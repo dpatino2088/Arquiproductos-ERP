@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { onCLS, onINP, onFCP, onLCP, onTTFB, type Metric } from 'web-vitals';
 import { logger } from './logger';
+import { externalMonitoring } from './external-monitoring';
 
 interface PerformanceMetric {
   name: string;
@@ -88,6 +89,9 @@ class PerformanceMonitor {
 
     // Send to analytics service
     this.sendMetricToAnalytics(performanceMetric);
+    
+    // Send to external monitoring services
+    externalMonitoring.sendPerformanceMetric(performanceMetric);
   }
 
   private trackRouteChange() {

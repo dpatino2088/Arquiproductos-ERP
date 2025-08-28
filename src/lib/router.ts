@@ -57,16 +57,16 @@ export class Router {
       
       // Redirect to personal dashboard instead
       const redirectPath = '/personal/dashboard';
-      if (pushState) {
-        window.history.replaceState({}, '', redirectPath);
-      }
+      
+      // Always update the URL when redirecting
+      window.history.replaceState({}, '', redirectPath);
       
       // Call unauthorized redirect handler if set
       if (this.unauthorizedRedirectHandler) {
         this.unauthorizedRedirectHandler();
       }
       
-      // Navigate to allowed route instead
+      // Navigate to allowed route instead (without pushing to history again)
       this.navigate(redirectPath, false);
       return;
     }

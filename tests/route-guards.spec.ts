@@ -11,7 +11,7 @@ test.describe('Route Guards', () => {
 
   test('should redirect management routes to personal dashboard when in personal view', async ({ page }) => {
     // Ensure we're in personal view (default) - check the navbar indicator
-    await expect(page.locator('text=Personal')).toBeVisible();
+    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Personal")')).toBeVisible();
     
     // Try to navigate directly to a management route
     await page.goto('/management/dashboard');
@@ -42,7 +42,7 @@ test.describe('Route Guards', () => {
     await page.click('text=Switch to Manager View'); // Click view toggle
     
     // Wait for view to change
-    await expect(page.locator('text=Management')).toBeVisible();
+    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Management")')).toBeVisible();
     
     // Now try to navigate to management routes - should work
     await page.goto('/management/dashboard');
@@ -63,7 +63,7 @@ test.describe('Route Guards', () => {
     // Switch to management view via user dropdown
     await page.click('[aria-label="My Account"]'); // Click user icon
     await page.click('text=Switch to Manager View'); // Click view toggle
-    await expect(page.locator('text=Management')).toBeVisible();
+    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Management")')).toBeVisible();
     
     // Test from management view - personal routes should still work
     await page.goto('/personal/dashboard');
@@ -75,7 +75,7 @@ test.describe('Route Guards', () => {
 
   test('should protect payroll route in personal view', async ({ page }) => {
     // Ensure we're in personal view
-    await expect(page.locator('text=Personal')).toBeVisible();
+    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Personal")')).toBeVisible();
     
     // Try to access payroll route
     await page.goto('/payroll');

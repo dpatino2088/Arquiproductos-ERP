@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { router } from './lib/router';
 import { SubmoduleNavProvider } from './hooks/useSubmoduleNav';
 import { logger } from './lib/logger';
+import { useUIStore } from './stores/ui-store';
 
 // Code splitting with React.lazy
 const PersonalDashboard = lazy(() => {
@@ -186,6 +187,11 @@ function App() {
   // Setup routing
   useEffect(() => {
     if (isAuthenticated) {
+      // Initialize router view mode to match UI store
+      const { viewMode } = useUIStore.getState();
+      router.setViewMode(viewMode);
+      console.log('Router initialized with view mode:', viewMode);
+      
       // Set up unauthorized redirect handler
       router.setUnauthorizedRedirectHandler(() => {
         console.log('Unauthorized access attempt blocked - redirecting to personal dashboard');
@@ -215,19 +221,56 @@ function App() {
       router.addRoute('/employees', () => setCurrentPage('people'));
       router.addRoute('/reports', () => setCurrentPage('reports')); // Legacy route redirects to same page
       
+      // Protected routes (management only)
+      router.addRoute('/payroll', () => setCurrentPage('personal-dashboard')); // This will be blocked by route guard
+      
       // Other routes - redirect to personal dashboard for now
       router.addRoute('/time-tracking', () => setCurrentPage('personal-dashboard'));
       router.addRoute('/pto', () => setCurrentPage('personal-dashboard'));
       router.addRoute('/security', () => setCurrentPage('personal-dashboard'));
       router.addRoute('/performance', () => setCurrentPage('personal-dashboard'));
       router.addRoute('/benefits', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/payroll', () => setCurrentPage('personal-dashboard'));
       router.addRoute('/settings', () => setCurrentPage('personal-dashboard'));
       
       // Initialize router
       router.init();
+      
+      // Add listener for route changes to sync with current page
+      const unsubscribe = router.addListener(() => {
+        // This ensures the UI updates when router redirects
+        const currentRoute = router.getCurrentRoute();
+        console.log('Route changed to:', currentRoute);
+      });
+      
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
     }
   }, [isAuthenticated]);
+
+  // Monitor URL changes and trigger router navigation (for direct navigation like tests)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const handleLocationChange = () => {
+      const currentPath = window.location.pathname;
+      const routerPath = router.getCurrentRoute();
+      
+      // If URL changed but router hasn't been notified, trigger navigation
+      if (currentPath !== routerPath) {
+        console.log('Direct navigation detected:', currentPath, '-> triggering router navigation');
+        router.navigate(currentPath, false);
+      }
+    };
+
+    // Check on initial load and when URL changes
+    handleLocationChange();
+    
+    // Set up interval to check for URL changes (fallback for direct navigation)
+    const interval = setInterval(handleLocationChange, 100);
+    
+    return () => clearInterval(interval);
+  }, [isAuthenticated, currentPage]);
 
   if (isLoading) {
     return (

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { logger } from '../lib/logger';
 import { errorTracker } from '../lib/error-tracker';
+import { externalMonitoring } from '../lib/external-monitoring';
 
 interface User {
   id: string;
@@ -46,6 +47,14 @@ export const useAuthStore = create<AuthState>()(
       // Actions
       setAuth: (user: User, token: string) => {
         logger.info('User authenticated', { userId: user.id, email: user.email });
+        
+        // Set user context for external monitoring
+        externalMonitoring.setUser({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+        });
+        
         set({
           user,
           accessToken: token,

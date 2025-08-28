@@ -9,6 +9,8 @@ import { queryClient } from './lib/query-client'
 import { performanceMonitor } from './lib/performance'
 import { logger } from './lib/logger'
 import './lib/error-tracker' // Initialize error tracking
+import './lib/trusted-types' // Initialize Trusted Types
+import './lib/service-worker' // Initialize Service Worker
 
 // Initialize performance monitoring
 performanceMonitor.init()

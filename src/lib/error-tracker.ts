@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { logger } from './logger';
+import { externalMonitoring } from './external-monitoring';
 
 interface ErrorContext {
   userId?: string;
@@ -50,6 +51,15 @@ class ErrorTracker {
 
     // Log error
     logger.error('Error tracked', error, trackedError.context);
+
+    // Send to external monitoring services
+    externalMonitoring.sendError({
+      message: error.message,
+      stack: error.stack,
+      timestamp: Date.now(),
+      userAgent: navigator.userAgent,
+      url: window.location.href,
+    });
 
     // In production, you would send to error tracking service
     if (!import.meta.env.DEV) {
