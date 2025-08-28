@@ -1,4 +1,4 @@
-import { onCLS, onFID, onFCP, onLCP, onTTFB, type Metric } from 'web-vitals';
+import { onCLS, onINP, onFCP, onLCP, onTTFB, type Metric } from 'web-vitals';
 import { logger } from './logger';
 
 interface PerformanceMetric {
@@ -33,8 +33,8 @@ class PerformanceMonitor {
       this.trackMetric(metric);
     });
 
-    // First Input Delay
-    onFID((metric) => {
+    // Interaction to Next Paint (replaces First Input Delay)
+    onINP((metric) => {
       this.trackMetric(metric);
     });
 
@@ -209,7 +209,7 @@ class PerformanceMonitor {
   checkPerformanceBudget(): { passed: boolean; violations: string[] } {
     const budgets = {
       LCP: 2500, // Largest Contentful Paint should be under 2.5s
-      FID: 100,  // First Input Delay should be under 100ms
+      INP: 200,  // Interaction to Next Paint should be under 200ms
       CLS: 0.1,  // Cumulative Layout Shift should be under 0.1
       FCP: 1800, // First Contentful Paint should be under 1.8s
       TTFB: 600, // Time to First Byte should be under 600ms
