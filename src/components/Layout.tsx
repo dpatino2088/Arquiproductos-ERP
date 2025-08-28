@@ -675,7 +675,7 @@ function Layout({ children }: LayoutProps) {
                   })}
                 </div>
               ) : breadcrumbs.length > 0 ? (
-                <nav className="flex items-center h-full pl-6" aria-label="Breadcrumb">
+                <nav className="flex items-center h-full pl-12" aria-label="Breadcrumb">
                   <ol className="flex items-center gap-2" style={{ fontSize: '14px', color: '#222222' }}>
                     {breadcrumbs.map((crumb, index) => (
                       <li key={index} className="flex items-center gap-2">
