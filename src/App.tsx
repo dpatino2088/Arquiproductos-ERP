@@ -1,19 +1,47 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { SecureForm } from './components/ui/SecureForm';
 import Layout from './components/Layout';
-
-
-import PersonalDashboard from './pages/personal/Dashboard';
-import ManagementDashboard from './pages/management/Dashboard';
-import Inbox from './pages/Inbox';
-
-import Reports from './pages/management/Reports';
-import MyInfo from './pages/personal/people/MyInfo';
-import Directory from './pages/management/people/Directory';
-import OrganizationalChart from './pages/management/people/OrganizationalChart';
+import ErrorBoundary from './components/ErrorBoundary';
 import { router } from './lib/router';
 import { SubmoduleNavProvider } from './hooks/useSubmoduleNav';
+import { logger } from './lib/logger';
+
+// Code splitting with React.lazy
+const PersonalDashboard = lazy(() => {
+  logger.debug('Loading PersonalDashboard component');
+  return import('./pages/personal/Dashboard');
+});
+
+const ManagementDashboard = lazy(() => {
+  logger.debug('Loading ManagementDashboard component');
+  return import('./pages/management/Dashboard');
+});
+
+const Inbox = lazy(() => {
+  logger.debug('Loading Inbox component');
+  return import('./pages/Inbox');
+});
+
+const Reports = lazy(() => {
+  logger.debug('Loading Reports component');
+  return import('./pages/management/Reports');
+});
+
+const MyInfo = lazy(() => {
+  logger.debug('Loading MyInfo component');
+  return import('./pages/personal/people/MyInfo');
+});
+
+const Directory = lazy(() => {
+  logger.debug('Loading Directory component');
+  return import('./pages/management/people/Directory');
+});
+
+const OrganizationalChart = lazy(() => {
+  logger.debug('Loading OrganizationalChart component');
+  return import('./pages/management/people/OrganizationalChart');
+});
 
 function ThemeToggle() {
   const [theme, setTheme] = React.useState(() => localStorage.getItem('theme') || 'light');
@@ -235,19 +263,32 @@ function App() {
   };
 
   return (
-    <div className="min-h-dvh bg-background">
-      {!isAuthenticated ? (
-        <div className="min-h-dvh flex items-center justify-center p-6">
-          <AuthForms />
-        </div>
-      ) : (
-        <SubmoduleNavProvider>
-          <Layout>
-            {renderPage()}
-          </Layout>
-        </SubmoduleNavProvider>
-      )}
-    </div>
+    <ErrorBoundary>
+      <div className="min-h-dvh bg-background">
+        {!isAuthenticated ? (
+          <div className="min-h-dvh flex items-center justify-center p-6">
+            <AuthForms />
+          </div>
+        ) : (
+          <SubmoduleNavProvider>
+            <Layout>
+              <ErrorBoundary>
+                <Suspense fallback={
+                  <div className="flex items-center justify-center min-h-[400px]">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                      <p className="text-sm text-muted-foreground">Loading...</p>
+                    </div>
+                  </div>
+                }>
+                  {renderPage()}
+                </Suspense>
+              </ErrorBoundary>
+            </Layout>
+          </SubmoduleNavProvider>
+        )}
+      </div>
+    </ErrorBoundary>
   );
 }
 

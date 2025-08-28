@@ -1,7 +1,8 @@
-import React, { ReactNode, useState, useCallback, useMemo, useEffect } from 'react';
+import React, { ReactNode, useState, useCallback, useMemo, useEffect, memo } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { router } from '../lib/router';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
+import { useUIStore } from '../stores/ui-store';
 import { RhemoLogo } from './RhemoLogo';
 import { 
   Users, 
@@ -27,6 +28,59 @@ interface LayoutProps {
   children: ReactNode;
 }
 
+// Memoized navigation item component
+const NavigationItem = memo(({ 
+  item, 
+  isActive, 
+  isCollapsed, 
+  onClick 
+}: {
+  item: { name: string; href: string; icon: any };
+  isActive: boolean;
+  isCollapsed: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    onClick={onClick}
+    className="flex items-center font-normal rounded-lg transition-colors group relative w-full"
+    style={{
+      fontSize: '14px',
+      minHeight: '36px',
+      padding: '12px 12px 12px 11px',
+      color: isActive ? '#14B8A6' : '#222222',
+      backgroundColor: isActive ? 'rgba(20, 184, 166, 0.1)' : 'transparent',
+    }}
+    onMouseEnter={(e) => {
+      if (!isActive) {
+        e.currentTarget.style.backgroundColor = 'rgba(34, 34, 34, 0.05)';
+      }
+    }}
+    onMouseLeave={(e) => {
+      if (!isActive) {
+        e.currentTarget.style.backgroundColor = 'transparent';
+      }
+    }}
+    aria-current={isActive ? 'page' : undefined}
+  >
+    <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
+      <item.icon style={{ width: '18px', height: '18px' }} />
+    </div>
+    <span 
+      className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
+      style={{
+        opacity: isCollapsed ? 0 : 1,
+        pointerEvents: isCollapsed ? 'none' : 'auto',
+        fontSize: '14px',
+        color: isActive ? '#14B8A6' : '#222222'
+      }}
+    >
+      {item.name}
+    </span>
+  </button>
+));
+
+NavigationItem.displayName = 'NavigationItem';
+
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
   { name: 'People', href: '/people', icon: Users }, // Will be handled dynamically based on view mode
@@ -42,13 +96,19 @@ const managementOnlyNavigation = [
   { name: 'Reports', href: '/management/reports', icon: FileText },
 ];
 
-export default function Layout({ children }: LayoutProps) {
-  const [isCollapsed, setIsCollapsed] = useState(true);
-  const [viewMode, setViewMode] = useState<'personal' | 'manager'>('personal');
+function Layout({ children }: LayoutProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const { logout, user } = useAuth();
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
+  
+  // Use UI store for sidebar and view mode state
+  const { 
+    sidebarCollapsed: isCollapsed, 
+    viewMode, 
+    toggleSidebarCollapsed, 
+    setViewMode 
+  } = useUIStore();
 
   // Scroll to top when route changes
   useEffect(() => {
@@ -133,8 +193,8 @@ export default function Layout({ children }: LayoutProps) {
 
   // Memoized handlers
   const handleCollapseToggle = useCallback(() => {
-    setIsCollapsed(prev => !prev);
-  }, []);
+    toggleSidebarCollapsed();
+  }, [toggleSidebarCollapsed]);
 
   const handleHelpClick = useCallback(() => {
     console.log('Help/Knowledgebase clicked');
@@ -653,3 +713,5 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   );
 }
+
+export default memo(Layout);
