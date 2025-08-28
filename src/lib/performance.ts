@@ -1,4 +1,4 @@
-import { getCLS, getFID, getFCP, getLCP, getTTFB, Metric } from 'web-vitals';
+import { onCLS, onFID, onFCP, onLCP, onTTFB, type Metric } from 'web-vitals';
 import { logger } from './logger';
 
 interface PerformanceMetric {
@@ -29,27 +29,27 @@ class PerformanceMonitor {
 
   private setupWebVitalsTracking() {
     // Cumulative Layout Shift
-    getCLS((metric) => {
+    onCLS((metric) => {
       this.trackMetric(metric);
     });
 
     // First Input Delay
-    getFID((metric) => {
+    onFID((metric) => {
       this.trackMetric(metric);
     });
 
     // First Contentful Paint
-    getFCP((metric) => {
+    onFCP((metric) => {
       this.trackMetric(metric);
     });
 
     // Largest Contentful Paint
-    getLCP((metric) => {
+    onLCP((metric) => {
       this.trackMetric(metric);
     });
 
     // Time to First Byte
-    getTTFB((metric) => {
+    onTTFB((metric) => {
       this.trackMetric(metric);
     });
   }
