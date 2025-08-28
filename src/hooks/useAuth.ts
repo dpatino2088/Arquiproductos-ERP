@@ -26,159 +26,39 @@ interface RegisterCredentials extends LoginCredentials {
 }
 
 export const useAuth = () => {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    isAuthenticated: false,
+  // Always return authenticated state with a default user
+  const [authState] = useState<AuthState>({
+    user: {
+      id: '1',
+      email: 'user@securecorp.com',
+      name: 'Demo User',
+      role: 'user'
+    },
+    isAuthenticated: true,
     isLoading: false,
     error: null
   });
 
   const [csrfToken] = useState(() => generateCSRFToken());
 
-  // Check for existing session on mount
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const token = localStorage.getItem('auth_token');
-        const userData = localStorage.getItem('user_data');
-        
-        if (token && userData) {
-          const user = JSON.parse(userData);
-          setAuthState(prev => ({
-            ...prev,
-            user,
-            isAuthenticated: true
-          }));
-        }
-      } catch (error) {
-        console.error('Session check failed:', error);
-        // Clear invalid data
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user_data');
-        localStorage.removeItem('csrf_token');
-      }
-    };
-
-    checkSession();
+  const login = useCallback(async (credentials: LoginCredentials) => {
+    // No-op function since authentication is bypassed
+    console.log('Login bypassed - already authenticated');
   }, []);
 
-  const login = useCallback(async (credentials: LoginCredentials) => {
-    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-
-    try {
-      // Validate inputs
-      if (!validateEmail(credentials.email)) {
-        throw new Error('Invalid email format');
-      }
-
-      if (credentials.password.length < 8) {
-        throw new Error('Password must be at least 8 characters');
-      }
-
-      // Simulate API call (replace with actual authentication)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Mock user data (replace with actual API response)
-      const user: User = {
-        id: '1',
-        email: credentials.email,
-        name: credentials.email.split('@')[0] || 'User', // Use email prefix as name
-        role: 'user'
-      };
-
-      // Store authentication data securely
-      localStorage.setItem('auth_token', 'mock_jwt_token_' + Date.now());
-      localStorage.setItem('user_data', JSON.stringify(user));
-      localStorage.setItem('csrf_token', csrfToken);
-
-      setAuthState({
-        user,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null
-      });
-
-      console.log('Login successful:', user);
-
-    } catch (error) {
-      setAuthState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Login failed'
-      }));
-    }
-  }, [csrfToken]);
-
   const register = useCallback(async (credentials: RegisterCredentials) => {
-    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-
-    try {
-      // Validate inputs
-      if (!validateEmail(credentials.email)) {
-        throw new Error('Invalid email format');
-      }
-
-      const passwordValidation = validatePassword(credentials.password);
-      if (!passwordValidation.isValid) {
-        throw new Error(passwordValidation.errors.join(', '));
-      }
-
-      if (credentials.password !== credentials.confirmPassword) {
-        throw new Error('Passwords do not match');
-      }
-
-      // Simulate API call (replace with actual registration)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Mock user data (replace with actual API response)
-      const user: User = {
-        id: '1',
-        email: credentials.email,
-        name: credentials.name,
-        role: 'user'
-      };
-
-      // Store authentication data securely
-      localStorage.setItem('auth_token', 'mock_jwt_token_' + Date.now());
-      localStorage.setItem('user_data', JSON.stringify(user));
-      localStorage.setItem('csrf_token', csrfToken);
-
-      setAuthState({
-        user,
-        isAuthenticated: true,
-        isLoading: false,
-        error: null
-      });
-
-      console.log('Registration successful:', user);
-
-    } catch (error) {
-      setAuthState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Registration failed'
-      }));
-    }
-  }, [csrfToken]);
+    // No-op function since authentication is bypassed
+    console.log('Registration bypassed - already authenticated');
+  }, []);
 
   const logout = useCallback(() => {
-    // Clear all authentication data
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_data');
-    localStorage.removeItem('csrf_token');
-
-    setAuthState({
-      user: null,
-      isAuthenticated: false,
-      isLoading: false,
-      error: null
-    });
-
-    console.log('Logout successful');
+    // No-op function since authentication is bypassed
+    console.log('Logout bypassed - staying authenticated');
   }, []);
 
   const clearError = useCallback(() => {
-    setAuthState(prev => ({ ...prev, error: null }));
+    // No-op function since there are no errors in bypassed auth
+    console.log('Clear error bypassed - no errors to clear');
   }, []);
 
   return {

@@ -45,7 +45,8 @@ const managementOnlyNavigation = [
 export default function Layout({ children }: LayoutProps) {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [viewMode, setViewMode] = useState<'personal' | 'manager'>('personal');
-  const { logout } = useAuth();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const { logout, user } = useAuth();
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
 
@@ -80,6 +81,24 @@ export default function Layout({ children }: LayoutProps) {
       removeListener();
     };
   }, []);
+
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('[data-user-menu]')) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    if (isUserMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isUserMenuOpen]);
 
   // Helper function to determine if a navigation item is active
   const isNavItemActive = useCallback((itemName: string, itemHref: string) => {
@@ -165,7 +184,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const mainPaddingTop = useMemo(() => {
     const hasSecondaryNav = submoduleTabs.length > 0 || breadcrumbs.length > 0;
-    return hasSecondaryNav ? '7.5rem' : '5rem';
+    return hasSecondaryNav ? '5.8125rem' : '3.3125rem';
   }, [submoduleTabs.length, breadcrumbs.length]);
 
   return (
@@ -456,17 +475,6 @@ export default function Layout({ children }: LayoutProps) {
 
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
-              {/* View Mode Toggle */}
-              <button
-                onClick={handleViewToggle}
-                className="px-3 py-1 rounded transition-colors hover:bg-gray-100 text-sm font-normal"
-                style={{ color: '#222222' }}
-                title={`Switch to ${viewMode === 'personal' ? 'Manager' : 'Personal'} View`}
-                aria-label={`Switch to ${viewMode === 'personal' ? 'Manager' : 'Personal'} View`}
-              >
-                {viewMode === 'personal' ? 'Personal' : 'Management'}
-              </button>
-
               <button 
                 className="p-1 rounded"
                 style={{ color: '#222222' }}
@@ -475,18 +483,88 @@ export default function Layout({ children }: LayoutProps) {
                 <Bell style={{ width: '16px', height: '16px' }} />
               </button>
 
-              <button 
-                className="rounded-full flex items-center justify-center hover:opacity-80 transition-colors"
-                style={{ 
-                  width: '28px', 
-                  height: '28px',
-                  backgroundColor: '#14B8A6'
-                }}
-                aria-label="My Account"
-                onClick={logout}
-              >
-                <User style={{ width: '14px', height: '14px', color: 'white' }} />
-              </button>
+              {/* User Menu */}
+              <div className="relative" data-user-menu>
+                <button 
+                  className="rounded-full flex items-center justify-center hover:opacity-80 transition-colors"
+                  style={{ 
+                    width: '28px', 
+                    height: '28px',
+                    backgroundColor: '#14B8A6'
+                  }}
+                  aria-label="My Account"
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                >
+                  <User style={{ width: '14px', height: '14px', color: 'white' }} />
+                </button>
+
+                {/* User Dropdown Menu */}
+                {isUserMenuOpen && (
+                  <div 
+                    className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50"
+                    style={{ top: '100%' }}
+                  >
+                    {/* User Info Section */}
+                    <div className="px-4 py-3 border-b border-gray-100">
+                      <div className="text-sm text-gray-500 mb-1">Logged in as</div>
+                      <div className="font-medium text-gray-900">{user?.name || 'Demo User'}</div>
+                    </div>
+
+                    {/* Menu Items */}
+                    <div className="py-1">
+                      <button
+                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          // Add navigation to account page if needed
+                        }}
+                      >
+                        <User style={{ width: '16px', height: '16px' }} />
+                        My Account
+                      </button>
+                      
+                      <button
+                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          // Add navigation to change password if needed
+                        }}
+                      >
+                        <Settings style={{ width: '16px', height: '16px' }} />
+                        Change Password
+                      </button>
+
+                      {/* View Mode Toggle */}
+                      <div className="border-t border-gray-100 mt-1 pt-1">
+                        <div className="px-4 py-2">
+                          <div className="text-xs text-gray-500 mb-2">View Mode</div>
+                          <button
+                            onClick={() => {
+                              handleViewToggle();
+                              setIsUserMenuOpen(false);
+                            }}
+                            className="w-full px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors text-left"
+                            style={{ color: '#222222' }}
+                          >
+                            Switch to {viewMode === 'personal' ? 'Manager' : 'Personal'} View
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100 mt-1 pt-3"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          logout();
+                        }}
+                      >
+                        <span style={{ width: '16px', height: '16px', display: 'inline-block' }}>⏻</span>
+                        Log out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>
