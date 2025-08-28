@@ -423,7 +423,11 @@ export default function Layout({ children }: LayoutProps) {
             {/* Left side - Company name */}
             <div className="flex items-center gap-3">
               <Building style={{ width: '16px', height: '16px', color: '#222222' }} />
-              <span className="font-medium" style={{ color: '#222222', fontSize: '14px' }}>Secure Corp</span>
+              <div className="flex items-center font-medium" style={{ color: '#222222', fontSize: '14px' }}>
+                <span>Secure Corp</span>
+                <span style={{ marginLeft: '18px', marginRight: '18px' }}>|</span>
+                <span>{viewMode === 'personal' ? 'Personal' : 'Management'}</span>
+              </div>
             </div>
 
             {/* Center - Search Bar */}
