@@ -10,5 +10,5 @@ test('app loads successfully', async ({ page }) => {
   await expect(page.locator('#root')).toBeVisible()
   
   // Page should have a title
-  await expect(page).toHaveTitle(/React/)
+  await expect(page).toHaveTitle(/RHEMO/)
 })

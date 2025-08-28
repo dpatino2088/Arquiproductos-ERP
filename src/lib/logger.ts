@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // Structured logging system for observability compliance
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -6,9 +7,9 @@ interface LogEntry {
   level: LogLevel;
   message: string;
   timestamp: string;
-  data?: any;
+  data?: unknown;
   error?: Error;
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
 }
 
 class Logger {
@@ -19,23 +20,23 @@ class Logger {
     this.logLevel = level;
   }
 
-  debug(message: string, data?: any, context?: Record<string, any>) {
+  debug(message: string, data?: unknown, context?: Record<string, unknown>) {
     this.log('debug', message, data, undefined, context);
   }
 
-  info(message: string, data?: any, context?: Record<string, any>) {
+  info(message: string, data?: unknown, context?: Record<string, unknown>) {
     this.log('info', message, data, undefined, context);
   }
 
-  warn(message: string, data?: any, context?: Record<string, any>) {
+  warn(message: string, data?: unknown, context?: Record<string, unknown>) {
     this.log('warn', message, data, undefined, context);
   }
 
-  error(message: string, error?: Error, context?: Record<string, any>) {
+  error(message: string, error?: Error, context?: Record<string, unknown>) {
     this.log('error', message, undefined, error, context);
   }
 
-  private log(level: LogLevel, message: string, data?: any, error?: Error, context?: Record<string, any>) {
+  private log(level: LogLevel, message: string, data?: unknown, error?: Error, context?: Record<string, unknown>) {
     if (!this.shouldLog(level)) {
       return;
     }

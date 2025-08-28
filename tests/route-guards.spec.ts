@@ -2,26 +2,16 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Route Guards', () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate to the app and log in
+    // Navigate to the app (authentication is now bypassed)
     await page.goto('/');
     
-    // Wait for the login form to appear
-    await page.waitForSelector('input[type="email"]');
-    
-    // Fill in login credentials
-    await page.fill('input[type="email"]', 'test@example.com');
-    await page.fill('input[type="password"]', 'TestPassword123!');
-    
-    // Click login button
-    await page.click('button[type="submit"]');
-    
-    // Wait for the dashboard to load
+    // Wait for the main navigation to appear (no login required)
     await page.waitForSelector('[aria-label="Main navigation"]');
   });
 
   test('should redirect management routes to personal dashboard when in personal view', async ({ page }) => {
-    // Ensure we're in personal view (default)
-    await expect(page.locator('button:has-text("Personal")')).toBeVisible();
+    // Ensure we're in personal view (default) - check the navbar indicator
+    await expect(page.locator('text=Personal')).toBeVisible();
     
     // Try to navigate directly to a management route
     await page.goto('/management/dashboard');
@@ -47,11 +37,12 @@ test.describe('Route Guards', () => {
   });
 
   test('should allow access to management routes when in management view', async ({ page }) => {
-    // Switch to management view
-    await page.click('button:has-text("Personal")');
+    // Switch to management view via user dropdown
+    await page.click('[aria-label="My Account"]'); // Click user icon
+    await page.click('text=Switch to Manager View'); // Click view toggle
     
     // Wait for view to change
-    await expect(page.locator('button:has-text("Management")')).toBeVisible();
+    await expect(page.locator('text=Management')).toBeVisible();
     
     // Now try to navigate to management routes - should work
     await page.goto('/management/dashboard');
@@ -69,9 +60,10 @@ test.describe('Route Guards', () => {
     await page.goto('/inbox');
     await expect(page).toHaveURL('/inbox');
     
-    // Switch to management view
-    await page.click('button:has-text("Personal")');
-    await expect(page.locator('button:has-text("Management")')).toBeVisible();
+    // Switch to management view via user dropdown
+    await page.click('[aria-label="My Account"]'); // Click user icon
+    await page.click('text=Switch to Manager View'); // Click view toggle
+    await expect(page.locator('text=Management')).toBeVisible();
     
     // Test from management view - personal routes should still work
     await page.goto('/personal/dashboard');
@@ -83,7 +75,7 @@ test.describe('Route Guards', () => {
 
   test('should protect payroll route in personal view', async ({ page }) => {
     // Ensure we're in personal view
-    await expect(page.locator('button:has-text("Personal")')).toBeVisible();
+    await expect(page.locator('text=Personal')).toBeVisible();
     
     // Try to access payroll route
     await page.goto('/payroll');

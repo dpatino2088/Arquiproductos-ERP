@@ -11,9 +11,6 @@ export const useAuth = () => {
     isAuthenticated,
     isLoading,
     error,
-    setAuth,
-    clearAuth,
-    setLoading,
     setError,
     updateUser,
   } = useAuthStore();

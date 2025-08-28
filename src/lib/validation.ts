@@ -32,7 +32,7 @@ export const registrationSchema = z.object({
 export const userProfileSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: emailSchema,
-  phone: z.string().regex(/^\+?[\d\s\-\(\)]+$/, 'Invalid phone number').optional(),
+  phone: z.string().regex(/^\+?[\d\s\-()]+$/, 'Invalid phone number').optional(),
   department: z.string().optional(),
   position: z.string().optional(),
 });

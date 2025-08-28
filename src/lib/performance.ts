@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { onCLS, onINP, onFCP, onLCP, onTTFB, type Metric } from 'web-vitals';
 import { logger } from './logger';
 
@@ -90,7 +91,7 @@ class PerformanceMonitor {
   }
 
   private trackRouteChange() {
-    let startTime = performance.now();
+    const startTime = performance.now();
     
     // Track initial page load
     window.addEventListener('load', () => {
@@ -103,8 +104,10 @@ class PerformanceMonitor {
       const navigationEntries = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
       if (navigationEntries.length > 0) {
         const nav = navigationEntries[0];
-        this.trackCustomMetric('dom_content_loaded', nav.domContentLoadedEventEnd - nav.domContentLoadedEventStart);
-        this.trackCustomMetric('dom_complete', nav.domComplete - nav.domLoading);
+        if (nav) {
+          this.trackCustomMetric('dom_content_loaded', nav.domContentLoadedEventEnd - nav.domContentLoadedEventStart);
+          this.trackCustomMetric('dom_complete', nav.domComplete - nav.fetchStart);
+        }
       }
     }
   }
@@ -125,7 +128,7 @@ class PerformanceMonitor {
 
   private trackUserInteractions() {
     // Track click interactions
-    document.addEventListener('click', (event) => {
+    document.addEventListener('click', () => {
       const startTime = performance.now();
       
       // Use requestAnimationFrame to measure interaction response

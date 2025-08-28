@@ -2,6 +2,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { logger } from '../lib/logger';
 import { errorTracker } from '../lib/error-tracker';
 
+// API response types
+interface ApiError {
+  message: string;
+  status?: number;
+  data?: unknown;
+}
+
 // Mock API client - replace with actual API implementation
 const apiClient = {
   get: async <T>(endpoint: string): Promise<T> => {
@@ -31,7 +38,7 @@ const apiClient = {
     throw new Error(`Endpoint not implemented: ${endpoint}`);
   },
 
-  post: async <T>(endpoint: string, data: any): Promise<T> => {
+  post: async <T>(endpoint: string, data: unknown): Promise<T> => {
     logger.debug('API POST request', { endpoint, data });
     
     // Simulate API delay
@@ -41,7 +48,7 @@ const apiClient = {
     return { success: true, data } as T;
   },
 
-  put: async <T>(endpoint: string, data: any): Promise<T> => {
+  put: async <T>(endpoint: string, data: unknown): Promise<T> => {
     logger.debug('API PUT request', { endpoint, data });
     
     // Simulate API delay
@@ -64,14 +71,11 @@ const apiClient = {
 export function useApiQuery<TData>(
   queryKey: string[],
   endpoint: string,
-  options?: any
+  options?: Record<string, unknown>
 ) {
   return useQuery({
     queryKey,
     queryFn: () => apiClient.get<TData>(endpoint),
-    onError: (error: any) => {
-      errorTracker.trackApiError(error, endpoint, 'GET');
-    },
     ...options,
   });
 }
@@ -80,7 +84,7 @@ export function useApiQuery<TData>(
 export function useApiMutation<TData, TVariables>(
   endpoint: string,
   method: 'POST' | 'PUT' | 'DELETE' = 'POST',
-  options?: any
+  options?: Record<string, unknown> & { invalidateQueries?: string[] }
 ) {
   const queryClient = useQueryClient();
   
@@ -97,10 +101,10 @@ export function useApiMutation<TData, TVariables>(
           throw new Error(`Unsupported method: ${method}`);
       }
     },
-    onError: (error: any) => {
+    onError: (error: ApiError) => {
       errorTracker.trackApiError(error, endpoint, method);
     },
-    onSuccess: (data) => {
+    onSuccess: (_data) => {
       logger.info('API mutation successful', { endpoint, method });
       
       // Invalidate related queries on successful mutations
@@ -149,9 +153,10 @@ export function useDeleteEmployee() {
 }
 
 // Reports hooks
-export function useReports(filters?: any) {
+export function useReports(filters?: Record<string, string>) {
+  const filtersKey = filters ? JSON.stringify(filters) : 'no-filters';
   return useApiQuery(
-    ['reports', filters], 
+    ['reports', filtersKey], 
     `/api/reports${filters ? `?${new URLSearchParams(filters)}` : ''}`,
     {
       enabled: !!filters, // Only fetch when filters are provided

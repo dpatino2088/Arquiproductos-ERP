@@ -35,7 +35,7 @@ const NavigationItem = memo(({
   isCollapsed, 
   onClick 
 }: {
-  item: { name: string; href: string; icon: any };
+  item: { name: string; href: string; icon: React.ComponentType<{ style?: React.CSSProperties }> };
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;

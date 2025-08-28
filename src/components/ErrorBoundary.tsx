@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { errorTracker } from '../lib/error-tracker';
 import { logger } from '../lib/logger';

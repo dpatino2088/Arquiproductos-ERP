@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { logger } from './logger';
 
 interface ErrorContext {
@@ -8,7 +9,7 @@ interface ErrorContext {
   timestamp?: string;
   userAgent?: string;
   url?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface TrackedError {
@@ -58,16 +59,26 @@ class ErrorTracker {
     return errorId;
   }
 
-  trackApiError(error: any, endpoint: string, method: string, context?: ErrorContext): string {
-    const apiError = new Error(`API Error: ${method} ${endpoint} - ${error.message || 'Unknown error'}`);
+  trackApiError(error: unknown, endpoint: string, method: string, context?: ErrorContext): string {
+    const errorMessage = error && typeof error === 'object' && 'message' in error 
+      ? String(error.message) 
+      : 'Unknown error';
+    const apiError = new Error(`API Error: ${method} ${endpoint} - ${errorMessage}`);
+    
+    const statusCode = error && typeof error === 'object' && 'status' in error 
+      ? error.status 
+      : undefined;
+    const responseData = error && typeof error === 'object' && 'data' in error 
+      ? error.data 
+      : undefined;
     
     return this.trackError(apiError, {
       ...context,
       type: 'api_error',
       endpoint,
       method,
-      statusCode: error.status,
-      responseData: error.data,
+      statusCode,
+      responseData,
     });
   }
 
