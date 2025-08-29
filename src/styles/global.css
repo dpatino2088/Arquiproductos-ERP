@@ -22,7 +22,7 @@
     --background: 210 20% 97%;         /* Light Gray #F5F7FA */
 
     /* Brand (user-customizable primary accent only) */
-    --brand-primary: 173 79% 39%;      /* Teal #14B8A6 */
+    --brand-primary: 174 70% 30%;      /* Much darker for WCAG AA compliance */
     --brand-secondary: 262 46% 55%;    /* Violet #7E57C2 (static) */
 
     --primary: var(--brand-primary);
@@ -51,13 +51,19 @@
     --sidebar-background: var(--sidebar-light-background);
     --sidebar-foreground: var(--foreground);
 
-    /* Status color tokens */
+    /* Status color tokens - Your approved secondary palette */
     --status-green: #1FB6A1;
     --status-red: #D32F2F;
     --status-blue: #1976D2;
     --status-amber: #F9A825;
     --neutral-gray: #9E9E9E;
     --highlight-bg: #E3F2FD;
+    
+    /* Accessible variants (darker when needed for WCAG AA compliance) */
+--status-green-accessible: #0D5B52; /* Even darker Status Green for WCAG AA compliance */
+--status-red-accessible: #991B1B;   /* Even darker Status Red for WCAG AA compliance */
+--status-blue-accessible: #1E3A8A;  /* Even darker Status Blue for WCAG AA compliance */
+--status-amber-accessible: #B45309; /* Even darker Status Amber for WCAG AA compliance */
   }
 
   .dark {
@@ -87,6 +93,21 @@
   .text-status-blue { color: var(--status-blue); }
   .text-status-amber { color: var(--status-amber); }
   .text-neutral-gray { color: var(--neutral-gray); }
+
+  /* Accessible color overrides using your approved palette */
+  .text-gray-400-accessible { color: #6B7280; } /* For better contrast than original gray-400 */
+  
+  /* Status colors - using your exact palette */
+  .text-status-green-accessible { color: var(--status-green-accessible); }
+  .text-status-red-accessible { color: var(--status-red-accessible); }
+  .text-status-blue-accessible { color: var(--status-blue-accessible); }
+  .text-status-amber-accessible { color: var(--status-amber-accessible); }
+  
+  /* Light background variants for badges (10% opacity of your colors) */
+  .bg-status-green-light { background-color: rgba(31, 182, 161, 0.1); }
+  .bg-status-red-light { background-color: rgba(211, 47, 47, 0.1); }
+  .bg-status-blue-light { background-color: rgba(25, 118, 210, 0.1); }
+  .bg-status-amber-light { background-color: rgba(249, 168, 37, 0.1); }
 
   .bg-status-green { background-color: var(--status-green); }
   .bg-status-red { background-color: var(--status-red); }

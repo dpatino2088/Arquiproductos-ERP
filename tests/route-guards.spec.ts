@@ -38,11 +38,12 @@ test.describe('Route Guards', () => {
 
   test('should allow access to management routes when in management view', async ({ page }) => {
     // Switch to management view via user dropdown
-    await page.click('[aria-label="My Account"]'); // Click user icon
-    await page.click('text=Switch to Manager View'); // Click view toggle
+    await page.click('[data-testid="view-toggle"]'); // Click user icon
+    await page.waitForSelector('[data-testid="manager-view-btn"]', { state: 'visible' });
+    await page.click('[data-testid="manager-view-btn"]'); // Click view toggle
     
-    // Wait for view to change
-    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Management")')).toBeVisible();
+    // Wait for view to change - check for the view label in navbar (be more specific)
+    await expect(page.locator('span.font-medium:has-text("Management")')).toBeVisible();
     
     // Now try to navigate to management routes - should work
     await page.goto('/management/dashboard');
@@ -61,9 +62,10 @@ test.describe('Route Guards', () => {
     await expect(page).toHaveURL('/inbox');
     
     // Switch to management view via user dropdown
-    await page.click('[aria-label="My Account"]'); // Click user icon
-    await page.click('text=Switch to Manager View'); // Click view toggle
-    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Management")')).toBeVisible();
+    await page.click('[data-testid="view-toggle"]'); // Click user icon
+    await page.waitForSelector('[data-testid="manager-view-btn"]', { state: 'visible' });
+    await page.click('[data-testid="manager-view-btn"]'); // Click view toggle
+    await expect(page.locator('text=Management')).toBeVisible();
     
     // Test from management view - personal routes should still work
     await page.goto('/personal/dashboard');

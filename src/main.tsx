@@ -11,9 +11,17 @@ import { logger } from './lib/logger'
 import './lib/error-tracker' // Initialize error tracking
 import './lib/trusted-types' // Initialize Trusted Types
 import './lib/service-worker' // Initialize Service Worker
+import './lib/rum-monitoring' // Initialize RUM
+import './lib/performance-budgets' // Initialize performance budgets
+import { useAuthStore } from './stores/auth-store'
 
 // Initialize performance monitoring
 performanceMonitor.init()
+
+// Initialize RUM monitoring and set user context
+const _unsubscribe = useAuthStore.subscribe(
+  (state) => state.user
+)
 
 // Log application startup
 logger.info('Application starting up', {

@@ -43,9 +43,9 @@ export default function ManagementDashboard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'text-red-600 bg-red-50';
-      case 'medium': return 'text-orange-600 bg-orange-50';
-      default: return 'text-green-600 bg-green-50';
+      case 'high': return 'text-status-red-accessible bg-status-red-light';
+      case 'medium': return 'text-status-amber-accessible bg-status-amber-light';
+      default: return 'text-status-green-accessible bg-status-green-light';
     }
   };
 
@@ -62,7 +62,7 @@ export default function ManagementDashboard() {
       {/* Management Header */}
       <div className="mb-8">
         <h1 className="text-xl font-semibold text-foreground mb-1">Management Dashboard</h1>
-        <p className="text-xs text-gray-400">Overview of team performance, approvals, and key metrics</p>
+        <p className="text-xs" style={{ color: '#6B7280' }}>Overview of team performance, approvals, and key metrics</p>
       </div>
 
       {/* Management Stats */}
@@ -73,7 +73,7 @@ export default function ManagementDashboard() {
               <stat.icon className="h-8 w-8 text-primary" />
               <div className="text-right">
                 <div className="text-2xl font-bold text-foreground">{stat.value}</div>
-                <div className={`text-sm ${stat.changeType === 'positive' ? 'text-green-600' : stat.changeType === 'negative' ? 'text-red-600' : 'text-gray-600'}`}>
+                <div className={`text-sm ${stat.changeType === 'positive' ? 'text-status-green-accessible' : stat.changeType === 'negative' ? 'text-status-red-accessible' : 'text-gray-600'}`}>
                   {stat.change}
                 </div>
               </div>
@@ -88,7 +88,7 @@ export default function ManagementDashboard() {
         <div className="bg-card border border-border rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold">Pending Approvals</h2>
-            <div className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">
+            <div className="bg-status-red-light text-status-red-accessible text-xs px-2 py-1 rounded-full">
               {pendingApprovals.length} pending
             </div>
           </div>
@@ -106,10 +106,10 @@ export default function ManagementDashboard() {
                   <div className="text-xs text-muted-foreground">{approval.details}</div>
                 </div>
                 <div className="flex gap-2">
-                  <button className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200">
+                  <button className="px-3 py-1 text-xs bg-status-green-light text-status-green-accessible rounded hover:opacity-80">
                     Approve
                   </button>
-                  <button className="px-3 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200">
+                  <button className="px-3 py-1 text-xs bg-status-red-light text-status-red-accessible rounded hover:opacity-80">
                     Reject
                   </button>
                 </div>

@@ -38,7 +38,7 @@ export default function PersonalDashboard() {
       {/* Welcome Header */}
       <div className="mb-8">
         <h1 className="text-xl font-semibold text-foreground mb-1">Welcome back, John!</h1>
-        <p className="text-xs text-gray-400">Here's your personal overview and important updates</p>
+        <p className="text-xs" style={{ color: '#6B7280' }}>Here's your personal overview and important updates</p>
       </div>
 
       {/* Personal Stats */}
@@ -68,7 +68,7 @@ export default function PersonalDashboard() {
                   <div className="font-medium">{birthday.name}</div>
                   <div className="text-sm text-muted-foreground">{birthday.department}</div>
                 </div>
-                <div className="text-sm font-medium text-pink-600">{birthday.date}</div>
+                <div className="text-sm font-medium" style={{ color: '#DC2626' }}>{birthday.date}</div>
               </div>
             ))}
           </div>

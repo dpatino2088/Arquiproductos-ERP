@@ -19,7 +19,7 @@ export default function Reports() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-xl font-semibold text-foreground mb-1">Reports & Analytics</h1>
-        <p className="text-xs text-gray-400">
+        <p className="text-xs" style={{ color: '#6B7280' }}>
           Generate and view detailed reports about your organization
         </p>
       </div>

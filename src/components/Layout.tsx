@@ -542,6 +542,7 @@ function Layout({ children }: LayoutProps) {
                     backgroundColor: '#14B8A6'
                   }}
                   aria-label="My Account"
+                  data-testid="view-toggle"
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 >
                   <User style={{ width: '14px', height: '14px', color: 'white' }} />
@@ -594,8 +595,9 @@ function Layout({ children }: LayoutProps) {
                             }}
                             className="w-full px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors text-left"
                             style={{ color: '#222222' }}
+                            data-testid={viewMode === 'personal' ? 'manager-view-btn' : 'personal-view-btn'}
                           >
-                            Switch to {viewMode === 'personal' ? 'Manager' : 'Personal'} View
+                            {viewMode === 'personal' ? 'Manager View' : 'Personal View'}
                           </button>
                         </div>
                       </div>
@@ -651,7 +653,7 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                          color: tab.isActive ? '#14B8A6' : '#6B7280',
+                          color: tab.isActive ? '#14B8A6' : '#222222',
                           borderColor: '#E5E7EB'
                         }}
                         role="tab"

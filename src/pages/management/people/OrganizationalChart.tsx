@@ -165,7 +165,7 @@ export default function OrganizationalChart() {
     <div className="p-6">
       <div className="mb-8">
         <h1 className="text-xl font-semibold text-foreground mb-1">Organizational Chart</h1>
-        <p className="text-xs text-gray-400">View the company's organizational structure</p>
+        <p className="text-xs" style={{ color: '#6B7280' }}>View the company's organizational structure</p>
       </div>
 
       {/* Chart Stats */}

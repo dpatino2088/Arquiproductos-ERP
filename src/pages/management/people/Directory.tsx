@@ -456,31 +456,31 @@ export default function Directory() {
     switch (status) {
       case 'Active':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-10 text-status-green">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green-accessible">
             Active
           </span>
         );
       case 'Suspended':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-10 text-status-red">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red-accessible">
             Suspended
           </span>
         );
       case 'Onboarding':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-10 text-status-blue">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue-accessible">
             Onboarding
           </span>
         );
       case 'On Leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-10 text-status-amber">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-light text-status-amber-accessible">
             On Leave
           </span>
         );
       default:
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-neutral-gray-10 text-neutral-gray">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
             {status}
           </span>
         );
@@ -497,7 +497,7 @@ export default function Directory() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Employee Directory</h1>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs" style={{ color: '#6B7280' }}>
             Manage your team of {filteredEmployees.length} employees
             {filteredEmployees.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}
           </p>
@@ -528,7 +528,7 @@ export default function Directory() {
                 placeholder="Search employees by name, email, job title, or employee ID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
           />
         </div>
             
@@ -578,7 +578,7 @@ export default function Directory() {
               <select 
                 value={selectedDepartment}
                 onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               >
                 <option value="">All Departments</option>
                 <option value="Executive">Executive</option>
@@ -592,7 +592,7 @@ export default function Directory() {
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               >
                 <option value="">All Statuses</option>
                 <option value="Active">Active</option>
@@ -604,7 +604,7 @@ export default function Directory() {
               <select 
                 value={selectedEmploymentType}
                 onChange={(e) => setSelectedEmploymentType(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               >
                 <option value="">All Employment Types</option>
                 <option value="Full-time">Full-time</option>
@@ -616,7 +616,7 @@ export default function Directory() {
               <select 
                 value={selectedLocation}
                 onChange={(e) => setSelectedLocation(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               >
                 <option value="">All Locations</option>
                 <option value="San Francisco, CA">San Francisco, CA</option>
@@ -676,7 +676,7 @@ export default function Directory() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                   <button
                     onClick={() => handleSort('firstName')}
                     className="flex items-center gap-1 hover:text-gray-700"
@@ -720,7 +720,7 @@ export default function Directory() {
             <tbody>
               {paginatedEmployees.map((employee, _index) => (
                 <tr key={employee.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                    <td className="py-4 px-4">
+                                    <td className="py-4 px-6">
                     <div className="flex items-center gap-3">
                       <div className="relative">
                         {employee.avatar ? (
@@ -734,19 +734,23 @@ export default function Directory() {
                             {getInitials(employee.firstName, employee.lastName)}
                           </div>
                         )}
-                        <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white ${
-                          employee.status === 'Active' ? 'bg-green-500' :
-                          employee.status === 'On Leave' ? 'bg-yellow-500' :
-                          employee.status === 'Onboarding' ? 'bg-blue-500' :
-                          employee.status === 'Suspended' ? 'bg-red-500' :
-                          'bg-gray-400'
-                        }`}></div>
+                        <div 
+                          className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
+                          style={{
+                            backgroundColor: 
+                              employee.status === 'Active' ? '#1FB6A1' :
+                              employee.status === 'On Leave' ? '#F9A825' :
+                              employee.status === 'Onboarding' ? '#1976D2' :
+                              employee.status === 'Suspended' ? '#D32F2F' :
+                              '#9E9E9E'
+                          }}>
+                        </div>
                       </div>
                       <div>
                         <div className="font-medium text-gray-900 text-sm">
                           {employee.firstName} {employee.lastName}
                         </div>
-                        <div className="text-xs text-gray-400">{employee.email}</div>
+                        <div className="text-xs" style={{ color: '#6B7280' }}>{employee.email}</div>
                       </div>
                   </div>
                   </td>
@@ -795,13 +799,17 @@ export default function Directory() {
                       {getInitials(employee.firstName, employee.lastName)}
                     </div>
                   )}
-                  <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
-                    employee.status === 'Active' ? 'bg-green-500' :
-                    employee.status === 'On Leave' ? 'bg-yellow-500' :
-                    employee.status === 'Onboarding' ? 'bg-blue-500' :
-                    employee.status === 'Suspended' ? 'bg-red-500' :
-                    'bg-gray-400'
-                  }`}></div>
+                  <div 
+                    className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
+                    style={{
+                      backgroundColor: 
+                        employee.status === 'Active' ? '#1FB6A1' :
+                        employee.status === 'On Leave' ? '#F9A825' :
+                        employee.status === 'Onboarding' ? '#1976D2' :
+                        employee.status === 'Suspended' ? '#D32F2F' :
+                        '#9E9E9E'
+                    }}>
+                  </div>
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">
@@ -853,21 +861,21 @@ export default function Directory() {
       <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600">Show:</span>
+            <span className="text-xs text-gray-600">Show:</span>
             <select
               value={itemsPerPage}
               onChange={(e) => {
                 setItemsPerPage(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>
-            <span className="text-sm text-gray-600">
+            <span className="text-xs text-gray-600">
               Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length}
             </span>
           </div>
