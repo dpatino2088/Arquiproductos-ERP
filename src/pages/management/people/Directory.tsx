@@ -14,7 +14,12 @@ import {
   List,
   Grid3X3,
   SortAsc,
-  SortDesc
+  SortDesc,
+  MoreHorizontal,
+  Mail,
+  Phone,
+  MapPin,
+  Calendar
 } from 'lucide-react';
 
 interface Employee {
@@ -28,6 +33,7 @@ interface Employee {
   location: string;
   startDate: string;
   avatar?: string;
+  phone?: string;
 }
 
 export default function Directory() {
@@ -450,31 +456,31 @@ export default function Directory() {
     switch (status) {
       case 'Active':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#1FB6A1', color: 'white' }}>
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-10 text-status-green">
             Active
           </span>
         );
       case 'Suspended':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FEF2F2', color: '#DC2626' }}>
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-10 text-status-red">
             Suspended
           </span>
         );
       case 'Onboarding':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#EFF6FF', color: '#2563EB' }}>
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-10 text-status-blue">
             Onboarding
           </span>
         );
       case 'On Leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-10 text-status-amber">
             On Leave
           </span>
         );
       default:
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#F3F4F6', color: '#6B7280' }}>
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-neutral-gray-10 text-neutral-gray">
             {status}
           </span>
         );
@@ -663,8 +669,9 @@ export default function Directory() {
         )}
       </div>
 
-      {/* Employee Table */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+      {/* Table View */}
+      {viewMode === 'table' && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
@@ -764,9 +771,86 @@ export default function Directory() {
           </table>
                   </div>
                 </div>
+      )}
+
+      {/* Grid View */}
+      {viewMode === 'grid' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-4">
+          {paginatedEmployees.map((employee) => (
+            <div
+              key={employee.id}
+              className="bg-white border border-gray-200 hover:shadow-lg transition-all duration-200 hover:border-primary/20 group rounded-lg p-6"
+            >
+              {/* Employee Avatar and Basic Info */}
+              <div className="flex items-start gap-3 mb-4">
+                <div className="relative">
+                  {employee.avatar ? (
+                    <img 
+                      src={employee.avatar} 
+                      alt={`${employee.firstName} ${employee.lastName}`}
+                      className="w-12 h-12 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" style={{ backgroundColor: '#1FB6A1' }}>
+                      {getInitials(employee.firstName, employee.lastName)}
+                    </div>
+                  )}
+                  <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
+                    employee.status === 'Active' ? 'bg-green-500' :
+                    employee.status === 'On Leave' ? 'bg-yellow-500' :
+                    employee.status === 'Onboarding' ? 'bg-blue-500' :
+                    employee.status === 'Suspended' ? 'bg-red-500' :
+                    'bg-gray-400'
+                  }`}></div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">
+                    {employee.firstName} {employee.lastName}
+                  </h3>
+                  <p className="text-xs text-gray-600 truncate">{employee.jobTitle}</p>
+                  <div className="mt-1">
+                    {getStatusBadge(employee.status)}
+                  </div>
+                </div>
+                <button className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary">
+                  <MoreHorizontal className="w-4 h-4" />
+                  </button>
+              </div>
+
+              {/* Contact Info */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <Mail className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{employee.email}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <Phone className="w-3 h-3 flex-shrink-0" />
+                  <span>{employee.phone || '+1 (555) 000-0000'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <MapPin className="w-3 h-3 flex-shrink-0" />
+                  <span className="truncate">{employee.location}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <Calendar className="w-3 h-3 flex-shrink-0" />
+                  <span>Started {new Date(employee.startDate).toLocaleDateString()}</span>
+                </div>
+              </div>
+
+              {/* Department and Manager */}
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-medium text-gray-900">{employee.department}</span>
+                  <span className="text-xs text-gray-500">Reports to Manager</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Pagination */}
-      <div className="bg-white border border-gray-200 rounded-lg py-6 px-4">
+      <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-600">Show:</span>

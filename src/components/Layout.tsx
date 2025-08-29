@@ -500,41 +500,30 @@ function Layout({ children }: LayoutProps) {
         >
           <div className="flex items-center justify-between h-full px-6">
             {/* Left side - Company name */}
-            <div className="flex items-center gap-3">
-              <Building style={{ width: '16px', height: '16px', color: '#222222' }} />
+            <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
+              <Building style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
               <div className="flex items-center font-medium" style={{ color: '#222222', fontSize: '14px' }}>
                 <span>Secure Corp</span>
-                <span style={{ marginLeft: '18px', marginRight: '18px' }}>|</span>
-                <span>{viewMode === 'personal' ? 'Personal' : 'Management'}</span>
               </div>
             </div>
 
-            {/* Center - Search Bar */}
-            <div className="flex-1 max-w-md mx-6">
-              <div className="relative">
-                <Search className="absolute top-1/2 transform -translate-y-1/2"
-                        style={{
-                          left: '12px',
-                          width: '16px',
-                          height: '16px',
-                          color: '#9CA3AF'
-                        }} />
-                <input
-                  type="text"
-                  placeholder="Search employees, documents..."
-                  className="w-full pl-10 pr-4 py-2 rounded-lg focus:outline-none focus:ring-2"
-                  style={{
-                    backgroundColor: '#F5F7FA',
-                    border: '1px solid #E5E7EB',
-                    outline: 'none'
-                  }}
-                  aria-label="Search employees, documents..."
-                />
-              </div>
-            </div>
+            {/* Center - Empty space for future use */}
+            <div className="flex-1"></div>
 
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
+              <span className="font-medium" style={{ color: '#222222', fontSize: '14px' }}>
+                {viewMode === 'personal' ? 'Personal' : 'Management'}
+              </span>
+
+              <button 
+                className="p-1 rounded"
+                style={{ color: '#222222' }}
+                aria-label="Search"
+              >
+                <Search style={{ width: '16px', height: '16px' }} />
+              </button>
+              
               <button 
                 className="p-1 rounded"
                 style={{ color: '#222222' }}
@@ -651,18 +640,18 @@ function Layout({ children }: LayoutProps) {
                       <button
                         key={tab.id}
                         onClick={tab.onClick}
-                        className={`font-medium transition-colors flex items-center justify-center border-r ${
+                        className={`transition-colors flex items-center justify-start border-r font-normal ${
                           tab.isActive
                             ? 'bg-white'
                             : 'hover:bg-white/50'
                         }`}
                         style={{
-                          fontSize: '14px',
-                          padding: '0 16px',
+                          fontSize: '12px',
+                          padding: '0 48px',
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                          color: tab.isActive ? '#14B8A6' : '#222222',
+                          color: tab.isActive ? '#14B8A6' : '#6B7280',
                           borderColor: '#E5E7EB'
                         }}
                         role="tab"
