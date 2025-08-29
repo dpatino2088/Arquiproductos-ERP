@@ -15,41 +15,41 @@ export default function Reports() {
   }, [setBreadcrumbs, clearSubmoduleNav]);
 
   return (
-    <main className="flex flex-col space-y-6" role="main">
+    <div className="p-6">
       {/* Header */}
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: '#222222' }}>Reports & Analytics</h1>
-          <p style={{ color: '#6B7280', marginTop: '4px' }}>
-            Generate and view detailed reports about your organization.
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <button 
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors"
-            style={{ 
-              backgroundColor: 'white',
-              borderColor: '#E5E7EB',
-              color: '#6B7280'
-            }}
-          >
-            <Calendar style={{ width: '16px', height: '16px' }} />
-            Date Range
-          </button>
-          <button 
-            className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors"
-            style={{ 
-              backgroundColor: '#14B8A6',
-              color: 'white'
-            }}
-          >
-            <Download style={{ width: '16px', height: '16px' }} />
-            Export
-          </button>
-        </div>
-      </header>
+      <div className="mb-8">
+        <h1 className="text-xl font-semibold text-foreground mb-1">Reports & Analytics</h1>
+        <p className="text-xs text-gray-400">
+          Generate and view detailed reports about your organization
+        </p>
+      </div>
 
-      {/* Report Categories */}
+      {/* Action Buttons */}
+      <div className="flex justify-end gap-3 mb-6">
+        <button 
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors"
+          style={{ 
+            backgroundColor: 'white',
+            borderColor: '#E5E7EB',
+            color: '#6B7280'
+          }}
+        >
+          <Calendar style={{ width: '16px', height: '16px' }} />
+          Date Range
+        </button>
+        <button 
+          className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors"
+          style={{ 
+            backgroundColor: '#14B8A6',
+            color: 'white'
+          }}
+        >
+          <Download style={{ width: '16px', height: '16px' }} />
+          Export
+        </button>
+      </div>
+
+        {/* Report Categories */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {[
           {
@@ -126,6 +126,6 @@ export default function Reports() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

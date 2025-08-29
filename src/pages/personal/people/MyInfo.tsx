@@ -29,8 +29,8 @@ export default function MyInfo() {
       <div className="mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground mb-2">My Information</h1>
-            <p className="text-muted-foreground">View and manage your personal information</p>
+            <h1 className="text-xl font-semibold text-foreground mb-1">My Information</h1>
+            <p className="text-xs text-gray-400">View and manage your personal information</p>
           </div>
           <button className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90">
             <Edit className="h-4 w-4" />

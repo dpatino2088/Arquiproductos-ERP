@@ -37,8 +37,8 @@ export default function PersonalDashboard() {
     <div className="p-6">
       {/* Welcome Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground mb-2">Welcome back, John!</h1>
-        <p className="text-muted-foreground">Here's your personal overview and important updates.</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Welcome back, John!</h1>
+        <p className="text-xs text-gray-400">Here's your personal overview and important updates</p>
       </div>
 
       {/* Personal Stats */}
