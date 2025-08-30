@@ -273,7 +273,7 @@ function Layout({ children }: LayoutProps) {
               }}
             >
               <div className="flex items-center justify-center" style={{ width: '27px', height: '27px', flexShrink: 0 }}>
-                <RhemoLogo width={27} height={27} color={viewMode === 'manager' ? '#F9FAFB' : '#222222'} />
+                <RhemoLogo width={27} height={27} viewMode={viewMode} />
               </div>
                           <span
               className="absolute left-12 transition-opacity duration-300 whitespace-nowrap font-normal"
@@ -284,7 +284,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '16px'
               }}
             >
-              <span style={{ fontWeight: '800' }}>RH</span><span style={{ fontWeight: 'normal' }}>EMO</span>
+              <span style={{ fontWeight: '700' }}>RH</span><span style={{ fontWeight: '200' }}>EMO</span>
             </span>
             </div>
           </div>
@@ -501,7 +501,11 @@ function Layout({ children }: LayoutProps) {
           <div className="flex items-center justify-between h-full px-6">
             {/* Left side - Company name */}
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
-              <Building style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+              {viewMode === 'personal' ? (
+                <User style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+              ) : (
+                <Building style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+              )}
               <div className="flex items-center font-medium" style={{ color: '#222222', fontSize: '14px' }}>
                 <span>Secure Corp</span>
               </div>
