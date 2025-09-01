@@ -1,7 +1,7 @@
 export const STATUS = {
   success: 'bg-status-green-light text-status-green',
   info: 'bg-status-blue-light text-status-blue',
-  warning: 'bg-status-amber-light text-status-amber',
+  warning: 'bg-status-orange-light text-status-orange',
   error: 'bg-status-red-light text-status-red',
   neutral: 'bg-neutral-gray-10 text-neutral-gray',
 } as const;

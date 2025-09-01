@@ -51,69 +51,126 @@ export default {
     --font-size-heading: 16px;
     --font-size-title: 20px;
 
-    /* Primarios */
-    --graphite-black: 0 0% 10%;       /* #1A1A1A - Texto principal, íconos oscuros */
-    --light-gray: 210 20% 97%;        /* #F5F7FA - Fondo base, áreas amplias */
-    --white: 0 0% 100%;               /* #FFFFFF - Tarjetas, superficies elevadas */
-    --teal-brand: 174 100% 26%;       /* #008575 - Color de marca, botones primarios */
-    --teal-brand-hex: #008575;         /* Hex version for direct usage */
-    --teal-brand-rgba-10: rgba(0, 133, 117, 0.1); /* 10% opacity version */
+    /* Tailwind v3 Color Palette */
+    --gray-950: #030712;
+    --gray-900: #111827;
+    --gray-800: #1f2937;
+    --gray-700: #374151;
+    --gray-600: #4b5563;
+    --gray-500: #6b7280;
+    --gray-400: #9ca3af;
+    --gray-300: #d1d5db;
+    --gray-200: #e5e7eb;
+    --gray-100: #f3f4f6;
+    --gray-50: #f9fafb;
+    
+    --teal-950: #042f2e;
+    --teal-900: #134e4a;
+    --teal-800: #115e59;
+    --teal-700: #0f766e;  /* Primary brand color */
+    --teal-600: #0d9488;
+    --teal-500: #14b8a6;
+    --teal-400: #2dd4bf;
+    --teal-300: #5eead4;
+    --teal-200: #99f6e4;
+    --teal-100: #ccfbf1;
+    --teal-50: #f0fdfa;
+    
+    --red-950: #450a0a;
+    --red-900: #7f1d1d;
+    --red-800: #991b1b;
+    --red-700: #b91c1c;
+    --red-600: #dc2626;
+    --red-500: #ef4444;
+    --red-400: #f87171;
+    --red-300: #fca5a5;
+    --red-200: #fecaca;
+    --red-100: #fee2e2;
+    --red-50: #fef2f2;
+    
+    --orange-950: #431407;
+    --orange-900: #7c2d12;
+    --orange-800: #9a3412;
+    --orange-700: #c2410c;
+    --orange-600: #ea580c;
+    --orange-500: #f97316;
+    --orange-400: #fb923c;
+    --orange-300: #fdba74;
+    --orange-200: #fed7aa;
+    --orange-100: #ffedd5;
+    --orange-50: #fff7ed;
+    
+    --blue-950: #172554;
+    --blue-900: #1e3a8a;
+    --blue-800: #1e40af;
+    --blue-700: #1d4ed8;
+    --blue-600: #2563eb;
+    --blue-500: #3b82f6;
+    --blue-400: #60a5fa;
+    --blue-300: #93c5fd;
+    --blue-200: #bfdbfe;
+    --blue-100: #dbeafe;
+    --blue-50: #eff6ff;
+    
+    --green-950: #052e16;
+    --green-900: #14532d;
+    --green-800: #166534;
+    --green-700: #15803d;
+    --green-600: #16a34a;
+    --green-500: #22c55e;
+    --green-400: #4ade80;
+    --green-300: #86efac;
+    --green-200: #bbf7d0;
+    --green-100: #dcfce7;
+    --green-50: #f0fdf4;
 
-    /* Base palette (mapped to new colors) */
-    --foreground: var(--graphite-black);
-    --background: var(--light-gray);
-    --brand-primary: var(--teal-brand);
-    --brand-secondary: 262 46% 55%;    /* Violet #7E57C2 (static) */
+    /* Semantic Color Mapping using Tailwind v3 */
+    --foreground: var(--gray-900);           /* Dark text */
+    --background: var(--gray-50);            /* Light background */
+    --brand-primary: var(--teal-700);       /* Primary brand color #0f766e */
+    --brand-secondary: var(--gray-600);     /* Secondary brand color */
 
     --primary: var(--brand-primary);
-    --primary-foreground: var(--white);
+    --primary-foreground: var(--gray-50);
     --secondary: var(--brand-secondary);
-    --secondary-foreground: var(--white);
+    --secondary-foreground: var(--gray-50);
 
-    --card: var(--white);
+    --card: var(--gray-50);
     --card-foreground: var(--foreground);
-    --popover: var(--white);
+    --popover: var(--gray-50);
     --popover-foreground: var(--foreground);
-    --muted: var(--light-gray);
-    --muted-foreground: 220 9% 46%;   /* #757575 - Muted Gray */
+    --muted: var(--gray-100);
+    --muted-foreground: var(--gray-500);
     --accent: var(--brand-primary);
-    --accent-foreground: var(--white);
-    --destructive: 4 90% 58%;         /* #C62828 - Danger Red */
-    --destructive-foreground: var(--white);
-    --border: 216 12% 84%;            /* #D6DAE1 - Subtle Border */
-    --input: 216 12% 84%;
-    --ring: 45 100% 51%;              /* #FFB300 - Focus Ring */
+    --accent-foreground: var(--gray-50);
+    --destructive: var(--red-600);
+    --destructive-foreground: var(--gray-50);
+    --border: var(--gray-200);
+    --input: var(--gray-200);
+    --ring: var(--orange-500);              /* Focus ring */
     --radius: 0.5rem;
 
     /* Sidebar colors */
-    --sidebar-light-background: var(--white);
-    --sidebar-dark-background: var(--graphite-black);
+    --sidebar-light-background: var(--gray-50);
+    --sidebar-dark-background: var(--gray-900);
     --sidebar-background: var(--sidebar-light-background);
     --sidebar-foreground: var(--foreground);
 
-    /* Secundarios / Estados */
-    --success-green: 122 39% 49%;     /* #2E7D32 */
-    --danger-red: 4 90% 58%;          /* #C62828 */
-    --info-blue: 210 79% 46%;         /* #1565C0 */
-    --warning-amber: 32 100% 47%;     /* #EF6C00 */
-
-    /* Neutros */
-    --secondary-text: 220 9% 46%;     /* #4B4F57 - Secondary Text */
-    --muted-gray: 0 0% 46%;           /* #757575 - Placeholders, texto deshabilitado */
-    --subtle-border: 216 12% 84%;     /* #D6DAE1 */
-    --strong-border: 215 13% 70%;     /* #B8BFCA */
-
-    /* Auxiliares */
-    --focus-ring: 45 100% 51%;        /* #FFB300 - Color para indicar foco accesible */
-    --row-highlight: 207 44% 92%;     /* #D6EAF8 - Fondos suaves para hover o resaltado */
-
-    /* Legacy status tokens (mapped to new colors) */
-    --status-green: #2E7D32;
-    --status-red: #C62828;
-    --status-blue: #1565C0;
-    --status-amber: #EF6C00;
-    --neutral-gray: #757575;
-    --highlight-bg: #D6EAF8;
+    /* Status colors using Tailwind v3 */
+    --status-green: var(--green-600);       /* Success #16a34a */
+    --status-red: var(--red-600);           /* Error/Danger #dc2626 */
+    --status-blue: var(--blue-600);         /* Info #2563eb */
+    --status-orange: var(--orange-600);     /* Warning #ea580c */
+    
+    /* Utility colors */
+    --focus-ring: var(--orange-500);        /* Focus indicator */
+    --row-highlight: var(--teal-50);        /* Row hover/highlight */
+    
+    /* Hex versions for direct usage */
+    --teal-brand-hex: var(--teal-700);
+    --teal-brand-rgba-10: rgba(15, 118, 110, 0.1);
+    --graphite-black-hex: var(--gray-900);
+    --white-hex: var(--gray-50);
   }
 
   .dark {

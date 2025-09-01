@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+an yimport { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../../hooks/useSubmoduleNav';
 import { 
   Users, 
@@ -474,7 +474,7 @@ export default function Directory() {
         );
       case 'On Leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-light text-status-amber">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
             On Leave
           </span>
         );
@@ -738,11 +738,11 @@ export default function Directory() {
                           className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
                           style={{
                             backgroundColor: 
-                              employee.status === 'Active' ? '#2E7D32' :
-                              employee.status === 'On Leave' ? '#EF6C00' :
-                              employee.status === 'Onboarding' ? '#1565C0' :
-                              employee.status === 'Suspended' ? '#D32F2F' :
-                              '#9E9E9E'
+                              employee.status === 'Active' ? '#16a34a' :
+                              employee.status === 'On Leave' ? '#ea580c' :
+                              employee.status === 'Onboarding' ? '#2563eb' :
+                              employee.status === 'Suspended' ? '#dc2626' :
+                              '#6b7280'
                           }}>
                         </div>
                       </div>
@@ -803,11 +803,11 @@ export default function Directory() {
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{
                       backgroundColor: 
-                        employee.status === 'Active' ? '#2E7D32' :
-                        employee.status === 'On Leave' ? '#EF6C00' :
-                        employee.status === 'Onboarding' ? '#1565C0' :
-                        employee.status === 'Suspended' ? '#D32F2F' :
-                        '#9E9E9E'
+                        employee.status === 'Active' ? '#16a34a' :
+                        employee.status === 'On Leave' ? '#ea580c' :
+                        employee.status === 'Onboarding' ? '#2563eb' :
+                        employee.status === 'Suspended' ? '#dc2626' :
+                        '#6b7280'
                     }}>
                   </div>
                 </div>
