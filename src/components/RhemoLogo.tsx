@@ -3,18 +3,18 @@ import React from 'react';
 interface RhemoLogoProps {
   width?: string | number;
   height?: string | number;
-  viewMode?: 'personal' | 'manager';
+  viewMode?: 'employee' | 'manager';
   style?: React.CSSProperties;
 }
 
 export const RhemoLogo: React.FC<RhemoLogoProps> = ({ 
   width = 27, 
   height = 27, 
-  viewMode = 'personal',
+  viewMode = 'employee',
   style 
 }) => {
   const primaryColor = '#1FB6A1'; // Always keep the teal color
-  const secondaryColor = viewMode === 'manager' ? '#FFFFFF' : '#000000'; // Black in personal, white in manager
+  const secondaryColor = viewMode === 'manager' ? '#FFFFFF' : '#000000'; // Black in employee, white in manager
   
   return (
     <svg 

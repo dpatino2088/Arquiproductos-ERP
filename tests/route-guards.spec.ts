@@ -9,15 +9,15 @@ test.describe('Route Guards', () => {
     await page.waitForSelector('[aria-label="Main navigation"]');
   });
 
-  test('should redirect management routes to personal dashboard when in personal view', async ({ page }) => {
-    // Ensure we're in personal view (default) - check the navbar indicator
-    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Personal")')).toBeVisible();
+  test('should redirect management routes to employee dashboard when in employee view', async ({ page }) => {
+    // Ensure we're in employee view (default) - check the navbar indicator
+    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Employee")')).toBeVisible();
     
     // Try to navigate directly to a management route
     await page.goto('/management/dashboard');
     
-    // Should be redirected to personal dashboard
-    await expect(page).toHaveURL('/personal/dashboard');
+    // Should be redirected to employee dashboard
+    await expect(page).toHaveURL('/employee/dashboard');
     
     // Check console for warning message
     const consoleMessages = [];
@@ -26,8 +26,8 @@ test.describe('Route Guards', () => {
     await page.goto('/management/reports');
     await page.waitForTimeout(100); // Wait for console message
     
-    // Should be redirected to personal dashboard
-    await expect(page).toHaveURL('/personal/dashboard');
+    // Should be redirected to employee dashboard
+    await expect(page).toHaveURL('/employee/dashboard');
     
     // Should have logged access denial
     const hasAccessDeniedMessage = consoleMessages.some(msg => 
@@ -43,7 +43,7 @@ test.describe('Route Guards', () => {
     await page.click('[data-testid="manager-view-btn"]'); // Click view toggle
     
     // Wait for view to change - check for the view label in navbar (be more specific)
-    await expect(page.locator('span.font-medium:has-text("Management")')).toBeVisible();
+    await expect(page.locator('span.font-medium:has-text("Management View")')).toBeVisible();
     
     // Now try to navigate to management routes - should work
     await page.goto('/management/dashboard');
@@ -53,10 +53,10 @@ test.describe('Route Guards', () => {
     await expect(page).toHaveURL('/management/reports');
   });
 
-  test('should allow access to personal routes from both views', async ({ page }) => {
-    // Test from personal view
-    await page.goto('/personal/dashboard');
-    await expect(page).toHaveURL('/personal/dashboard');
+  test('should allow access to employee routes from both views', async ({ page }) => {
+    // Test from employee view
+    await page.goto('/employee/dashboard');
+    await expect(page).toHaveURL('/employee/dashboard');
     
     await page.goto('/inbox');
     await expect(page).toHaveURL('/inbox');
@@ -65,24 +65,24 @@ test.describe('Route Guards', () => {
     await page.click('[data-testid="view-toggle"]'); // Click user icon
     await page.waitForSelector('[data-testid="manager-view-btn"]', { state: 'visible' });
     await page.click('[data-testid="manager-view-btn"]'); // Click view toggle
-    await expect(page.locator('text=Management')).toBeVisible();
+    await expect(page.locator('span.font-medium:has-text("Management View")')).toBeVisible();
     
-    // Test from management view - personal routes should still work
-    await page.goto('/personal/dashboard');
-    await expect(page).toHaveURL('/personal/dashboard');
+    // Test from management view - employee routes should still work
+    await page.goto('/employee/dashboard');
+    await expect(page).toHaveURL('/employee/dashboard');
     
     await page.goto('/inbox');
     await expect(page).toHaveURL('/inbox');
   });
 
-  test('should protect payroll route in personal view', async ({ page }) => {
-    // Ensure we're in personal view
-    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Personal")')).toBeVisible();
+  test('should protect payroll route in employee view', async ({ page }) => {
+    // Ensure we're in employee view
+    await expect(page.locator('div:has-text("Secure Corp") span:has-text("Employee")')).toBeVisible();
     
     // Try to access payroll route
     await page.goto('/payroll');
     
-    // Should be redirected to personal dashboard
-    await expect(page).toHaveURL('/personal/dashboard');
+    // Should be redirected to employee dashboard
+    await expect(page).toHaveURL('/employee/dashboard');
   });
 });

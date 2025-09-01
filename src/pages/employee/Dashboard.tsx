@@ -6,9 +6,9 @@ export default function PersonalDashboard() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for personal dashboard
-    registerSubmodules('Personal Dashboard', [
-      { id: 'dashboard', label: 'Dashboard', href: '/personal/dashboard', icon: Home },
+    // Register submodule tabs for employee dashboard
+    registerSubmodules('Employee Dashboard', [
+      { id: 'dashboard', label: 'Dashboard', href: '/employee/dashboard', icon: Home },
       { id: 'inbox', label: 'Inbox', href: '/inbox', icon: Inbox }
     ]);
   }, [registerSubmodules]);

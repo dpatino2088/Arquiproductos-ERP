@@ -24,7 +24,7 @@ interface UIState {
   theme: 'light' | 'dark' | 'system';
 
   // View mode state
-  viewMode: 'personal' | 'manager';
+  viewMode: 'employee' | 'manager';
 
   // Notifications
   notifications: Notification[];
@@ -44,7 +44,7 @@ interface UIState {
   
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   
-  setViewMode: (mode: 'personal' | 'manager') => void;
+  setViewMode: (mode: 'employee' | 'manager') => void;
   
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
   markNotificationRead: (id: string) => void;
@@ -66,7 +66,7 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: false,
       sidebarCollapsed: true,
       theme: 'system',
-      viewMode: 'personal',
+      viewMode: 'employee',
       notifications: [],
       unreadNotificationCount: 0,
       globalLoading: false,
@@ -107,7 +107,7 @@ export const useUIStore = create<UIState>()(
       },
 
       // View mode actions
-      setViewMode: (mode: 'personal' | 'manager') => {
+      setViewMode: (mode: 'employee' | 'manager') => {
         logger.info('View mode changed', { viewMode: mode });
         set({ viewMode: mode });
       },

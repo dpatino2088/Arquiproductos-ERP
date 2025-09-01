@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../../hooks/useSubmoduleNav';
+import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { User, Mail, Phone, MapPin, Calendar, Edit } from 'lucide-react';
 
 export default function MyInfo() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for personal people section
+    // Register submodule tabs for employee my info section
     registerSubmodules('My Information', [
-      { id: 'my-info', label: 'My Info', href: '/personal/people/my-info', icon: User }
+      { id: 'my-info', label: 'My Info', href: '/employee/my-info', icon: User }
     ]);
   }, [registerSubmodules]);
 

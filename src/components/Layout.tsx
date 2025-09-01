@@ -7,11 +7,7 @@ import { RhemoLogo } from './RhemoLogo';
 import { 
   Users, 
   User,
-  DollarSign, 
   Clock, 
-  Calendar, 
-  FileText, 
-  BarChart3, 
   Settings, 
   Home, 
   Bell, 
@@ -19,9 +15,16 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Building, 
-  Heart, 
   HelpCircle,
-  Shield
+  Receipt,
+  Printer,
+  HandCoins,
+  Cpu,
+  ChartNoAxesCombined,
+  HeartPulse,
+  BriefcaseBusiness,
+  CalendarCheck,
+  BookMarked
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -83,18 +86,27 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'People', href: '/people', icon: Users }, // Will be handled dynamically based on view mode
   { name: 'Attendance', href: '/time-tracking', icon: Clock },
-  { name: 'PTO & Leave', href: '/pto', icon: Calendar },
-  { name: 'Security', href: '/security', icon: Shield },
-  { name: 'Performance', href: '/performance', icon: BarChart3 },
-  { name: 'Benefits', href: '/benefits', icon: Heart },
+  { name: 'PTO & Leave', href: '/pto', icon: CalendarCheck },
+  { name: 'Knowledge Hub', href: '/knowledge-hub', icon: BookMarked },
+  { name: 'Performance', href: '/performance', icon: ChartNoAxesCombined },
+  { name: 'Benefits', href: '/benefits', icon: BriefcaseBusiness },
 ];
 
-const managementOnlyNavigation = [
-  { name: 'Payroll', href: '/payroll', icon: DollarSign },
-  { name: 'Reports', href: '/management/reports', icon: FileText },
+const employeeOnlyNavigation = [
+  { name: 'Wellness', href: '/wellness', icon: HeartPulse },
+  { name: 'Expenses', href: '/expenses', icon: Receipt },
 ];
+
+const managementExpenses = [
+  { name: 'Expenses', href: '/expenses', icon: Receipt },
+];
+
+const sharedManagementNavigation = [
+  { name: 'IT Management', href: '/it-management', icon: Cpu },
+];
+
+
 
 function Layout({ children }: LayoutProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -169,6 +181,9 @@ function Layout({ children }: LayoutProps) {
       case 'People':
         // People is active if we're on any people route
         return currentRoute.includes('/people');
+      case 'My Info':
+        // My Info is active if we're on any people or my-info route
+        return currentRoute.includes('/people') || currentRoute.includes('/my-info');
       default:
         // For other items, use exact match or check if current route starts with the href
         return currentRoute === itemHref || currentRoute.startsWith(itemHref + '/');
@@ -177,18 +192,25 @@ function Layout({ children }: LayoutProps) {
 
   // Memoized navigation items based on view mode
   const navigation = useMemo(() => {
+    // Create base navigation with People/My Info inserted after Dashboard
+    const dashboardItem = baseNavigation[0]; // Dashboard
+    const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
+    
     if (viewMode === 'manager') {
-      return [...baseNavigation, ...managementOnlyNavigation];
+      const peopleItem = { name: 'People', href: '/people', icon: Users };
+      return [dashboardItem, peopleItem, ...restOfBase, ...managementExpenses, { name: 'Payroll', href: '/payroll', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports', icon: Printer }];
+    } else {
+      const myInfoItem = { name: 'My Info', href: '/people', icon: User };
+      return [dashboardItem, myInfoItem, ...restOfBase, ...employeeOnlyNavigation, ...sharedManagementNavigation];
     }
-    return baseNavigation;
   }, [viewMode]);
 
   const dashboardItem = useMemo(() => 
-    navigation.find(item => item.name === 'Dashboard'), [navigation]
+    navigation.find(item => item?.name === 'Dashboard'), [navigation]
   );
   
   const otherNavItems = useMemo(() => 
-    navigation.filter(item => item.name !== 'Dashboard'), [navigation]
+    navigation.filter(item => item?.name !== 'Dashboard'), [navigation]
   );
 
   // Memoized handlers
@@ -201,12 +223,12 @@ function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleViewToggle = useCallback(() => {
-    const newMode = viewMode === 'personal' ? 'manager' : 'personal';
+    const newMode = viewMode === 'employee' ? 'manager' : 'employee';
     setViewMode(newMode);
     router.setViewMode(newMode);
     
     // Navigate to appropriate dashboard based on view mode
-    const newPath = newMode === 'personal' ? '/personal/dashboard' : '/management/dashboard';
+    const newPath = newMode === 'employee' ? '/employee/dashboard' : '/management/dashboard';
     router.navigate(newPath);
     setCurrentRoute(newPath);
   }, [viewMode]);
@@ -214,14 +236,14 @@ function Layout({ children }: LayoutProps) {
   const handleNavigation = useCallback((path: string) => {
     // Handle dynamic navigation based on view mode
     if (path === '/dashboard') {
-      const actualPath = viewMode === 'personal' 
-        ? '/personal/dashboard' 
+      const actualPath = viewMode === 'employee' 
+        ? '/employee/dashboard' 
         : '/management/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/people') {
-      const actualPath = viewMode === 'personal' 
-        ? '/personal/people/my-info' 
+      const actualPath = viewMode === 'employee' 
+        ? '/employee/my-info' 
         : '/management/people/directory';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
@@ -325,6 +347,7 @@ function Layout({ children }: LayoutProps) {
             {/* Other Navigation Items */}
             <ul style={{ gap: '1px', marginTop: '-3px' }} className="flex flex-col" role="list">
               {otherNavItems.map((item) => {
+                if (!item) return null;
                 const isActive = isNavItemActive(item.name, item.href);
                 const Icon = item.icon;
 
@@ -375,39 +398,7 @@ function Layout({ children }: LayoutProps) {
           {/* Help, Settings and Collapse/Expand Buttons */}
           <div className="absolute left-0 right-0 px-2" style={{ bottom: '1rem' }}>
             <div style={{ gap: '1px' }} className="flex flex-col">
-              {/* Help Button */}
-              <button
-                onClick={handleHelpClick}
-                className="flex items-center font-normal rounded-lg transition-colors w-full relative"
-              style={{
-                fontSize: '14px',
-                minHeight: '36px',
-                padding: '12px 12px 12px 11px',
-                color: viewMode === 'manager' ? '#D1D5DB' : '#222222',
-                backgroundColor: 'transparent'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-              title="Help & Knowledge Base"
-              aria-label="Help & Knowledge Base"
-            >
-              <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-                <HelpCircle style={{ width: '18px', height: '18px' }} />
-              </div>
-              <span 
-                className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
-                style={{ 
-                  opacity: isCollapsed ? 0 : 1,
-                  pointerEvents: isCollapsed ? 'none' : 'auto'
-                }}
-              >
-                Help & Support
-              </span>
-            </button>
+
 
               {/* Settings Button */}
               <button
@@ -501,11 +492,11 @@ function Layout({ children }: LayoutProps) {
           <div className="flex items-center justify-between h-full px-6">
             {/* Left side - Company name */}
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
-              {viewMode === 'personal' ? (
-                <User style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
-              ) : (
-                <Building style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
-              )}
+                      {viewMode === 'employee' ? (
+          <User style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+        ) : (
+          <Building style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+        )}
               <div className="flex items-center font-medium" style={{ color: '#222222', fontSize: '14px' }}>
                 <span>Secure Corp</span>
               </div>
@@ -517,7 +508,7 @@ function Layout({ children }: LayoutProps) {
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
               <span className="font-medium" style={{ color: '#222222', fontSize: '14px' }}>
-                {viewMode === 'personal' ? 'Personal' : 'Management'}
+                {viewMode === 'employee' ? 'Employee View' : 'Management View'}
               </span>
 
               <button 
@@ -534,6 +525,16 @@ function Layout({ children }: LayoutProps) {
                 aria-label="Notifications"
               >
                 <Bell style={{ width: '16px', height: '16px' }} />
+              </button>
+
+              <button 
+                onClick={handleHelpClick}
+                className="p-1 rounded"
+                style={{ color: '#222222' }}
+                aria-label="Help & Knowledge Base"
+                title="Help & Knowledge Base"
+              >
+                <HelpCircle style={{ width: '16px', height: '16px' }} />
               </button>
 
               {/* User Menu */}
@@ -599,9 +600,9 @@ function Layout({ children }: LayoutProps) {
                             }}
                             className="w-full px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors text-left"
                             style={{ color: '#222222' }}
-                            data-testid={viewMode === 'personal' ? 'manager-view-btn' : 'personal-view-btn'}
+                            data-testid={viewMode === 'employee' ? 'manager-view-btn' : 'employee-view-btn'}
                           >
-                            {viewMode === 'personal' ? 'Manager View' : 'Personal View'}
+                            Switch to {viewMode === 'employee' ? 'Manager' : 'Employee'} View
                           </button>
                         </div>
                       </div>

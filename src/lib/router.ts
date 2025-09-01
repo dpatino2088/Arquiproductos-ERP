@@ -2,7 +2,7 @@
 export class Router {
   private routes: Map<string, () => void> = new Map();
   private currentRoute: string = '/';
-  private viewMode: 'personal' | 'manager' = 'personal';
+  private viewMode: 'employee' | 'manager' = 'employee';
   private listeners: Set<() => void> = new Set();
   private unauthorizedRedirectHandler?: () => void;
 
@@ -17,11 +17,11 @@ export class Router {
     this.routes.set(path, handler);
   }
 
-  setViewMode(mode: 'personal' | 'manager') {
+  setViewMode(mode: 'employee' | 'manager') {
     this.viewMode = mode;
   }
 
-  getViewMode(): 'personal' | 'manager' {
+  getViewMode(): 'employee' | 'manager' {
     return this.viewMode;
   }
 
@@ -53,10 +53,10 @@ export class Router {
   navigate(path: string, pushState: boolean = true) {
     // Check route access before navigation
     if (!this.hasRouteAccess(path)) {
-      console.warn(`Access denied to route: ${path}. Redirecting to personal dashboard.`);
+      console.warn(`Access denied to route: ${path}. Redirecting to employee dashboard.`);
       
-      // Redirect to personal dashboard instead
-      const redirectPath = '/personal/dashboard';
+      // Redirect to employee dashboard instead
+      const redirectPath = '/employee/dashboard';
       
       // Always update the URL when redirecting
       window.history.replaceState({}, '', redirectPath);

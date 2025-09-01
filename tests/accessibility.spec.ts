@@ -18,22 +18,22 @@ test.describe('Accessibility Tests', () => {
     expect(nonColorViolations).toEqual([]);
   });
 
-  test('should not have accessibility issues on personal dashboard', async ({ page }) => {
+  test('should not have accessibility issues on employee dashboard', async ({ page }) => {
     await page.goto('/');
     
-    // Check if we need to switch to personal view (app might start in management view)
+    // Check if we need to switch to employee view (app might start in management view)
     await page.click('[data-testid="view-toggle"]');
     
     // Wait for dropdown to appear and check which button is available
-    const personalBtn = page.locator('[data-testid="personal-view-btn"]');
+    const employeeBtn = page.locator('[data-testid="employee-view-btn"]');
     
-    if (await personalBtn.isVisible()) {
-      await personalBtn.click();
+    if (await employeeBtn.isVisible()) {
+      await employeeBtn.click();
     }
-    // If personal button isn't visible, we're already in personal view
+    // If employee button isn't visible, we're already in employee view
     
-    await page.goto('/personal/dashboard');
-    await page.waitForURL('/personal/dashboard');
+    await page.goto('/employee/dashboard');
+    await page.waitForURL('/employee/dashboard');
 
     const accessibilityScanResults = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
@@ -65,12 +65,14 @@ test.describe('Accessibility Tests', () => {
     await page.click('[data-testid="manager-view-btn"]');
     await page.waitForURL('/management/dashboard');
     
-    // Expand sidebar by hovering over it
+    // Expand sidebar by clicking the sidebar toggle or hovering
     await page.hover('nav[aria-label="Main navigation"]');
     await page.waitForTimeout(500); // Wait for expansion animation
     
-    await page.click('text=People');
-    await page.click('text=Directory');
+    // Use more specific selector for People button
+    await page.click('nav[aria-label="Main navigation"] button:has-text("People")');
+    await page.waitForTimeout(200);
+    await page.click('button[role="tab"]:has-text("Directory")');
     await page.waitForURL('/management/people/directory');
 
     const accessibilityScanResults = await new AxeBuilder({ page })

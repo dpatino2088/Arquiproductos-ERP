@@ -9,9 +9,9 @@ import { logger } from './lib/logger';
 import { useUIStore } from './stores/ui-store';
 
 // Code splitting with React.lazy
-const PersonalDashboard = lazy(() => {
-  logger.debug('Loading PersonalDashboard component');
-  return import('./pages/personal/Dashboard');
+const EmployeeDashboard = lazy(() => {
+  logger.debug('Loading EmployeeDashboard component');
+  return import('./pages/employee/Dashboard');
 });
 
 const ManagementDashboard = lazy(() => {
@@ -31,7 +31,7 @@ const Reports = lazy(() => {
 
 const MyInfo = lazy(() => {
   logger.debug('Loading MyInfo component');
-  return import('./pages/personal/people/MyInfo');
+  return import('./pages/employee/MyInfo');
 });
 
 const Directory = lazy(() => {
@@ -194,20 +194,27 @@ function App() {
       
       // Set up unauthorized redirect handler
       router.setUnauthorizedRedirectHandler(() => {
-        console.log('Unauthorized access attempt blocked - redirecting to personal dashboard');
-        setCurrentPage('personal-dashboard');
+        console.log('Unauthorized access attempt blocked - redirecting to employee dashboard');
+        setCurrentPage('employee-dashboard');
       });
       
-      // Set up routes - default route goes to personal dashboard
-      router.addRoute('/', () => setCurrentPage('personal-dashboard'));
+      // Set up routes - default route goes to employee dashboard
+      router.addRoute('/', () => setCurrentPage('employee-dashboard'));
       // Legacy routes for backward compatibility
-      router.addRoute('/home/dashboard', () => setCurrentPage('personal-dashboard'));
+      router.addRoute('/home/dashboard', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/home/inbox', () => setCurrentPage('inbox'));
       router.addRoute('/inbox', () => setCurrentPage('inbox'));
       
-      // Personal view routes
-      router.addRoute('/personal/dashboard', () => setCurrentPage('personal-dashboard'));
+      // Employee view routes
+      router.addRoute('/employee/dashboard', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/employee/my-info', () => setCurrentPage('my-info'));
+      
+      // Legacy personal routes (redirect to employee)
+      router.addRoute('/personal/dashboard', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/personal/people/my-info', () => setCurrentPage('my-info'));
+      
+      // Legacy employee routes (redirect to new path)
+      router.addRoute('/employee/people/my-info', () => setCurrentPage('my-info'));
       
       // Management view routes
       router.addRoute('/management/dashboard', () => setCurrentPage('management-dashboard'));
@@ -222,15 +229,18 @@ function App() {
       router.addRoute('/reports', () => setCurrentPage('reports')); // Legacy route redirects to same page
       
       // Protected routes (management only)
-      router.addRoute('/payroll', () => setCurrentPage('personal-dashboard')); // This will be blocked by route guard
+      router.addRoute('/payroll', () => setCurrentPage('employee-dashboard')); // This will be blocked by route guard
       
-      // Other routes - redirect to personal dashboard for now
-      router.addRoute('/time-tracking', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/pto', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/security', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/performance', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/benefits', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/settings', () => setCurrentPage('personal-dashboard'));
+      // Other routes - redirect to employee dashboard for now
+      router.addRoute('/time-tracking', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/pto', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/knowledge-hub', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/performance', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/benefits', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/wellness', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/expenses', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/it-management', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/settings', () => setCurrentPage('employee-dashboard'));
       
       // Initialize router
       router.init();
@@ -285,8 +295,8 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
-      case 'personal-dashboard':
-        return <PersonalDashboard />;
+      case 'employee-dashboard':
+        return <EmployeeDashboard />;
       case 'management-dashboard':
         return <ManagementDashboard />;
       case 'inbox':
@@ -301,7 +311,7 @@ function App() {
       case 'reports':
         return <Reports />;
       default:
-        return <PersonalDashboard />;
+        return <EmployeeDashboard />;
     }
   };
 

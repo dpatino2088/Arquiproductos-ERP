@@ -9,7 +9,7 @@ export default function Inbox() {
   useEffect(() => {
     // Get current view mode from router and register appropriate dashboard
     const viewMode = router.getViewMode();
-    const dashboardHref = viewMode === 'personal' ? '/personal/dashboard' : '/management/dashboard';
+    const dashboardHref = viewMode === 'employee' ? '/employee/dashboard' : '/management/dashboard';
     
     // Register submodule tabs for inbox
     registerSubmodules('Inbox', [
