@@ -55,7 +55,9 @@ export default {
     --graphite-black: 0 0% 10%;       /* #1A1A1A - Texto principal, íconos oscuros */
     --light-gray: 210 20% 97%;        /* #F5F7FA - Fondo base, áreas amplias */
     --white: 0 0% 100%;               /* #FFFFFF - Tarjetas, superficies elevadas */
-    --teal-brand: 174 100% 29%;       /* #009688 - Color de marca, botones primarios */
+    --teal-brand: 174 100% 26%;       /* #008575 - Color de marca, botones primarios */
+    --teal-brand-hex: #008575;         /* Hex version for direct usage */
+    --teal-brand-rgba-10: rgba(0, 133, 117, 0.1); /* 10% opacity version */
 
     /* Base palette (mapped to new colors) */
     --foreground: var(--graphite-black);

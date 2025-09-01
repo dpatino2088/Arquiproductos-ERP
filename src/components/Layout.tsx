@@ -50,8 +50,8 @@ const NavigationItem = memo(({
       fontSize: '14px',
       minHeight: '36px',
       padding: '12px 12px 12px 11px',
-              color: isActive ? '#009688' : '#1A1A1A',
-        backgroundColor: isActive ? 'rgba(0, 150, 136, 0.1)' : 'transparent',
+              color: isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
+        backgroundColor: isActive ? 'var(--teal-brand-rgba-10)' : 'transparent',
     }}
     onMouseEnter={(e) => {
       if (!isActive) {
@@ -74,7 +74,7 @@ const NavigationItem = memo(({
         opacity: isCollapsed ? 0 : 1,
         pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
-        color: isActive ? '#009688' : '#1A1A1A'
+        color: isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)'
       }}
     >
       {item.name}
@@ -322,7 +322,7 @@ function Layout({ children }: LayoutProps) {
                       fontSize: '14px',
                       minHeight: '36px',
                       padding: '12px 12px 30px 11px',
-                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? '#009688' : (viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A'),
+                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 'var(--teal-brand-hex)' : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
                       backgroundColor: 'transparent'
                     }}
                     title={isCollapsed ? dashboardItem.name : undefined}
@@ -360,7 +360,7 @@ function Layout({ children }: LayoutProps) {
                           fontSize: '14px',
                           minHeight: '36px',
                           padding: '12px 12px 12px 11px',
-                          color: isActive ? '#009688' : (viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A'),
+                          color: isActive ? 'var(--teal-brand-hex)' : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
                           backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent'
                         }}
                         onMouseEnter={(e) => {
@@ -408,7 +408,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 12px 12px 11px',
-                                          color: currentRoute === '/settings' ? '#009688' : (viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A'),
+                                          color: currentRoute === '/settings' ? 'var(--teal-brand-hex)' : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
                 backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent'
               }}
               onMouseEnter={(e) => {
@@ -544,7 +544,7 @@ function Layout({ children }: LayoutProps) {
                   style={{ 
                     width: '28px', 
                     height: '28px',
-                                         backgroundColor: '#009688'
+                                         backgroundColor: 'var(--teal-brand-hex)'
                   }}
                   aria-label="My Account"
                   data-testid="view-toggle"
@@ -658,7 +658,7 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                                                     color: tab.isActive ? '#009688' : '#1A1A1A',
+                                                     color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
                           borderColor: '#E5E7EB'
                         }}
                         role="tab"

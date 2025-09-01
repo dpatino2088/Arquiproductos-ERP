@@ -507,7 +507,7 @@ export default function Directory() {
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
           </button>
-          <button className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm" style={{ backgroundColor: '#009688' }}>
+          <button className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm" style={{ backgroundColor: 'var(--teal-brand-hex)' }}>
             <Plus style={{ width: '14px', height: '14px' }} />
             Add Person
           </button>
@@ -730,7 +730,7 @@ export default function Directory() {
                             className="w-8 h-8 rounded-full object-cover"
                           />
                         ) : (
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ backgroundColor: '#009688' }}>
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ backgroundColor: 'var(--teal-brand-hex)' }}>
                             {getInitials(employee.firstName, employee.lastName)}
                           </div>
                         )}
@@ -795,7 +795,7 @@ export default function Directory() {
                       className="w-12 h-12 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" style={{ backgroundColor: '#009688' }}>
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" style={{ backgroundColor: 'var(--teal-brand-hex)' }}>
                       {getInitials(employee.firstName, employee.lastName)}
                     </div>
                   )}
@@ -917,7 +917,7 @@ export default function Directory() {
                           ? 'text-white'
                           : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
                       }`}
-                      style={currentPage === pageNum ? { backgroundColor: '#009688' } : {}}
+                      style={currentPage === pageNum ? { backgroundColor: 'var(--teal-brand-hex)' } : {}}
                     >
                       {pageNum}
                   </button>
