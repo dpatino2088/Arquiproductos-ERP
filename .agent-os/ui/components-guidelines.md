@@ -1,4 +1,12 @@
-inbat# UI Components – Guidelines & Examples
+# UI Components – Guidelines & Examples
+
+## Design System Compliance
+All components MUST follow the RHEMO design system rules:
+- **Status Colors**: Green 700 (#15803d) for Active/Success, NOT teal
+- **Focus Rings**: Primary teal only (`focus:ring-primary/20`)
+- **Card Styling**: `bg-white border border-gray-200 rounded-lg`
+- **No Hardcoded Values**: Use design tokens and Tailwind classes
+- **WCAG 2.2 AA**: All components must meet accessibility standards
 
 ## Alert
 ```tsx
@@ -7,8 +15,8 @@ import { STATUS } from '@/lib/colors'
 type Variant = 'success' | 'error' | 'info' | 'warning' | 'neutral'
 export function Alert({ variant='info', title, children }: { variant?: Variant, title?: string, children?: ReactNode }) {
   const map = { success: STATUS.success, error: STATUS.error, info: STATUS.info, warning: STATUS.warning, neutral: STATUS.neutral } as const
-  return (<div className={`w-full rounded-md border border-border p-3 flex items-start gap-3 ${map[variant]}`}>
-    <div className="text-sm font-medium">{title}</div>{children && <div className="text-sm opacity-90">{children}</div>}</div>)
+  return (<div className={`w-full rounded-lg border border-gray-200 p-3 flex items-start gap-3 ${map[variant]}`}>
+    <div className="text-sm font-medium">{title}</div>{children && <div className="text-sm text-muted-foreground">{children}</div>}</div>)
 }
 
 ```
@@ -20,7 +28,7 @@ export function Modal({ open, title, children, onClose }: { open: boolean, title
   if (!open) return null
   return (<div className="fixed inset-0 z-50 flex items-center justify-center">
     <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-    <div className="relative z-10 w-full max-w-md bg-card text-card-foreground rounded-xl border border-border shadow-lg p-4">
+    <div className="relative z-10 w-full max-w-md bg-white rounded-xl border border-gray-200 shadow-lg p-4">
       {title && <div className="text-heading font-semibold mb-2">{title}</div>}
       <div className="text-sm">{children}</div>
       <div className="mt-4 flex justify-end gap-2"><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={onClose}>Confirm</button></div>
@@ -45,7 +53,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const variantMap = { success: STATUS.success, error: STATUS.error, info: STATUS.info, warning: STATUS.warning } as const
   return (<ToastCtx.Provider value={value}>{children}
     <div className="fixed bottom-4 right-4 z-50 space-y-2 w-[320px]">
-      {toasts.map(t => (<div key={t.id} className={`rounded-md border border-border p-3 shadow-sm ${variantMap[t.variant]}`}>
+      {toasts.map(t => (<div key={t.id} className={`rounded-lg border border-gray-200 p-3 shadow-sm ${variantMap[t.variant]}`}>
         <div className="text-sm font-semibold">{t.title}</div>{t.message && <div className="text-xs opacity-90">{t.message}</div>}</div>))}
     </div></ToastCtx.Provider>)
 }
@@ -66,7 +74,7 @@ export function NotificationBell() {
   ])
   return (<div className="relative">
     <button className="icon-btn" onClick={() => setOpen(v => !v)} aria-label="Notifications">🔔</button>
-    {open && (<div className="absolute right-0 mt-2 w-80 bg-card text-card-foreground border border-border rounded-lg shadow-lg p-2 z-40">
+    {open && (<div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-40">
       <div className="text-sm font-medium px-2 py-1">Notifications</div>
       <div className="divide-y divide-border max-h-80 overflow-auto">
         {items.map(i => (<div key={i.id} className={`p-2 text-sm ${i.variant ? STATUS[i.variant] : ''}`}>

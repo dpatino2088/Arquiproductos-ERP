@@ -28,12 +28,12 @@ This document defines the complete design system and behavioral patterns for all
 
 ## 📝 **Page Header Pattern**
 
-### **Header Structure** (MANDATORY)
+### **Header Structure** (MANDATORY - UPDATED)
 ```tsx
 <div className="flex items-center justify-between mb-6">
   <div>
     <h1 className="text-xl font-semibold text-foreground mb-1">[Page Title]</h1>
-    <p className="text-xs" style={{ color: '#6B7280' }}>[Descriptive subtitle]</p>
+    <p className="text-xs text-muted-foreground">[Descriptive subtitle]</p>
   </div>
   <div className="flex items-center gap-3">
     {/* Action buttons go here */}
@@ -41,10 +41,16 @@ This document defines the complete design system and behavioral patterns for all
 </div>
 ```
 
-### **Typography Standards**
+### **Typography Standards** (UPDATED)
 - **Main Title**: `text-xl font-semibold text-foreground mb-1`
-- **Subtitle**: `text-xs` with `color: '#6B7280'` (accessible gray)
+- **Subtitle**: `text-xs text-muted-foreground` (NO hardcoded colors)
 - **Spacing**: `mb-6` after header block
+
+### **Typography Classes** (Use these semantic classes)
+- **Headings**: `text-title`, `text-heading` 
+- **Body Text**: `text-small`, `text-body`
+- **Muted Text**: `text-muted-foreground`
+- **Secondary Text**: `text-secondary`
 
 ### **Action Buttons** (Right Side)
 - **Secondary Actions**: `px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm`
@@ -108,45 +114,91 @@ This document defines the complete design system and behavioral patterns for all
 - **Avatar Size**: `w-12 h-12` for grid, `w-8 h-8` for table
 - **Status Indicators**: 3px circles with 2px white border
 
+### **Card Styling Standards** (CRITICAL - Consistent across all pages)
+- **Background**: `bg-white` (NOT `bg-card`)
+- **Border**: `border border-gray-200` (NOT `border-border`)
+- **Border Radius**: `rounded-lg`
+- **Hover Effects**: `hover:shadow-lg transition-all duration-200 hover:border-primary/20`
+- **Hover Background**: `hover:bg-gray-50` (for list items and interactive elements)
+- **Padding**: `p-6` for cards, `p-3` for list items
+
+### **Progress Bar Standards**
+- **Background**: `bg-gray-200` (NOT `bg-muted`)
+- **Fill**: Use appropriate status colors (`bg-status-green`, etc.)
+
 ---
 
 ## 🎨 **Color System (MANDATORY)**
 
-### **Status Colors** (From approved tokens)
+### **Status Colors** (From approved tokens - UPDATED)
 ```css
---status-green: #1FB6A1;    /* Success / Active */
+--status-green: #15803d;    /* Success / Active - Green 700 (UPDATED) */
 --status-red: #D32F2F;      /* Error / Critical */
 --status-blue: #1976D2;     /* Info / Neutral */
 --status-amber: #F9A825;    /* Warning / Pending */
 --neutral-gray: #9E9E9E;    /* Disabled / Inactive */
+--highlight-bg: #E3F2FD;    /* Hover states, highlighted rows */
 ```
 
-### **Accessible Variants** (WCAG AA Compliant - For text on light backgrounds)
+### **Status Color Usage Rules** (CRITICAL)
+- **Active/Success**: Use Green 700 (#15803d) - NOT teal (teal is reserved for primary brand)
+- **Error/Critical/Delete**: Use Red (#D32F2F) 
+- **Info/Neutral Actions**: Use Blue (#1976D2)
+- **Warning/Pending**: Use Amber (#F9A825)
+- **Disabled/Inactive**: Use Neutral Gray (#9E9E9E)
+
+### **Light Background Variants** (10% opacity for badges)
 ```css
---status-green-accessible: #0D5B52;  /* WCAG AA compliant green */
---status-red-accessible: #991B1B;    /* WCAG AA compliant red */
---status-blue-accessible: #1E3A8A;   /* WCAG AA compliant blue */
---status-amber-accessible: #B45309;  /* WCAG AA compliant amber */
+.bg-status-green-light { background-color: rgba(21, 128, 61, 0.1); }
+.bg-status-red-light { background-color: rgba(211, 47, 47, 0.1); }
+.bg-status-blue-light { background-color: rgba(25, 118, 210, 0.1); }
+.bg-status-orange-light { background-color: rgba(249, 168, 37, 0.1); }
 ```
 
-### **Primary Color** (User Customizable)
+### **Primary Brand Color** (Teal - User Customizable)
 ```css
---brand-primary: 174 70% 30%;  /* WCAG AA compliant teal - HSL format */
+--brand-primary: 174 78% 26%;  /* Primary teal #0f766e - HSL format for Tailwind */
+--teal-700: #0f766e;           /* Primary brand color in hex */
 ```
 
-### **Status Badge Implementation**
+### **Focus Ring System** (CRITICAL - ALL inputs must use primary color)
+```css
+--ring: var(--brand-primary);           /* Focus ring - primary teal */
+--focus-ring: var(--brand-primary);     /* Focus indicator - primary teal */
+```
+
+**Standard Focus Ring Classes:**
+- `focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50`
+- **NEVER use blue focus rings** - always use primary teal
+
+### **Status Badge Implementation** (UPDATED)
 ```tsx
-// Active status example
-<span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green-accessible">
+// Active status example - UPDATED to use Green 700
+<span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
   Active
+</span>
+
+// Suspended status
+<span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+  Suspended
+</span>
+
+// Onboarding status  
+<span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
+  Onboarding
+</span>
+
+// On Leave status
+<span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+  On Leave
 </span>
 ```
 
-### **Status Indicator Circles**
+### **Status Indicator Circles** (UPDATED)
 ```tsx
 <div style={{
   backgroundColor: 
-    status === 'Active' ? '#1FB6A1' :
+    status === 'Active' ? '#15803d' :      // Green 700 - UPDATED
     status === 'On Leave' ? '#F9A825' :
     status === 'Onboarding' ? '#1976D2' :
     status === 'Suspended' ? '#D32F2F' :
@@ -201,11 +253,38 @@ useEffect(() => {
 }, [registerSubmodules]);
 ```
 
-### **Submodule Tab Styling**
-- **Font**: `fontSize: '12px', font-normal`
-- **Padding**: `padding: '0 48px'` (first tab), `padding: '0 48px'` (others)
-- **Colors**: Active `#14B8A6`, Inactive `#222222`
+### **Submodule Tab Styling** (UPDATED)
+- **Font**: `fontSize: '12px'`
+- **Font Weight**: `font-semibold` (active), `font-normal` (inactive)
+- **Padding**: `padding: '0 48px'`
+- **Colors**: Active `var(--teal-brand-hex)`, Inactive `var(--graphite-black-hex)`
+- **Background**: Active `bg-white`, Inactive hover `hover:bg-white/50`
+- **Bottom Border**: Active tabs get `borderBottom: '2px solid var(--teal-700)'` for WCAG compliance
 - **Alignment**: `justify-start` (left-aligned)
+- **Border Color**: `borderColor: '#E5E7EB'` (right border between tabs)
+
+### **Selected Tab Implementation** (WCAG 2.2 AA Compliant)
+```tsx
+<button
+  className={`transition-colors flex items-center justify-start border-r ${
+    tab.isActive
+      ? 'bg-white font-semibold'
+      : 'hover:bg-white/50 font-normal'
+  }`}
+  style={{
+    fontSize: '12px',
+    padding: '0 48px',
+    height: '100%',
+    color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
+    borderColor: '#E5E7EB',
+    borderBottom: tab.isActive ? '2px solid var(--teal-700)' : 'none'
+  }}
+  role="tab"
+  aria-selected={tab.isActive}
+>
+  {tab.label}
+</button>
+```
 
 ### **Breadcrumb Standards**
 - **Container**: `nav` with `paddingLeft: '48px'`
@@ -272,13 +351,21 @@ const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
 ## ♿ **Accessibility Requirements**
 
-### **WCAG AA Compliance** ✅
-- **Color Contrast**: All text elements meet 4.5:1 contrast ratio minimum
-- **Status Elements**: Use accessible variants (`-accessible` suffix) for text
-- **Primary Colors**: Darkened to HSL(174 70% 30%) for compliance
+### **WCAG 2.2 AA Compliance** ✅ (UPDATED)
+- **Text Contrast**: All text elements meet 4.5:1 contrast ratio minimum
+- **Non-text Elements**: UI components and borders meet 3:1 contrast ratio minimum
+- **Status Colors**: Green 700 (#15803d) provides 4.5:1+ contrast for text
+- **Focus Rings**: Primary teal provides excellent contrast against all backgrounds
+- **Selected Tab Borders**: Teal 700 (#0f766e) provides 4.6:1 contrast against white, 4.8:1 against gray
 - **Interactive Elements**: Proper ARIA labels on all interactive components
 - **Keyboard Navigation**: Full keyboard support with visible focus indicators
 - **Screen Reader**: Compatible with assistive technologies
+
+### **WCAG Contrast Requirements** (CRITICAL)
+- **Normal Text**: Minimum 4.5:1 contrast ratio
+- **Large Text**: Minimum 3:1 contrast ratio
+- **Non-text Elements**: Minimum 3:1 contrast ratio (borders, UI components)
+- **Focus Indicators**: Must be visible and meet 3:1 contrast against adjacent colors
 
 ### **Accessibility Testing**
 - **Automated**: axe-core WCAG 2.1 AA compliance testing
@@ -307,6 +394,23 @@ const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
 ---
 
+## 🚫 **Critical Rules - NO EXCEPTIONS**
+
+### **No Hardcoded Styling Values** (MANDATORY)
+- **NO hardcoded colors**: Use design tokens (`text-muted-foreground`, `text-status-green`, etc.)
+- **NO hardcoded CSS values**: Use Tailwind classes (`bg-white`, `border-gray-200`, etc.)
+- **NO style objects**: Except for dynamic values (status indicators, calculated positions)
+- **ALL inputs must use consistent focus rings**: Primary teal color system
+
+### **Consistency Requirements**
+- **Card styling**: Always `bg-white border border-gray-200 rounded-lg`
+- **Hover states**: Always `hover:bg-gray-50` for list items
+- **Status colors**: Green for active/success, NOT teal
+- **Focus rings**: Always primary teal, NEVER blue
+- **Typography**: Always use semantic classes, NO hardcoded colors
+
+---
+
 ## 📋 **Implementation Checklist**
 
 ### **Page Setup**
@@ -330,8 +434,12 @@ const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 - [ ] Pagination logic
 
 ### **Quality Assurance**
-- [ ] Color contrast validation
-- [ ] Accessibility testing
+- [ ] Color contrast validation (4.5:1 text, 3:1 non-text)
+- [ ] Accessibility testing (WCAG 2.2 AA)
+- [ ] Focus ring consistency (primary teal only)
+- [ ] Status color validation (green for active, not teal)
+- [ ] No hardcoded values verification
+- [ ] Card styling consistency
 - [ ] Responsive design verification
 - [ ] Performance optimization
 

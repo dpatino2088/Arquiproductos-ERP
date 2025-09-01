@@ -738,7 +738,7 @@ export default function Directory() {
                           className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
                           style={{
                             backgroundColor: 
-                              employee.status === 'Active' ? '#16a34a' :
+                              employee.status === 'Active' ? '#15803d' :
                               employee.status === 'On Leave' ? '#ea580c' :
                               employee.status === 'Onboarding' ? '#2563eb' :
                               employee.status === 'Suspended' ? '#dc2626' :
@@ -803,7 +803,7 @@ export default function Directory() {
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{
                       backgroundColor: 
-                        employee.status === 'Active' ? '#16a34a' :
+                        employee.status === 'Active' ? '#15803d' :
                         employee.status === 'On Leave' ? '#ea580c' :
                         employee.status === 'Onboarding' ? '#2563eb' :
                         employee.status === 'Suspended' ? '#dc2626' :

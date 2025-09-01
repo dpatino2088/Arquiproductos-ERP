@@ -647,10 +647,10 @@ function Layout({ children }: LayoutProps) {
                       <button
                         key={tab.id}
                         onClick={tab.onClick}
-                        className={`transition-colors flex items-center justify-start border-r font-normal ${
+                        className={`transition-colors flex items-center justify-start border-r ${
                           tab.isActive
-                            ? 'bg-white'
-                            : 'hover:bg-white/50'
+                            ? 'bg-white font-semibold'
+                            : 'hover:bg-white/50 font-normal'
                         }`}
                         style={{
                           fontSize: '12px',
@@ -658,8 +658,9 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                                                     color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
-                          borderColor: '#E5E7EB'
+                          color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
+                          borderColor: '#E5E7EB',
+                          borderBottom: tab.isActive ? '2px solid var(--teal-700)' : 'none'
                         }}
                         role="tab"
                         aria-selected={tab.isActive}

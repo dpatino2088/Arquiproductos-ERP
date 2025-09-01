@@ -72,10 +72,13 @@ useEffect(() => {
 }, [registerSubmodules]);
 ```
 
-**Styling Requirements:**
-- Font: `fontSize: '12px', font-normal`
+**Styling Requirements (UPDATED):**
+- Font: `fontSize: '12px'`
+- Font Weight: `font-semibold` (active), `font-normal` (inactive)
 - Padding: `padding: '0 48px'` for all tabs
-- Colors: Active `#14B8A6`, Inactive `#222222`
+- Colors: Active `var(--teal-brand-hex)`, Inactive `var(--graphite-black-hex)`
+- Background: Active `bg-white`, Inactive hover `hover:bg-white/50`
+- Bottom Border: Active tabs get `borderBottom: '2px solid var(--teal-700)'` for WCAG compliance
 - Alignment: `justify-start`
 
 ---
@@ -158,25 +161,25 @@ const getStatusBadge = (status: string) => {
   switch (status) {
     case 'Active':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green-accessible">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
           Active
         </span>
       );
     case 'Suspended':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red-accessible">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
           Suspended
         </span>
       );
     case 'Onboarding':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue-accessible">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
           Onboarding
         </span>
       );
     case 'On Leave':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-light text-status-amber-accessible">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
           On Leave
         </span>
       );
@@ -196,7 +199,7 @@ const getStatusBadge = (status: string) => {
   className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
   style={{
     backgroundColor: 
-      status === 'Active' ? '#1FB6A1' :
+      status === 'Active' ? '#15803d' :      // Green 700 - UPDATED
       status === 'On Leave' ? '#F9A825' :
       status === 'Onboarding' ? '#1976D2' :
       status === 'Suspended' ? '#D32F2F' :
@@ -518,29 +521,29 @@ const filteredData = useMemo(() => {
 
 ## 🎨 **Color Reference**
 
-### **Status Colors** (WCAG AA Compliant)
+### **Status Colors** (WCAG 2.2 AA Compliant - UPDATED)
 ```css
-/* Original Colors (for backgrounds, borders, icons) */
---status-green: #1FB6A1;
---status-red: #D32F2F;
---status-blue: #1976D2;
---status-amber: #F9A825;
---neutral-gray: #9E9E9E;
-
-/* WCAG AA Accessible Text Variants (4.5:1+ contrast) */
---status-green-accessible: #0D5B52;  /* Use for text on light backgrounds */
---status-red-accessible: #991B1B;    /* Use for text on light backgrounds */
---status-blue-accessible: #1E3A8A;   /* Use for text on light backgrounds */
---status-amber-accessible: #B45309;  /* Use for text on light backgrounds */
+/* Status Colors (for backgrounds, borders, icons) */
+--status-green: #15803d;       /* Success/Active - Green 700 (UPDATED) */
+--status-red: #D32F2F;         /* Error/Critical/Delete */
+--status-blue: #1976D2;        /* Info/Neutral actions */
+--status-amber: #F9A825;       /* Warning/Pending approvals */
+--neutral-gray: #9E9E9E;       /* Disabled/Inactive elements */
+--highlight-bg: #E3F2FD;       /* Hover states, highlighted rows */
 
 /* Light Background Variants (10% opacity) */
-bg-status-green-light: rgba(31, 182, 161, 0.1);
+bg-status-green-light: rgba(21, 128, 61, 0.1);    /* UPDATED */
 bg-status-red-light: rgba(211, 47, 47, 0.1);
 bg-status-blue-light: rgba(25, 118, 210, 0.1);
-bg-status-amber-light: rgba(249, 168, 37, 0.1);
+bg-status-orange-light: rgba(249, 168, 37, 0.1);
 
-/* Primary Color (User Customizable) */
---brand-primary: 174 70% 30%;  /* WCAG AA compliant HSL */
+/* Primary Brand Color (User Customizable) */
+--brand-primary: 174 78% 26%;  /* Primary teal #0f766e - HSL format for Tailwind */
+--teal-700: #0f766e;           /* Primary brand color in hex */
+
+/* Focus Ring System (CRITICAL) */
+--ring: var(--brand-primary);           /* Focus ring - primary teal */
+--focus-ring: var(--brand-primary);     /* Focus indicator - primary teal */
 ```
 
 ### **Text Colors**

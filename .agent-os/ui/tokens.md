@@ -124,30 +124,30 @@ export default {
     --green-100: #dcfce7;
     --green-50: #f0fdf4;
 
-    /* Semantic Color Mapping using Tailwind v3 */
-    --foreground: var(--gray-900);           /* Dark text */
-    --background: var(--gray-50);            /* Light background */
-    --brand-primary: var(--teal-700);       /* Primary brand color #0f766e */
-    --brand-secondary: var(--gray-600);     /* Secondary brand color */
+    /* Semantic Color Mapping using Tailwind v3 - UPDATED */
+    --foreground: 218 11% 15%;               /* Dark text - HSL for gray-900 */
+    --background: 210 20% 98%;               /* Light background - HSL for gray-50 */
+    --brand-primary: 174 78% 26%;            /* Primary brand color #0f766e in HSL */
+    --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-600 */
 
     --primary: var(--brand-primary);
-    --primary-foreground: var(--gray-50);
+    --primary-foreground: 210 20% 98%;       /* HSL for gray-50 */
     --secondary: var(--brand-secondary);
-    --secondary-foreground: var(--gray-50);
+    --secondary-foreground: 210 20% 98%;    /* HSL for gray-50 */
 
-    --card: var(--gray-50);
+    --card: 210 20% 98%;                     /* HSL for gray-50 */
     --card-foreground: var(--foreground);
-    --popover: var(--gray-50);
+    --popover: 210 20% 98%;                  /* HSL for gray-50 */
     --popover-foreground: var(--foreground);
-    --muted: var(--gray-100);
-    --muted-foreground: var(--gray-500);
+    --muted: 220 14% 96%;                    /* HSL for gray-100 */
+    --muted-foreground: 220 9% 46%;          /* HSL for gray-500 */
     --accent: var(--brand-primary);
-    --accent-foreground: var(--gray-50);
-    --destructive: var(--red-600);
-    --destructive-foreground: var(--gray-50);
-    --border: var(--gray-200);
-    --input: var(--gray-200);
-    --ring: var(--orange-500);              /* Focus ring */
+    --accent-foreground: 210 20% 98%;        /* HSL for gray-50 */
+    --destructive: 0 84% 60%;                /* HSL for red-600 */
+    --destructive-foreground: 210 20% 98%;   /* HSL for gray-50 */
+    --border: 220 13% 91%;                   /* HSL for gray-200 */
+    --input: 220 13% 91%;                    /* HSL for gray-200 */
+    --ring: var(--brand-primary);           /* Focus ring - primary teal */
     --radius: 0.5rem;
 
     /* Sidebar colors */
@@ -156,14 +156,16 @@ export default {
     --sidebar-background: var(--sidebar-light-background);
     --sidebar-foreground: var(--foreground);
 
-    /* Status colors using Tailwind v3 */
-    --status-green: var(--green-600);       /* Success #16a34a */
-    --status-red: var(--red-600);           /* Error/Danger #dc2626 */
-    --status-blue: var(--blue-600);         /* Info #2563eb */
-    --status-orange: var(--orange-600);     /* Warning #ea580c */
+    /* Status colors per design system specification - UPDATED */
+    --status-green: #15803d;               /* Success/Active - Green 700 */
+    --status-red: #D32F2F;                 /* Error/Critical/Delete */
+    --status-blue: #1976D2;                /* Info/Neutral actions */
+    --status-amber: #F9A825;               /* Warning/Pending approvals */
+    --neutral-gray: #9E9E9E;               /* Disabled/Inactive elements */
+    --highlight-bg: #E3F2FD;               /* Hover states, highlighted rows */
     
     /* Utility colors */
-    --focus-ring: var(--orange-500);        /* Focus indicator */
+    --focus-ring: var(--brand-primary);     /* Focus indicator - primary teal */
     --row-highlight: var(--teal-50);        /* Row hover/highlight */
     
     /* Hex versions for direct usage */
@@ -194,25 +196,31 @@ export default {
   .text-heading { font-size: var(--font-size-heading); }
   .text-title { font-size: var(--font-size-title); }
 
-  /* Status utilities */
+  /* Status utilities using design system colors - UPDATED */
   .text-status-green { color: var(--status-green); }
   .text-status-red { color: var(--status-red); }
   .text-status-blue { color: var(--status-blue); }
-  .text-status-amber { color: var(--status-amber); }
+  .text-status-orange { color: var(--status-amber); }
   .text-neutral-gray { color: var(--neutral-gray); }
 
+  /* Text utilities */
+  .text-secondary { color: var(--gray-600); }
+  .text-muted { color: var(--gray-500); }
+  
+  /* Light background variants for badges using design system colors */
+  .bg-status-green-light { background-color: rgba(21, 128, 61, 0.1); }
+  .bg-status-red-light { background-color: rgba(211, 47, 47, 0.1); }
+  .bg-status-blue-light { background-color: rgba(25, 118, 210, 0.1); }
+  .bg-status-orange-light { background-color: rgba(249, 168, 37, 0.1); }
+
+  /* Solid backgrounds */
   .bg-status-green { background-color: var(--status-green); }
   .bg-status-red { background-color: var(--status-red); }
   .bg-status-blue { background-color: var(--status-blue); }
-  .bg-status-amber { background-color: var(--status-amber); }
+  .bg-status-orange { background-color: var(--status-amber); }
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
-
-  .bg-status-green-10 { background-color: #1FB6A11A; }
-  .bg-status-red-10 { background-color: #D32F2F1A; }
-  .bg-status-blue-10 { background-color: #1976D21A; }
-  .bg-status-amber-10 { background-color: #F9A8251A; }
-  .bg-neutral-gray-10 { background-color: #9E9E9E1A; }
+  .bg-row-highlight { background-color: var(--row-highlight); }
 }
 
 ```

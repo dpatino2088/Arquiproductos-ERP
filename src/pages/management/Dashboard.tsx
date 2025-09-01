@@ -43,17 +43,17 @@ export default function ManagementDashboard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'text-status-red-accessible bg-status-red-light';
-      case 'medium': return 'text-status-amber-accessible bg-status-amber-light';
-      default: return 'text-status-green-accessible bg-status-green-light';
+      case 'high': return 'text-status-red bg-status-red-light';
+      case 'medium': return 'text-status-orange bg-status-orange-light';
+      default: return 'text-status-green bg-status-green-light';
     }
   };
 
   const getTrendIcon = (trend: string) => {
     switch (trend) {
-      case 'up': return <TrendingUp className="h-4 w-4 text-green-500" />;
-      case 'down': return <TrendingUp className="h-4 w-4 text-red-500 rotate-180" />;
-      default: return <div className="h-4 w-4 rounded-full bg-gray-400" />;
+      case 'up': return <TrendingUp className="h-4 w-4 text-status-green" />;
+      case 'down': return <TrendingUp className="h-4 w-4 text-status-red rotate-180" />;
+      default: return <div className="h-4 w-4 rounded-full bg-neutral-gray" />;
     }
   };
 
@@ -61,19 +61,19 @@ export default function ManagementDashboard() {
     <div className="p-6">
       {/* Management Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Management Dashboard</h1>
-        <p className="text-xs" style={{ color: '#6B7280' }}>Overview of team performance, approvals, and key metrics</p>
+        <h1 className="text-title font-semibold text-foreground mb-1">Management Dashboard</h1>
+        <p className="text-small text-muted-foreground">Overview of team performance, approvals, and key metrics</p>
       </div>
 
       {/* Management Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {managementStats.map((stat, index) => (
-          <div key={index} className="bg-card border border-border rounded-lg p-6">
+          <div key={index} className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-all duration-200 hover:border-primary/20">
             <div className="flex items-center justify-between mb-4">
               <stat.icon className="h-8 w-8 text-primary" />
               <div className="text-right">
                 <div className="text-2xl font-bold text-foreground">{stat.value}</div>
-                <div className={`text-sm ${stat.changeType === 'positive' ? 'text-status-green-accessible' : stat.changeType === 'negative' ? 'text-status-red-accessible' : 'text-gray-600'}`}>
+                <div className={`text-sm ${stat.changeType === 'positive' ? 'text-status-green' : stat.changeType === 'negative' ? 'text-status-red' : 'text-muted-foreground'}`}>
                   {stat.change}
                 </div>
               </div>
@@ -85,16 +85,16 @@ export default function ManagementDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Pending Approvals */}
-        <div className="bg-card border border-border rounded-lg p-6">
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold">Pending Approvals</h2>
-            <div className="bg-status-red-light text-status-red-accessible text-xs px-2 py-1 rounded-full">
+            <h2 className="text-heading font-semibold">Pending Approvals</h2>
+            <div className="bg-status-red-light text-status-red text-xs px-2 py-1 rounded-full">
               {pendingApprovals.length} pending
             </div>
           </div>
           <div className="space-y-4">
             {pendingApprovals.map((approval, index) => (
-              <div key={index} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div key={index} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-medium">{approval.type}</span>
@@ -106,10 +106,10 @@ export default function ManagementDashboard() {
                   <div className="text-xs text-muted-foreground">{approval.details}</div>
                 </div>
                 <div className="flex gap-2">
-                  <button className="px-3 py-1 text-xs bg-status-green-light text-status-green-accessible rounded hover:opacity-80">
+                  <button className="px-3 py-1 text-xs bg-status-green-light text-status-green rounded hover:opacity-80">
                     Approve
                   </button>
-                  <button className="px-3 py-1 text-xs bg-status-red-light text-status-red-accessible rounded hover:opacity-80">
+                  <button className="px-3 py-1 text-xs bg-status-red-light text-status-red rounded hover:opacity-80">
                     Reject
                   </button>
                 </div>
@@ -119,11 +119,11 @@ export default function ManagementDashboard() {
         </div>
 
         {/* Team Performance */}
-        <div className="bg-card border border-border rounded-lg p-6">
-          <h2 className="text-lg font-semibold mb-6">Team Performance</h2>
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <h2 className="text-heading font-semibold mb-6">Team Performance</h2>
           <div className="space-y-4">
             {teamPerformance.map((team, index) => (
-              <div key={index} className="p-3 bg-muted/50 rounded-lg">
+              <div key={index} className="p-3 hover:bg-gray-50 rounded-lg transition-colors">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-medium">{team.department}</div>
                   <div className="flex items-center gap-2">
@@ -148,15 +148,15 @@ export default function ManagementDashboard() {
       </div>
 
       {/* Recent Management Activities */}
-      <div className="bg-card border border-border rounded-lg p-6">
+      <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-6">
-          <Clock className="h-6 w-6 text-blue-500" />
-          <h2 className="text-lg font-semibold">Recent Activities</h2>
+          <Clock className="h-6 w-6 text-status-blue" />
+          <h2 className="text-heading font-semibold">Recent Activities</h2>
         </div>
         <div className="space-y-4">
           {recentActivities.map((activity, index) => (
-            <div key={index} className="flex items-start gap-4 p-3 hover:bg-muted/50 rounded-lg transition-colors">
-              <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
+            <div key={index} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors">
+              <CheckCircle className="h-5 w-5 text-status-green mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <div className="font-medium">{activity.action}</div>
                 <div className="text-sm text-muted-foreground">{activity.details}</div>
