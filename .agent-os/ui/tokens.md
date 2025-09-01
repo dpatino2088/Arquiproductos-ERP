@@ -51,47 +51,67 @@ export default {
     --font-size-heading: 16px;
     --font-size-title: 20px;
 
-    /* Base palette */
-    --foreground: 0 0% 13%;           /* Soft Black #222222 — app text always */
-    --background: 210 20% 97%;         /* Light Gray #F5F7FA */
+    /* Primarios */
+    --graphite-black: 0 0% 10%;       /* #1A1A1A - Texto principal, íconos oscuros */
+    --light-gray: 210 20% 97%;        /* #F5F7FA - Fondo base, áreas amplias */
+    --white: 0 0% 100%;               /* #FFFFFF - Tarjetas, superficies elevadas */
+    --teal-brand: 174 100% 29%;       /* #009688 - Color de marca, botones primarios */
 
-    /* Brand (user-customizable primary accent only) */
-    --brand-primary: 173 79% 39%;      /* Teal #14B8A6 */
+    /* Base palette (mapped to new colors) */
+    --foreground: var(--graphite-black);
+    --background: var(--light-gray);
+    --brand-primary: var(--teal-brand);
     --brand-secondary: 262 46% 55%;    /* Violet #7E57C2 (static) */
 
     --primary: var(--brand-primary);
-    --primary-foreground: 0 0% 98%;
+    --primary-foreground: var(--white);
     --secondary: var(--brand-secondary);
-    --secondary-foreground: 0 0% 98%;
+    --secondary-foreground: var(--white);
 
-    --card: 0 0% 100%;
+    --card: var(--white);
     --card-foreground: var(--foreground);
-    --popover: 0 0% 100%;
+    --popover: var(--white);
     --popover-foreground: var(--foreground);
-    --muted: 210 16% 95%;
-    --muted-foreground: 215 16% 35%;
+    --muted: var(--light-gray);
+    --muted-foreground: 220 9% 46%;   /* #757575 - Muted Gray */
     --accent: var(--brand-primary);
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 95% 61%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 210 16% 90%;
-    --input: 210 16% 90%;
-    --ring: var(--brand-primary);
+    --accent-foreground: var(--white);
+    --destructive: 4 90% 58%;         /* #C62828 - Danger Red */
+    --destructive-foreground: var(--white);
+    --border: 216 12% 84%;            /* #D6DAE1 - Subtle Border */
+    --input: 216 12% 84%;
+    --ring: 45 100% 51%;              /* #FFB300 - Focus Ring */
     --radius: 0.5rem;
 
-    /* Sidebar (white in Personal, #222 in Manager) */
-    --sidebar-light-background: 0 0% 98%;
-    --sidebar-dark-background: 0 0% 13%;
+    /* Sidebar colors */
+    --sidebar-light-background: var(--white);
+    --sidebar-dark-background: var(--graphite-black);
     --sidebar-background: var(--sidebar-light-background);
     --sidebar-foreground: var(--foreground);
 
-    /* Status color tokens */
-    --status-green: #1FB6A1;
-    --status-red: #D32F2F;
-    --status-blue: #1976D2;
-    --status-amber: #F9A825;
-    --neutral-gray: #9E9E9E;
-    --highlight-bg: #E3F2FD;
+    /* Secundarios / Estados */
+    --success-green: 122 39% 49%;     /* #2E7D32 */
+    --danger-red: 4 90% 58%;          /* #C62828 */
+    --info-blue: 210 79% 46%;         /* #1565C0 */
+    --warning-amber: 32 100% 47%;     /* #EF6C00 */
+
+    /* Neutros */
+    --secondary-text: 220 9% 46%;     /* #4B4F57 - Secondary Text */
+    --muted-gray: 0 0% 46%;           /* #757575 - Placeholders, texto deshabilitado */
+    --subtle-border: 216 12% 84%;     /* #D6DAE1 */
+    --strong-border: 215 13% 70%;     /* #B8BFCA */
+
+    /* Auxiliares */
+    --focus-ring: 45 100% 51%;        /* #FFB300 - Color para indicar foco accesible */
+    --row-highlight: 207 44% 92%;     /* #D6EAF8 - Fondos suaves para hover o resaltado */
+
+    /* Legacy status tokens (mapped to new colors) */
+    --status-green: #2E7D32;
+    --status-red: #C62828;
+    --status-blue: #1565C0;
+    --status-amber: #EF6C00;
+    --neutral-gray: #757575;
+    --highlight-bg: #D6EAF8;
   }
 
   .dark {

@@ -17,53 +17,67 @@
     --font-size-heading: 16px;
     --font-size-title: 20px;
 
-    /* Base palette */
-    --foreground: 0 0% 13%;           /* Soft Black #222222 — app text always */
-    --background: 210 20% 97%;         /* Light Gray #F5F7FA */
+    /* Primarios */
+    --graphite-black: 0 0% 10%;       /* #1A1A1A - Texto principal, íconos oscuros */
+    --light-gray: 210 20% 97%;        /* #F5F7FA - Fondo base, áreas amplias */
+    --white: 0 0% 100%;               /* #FFFFFF - Tarjetas, superficies elevadas */
+    --teal-brand: 174 100% 29%;       /* #009688 - Color de marca, botones primarios */
 
-    /* Brand (user-customizable primary accent only) */
-    --brand-primary: 174 70% 30%;      /* Much darker for WCAG AA compliance */
+    /* Base palette (mapped to new colors) */
+    --foreground: var(--graphite-black);
+    --background: var(--light-gray);
+    --brand-primary: var(--teal-brand);
     --brand-secondary: 262 46% 55%;    /* Violet #7E57C2 (static) */
 
     --primary: var(--brand-primary);
-    --primary-foreground: 0 0% 98%;
+    --primary-foreground: var(--white);
     --secondary: var(--brand-secondary);
-    --secondary-foreground: 0 0% 98%;
+    --secondary-foreground: var(--white);
 
-    --card: 0 0% 100%;
+    --card: var(--white);
     --card-foreground: var(--foreground);
-    --popover: 0 0% 100%;
+    --popover: var(--white);
     --popover-foreground: var(--foreground);
-    --muted: 210 16% 95%;
-    --muted-foreground: 215 16% 35%;
+    --muted: var(--light-gray);
+    --muted-foreground: 0 0% 46%;     /* #757575 - Muted Gray */
     --accent: var(--brand-primary);
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 95% 61%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 210 16% 90%;
-    --input: 210 16% 90%;
-    --ring: var(--brand-primary);
+    --accent-foreground: var(--white);
+    --destructive: 4 90% 58%;         /* #C62828 - Danger Red */
+    --destructive-foreground: var(--white);
+    --border: 216 12% 84%;            /* #D6DAE1 - Subtle Border */
+    --input: 216 12% 84%;
+    --ring: 45 100% 51%;              /* #FFB300 - Focus Ring */
     --radius: 0.5rem;
 
-    /* Sidebar (white in Personal, #222 in Manager) */
-    --sidebar-light-background: 0 0% 98%;
-    --sidebar-dark-background: 0 0% 13%;
+    /* Sidebar colors */
+    --sidebar-light-background: var(--white);
+    --sidebar-dark-background: var(--graphite-black);
     --sidebar-background: var(--sidebar-light-background);
     --sidebar-foreground: var(--foreground);
 
-    /* Status color tokens - Your approved secondary palette */
-    --status-green: #1FB6A1;
-    --status-red: #D32F2F;
-    --status-blue: #1976D2;
-    --status-amber: #F9A825;
-    --neutral-gray: #9E9E9E;
-    --highlight-bg: #E3F2FD;
-    
-    /* Accessible variants (darker when needed for WCAG AA compliance) */
---status-green-accessible: #0D5B52; /* Even darker Status Green for WCAG AA compliance */
---status-red-accessible: #991B1B;   /* Even darker Status Red for WCAG AA compliance */
---status-blue-accessible: #1E3A8A;  /* Even darker Status Blue for WCAG AA compliance */
---status-amber-accessible: #B45309; /* Even darker Status Amber for WCAG AA compliance */
+    /* Secundarios / Estados */
+    --success-green: #2E7D32;         /* Success Green */
+    --danger-red: #C62828;            /* Danger Red */
+    --info-blue: #1565C0;             /* Info Blue */
+    --warning-amber: #EF6C00;         /* Warning Amber */
+
+    /* Neutros */
+    --secondary-text: #4B4F57;        /* Secondary Text */
+    --muted-gray: #757575;            /* Placeholders, texto deshabilitado */
+    --subtle-border: #D6DAE1;         /* Subtle Border */
+    --strong-border: #B8BFCA;         /* Strong Border */
+
+    /* Auxiliares */
+    --focus-ring: #FFB300;            /* Focus Ring (Highlight) */
+    --row-highlight: #D6EAF8;         /* Row Highlight */
+
+    /* Legacy status tokens (mapped to new colors) */
+    --status-green: #2E7D32;
+    --status-red: #C62828;
+    --status-blue: #1565C0;
+    --status-amber: #EF6C00;
+    --neutral-gray: #757575;
+    --highlight-bg: #D6EAF8;
   }
 
   .dark {
@@ -87,38 +101,43 @@
   .text-heading { font-size: var(--font-size-heading); }
   .text-title { font-size: var(--font-size-title); }
 
-  /* Status utilities */
+  /* Status utilities - usando los nuevos colores WCAG 2.2 AA */
   .text-status-green { color: var(--status-green); }
   .text-status-red { color: var(--status-red); }
   .text-status-blue { color: var(--status-blue); }
   .text-status-amber { color: var(--status-amber); }
   .text-neutral-gray { color: var(--neutral-gray); }
 
-  /* Accessible color overrides using your approved palette */
-  .text-gray-400-accessible { color: #6B7280; } /* For better contrast than original gray-400 */
+  /* Nuevos colores auxiliares */
+  .text-secondary { color: var(--secondary-text); }
+  .text-muted { color: var(--muted-gray); }
   
-  /* Status colors - using your exact palette */
-  .text-status-green-accessible { color: var(--status-green-accessible); }
-  .text-status-red-accessible { color: var(--status-red-accessible); }
-  .text-status-blue-accessible { color: var(--status-blue-accessible); }
-  .text-status-amber-accessible { color: var(--status-amber-accessible); }
-  
-  /* Light background variants for badges (10% opacity of your colors) */
-  .bg-status-green-light { background-color: rgba(31, 182, 161, 0.1); }
-  .bg-status-red-light { background-color: rgba(211, 47, 47, 0.1); }
-  .bg-status-blue-light { background-color: rgba(25, 118, 210, 0.1); }
-  .bg-status-amber-light { background-color: rgba(249, 168, 37, 0.1); }
+  /* Light background variants for badges usando nuevos colores */
+  .bg-status-green-light { background-color: rgba(46, 125, 50, 0.1); }
+  .bg-status-red-light { background-color: rgba(198, 40, 40, 0.1); }
+  .bg-status-blue-light { background-color: rgba(21, 101, 192, 0.1); }
+  .bg-status-amber-light { background-color: rgba(239, 108, 0, 0.1); }
 
+  /* Fondos sólidos */
   .bg-status-green { background-color: var(--status-green); }
   .bg-status-red { background-color: var(--status-red); }
   .bg-status-blue { background-color: var(--status-blue); }
   .bg-status-amber { background-color: var(--status-amber); }
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
+  .bg-row-highlight { background-color: var(--row-highlight); }
 
-  .bg-status-green-10 { background-color: #1FB6A11A; }
-  .bg-status-red-10 { background-color: #D32F2F1A; }
-  .bg-status-blue-10 { background-color: #1976D21A; }
-  .bg-status-amber-10 { background-color: #F9A8251A; }
-  .bg-neutral-gray-10 { background-color: #9E9E9E1A; }
+  /* Bordes */
+  .border-subtle { border-color: var(--subtle-border); }
+  .border-strong { border-color: var(--strong-border); }
+
+  /* Focus ring accesible */
+  .focus-ring { box-shadow: 0 0 0 2px var(--focus-ring); }
+
+  /* Legacy 10% opacity variants */
+  .bg-status-green-10 { background-color: rgba(46, 125, 50, 0.1); }
+  .bg-status-red-10 { background-color: rgba(198, 40, 40, 0.1); }
+  .bg-status-blue-10 { background-color: rgba(21, 101, 192, 0.1); }
+  .bg-status-amber-10 { background-color: rgba(239, 108, 0, 0.1); }
+  .bg-neutral-gray-10 { background-color: rgba(117, 117, 117, 0.1); }
 }

@@ -50,8 +50,8 @@ const NavigationItem = memo(({
       fontSize: '14px',
       minHeight: '36px',
       padding: '12px 12px 12px 11px',
-      color: isActive ? '#14B8A6' : '#222222',
-      backgroundColor: isActive ? 'rgba(20, 184, 166, 0.1)' : 'transparent',
+              color: isActive ? '#009688' : '#1A1A1A',
+        backgroundColor: isActive ? 'rgba(0, 150, 136, 0.1)' : 'transparent',
     }}
     onMouseEnter={(e) => {
       if (!isActive) {
@@ -74,7 +74,7 @@ const NavigationItem = memo(({
         opacity: isCollapsed ? 0 : 1,
         pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
-        color: isActive ? '#14B8A6' : '#222222'
+        color: isActive ? '#009688' : '#1A1A1A'
       }}
     >
       {item.name}
@@ -279,7 +279,7 @@ function Layout({ children }: LayoutProps) {
           }`}
           style={{ 
             width: sidebarWidth,
-            backgroundColor: viewMode === 'manager' ? '#222222' : 'white',
+            backgroundColor: viewMode === 'manager' ? '#1A1A1A' : 'white',
             borderColor: viewMode === 'manager' ? '#333333' : '#E5E7EB'
           }}
           role="navigation"
@@ -302,7 +302,7 @@ function Layout({ children }: LayoutProps) {
               style={{
                 opacity: isCollapsed ? 0 : 1,
                 pointerEvents: isCollapsed ? 'none' : 'auto',
-                color: viewMode === 'manager' ? '#F9FAFB' : '#222222',
+                color: viewMode === 'manager' ? '#F9FAFB' : '#1A1A1A',
                 fontSize: '16px'
               }}
             >
@@ -322,7 +322,7 @@ function Layout({ children }: LayoutProps) {
                       fontSize: '14px',
                       minHeight: '36px',
                       padding: '12px 12px 30px 11px',
-                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? '#14B8A6' : (viewMode === 'manager' ? '#D1D5DB' : '#222222'),
+                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? '#009688' : (viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A'),
                       backgroundColor: 'transparent'
                     }}
                     title={isCollapsed ? dashboardItem.name : undefined}
@@ -360,7 +360,7 @@ function Layout({ children }: LayoutProps) {
                           fontSize: '14px',
                           minHeight: '36px',
                           padding: '12px 12px 12px 11px',
-                          color: isActive ? '#14B8A6' : (viewMode === 'manager' ? '#D1D5DB' : '#222222'),
+                          color: isActive ? '#009688' : (viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A'),
                           backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent'
                         }}
                         onMouseEnter={(e) => {
@@ -408,7 +408,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 12px 12px 11px',
-                                          color: currentRoute === '/settings' ? '#14B8A6' : (viewMode === 'manager' ? '#D1D5DB' : '#222222'),
+                                          color: currentRoute === '/settings' ? '#009688' : (viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A'),
                 backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent'
               }}
               onMouseEnter={(e) => {
@@ -446,7 +446,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 12px 12px 11px',
-                color: viewMode === 'manager' ? '#D1D5DB' : '#222222',
+                color: viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A',
                 backgroundColor: 'transparent'
               }}
               onMouseEnter={(e) => {
@@ -493,11 +493,11 @@ function Layout({ children }: LayoutProps) {
             {/* Left side - Company name */}
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
                       {viewMode === 'employee' ? (
-          <User style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+          <User style={{ width: '16px', height: '16px', color: '#1A1A1A', marginRight: '12px' }} />
         ) : (
-          <Building style={{ width: '16px', height: '16px', color: '#222222', marginRight: '12px' }} />
+          <Building style={{ width: '16px', height: '16px', color: '#1A1A1A', marginRight: '12px' }} />
         )}
-              <div className="flex items-center font-medium" style={{ color: '#222222', fontSize: '14px' }}>
+              <div className="flex items-center font-medium" style={{ color: '#1A1A1A', fontSize: '14px' }}>
                 <span>Secure Corp</span>
               </div>
             </div>
@@ -507,13 +507,13 @@ function Layout({ children }: LayoutProps) {
 
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
-              <span className="font-medium" style={{ color: '#222222', fontSize: '14px' }}>
+              <span className="font-medium" style={{ color: '#1A1A1A', fontSize: '14px' }}>
                 {viewMode === 'employee' ? 'Employee View' : 'Management View'}
               </span>
 
               <button 
                 className="p-1 rounded"
-                style={{ color: '#222222' }}
+                style={{ color: '#1A1A1A' }}
                 aria-label="Search"
               >
                 <Search style={{ width: '16px', height: '16px' }} />
@@ -521,7 +521,7 @@ function Layout({ children }: LayoutProps) {
               
               <button 
                 className="p-1 rounded"
-                style={{ color: '#222222' }}
+                style={{ color: '#1A1A1A' }}
                 aria-label="Notifications"
               >
                 <Bell style={{ width: '16px', height: '16px' }} />
@@ -530,7 +530,7 @@ function Layout({ children }: LayoutProps) {
               <button 
                 onClick={handleHelpClick}
                 className="p-1 rounded"
-                style={{ color: '#222222' }}
+                style={{ color: '#1A1A1A' }}
                 aria-label="Help & Knowledge Base"
                 title="Help & Knowledge Base"
               >
@@ -544,7 +544,7 @@ function Layout({ children }: LayoutProps) {
                   style={{ 
                     width: '28px', 
                     height: '28px',
-                    backgroundColor: '#14B8A6'
+                                         backgroundColor: '#009688'
                   }}
                   aria-label="My Account"
                   data-testid="view-toggle"
@@ -599,7 +599,7 @@ function Layout({ children }: LayoutProps) {
                               setIsUserMenuOpen(false);
                             }}
                             className="w-full px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors text-left"
-                            style={{ color: '#222222' }}
+                            style={{ color: '#1A1A1A' }}
                             data-testid={viewMode === 'employee' ? 'manager-view-btn' : 'employee-view-btn'}
                           >
                             Switch to {viewMode === 'employee' ? 'Manager' : 'Employee'} View
@@ -658,7 +658,7 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                          color: tab.isActive ? '#14B8A6' : '#222222',
+                                                     color: tab.isActive ? '#009688' : '#1A1A1A',
                           borderColor: '#E5E7EB'
                         }}
                         role="tab"
@@ -672,7 +672,7 @@ function Layout({ children }: LayoutProps) {
                 </div>
               ) : breadcrumbs.length > 0 ? (
                 <nav className="flex items-center h-full" style={{ paddingLeft: '1.5rem' }} aria-label="Breadcrumb">
-                  <ol className="flex items-center gap-2" style={{ fontSize: '14px', color: '#222222' }}>
+                  <ol className="flex items-center gap-2" style={{ fontSize: '14px', color: '#1A1A1A' }}>
                     {breadcrumbs.map((crumb, index) => (
                       <li key={index} className="flex items-center gap-2">
                         {crumb.href ? (
@@ -680,7 +680,7 @@ function Layout({ children }: LayoutProps) {
                             {crumb.label}
                           </button>
                         ) : (
-                          <span style={{ color: '#222222' }}>{crumb.label}</span>
+                          <span style={{ color: '#1A1A1A' }}>{crumb.label}</span>
                         )}
                         {index < breadcrumbs.length - 1 && <span aria-hidden="true">/</span>}
                       </li>

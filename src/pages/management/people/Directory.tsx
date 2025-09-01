@@ -456,25 +456,25 @@ export default function Directory() {
     switch (status) {
       case 'Active':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green-accessible">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
             Active
           </span>
         );
       case 'Suspended':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red-accessible">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
             Suspended
           </span>
         );
       case 'Onboarding':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue-accessible">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
             Onboarding
           </span>
         );
       case 'On Leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-light text-status-amber-accessible">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-light text-status-amber">
             On Leave
           </span>
         );
@@ -507,7 +507,7 @@ export default function Directory() {
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
           </button>
-          <button className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm" style={{ backgroundColor: '#1FB6A1' }}>
+          <button className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm" style={{ backgroundColor: '#009688' }}>
             <Plus style={{ width: '14px', height: '14px' }} />
             Add Person
           </button>
@@ -730,7 +730,7 @@ export default function Directory() {
                             className="w-8 h-8 rounded-full object-cover"
                           />
                         ) : (
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ backgroundColor: '#1FB6A1' }}>
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ backgroundColor: '#009688' }}>
                             {getInitials(employee.firstName, employee.lastName)}
                           </div>
                         )}
@@ -738,9 +738,9 @@ export default function Directory() {
                           className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
                           style={{
                             backgroundColor: 
-                              employee.status === 'Active' ? '#1FB6A1' :
-                              employee.status === 'On Leave' ? '#F9A825' :
-                              employee.status === 'Onboarding' ? '#1976D2' :
+                              employee.status === 'Active' ? '#2E7D32' :
+                              employee.status === 'On Leave' ? '#EF6C00' :
+                              employee.status === 'Onboarding' ? '#1565C0' :
                               employee.status === 'Suspended' ? '#D32F2F' :
                               '#9E9E9E'
                           }}>
@@ -795,7 +795,7 @@ export default function Directory() {
                       className="w-12 h-12 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" style={{ backgroundColor: '#1FB6A1' }}>
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" style={{ backgroundColor: '#009688' }}>
                       {getInitials(employee.firstName, employee.lastName)}
                     </div>
                   )}
@@ -803,9 +803,9 @@ export default function Directory() {
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{
                       backgroundColor: 
-                        employee.status === 'Active' ? '#1FB6A1' :
-                        employee.status === 'On Leave' ? '#F9A825' :
-                        employee.status === 'Onboarding' ? '#1976D2' :
+                        employee.status === 'Active' ? '#2E7D32' :
+                        employee.status === 'On Leave' ? '#EF6C00' :
+                        employee.status === 'Onboarding' ? '#1565C0' :
                         employee.status === 'Suspended' ? '#D32F2F' :
                         '#9E9E9E'
                     }}>
@@ -917,7 +917,7 @@ export default function Directory() {
                           ? 'text-white'
                           : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
                       }`}
-                      style={currentPage === pageNum ? { backgroundColor: '#1FB6A1' } : {}}
+                      style={currentPage === pageNum ? { backgroundColor: '#009688' } : {}}
                     >
                       {pageNum}
                   </button>

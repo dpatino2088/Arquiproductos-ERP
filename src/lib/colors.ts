@@ -1,8 +1,8 @@
 export const STATUS = {
-  success: 'bg-status-green-10 text-status-green',
-  info: 'bg-status-blue-10 text-status-blue',
-  warning: 'bg-status-amber-10 text-status-amber',
-  error: 'bg-status-red-10 text-status-red',
+  success: 'bg-status-green-light text-status-green',
+  info: 'bg-status-blue-light text-status-blue',
+  warning: 'bg-status-amber-light text-status-amber',
+  error: 'bg-status-red-light text-status-red',
   neutral: 'bg-neutral-gray-10 text-neutral-gray',
 } as const;
 

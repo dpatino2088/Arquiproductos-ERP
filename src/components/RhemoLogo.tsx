@@ -13,8 +13,8 @@ export const RhemoLogo: React.FC<RhemoLogoProps> = ({
   viewMode = 'employee',
   style 
 }) => {
-  const primaryColor = '#1FB6A1'; // Always keep the teal color
-  const secondaryColor = viewMode === 'manager' ? '#FFFFFF' : '#000000'; // Black in employee, white in manager
+  const primaryColor = '#009688'; // New teal brand color - WCAG 2.2 AA compliant
+  const secondaryColor = viewMode === 'manager' ? '#FFFFFF' : '#1A1A1A'; // Graphite Black in employee, white in manager
   
   return (
     <svg 
