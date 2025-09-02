@@ -52,13 +52,13 @@ const NavigationItem = memo(({
       fontSize: '14px',
       minHeight: '36px',
       padding: '12px 16px 12px 14px',
-      color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-      backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
-      borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
+      color: isActive ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+      backgroundColor: isActive ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+      borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
     }}
     onMouseEnter={(e) => {
       if (!isActive) {
-        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
+        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
       }
     }}
     onMouseLeave={(e) => {
@@ -77,7 +77,7 @@ const NavigationItem = memo(({
         opacity: isCollapsed ? 0 : 1,
         pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
-        color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : 'var(--graphite-black-hex)'
+        color: isActive ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 'var(--graphite-black-hex)'
       }}
     >
       {item.name}
@@ -273,7 +273,7 @@ function Layout({ children }: LayoutProps) {
   }, [submoduleTabs.length, breadcrumbs.length]);
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#F5F7FA' }}>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--gray-200)' }}>
       <div className="flex">
         {/* Sidebar Navigation */}
         <nav 
@@ -282,8 +282,8 @@ function Layout({ children }: LayoutProps) {
           }`}
           style={{ 
             width: sidebarWidth,
-            backgroundColor: viewMode === 'manager' ? '#1A1A1A' : 'white',
-            borderColor: viewMode === 'manager' ? '#333333' : '#E5E7EB'
+            backgroundColor: viewMode === 'manager' ? 'var(--gray-950)' : 'white',
+            borderColor: viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)'
           }}
           role="navigation"
           aria-label="Main navigation"
@@ -306,7 +306,7 @@ function Layout({ children }: LayoutProps) {
                 left: '52px',
                 opacity: isCollapsed ? 0 : 1,
                 pointerEvents: isCollapsed ? 'none' : 'auto',
-                color: viewMode === 'manager' ? '#F9FAFB' : '#1A1A1A',
+                color: viewMode === 'manager' ? 'var(--gray-100)' : 'var(--gray-950)',
                 fontSize: '16px'
               }}
             >
@@ -318,7 +318,7 @@ function Layout({ children }: LayoutProps) {
           <div className="pb-4">
             {/* Dashboard Button - Separate */}
             {dashboardItem && (
-              <div style={{ marginTop: '0px' }}>
+              <div style={{ marginTop: '-1px' }}>
                                   <button
                     onClick={() => handleNavigation(dashboardItem.href)}
                     className="flex items-center font-normal transition-colors group relative w-full"
@@ -326,13 +326,13 @@ function Layout({ children }: LayoutProps) {
                       fontSize: '14px',
                       minHeight: '40px',
                       padding: '11px 16px 11px 14px',
-                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-                      backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
-                      borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
+                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                      backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                      borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                     }}
                     onMouseEnter={(e) => {
                       if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
-                        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
+                        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                       }
                     }}
                     onMouseLeave={(e) => {
@@ -360,7 +360,7 @@ function Layout({ children }: LayoutProps) {
             )}
 
             {/* Spacer between Dashboard and other items */}
-            <div style={{ height: '17px' }}></div>
+            <div style={{ height: '18px' }}></div>
 
             {/* Other Navigation Items */}
             <ul style={{ gap: '1px', marginTop: '-3px' }} className="flex flex-col" role="list">
@@ -378,13 +378,13 @@ function Layout({ children }: LayoutProps) {
                           fontSize: '14px',
                           minHeight: '36px',
                           padding: '12px 16px 12px 14px',
-                          color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-                          backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
-                          borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
+                          color: isActive ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                          backgroundColor: isActive ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                          borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                         }}
                         onMouseEnter={(e) => {
                           if (!isActive) {
-                            e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
+                            e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                           }
                         }}
                         onMouseLeave={(e) => {
@@ -427,13 +427,13 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 16px 12px 14px',
-                color: currentRoute === '/settings' ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-                backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
-                borderLeft: currentRoute === '/settings' ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
+                color: currentRoute === '/settings' ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                borderLeft: currentRoute === '/settings' ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
               }}
               onMouseEnter={(e) => {
                 if (currentRoute !== '/settings') {
-                  e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
+                  e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                 }
               }}
               onMouseLeave={(e) => {
@@ -466,12 +466,12 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 16px 12px 14px',
-                color: viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A',
+                color: viewMode === 'manager' ? 'var(--gray-300)' : 'var(--gray-950)',
                 borderLeft: '3px solid transparent',
                 backgroundColor: 'transparent'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
+                e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent';
@@ -506,7 +506,7 @@ function Layout({ children }: LayoutProps) {
           style={{
             height: '3.5rem',
             left: mainMarginLeft,
-            borderColor: '#E5E7EB'
+            borderColor: 'var(--gray-250)'
           }}
           role="banner"
         >
@@ -514,11 +514,11 @@ function Layout({ children }: LayoutProps) {
             {/* Left side - Company name */}
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
                       {viewMode === 'employee' ? (
-          <User style={{ width: '16px', height: '16px', color: '#1A1A1A', marginRight: '12px' }} />
+          <User style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
         ) : (
-          <Building style={{ width: '16px', height: '16px', color: '#1A1A1A', marginRight: '12px' }} />
+          <Building style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
         )}
-              <div className="flex items-center font-medium" style={{ color: '#1A1A1A', fontSize: '14px' }}>
+              <div className="flex items-center font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
                 <span>Secure Corp</span>
               </div>
             </div>
@@ -528,13 +528,13 @@ function Layout({ children }: LayoutProps) {
 
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
-              <span className="font-medium" style={{ color: '#1A1A1A', fontSize: '14px' }}>
+              <span className="font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
                 {viewMode === 'employee' ? 'Employee View' : 'Management View'}
               </span>
 
               <button 
                 className="p-1 rounded"
-                style={{ color: '#1A1A1A' }}
+                style={{ color: 'var(--gray-950)' }}
                 aria-label="Search"
               >
                 <Search style={{ width: '16px', height: '16px' }} />
@@ -542,7 +542,7 @@ function Layout({ children }: LayoutProps) {
               
               <button 
                 className="p-1 rounded"
-                style={{ color: '#1A1A1A' }}
+                style={{ color: 'var(--gray-950)' }}
                 aria-label="Notifications"
               >
                 <Bell style={{ width: '16px', height: '16px' }} />
@@ -551,7 +551,7 @@ function Layout({ children }: LayoutProps) {
               <button 
                 onClick={handleHelpClick}
                 className="p-1 rounded"
-                style={{ color: '#1A1A1A' }}
+                style={{ color: 'var(--gray-950)' }}
                 aria-label="Help & Knowledge Base"
                 title="Help & Knowledge Base"
               >
@@ -620,7 +620,7 @@ function Layout({ children }: LayoutProps) {
                               setIsUserMenuOpen(false);
                             }}
                             className="w-full px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors text-left"
-                            style={{ color: '#1A1A1A' }}
+                            style={{ color: 'var(--gray-950)' }}
                             data-testid={viewMode === 'employee' ? 'manager-view-btn' : 'employee-view-btn'}
                           >
                             Switch to {viewMode === 'employee' ? 'Manager' : 'Employee'} View
@@ -654,8 +654,8 @@ function Layout({ children }: LayoutProps) {
               top: '3.5rem',
               height: '2.625rem',
               left: mainMarginLeft,
-              backgroundColor: '#F9FAFB',
-              borderColor: '#E5E7EB'
+              backgroundColor: 'var(--gray-100)',
+              borderColor: 'var(--gray-250)'
             }}
             role="navigation"
             aria-label="Secondary navigation"
@@ -680,7 +680,7 @@ function Layout({ children }: LayoutProps) {
                           minWidth: '140px',
                           width: 'auto',
                           color: tab.isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : 'var(--graphite-black-hex)',
-                          borderColor: '#E5E7EB',
+                          borderColor: 'var(--gray-250)',
                           borderBottom: tab.isActive ? (viewMode === 'manager' ? '2px solid var(--teal-600)' : '2px solid var(--teal-700)') : 'none'
                         }}
                         role="tab"
@@ -694,7 +694,7 @@ function Layout({ children }: LayoutProps) {
                 </div>
               ) : breadcrumbs.length > 0 ? (
                 <nav className="flex items-center h-full" style={{ paddingLeft: '1.5rem' }} aria-label="Breadcrumb">
-                  <ol className="flex items-center gap-2" style={{ fontSize: '14px', color: '#1A1A1A' }}>
+                  <ol className="flex items-center gap-2" style={{ fontSize: '14px', color: 'var(--gray-950)' }}>
                     {breadcrumbs.map((crumb, index) => (
                       <li key={index} className="flex items-center gap-2">
                         {crumb.href ? (
@@ -702,7 +702,7 @@ function Layout({ children }: LayoutProps) {
                             {crumb.label}
                           </button>
                         ) : (
-                          <span style={{ color: '#1A1A1A' }}>{crumb.label}</span>
+                          <span style={{ color: 'var(--gray-950)' }}>{crumb.label}</span>
                         )}
                         {index < breadcrumbs.length - 1 && <span aria-hidden="true">/</span>}
                       </li>
@@ -721,7 +721,7 @@ function Layout({ children }: LayoutProps) {
             marginLeft: mainMarginLeft,
             paddingTop: mainPaddingTop,
             padding: `${mainPaddingTop} 1.5rem 1.5rem`,
-            backgroundColor: '#F5F7FA'
+            backgroundColor: 'var(--gray-200)'
           }}
           role="main"
         >

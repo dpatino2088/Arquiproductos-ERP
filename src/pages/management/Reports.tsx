@@ -105,7 +105,7 @@ export default function Reports() {
               { name: 'Attendance Overview', type: 'Time & Attendance', generated: '3 days ago', size: '856 KB' },
               { name: 'Performance Metrics', type: 'Employee', generated: '1 week ago', size: '3.2 MB' }
             ].map((report, index) => (
-              <div key={index} className="flex items-center justify-between p-4 rounded-lg hover:bg-gray-50 cursor-pointer" style={{ backgroundColor: '#F9FAFB' }}>
+              <div key={index} className="flex items-center justify-between p-4 rounded-lg hover:bg-gray-50 cursor-pointer" style={{ backgroundColor: 'var(--gray-100)' }}>
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#14B8A6' }}>
                     <FileText style={{ width: '20px', height: '20px', color: 'white' }} />

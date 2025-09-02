@@ -51,30 +51,31 @@ export default {
     --font-size-heading: 16px;
     --font-size-title: 20px;
 
-    /* Tailwind v3 Color Palette */
-    --gray-950: #030712;
-    --gray-900: #111827;
-    --gray-800: #1f2937;
-    --gray-700: #374151;
-    --gray-600: #4b5563;
+    /* Updated Gray Palette - App Background Harmonized */
+    --gray-950: #0d1117;   /* casi negro, con un tinte azul/gris */
+    --gray-900: #1c1f26;
+    --gray-800: #2c313a;
+    --gray-700: #3d4450;
+    --gray-600: #4f5663;
     --gray-500: #6b7280;
     --gray-400: #9ca3af;
     --gray-300: #d1d5db;
-    --gray-200: #e5e7eb;
-    --gray-100: #f3f4f6;
-    --gray-50: #f9fafb;
+    --gray-250: #E6EBF0;   /* sidebar buttons employee view */
+    --gray-200: #f5f7fa;   /* tu tono actual */
+    --gray-100: #fafbfc;
+    --gray-50: #fdfefe;    /* prácticamente blanco */
     
-    --teal-950: #042f2e;
-    --teal-900: #134e4a;
-    --teal-800: #115e59;
-    --teal-700: #0f766e;  /* Primary brand color */
-    --teal-600: #0d9488;
-    --teal-500: #14b8a6;
-    --teal-400: #2dd4bf;
-    --teal-300: #5eead4;
-    --teal-200: #99f6e4;
-    --teal-100: #ccfbf1;
-    --teal-50: #f0fdfa;
+    --teal-950: #062524;
+    --teal-900: #0a3f3c;
+    --teal-800: #006666;
+    --teal-700: #008383;  /* Primary brand color - anchor */
+    --teal-600: #009999;
+    --teal-500: #00b3b3;
+    --teal-400: #33cccc;
+    --teal-300: #66e0e0;
+    --teal-200: #99f0f0;
+    --teal-100: #ccfafa;
+    --teal-50: #f2fefe;
     
     --red-950: #450a0a;
     --red-900: #7f1d1d;
@@ -124,29 +125,29 @@ export default {
     --green-100: #dcfce7;
     --green-50: #f0fdf4;
 
-    /* Semantic Color Mapping using Tailwind v3 - UPDATED */
-    --foreground: 218 11% 15%;               /* Dark text - HSL for gray-900 */
-    --background: 210 20% 98%;               /* Light background - HSL for gray-50 */
-    --brand-primary: 174 78% 26%;            /* Primary brand color #0f766e in HSL */
-    --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-600 */
+    /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
+    --foreground: 218 15% 12%;               /* Dark text - HSL for new gray-900 #1c1f26 */
+    --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
+    --brand-primary: 180 100% 26%;           /* Primary brand color #008383 (teal-700) in HSL */
+    --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-500 */
 
     --primary: var(--brand-primary);
-    --primary-foreground: 210 20% 98%;       /* HSL for gray-50 */
+    --primary-foreground: 200 100% 99%;      /* HSL for new gray-50 #fdfefe */
     --secondary: var(--brand-secondary);
-    --secondary-foreground: 210 20% 98%;    /* HSL for gray-50 */
+    --secondary-foreground: 200 100% 99%;    /* HSL for new gray-50 #fdfefe */
 
-    --card: 210 20% 98%;                     /* HSL for gray-50 */
+    --card: 200 100% 99%;                    /* HSL for new gray-50 #fdfefe */
     --card-foreground: var(--foreground);
-    --popover: 210 20% 98%;                  /* HSL for gray-50 */
+    --popover: 200 100% 99%;                 /* HSL for new gray-50 #fdfefe */
     --popover-foreground: var(--foreground);
-    --muted: 220 14% 96%;                    /* HSL for gray-100 */
+    --muted: 210 20% 98%;                    /* HSL for new gray-100 #fafbfc */
     --muted-foreground: 220 9% 46%;          /* HSL for gray-500 */
     --accent: var(--brand-primary);
-    --accent-foreground: 210 20% 98%;        /* HSL for gray-50 */
+    --accent-foreground: 200 100% 99%;       /* HSL for new gray-50 #fdfefe */
     --destructive: 0 84% 60%;                /* HSL for red-600 */
-    --destructive-foreground: 210 20% 98%;   /* HSL for gray-50 */
-    --border: 220 13% 91%;                   /* HSL for gray-200 */
-    --input: 220 13% 91%;                    /* HSL for gray-200 */
+    --destructive-foreground: 200 100% 99%;  /* HSL for new gray-50 #fdfefe */
+    --border: 210 17% 96%;                   /* HSL for new gray-200 #f5f7fa */
+    --input: 210 17% 96%;                    /* HSL for new gray-200 #f5f7fa */
     --ring: var(--brand-primary);           /* Focus ring - primary teal */
     --radius: 0.5rem;
 

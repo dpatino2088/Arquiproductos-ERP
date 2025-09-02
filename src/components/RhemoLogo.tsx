@@ -13,7 +13,7 @@ export const RhemoLogo: React.FC<RhemoLogoProps> = ({
   viewMode = 'employee',
   style 
 }) => {
-  const primaryColor = viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'; // Teal 600 for management (dark sidebar), Teal 700 for employee
+  const primaryColor = viewMode === 'manager' ? 'var(--teal-brand-hex)' : 'var(--teal-brand-hex)'; // Teal 700 for both management and employee views
   const secondaryColor = viewMode === 'manager' ? 'var(--white-hex)' : 'var(--graphite-black-hex)'; // Graphite Black in employee, white in manager
   
   return (

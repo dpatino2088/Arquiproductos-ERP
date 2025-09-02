@@ -38,7 +38,7 @@
 - [ ] **HSL Variables**: All colors in HSL format for Tailwind compatibility
 - [ ] **Persistence**: Theme preferences saved to localStorage
 - [ ] **No Hardcoded Colors**: ALL colors via CSS custom properties
-- [ ] **Primary Color**: Teal 700 (#0f766e) as brand primary
+- [ ] **Primary Color**: Teal 700 (#008383) as brand primary
 - [ ] **Status Semantics**: Proper color-meaning associations
 
 ## Component Library 📦

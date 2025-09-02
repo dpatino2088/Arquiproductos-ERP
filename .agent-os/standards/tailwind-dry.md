@@ -149,11 +149,16 @@ export const tokens = {
       700: "#1d4ed8",
     },
     gray: {
-      50: "#f9fafb",
-      100: "#f3f4f6",
+      50: "#fdfefe",    /* prácticamente blanco */
+      100: "#fafbfc",
+      200: "#f5f7fa",   /* tu tono actual */
+      250: "#E6EBF0",   /* sidebar buttons employee view */
       500: "#6b7280",
-      600: "#4b5563",
-      700: "#374151",
+      600: "#4f5663",
+      700: "#3d4450",
+      800: "#2c313a",
+      900: "#1c1f26",
+      950: "#0d1117",   /* casi negro, con un tinte azul/gris */
     },
   },
   spacing: {

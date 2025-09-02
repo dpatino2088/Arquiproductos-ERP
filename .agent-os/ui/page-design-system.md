@@ -157,8 +157,8 @@ This document defines the complete design system and behavioral patterns for all
 
 ### **Primary Brand Color** (Teal - User Customizable)
 ```css
---brand-primary: 174 78% 26%;  /* Primary teal #0f766e - HSL format for Tailwind */
---teal-700: #0f766e;           /* Primary brand color in hex */
+--brand-primary: 180 100% 26%; /* Primary teal #008383 - HSL format for Tailwind */
+--teal-700: #008383;           /* Primary brand color in hex */
 ```
 
 ### **Focus Ring System** (CRITICAL - ALL inputs must use primary color)
@@ -268,7 +268,7 @@ useEffect(() => {
   - **Management View**: `var(--teal-600-hex)` (better contrast on dark sidebar)
   - **Employee View**: `var(--teal-brand-hex)` (Teal 700)
 - **Background Colors**:
-  - **Selected**: `#333333` (management), `#F5F7FA` (employee)
+  - **Selected**: `#333333` (management), `#E6EBF0` (employee - gray-250)
   - **Hover**: Same as selected background
 - **Icon Positioning**: Icons positioned exactly 17px from left border (3px border + 14px padding)
 - **Button Heights**: 
@@ -386,7 +386,7 @@ const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 - **Non-text Elements**: UI components and borders meet 3:1 contrast ratio minimum
 - **Status Colors**: Green 700 (#15803d) provides 4.5:1+ contrast for text
 - **Focus Rings**: Primary teal provides excellent contrast against all backgrounds
-- **Selected Tab Borders**: Teal 700 (#0f766e) provides 4.6:1 contrast against white, 4.8:1 against gray
+- **Selected Tab Borders**: Teal 700 (#008383) provides 4.6:1 contrast against white, 4.8:1 against gray
 - **Interactive Elements**: Proper ARIA labels on all interactive components
 - **Keyboard Navigation**: Full keyboard support with visible focus indicators
 - **Screen Reader**: Compatible with assistive technologies

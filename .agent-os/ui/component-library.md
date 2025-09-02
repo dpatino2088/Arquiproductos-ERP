@@ -583,8 +583,8 @@ bg-status-blue-light: rgba(25, 118, 210, 0.1);
 bg-status-orange-light: rgba(249, 168, 37, 0.1);
 
 /* Primary Brand Color (User Customizable) */
---brand-primary: 174 78% 26%;  /* Primary teal #0f766e - HSL format for Tailwind */
---teal-700: #0f766e;           /* Primary brand color in hex */
+--brand-primary: 180 100% 26%; /* Primary teal #008383 - HSL format for Tailwind */
+--teal-700: #008383;           /* Primary brand color in hex */
 
 /* Focus Ring System (CRITICAL) */
 --ring: var(--brand-primary);           /* Focus ring - primary teal */
