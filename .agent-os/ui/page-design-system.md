@@ -260,6 +260,20 @@ useEffect(() => {
 - **Colors**: Active `var(--teal-brand-hex)`, Inactive `var(--graphite-black-hex)`
 - **Background**: Active `bg-white`, Inactive hover `hover:bg-white/50`
 - **Bottom Border**: Active tabs get `borderBottom: '2px solid var(--teal-700)'` for WCAG compliance
+
+### **Sidebar Navigation Styling** (NEW - Microsoft Teams Pattern)
+- **Selected State**: Square background with left border indicator (NO rounded corners)
+- **Full Width**: Background extends full sidebar width (no container padding)
+- **Left Border**: `3px solid` using primary color
+  - **Management View**: `var(--teal-600-hex)` (better contrast on dark sidebar)
+  - **Employee View**: `var(--teal-brand-hex)` (Teal 700)
+- **Background Colors**:
+  - **Selected**: `#333333` (management), `#F5F7FA` (employee)
+  - **Hover**: Same as selected background
+- **Padding**: `12px 16px 12px 11px` (internal spacing maintained)
+- **Border Implementation**: `borderLeft: '3px solid transparent'` for inactive items
+- **WCAG Compliance**: 3:1+ contrast ratio for left border against sidebar background
+- **Accessibility**: Uses `aria-current="page"` for active navigation items
 - **Alignment**: `justify-start` (left-aligned)
 - **Border Color**: `borderColor: '#E5E7EB'` (right border between tabs)
 

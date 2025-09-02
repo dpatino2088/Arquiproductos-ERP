@@ -133,7 +133,8 @@
     --row-highlight: var(--teal-50);        /* Row hover/highlight */
     
     /* Hex versions for direct usage */
-    --teal-brand-hex: var(--teal-700);
+    --teal-brand-hex: var(--teal-700);        /* Primary brand - Teal 700 */
+    --teal-600-hex: var(--teal-600);          /* Management view - Teal 600 */
     --teal-brand-rgba-10: rgba(15, 118, 110, 0.1);
     --graphite-black-hex: var(--gray-900);
     --white-hex: var(--gray-50);

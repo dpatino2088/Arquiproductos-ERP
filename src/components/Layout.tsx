@@ -36,26 +36,29 @@ const NavigationItem = memo(({
   item, 
   isActive, 
   isCollapsed, 
-  onClick 
+  onClick,
+  viewMode = 'employee'
 }: {
   item: { name: string; href: string; icon: React.ComponentType<{ style?: React.CSSProperties }> };
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
+  viewMode?: 'employee' | 'manager';
 }) => (
   <button
     onClick={onClick}
-    className="flex items-center font-normal rounded-lg transition-colors group relative w-full"
+    className="flex items-center font-normal transition-colors group relative w-full"
     style={{
       fontSize: '14px',
       minHeight: '36px',
-      padding: '12px 12px 12px 11px',
-              color: isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
-        backgroundColor: isActive ? 'var(--teal-brand-rgba-10)' : 'transparent',
+      padding: '12px 16px 12px 14px',
+      color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
+      backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
+      borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
     }}
     onMouseEnter={(e) => {
       if (!isActive) {
-        e.currentTarget.style.backgroundColor = 'rgba(34, 34, 34, 0.05)';
+        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
       }
     }}
     onMouseLeave={(e) => {
@@ -74,7 +77,7 @@ const NavigationItem = memo(({
         opacity: isCollapsed ? 0 : 1,
         pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
-        color: isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)'
+        color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : 'var(--graphite-black-hex)'
       }}
     >
       {item.name}
@@ -286,20 +289,21 @@ function Layout({ children }: LayoutProps) {
           aria-label="Main navigation"
         >
           {/* Logo Section */}
-                    <div className="px-2">
+                    <div>
             <div 
               className="flex items-center relative w-full"
               style={{ 
                 height: '56px',
-                padding: '0 12px 0 7px'
+                padding: '0 12px 0 13px'
               }}
             >
               <div className="flex items-center justify-center" style={{ width: '27px', height: '27px', flexShrink: 0 }}>
                 <RhemoLogo width={27} height={27} viewMode={viewMode} />
               </div>
                           <span
-              className="absolute left-12 transition-opacity duration-300 whitespace-nowrap font-normal"
+              className="absolute transition-opacity duration-300 whitespace-nowrap font-normal"
               style={{
+                left: '52px',
                 opacity: isCollapsed ? 0 : 1,
                 pointerEvents: isCollapsed ? 'none' : 'auto',
                 color: viewMode === 'manager' ? '#F9FAFB' : '#1A1A1A',
@@ -311,19 +315,30 @@ function Layout({ children }: LayoutProps) {
             </div>
           </div>
 
-          <div className="pb-4 px-2">
+          <div className="pb-4">
             {/* Dashboard Button - Separate */}
             {dashboardItem && (
-              <div style={{ marginTop: '-2px' }}>
-                <button
+              <div style={{ marginTop: '0px' }}>
+                                  <button
                     onClick={() => handleNavigation(dashboardItem.href)}
-                    className="flex items-center font-normal rounded-lg transition-colors group relative w-full"
+                    className="flex items-center font-normal transition-colors group relative w-full"
                     style={{
                       fontSize: '14px',
-                      minHeight: '36px',
-                      padding: '12px 12px 30px 11px',
-                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 'var(--teal-brand-hex)' : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-                      backgroundColor: 'transparent'
+                      minHeight: '40px',
+                      padding: '11px 16px 11px 14px',
+                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
+                      backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
+                      borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
+                        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? '#333333' : '#F5F7FA';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }
                     }}
                     title={isCollapsed ? dashboardItem.name : undefined}
                     aria-label={dashboardItem.name}
@@ -344,6 +359,9 @@ function Layout({ children }: LayoutProps) {
               </div>
             )}
 
+            {/* Spacer between Dashboard and other items */}
+            <div style={{ height: '17px' }}></div>
+
             {/* Other Navigation Items */}
             <ul style={{ gap: '1px', marginTop: '-3px' }} className="flex flex-col" role="list">
               {otherNavItems.map((item) => {
@@ -355,13 +373,14 @@ function Layout({ children }: LayoutProps) {
                   <li key={item.name} role="listitem">
                     <button
                         onClick={() => handleNavigation(item.href)}
-                        className="flex items-center font-normal rounded-lg transition-colors group relative w-full"
+                        className="flex items-center font-normal transition-colors group relative w-full"
                         style={{
                           fontSize: '14px',
                           minHeight: '36px',
-                          padding: '12px 12px 12px 11px',
-                          color: isActive ? 'var(--teal-brand-hex)' : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-                          backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent'
+                          padding: '12px 16px 12px 14px',
+                          color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
+                          backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
+                          borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
                         }}
                         onMouseEnter={(e) => {
                           if (!isActive) {
@@ -396,20 +415,21 @@ function Layout({ children }: LayoutProps) {
           </div>
 
           {/* Help, Settings and Collapse/Expand Buttons */}
-          <div className="absolute left-0 right-0 px-2" style={{ bottom: '1rem' }}>
+          <div className="absolute left-0 right-0" style={{ bottom: '1rem' }}>
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
               {/* Settings Button */}
               <button
                 onClick={() => handleNavigation('/settings')}
-                className="flex items-center font-normal rounded-lg transition-colors w-full relative"
+                className="flex items-center font-normal transition-colors w-full relative"
               style={{
                 fontSize: '14px',
                 minHeight: '36px',
-                padding: '12px 12px 12px 11px',
-                                          color: currentRoute === '/settings' ? 'var(--teal-brand-hex)' : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
-                backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent'
+                padding: '12px 16px 12px 14px',
+                color: currentRoute === '/settings' ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
+                backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
+                borderLeft: currentRoute === '/settings' ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
               }}
               onMouseEnter={(e) => {
                 if (currentRoute !== '/settings') {
@@ -441,12 +461,13 @@ function Layout({ children }: LayoutProps) {
               {/* Collapse/Expand Button */}
               <button
                 onClick={handleCollapseToggle}
-                className="flex items-center font-normal rounded-lg transition-colors w-full relative"
+                className="flex items-center font-normal transition-colors w-full relative"
               style={{
                 fontSize: '14px',
                 minHeight: '36px',
-                padding: '12px 12px 12px 11px',
+                padding: '12px 16px 12px 14px',
                 color: viewMode === 'manager' ? '#D1D5DB' : '#1A1A1A',
+                borderLeft: '3px solid transparent',
                 backgroundColor: 'transparent'
               }}
               onMouseEnter={(e) => {
@@ -544,7 +565,7 @@ function Layout({ children }: LayoutProps) {
                   style={{ 
                     width: '28px', 
                     height: '28px',
-                                         backgroundColor: 'var(--teal-brand-hex)'
+                                         backgroundColor: viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'
                   }}
                   aria-label="My Account"
                   data-testid="view-toggle"
@@ -658,9 +679,9 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                          color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
+                          color: tab.isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : 'var(--graphite-black-hex)',
                           borderColor: '#E5E7EB',
-                          borderBottom: tab.isActive ? '2px solid var(--teal-700)' : 'none'
+                          borderBottom: tab.isActive ? (viewMode === 'manager' ? '2px solid var(--teal-600)' : '2px solid var(--teal-700)') : 'none'
                         }}
                         role="tab"
                         aria-selected={tab.isActive}
