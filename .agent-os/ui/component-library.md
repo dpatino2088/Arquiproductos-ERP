@@ -79,6 +79,51 @@ useEffect(() => {
 - Colors: Active `var(--teal-brand-hex)`, Inactive `var(--graphite-black-hex)`
 - Background: Active `bg-white`, Inactive hover `hover:bg-white/50`
 - Bottom Border: Active tabs get `borderBottom: '2px solid var(--teal-700)'` for WCAG compliance
+
+## Sidebar Navigation Components (NEW)
+
+### **Microsoft Teams-Style Navigation Button**
+```tsx
+<button
+  className="flex items-center font-normal transition-colors group relative w-full"
+  style={{
+    fontSize: '14px',
+    minHeight: '36px', // 40px for home button
+    padding: '12px 16px 12px 14px', // 17px icon positioning
+    color: isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : (viewMode === 'manager' ? '#D1D5DB' : 'var(--graphite-black-hex)'),
+    backgroundColor: isActive ? (viewMode === 'manager' ? '#333333' : '#F5F7FA') : 'transparent',
+    borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'}` : '3px solid transparent'
+  }}
+  aria-current={isActive ? 'page' : undefined}
+>
+  <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
+    <Icon style={{ width: '18px', height: '18px' }} />
+  </div>
+  <span className="absolute left-12 transition-opacity duration-300 whitespace-nowrap">
+    {label}
+  </span>
+</button>
+```
+
+### **Logo with Brand Text**
+```tsx
+<div style={{ padding: '0 12px 0 13px', height: '56px' }}>
+  <div className="flex items-center justify-center" style={{ width: '27px', height: '27px', flexShrink: 0 }}>
+    <RhemoLogo width={27} height={27} viewMode={viewMode} />
+  </div>
+  <span 
+    className="absolute transition-opacity duration-300 whitespace-nowrap font-normal"
+    style={{
+      left: '52px',
+      opacity: isCollapsed ? 0 : 1,
+      color: viewMode === 'manager' ? '#F9FAFB' : '#1A1A1A',
+      fontSize: '16px'
+    }}
+  >
+    <span style={{ fontWeight: '700' }}>RH</span><span style={{ fontWeight: '200' }}>EMO</span>
+  </span>
+</div>
+```
 - Alignment: `justify-start`
 
 ---

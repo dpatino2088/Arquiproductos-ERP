@@ -261,7 +261,7 @@ useEffect(() => {
 - **Background**: Active `bg-white`, Inactive hover `hover:bg-white/50`
 - **Bottom Border**: Active tabs get `borderBottom: '2px solid var(--teal-700)'` for WCAG compliance
 
-### **Sidebar Navigation Styling** (NEW - Microsoft Teams Pattern)
+### **Sidebar Navigation Styling** (UPDATED - Microsoft Teams Pattern)
 - **Selected State**: Square background with left border indicator (NO rounded corners)
 - **Full Width**: Background extends full sidebar width (no container padding)
 - **Left Border**: `3px solid` using primary color
@@ -270,12 +270,28 @@ useEffect(() => {
 - **Background Colors**:
   - **Selected**: `#333333` (management), `#F5F7FA` (employee)
   - **Hover**: Same as selected background
-- **Padding**: `12px 16px 12px 11px` (internal spacing maintained)
+- **Icon Positioning**: Icons positioned exactly 17px from left border (3px border + 14px padding)
+- **Button Heights**: 
+  - **Standard Navigation**: `minHeight: '36px'`
+  - **Home Button**: `minHeight: '40px'` (matches secondary navbar height)
+- **Padding**: `padding: '12px 16px 12px 14px'` (ensures 17px icon positioning)
 - **Border Implementation**: `borderLeft: '3px solid transparent'` for inactive items
 - **WCAG Compliance**: 3:1+ contrast ratio for left border against sidebar background
 - **Accessibility**: Uses `aria-current="page"` for active navigation items
-- **Alignment**: `justify-start` (left-aligned)
-- **Border Color**: `borderColor: '#E5E7EB'` (right border between tabs)
+
+### **Logo Positioning** (NEW)
+- **Logo Size**: 27px x 27px (larger than navigation icons for brand prominence)
+- **Logo Position**: 13px from left border
+- **Brand Text**: "RHEMO" positioned at 52px from left border
+- **Typography**: Bold "RH" (font-weight: 700), Light "EMO" (font-weight: 200)
+- **Color Adaptation**: Uses Teal 600 in management view, Teal 700 in employee view
+
+### **Utility Button Styling** (NEW - Collapse/Expand)
+- **No Selected State**: Utility buttons never show as "selected"
+- **Hover Only**: Square hover background matching navigation items
+- **Same Positioning**: Icons aligned at 17px from left border
+- **Transparent Border**: `3px solid transparent` for consistent structure
+- **Background**: Hover shows same colors as navigation items
 
 ### **Selected Tab Implementation** (WCAG 2.2 AA Compliant)
 ```tsx

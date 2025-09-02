@@ -16,6 +16,10 @@
 - [ ] **Progress Bars**: `bg-gray-200` background (NOT `bg-muted`)
 - [ ] **Typography**: Use semantic classes (`text-muted-foreground`, `text-title`, etc.)
 - [ ] **No Hardcoded Values**: All colors via design tokens and Tailwind classes
+- [ ] **Sidebar Navigation**: Microsoft Teams-style square backgrounds with left borders
+- [ ] **Icon Positioning**: All sidebar icons positioned exactly 17px from left border
+- [ ] **Logo Positioning**: Logo at 13px, brand text at 52px from left border
+- [ ] **Button Heights**: Standard 36px, Home button 40px to match secondary navbar
 - [ ] **Focus Ring Consistency**: Primary teal across ALL inputs
 
 ## Selected Tab Styling 🎯
