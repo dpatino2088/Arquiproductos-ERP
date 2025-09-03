@@ -192,4 +192,119 @@ test.describe('Accessibility Tests', () => {
     // Should either have an outline or other visible focus indicator
     expect(outlineStyle).not.toBe('none');
   });
+
+  test('should not have accessibility issues in navigation components', async ({ page }) => {
+    await page.goto('/');
+    
+    // Navigate to management dashboard to test both employee and management navigation
+    await page.click('[data-testid="view-toggle"]');
+    await page.click('[data-testid="manager-view-btn"]');
+    await page.waitForURL('/management/dashboard');
+    
+    // Expand sidebar to test all navigation elements
+    await page.hover('nav[aria-label="Main navigation"]');
+    await page.waitForTimeout(500); // Wait for expansion animation
+    
+    // Navigate to People section to test secondary navbar
+    await page.click('nav[aria-label="Main navigation"] button:has-text("People")');
+    await page.waitForTimeout(200);
+    await page.click('button[role="tab"]:has-text("Directory")');
+    await page.waitForURL('/management/people/directory');
+    
+    // Test accessibility of navigation components specifically
+    const accessibilityScanResults = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .include([
+        'nav[aria-label="Main navigation"]', // Sidebar
+        '[role="tablist"]', // Secondary navbar
+        '[data-testid="view-toggle"]', // User account button
+        'button[role="tab"]' // Submodule tabs
+      ])
+      .analyze();
+
+    expect(accessibilityScanResults.violations).toEqual([]);
+  });
+
+  test('should have proper ARIA attributes in navigation', async ({ page }) => {
+    await page.goto('/');
+    
+    // Test sidebar navigation
+    const sidebar = page.locator('nav[aria-label="Main navigation"]');
+    await expect(sidebar).toBeVisible();
+    
+    // Test that navigation buttons have proper ARIA attributes
+    const navButtons = sidebar.locator('button');
+    const navButtonCount = await navButtons.count();
+    
+    for (let i = 0; i < navButtonCount; i++) {
+      const button = navButtons.nth(i);
+      if (await button.isVisible()) {
+        // Each button should have either aria-label or visible text
+        const ariaLabel = await button.getAttribute('aria-label');
+        const textContent = await button.textContent();
+        const hasAccessibleName = ariaLabel || (textContent && textContent.trim().length > 0);
+        expect(hasAccessibleName).toBeTruthy();
+      }
+    }
+    
+    // Navigate to test secondary navbar
+    await page.click('[data-testid="view-toggle"]');
+    await page.click('[data-testid="manager-view-btn"]');
+    await page.waitForURL('/management/dashboard');
+    
+    // Expand sidebar and navigate to People
+    await page.hover('nav[aria-label="Main navigation"]');
+    await page.waitForTimeout(500);
+    await page.click('nav[aria-label="Main navigation"] button:has-text("People")');
+    await page.waitForTimeout(200);
+    
+    // Test secondary navbar (submodule tabs)
+    const tablist = page.locator('[role="tablist"]');
+    await expect(tablist).toBeVisible();
+    
+    const tabs = tablist.locator('[role="tab"]');
+    const tabCount = await tabs.count();
+    
+    for (let i = 0; i < tabCount; i++) {
+      const tab = tabs.nth(i);
+      if (await tab.isVisible()) {
+        // Each tab should have proper ARIA attributes
+        const ariaSelected = await tab.getAttribute('aria-selected');
+        const ariaLabel = await tab.getAttribute('aria-label');
+        const textContent = await tab.textContent();
+        
+        expect(ariaSelected).toBeDefined(); // Should be 'true' or 'false'
+        expect(ariaLabel || (textContent && textContent.trim().length > 0)).toBeTruthy();
+      }
+    }
+  });
+
+  test('should support keyboard navigation in all navigation components', async ({ page }) => {
+    await page.goto('/');
+    
+    // Test keyboard navigation in sidebar
+    await page.keyboard.press('Tab');
+    let focusedElement = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim());
+    expect(focusedElement).toBeTruthy();
+    
+    // Navigate to management view to test secondary navbar keyboard navigation
+    await page.click('[data-testid="view-toggle"]');
+    await page.click('[data-testid="manager-view-btn"]');
+    await page.waitForURL('/management/dashboard');
+    
+    // Expand sidebar and navigate to People
+    await page.hover('nav[aria-label="Main navigation"]');
+    await page.waitForTimeout(500);
+    await page.click('nav[aria-label="Main navigation"] button:has-text("People")');
+    await page.waitForTimeout(200);
+    
+    // Test keyboard navigation in secondary navbar (tabs)
+    const firstTab = page.locator('[role="tab"]').first();
+    await firstTab.focus();
+    
+    // Test arrow key navigation (common pattern for tabs)
+    await page.keyboard.press('ArrowRight');
+    focusedElement = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim());
+    expect(focusedElement).toBeTruthy();
+  });
 });

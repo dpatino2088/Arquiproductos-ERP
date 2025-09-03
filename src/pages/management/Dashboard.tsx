@@ -128,7 +128,7 @@ export default function ManagementDashboard() {
                   <div className="font-medium">{team.department}</div>
                   <div className="flex items-center gap-2">
                     {getTrendIcon(team.trend)}
-                    <span className="font-bold text-primary">{team.performance}%</span>
+                    <span className="font-bold text-primary-contrast">{team.performance}%</span>
                   </div>
                 </div>
                 <div className="flex justify-between text-sm text-muted-foreground">

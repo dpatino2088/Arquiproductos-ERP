@@ -161,7 +161,7 @@ export default {
     --status-green: #166534;               /* Success/Active - Green 800 for WCAG 2.2 AA */
     --status-red: #991b1b;                 /* Error/Critical/Delete - Red 800 for WCAG 2.2 AA */
     --status-blue: #1976D2;                /* Info/Neutral actions */
-    --status-amber: #F9A825;               /* Warning/Pending approvals */
+    --status-amber: #9a3412;               /* Warning/Pending approvals - Orange 900 for WCAG 2.2 AA */
     --neutral-gray: #9E9E9E;               /* Disabled/Inactive elements */
     --highlight-bg: #E3F2FD;               /* Hover states, highlighted rows */
     
@@ -209,6 +209,7 @@ export default {
   .text-status-blue { color: var(--status-blue); }
   .text-status-orange { color: var(--status-amber); }
   .text-neutral-gray { color: var(--neutral-gray); }
+  .text-primary-contrast { color: var(--teal-800); } /* Higher contrast primary for WCAG compliance */
 
   /* Text utilities */
   .text-secondary { color: var(--gray-600); }
