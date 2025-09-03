@@ -36,6 +36,26 @@ interface Employee {
   phone?: string;
 }
 
+// Function to generate avatar initials (100% reliable, works everywhere)
+const generateAvatarInitials = (firstName: string, lastName: string) => {
+  return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+};
+
+// Function to generate a consistent background color based on name
+const generateAvatarColor = (firstName: string, lastName: string) => {
+  const colors = [
+    '#008383', '#1976D2', '#D32F2F', '#F9A825', '#9C27B0',
+    '#00BCD4', '#4CAF50', '#FF9800', '#E91E63', '#607D8B',
+    '#795548', '#3F51B5', '#009688', '#FF5722', '#673AB7'
+  ];
+  const name = firstName + lastName;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
 export default function Directory() {
   const { registerSubmodules } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
@@ -69,7 +89,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '12/31/2017',
-      avatar: 'https://i.pravatar.cc/150?img=1'
+      avatar: null
     },
     {
       id: '2',
@@ -81,7 +101,7 @@ export default function Directory() {
       status: 'Suspended',
       location: 'Seattle, WA',
       startDate: '9/11/2022',
-      avatar: 'https://i.pravatar.cc/150?img=2'
+      avatar: null
     },
     {
       id: '3',
@@ -93,7 +113,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Portland, OR',
       startDate: '1/9/2022',
-      avatar: 'https://i.pravatar.cc/150?img=3'
+      avatar: null
     },
     {
       id: '4',
@@ -171,7 +191,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '5/17/2020',
-      avatar: 'https://i.pravatar.cc/150?img=4'
+      avatar: null
     },
     {
       id: '11',
@@ -183,7 +203,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Portland, OR',
       startDate: '5/17/2020',
-      avatar: 'https://i.pravatar.cc/150?img=3'
+      avatar: null
     },
     {
       id: '12',
@@ -195,7 +215,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Austin, TX',
       startDate: '3/12/2021',
-      avatar: 'https://i.pravatar.cc/150?img=5'
+      avatar: null
     },
     {
       id: '13',
@@ -207,7 +227,7 @@ export default function Directory() {
       status: 'On Leave',
       location: 'Seattle, WA',
       startDate: '8/22/2020',
-      avatar: 'https://i.pravatar.cc/150?img=6'
+      avatar: null
     },
     {
       id: '14',
@@ -219,7 +239,7 @@ export default function Directory() {
       status: 'Active',
       location: 'New York, NY',
       startDate: '1/15/2019',
-      avatar: 'https://i.pravatar.cc/150?img=7'
+      avatar: null
     },
     {
       id: '15',
@@ -231,7 +251,7 @@ export default function Directory() {
       status: 'Onboarding',
       location: 'Portland, OR',
       startDate: '6/8/2022',
-      avatar: 'https://i.pravatar.cc/150?img=8'
+      avatar: null
     },
     {
       id: '16',
@@ -243,7 +263,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '11/1/2023',
-      avatar: 'https://i.pravatar.cc/150?img=9'
+      avatar: null
     },
     {
       id: '17',
@@ -255,7 +275,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Austin, TX',
       startDate: '4/3/2021',
-      avatar: 'https://i.pravatar.cc/150?img=10'
+      avatar: null
     },
     {
       id: '18',
@@ -267,7 +287,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Seattle, WA',
       startDate: '9/14/2020',
-      avatar: 'https://i.pravatar.cc/150?img=11'
+      avatar: null
     },
     {
       id: '19',
@@ -279,7 +299,7 @@ export default function Directory() {
       status: 'Suspended',
       location: 'Portland, OR',
       startDate: '2/28/2022',
-      avatar: 'https://i.pravatar.cc/150?img=12'
+      avatar: null
     },
     {
       id: '20',
@@ -291,7 +311,7 @@ export default function Directory() {
       status: 'Active',
       location: 'New York, NY',
       startDate: '7/19/2021',
-      avatar: 'https://i.pravatar.cc/150?img=1'
+      avatar: null
     },
     {
       id: '21',
@@ -303,7 +323,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '10/5/2022',
-      avatar: 'https://i.pravatar.cc/150?img=13'
+      avatar: null
     },
     {
       id: '22',
@@ -315,7 +335,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Austin, TX',
       startDate: '12/12/2021',
-      avatar: 'https://i.pravatar.cc/150?img=14'
+      avatar: null
     },
     {
       id: '23',
@@ -327,7 +347,7 @@ export default function Directory() {
       status: 'On Leave',
       location: 'Seattle, WA',
       startDate: '5/30/2020',
-      avatar: 'https://i.pravatar.cc/150?img=15'
+      avatar: null
     },
     {
       id: '24',
@@ -339,7 +359,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Portland, OR',
       startDate: '1/8/2023',
-      avatar: 'https://i.pravatar.cc/150?img=2'
+      avatar: null
     },
     {
       id: '25',
@@ -351,7 +371,7 @@ export default function Directory() {
       status: 'Onboarding',
       location: 'New York, NY',
       startDate: '11/15/2023',
-      avatar: 'https://i.pravatar.cc/150?img=16'
+      avatar: null
     }
   ];
 
@@ -737,17 +757,12 @@ export default function Directory() {
                                     <td className="py-4 px-6">
                     <div className="flex items-center gap-3">
                       <div className="relative">
-                        {employee.avatar ? (
-                          <img 
-                            src={employee.avatar} 
-                            alt={`${employee.firstName} ${employee.lastName}`}
-                            className="w-8 h-8 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" style={{ backgroundColor: 'var(--teal-brand-hex)' }}>
-                            {getInitials(employee.firstName, employee.lastName)}
-                          </div>
-                        )}
+                        <div 
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" 
+                          style={{ backgroundColor: generateAvatarColor(employee.firstName, employee.lastName) }}
+                        >
+                          {generateAvatarInitials(employee.firstName, employee.lastName)}
+                        </div>
                         <div 
                           className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
                           style={{
@@ -810,17 +825,12 @@ export default function Directory() {
               {/* Employee Avatar and Basic Info */}
               <div className="flex items-start gap-3 mb-4">
                 <div className="relative">
-                  {employee.avatar ? (
-                    <img 
-                      src={employee.avatar} 
-                      alt={`${employee.firstName} ${employee.lastName}`}
-                      className="w-12 h-12 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" style={{ backgroundColor: 'var(--teal-brand-hex)' }}>
-                      {getInitials(employee.firstName, employee.lastName)}
-                    </div>
-                  )}
+                  <div 
+                    className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" 
+                    style={{ backgroundColor: generateAvatarColor(employee.firstName, employee.lastName) }}
+                  >
+                    {generateAvatarInitials(employee.firstName, employee.lastName)}
+                  </div>
                   <div 
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{
