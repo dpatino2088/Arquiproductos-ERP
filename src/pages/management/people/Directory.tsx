@@ -89,7 +89,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '12/31/2017',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '2',
@@ -101,7 +101,7 @@ export default function Directory() {
       status: 'Suspended',
       location: 'Seattle, WA',
       startDate: '9/11/2022',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '3',
@@ -113,7 +113,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Portland, OR',
       startDate: '1/9/2022',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '4',
@@ -191,7 +191,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '5/17/2020',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '11',
@@ -203,7 +203,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Portland, OR',
       startDate: '5/17/2020',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '12',
@@ -215,7 +215,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Austin, TX',
       startDate: '3/12/2021',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '13',
@@ -227,7 +227,7 @@ export default function Directory() {
       status: 'On Leave',
       location: 'Seattle, WA',
       startDate: '8/22/2020',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '14',
@@ -239,7 +239,7 @@ export default function Directory() {
       status: 'Active',
       location: 'New York, NY',
       startDate: '1/15/2019',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '15',
@@ -251,7 +251,7 @@ export default function Directory() {
       status: 'Onboarding',
       location: 'Portland, OR',
       startDate: '6/8/2022',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '16',
@@ -263,7 +263,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '11/1/2023',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '17',
@@ -275,7 +275,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Austin, TX',
       startDate: '4/3/2021',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '18',
@@ -287,7 +287,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Seattle, WA',
       startDate: '9/14/2020',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '19',
@@ -299,7 +299,7 @@ export default function Directory() {
       status: 'Suspended',
       location: 'Portland, OR',
       startDate: '2/28/2022',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '20',
@@ -311,7 +311,7 @@ export default function Directory() {
       status: 'Active',
       location: 'New York, NY',
       startDate: '7/19/2021',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '21',
@@ -323,7 +323,7 @@ export default function Directory() {
       status: 'Active',
       location: 'San Francisco, CA',
       startDate: '10/5/2022',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '22',
@@ -335,7 +335,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Austin, TX',
       startDate: '12/12/2021',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '23',
@@ -347,7 +347,7 @@ export default function Directory() {
       status: 'On Leave',
       location: 'Seattle, WA',
       startDate: '5/30/2020',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '24',
@@ -359,7 +359,7 @@ export default function Directory() {
       status: 'Active',
       location: 'Portland, OR',
       startDate: '1/8/2023',
-      avatar: null
+      avatar: undefined
     },
     {
       id: '25',
@@ -371,7 +371,7 @@ export default function Directory() {
       status: 'Onboarding',
       location: 'New York, NY',
       startDate: '11/15/2023',
-      avatar: null
+      avatar: undefined
     }
   ];
 
