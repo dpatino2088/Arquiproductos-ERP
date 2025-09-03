@@ -24,10 +24,7 @@ const Inbox = lazy(() => {
   return import('./pages/org/cmp/Inbox');
 });
 
-const Reports = lazy(() => {
-  logger.debug('Loading Reports component');
-  return import('./pages/org/cmp/management/Reports');
-});
+
 
 const MyInfo = lazy(() => {
   logger.debug('Loading MyInfo component');
@@ -463,7 +460,7 @@ function App() {
         return <OrganizationalChart />;
 
       case 'reports':
-        return <Reports />;
+        return <CompanyReports />;
       case 'planner':
         return <Planner />;
       case 'attendance':

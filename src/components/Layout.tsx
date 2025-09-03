@@ -179,8 +179,8 @@ function Layout({ children }: LayoutProps) {
   const isNavItemActive = useCallback((itemName: string, itemHref: string) => {
     switch (itemName) {
       case 'Dashboard':
-        // Dashboard is active if we're on any dashboard route
-        return currentRoute.includes('/dashboard');
+        // Dashboard is active if we're on any dashboard route or inbox
+        return currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
       case 'People':
         // People is active if we're on any people route
         return currentRoute.includes('/people');
