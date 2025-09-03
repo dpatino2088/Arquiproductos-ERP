@@ -2,15 +2,15 @@ import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 import { Calendar as CalendarIcon, FileText, TrendingUp } from 'lucide-react';
 
-export default function Calendar() {
+export default function TeamLeaveRequests() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
     // Register submodule tabs for PTO & Leaves
     registerSubmodules('PTO & Leaves', [
-      { id: 'calendar', label: 'Calendar', href: '/management/pto-and-leaves/calendar', icon: CalendarIcon },
-      { id: 'requests', label: 'Requests', href: '/management/pto-and-leaves/requests', icon: FileText },
-      { id: 'balances', label: 'Balances', href: '/management/pto-and-leaves/balances', icon: TrendingUp }
+      { id: 'team-leave-calendar', label: 'Team Leave Calendar', href: '/management/pto-and-leaves/team-leave-calendar', icon: CalendarIcon },
+      { id: 'team-leave-requests', label: 'Team Leave Requests', href: '/management/pto-and-leaves/team-leave-requests', icon: FileText },
+      { id: 'team-balances', label: 'Team Balances', href: '/management/pto-and-leaves/team-balances', icon: TrendingUp }
     ]);
   }, [registerSubmodules]);
 
@@ -18,8 +18,8 @@ export default function Calendar() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Calendar</h1>
-        <p className="text-xs text-muted-foreground">View and manage PTO and leave calendar</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Team Leave Requests</h1>
+        <p className="text-xs text-muted-foreground">Manage team PTO and leave requests</p>
       </div>
 
       {/* Content */}

@@ -89,8 +89,8 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'Time & Attendance', href: '/management/time-and-attendance/planner', icon: Clock },
-  { name: 'PTO & Leave', href: '/management/pto-and-leaves/calendar', icon: CalendarCheck },
+  { name: 'Time & Attendance', href: '/management/time-and-attendance/team-planner', icon: Clock },
+  { name: 'PTO & Leave', href: '/management/pto-and-leaves/team-leave-calendar', icon: CalendarCheck },
   { name: 'Knowledge Hub', href: '/management/company-knowledge/about-the-company', icon: BookMarked },
   { name: 'Performance', href: '/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
   { name: 'Benefits', href: '/management/benefits/team-benefits', icon: BriefcaseBusiness },

@@ -10,8 +10,8 @@ export default function TeamGoalsAndPerformance() {
     registerSubmodules('Performance', [
       { id: 'team-goals', label: 'Team Goals & Performance', href: '/management/performance/team-goals-and-performance', icon: Target },
       { id: 'team-reviews', label: 'Team Reviews', href: '/management/performance/team-reviews', icon: FileText },
-      { id: 'feedback', label: 'Feedback & Recognition', href: '/management/performance/feedback-and-recognition', icon: Award },
-      { id: 'one-on-one', label: 'One-on-One', href: '/management/performance/one-on-one', icon: Users }
+      { id: 'team-feedback', label: 'Team Feedback & Recognition', href: '/management/performance/team-feedback-and-recognition', icon: Award },
+      { id: 'team-one-on-one', label: 'Team One-on-One', href: '/management/performance/team-one-on-one', icon: Users }
     ]);
   }, [registerSubmodules]);
 

@@ -41,34 +41,34 @@ const OrganizationalChart = lazy(() => {
   return import('./pages/org/cmp/management/people/OrganizationalChart');
 });
 
-const Planner = lazy(() => {
-  logger.debug('Loading Planner component');
-  return import('./pages/org/cmp/management/time-and-attendance/Planner');
+const TeamPlanner = lazy(() => {
+  logger.debug('Loading Team Planner component');
+  return import('./pages/org/cmp/management/time-and-attendance/TeamPlanner');
 });
 
-const Attendance = lazy(() => {
-  logger.debug('Loading Attendance component');
-  return import('./pages/org/cmp/management/time-and-attendance/Attendance');
+const TeamAttendance = lazy(() => {
+  logger.debug('Loading Team Attendance component');
+  return import('./pages/org/cmp/management/time-and-attendance/TeamAttendance');
 });
 
-const Geolocation = lazy(() => {
-  logger.debug('Loading Geolocation component');
-  return import('./pages/org/cmp/management/time-and-attendance/Geolocation');
+const TeamGeolocation = lazy(() => {
+  logger.debug('Loading Team Geolocation component');
+  return import('./pages/org/cmp/management/time-and-attendance/TeamGeolocation');
 });
 
-const PTOCalendar = lazy(() => {
-  logger.debug('Loading PTO Calendar component');
-  return import('./pages/org/cmp/management/pto-and-leaves/Calendar');
+const TeamLeaveCalendar = lazy(() => {
+  logger.debug('Loading Team Leave Calendar component');
+  return import('./pages/org/cmp/management/pto-and-leaves/TeamLeaveCalendar');
 });
 
-const PTORequests = lazy(() => {
-  logger.debug('Loading PTO Requests component');
-  return import('./pages/org/cmp/management/pto-and-leaves/Requests');
+const TeamLeaveRequests = lazy(() => {
+  logger.debug('Loading Team Leave Requests component');
+  return import('./pages/org/cmp/management/pto-and-leaves/TeamLeaveRequests');
 });
 
-const PTOBalances = lazy(() => {
-  logger.debug('Loading PTO Balances component');
-  return import('./pages/org/cmp/management/pto-and-leaves/Balances');
+const TeamBalances = lazy(() => {
+  logger.debug('Loading Team Balances component');
+  return import('./pages/org/cmp/management/pto-and-leaves/TeamBalances');
 });
 
 const TeamGoalsAndPerformance = lazy(() => {
@@ -81,14 +81,14 @@ const TeamReviews = lazy(() => {
   return import('./pages/org/cmp/management/performance/TeamReviews');
 });
 
-const FeedbackAndRecognition = lazy(() => {
-  logger.debug('Loading Feedback and Recognition component');
-  return import('./pages/org/cmp/management/performance/FeedbackAndRecognition');
+const TeamFeedbackAndRecognition = lazy(() => {
+  logger.debug('Loading Team Feedback and Recognition component');
+  return import('./pages/org/cmp/management/performance/TeamFeedbackAndRecognition');
 });
 
-const OneOnOne = lazy(() => {
-  logger.debug('Loading One-on-One component');
-  return import('./pages/org/cmp/management/performance/OneOnOne');
+const TeamOneOnOne = lazy(() => {
+  logger.debug('Loading Team One-on-One component');
+  return import('./pages/org/cmp/management/performance/TeamOneOnOne');
 });
 
 const TeamResponsibilities = lazy(() => {
@@ -334,20 +334,20 @@ function App() {
       router.addRoute('/management/reports', () => setCurrentPage('reports'));
       
       // Time & Attendance routes
-      router.addRoute('/management/time-and-attendance/planner', () => setCurrentPage('planner'));
-      router.addRoute('/management/time-and-attendance/attendance', () => setCurrentPage('attendance'));
-      router.addRoute('/management/time-and-attendance/geolocation', () => setCurrentPage('geolocation'));
+      router.addRoute('/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
+      router.addRoute('/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
+      router.addRoute('/management/time-and-attendance/team-geolocation', () => setCurrentPage('team-geolocation'));
       
       // PTO & Leaves routes
-      router.addRoute('/management/pto-and-leaves/calendar', () => setCurrentPage('pto-calendar'));
-      router.addRoute('/management/pto-and-leaves/requests', () => setCurrentPage('pto-requests'));
-      router.addRoute('/management/pto-and-leaves/balances', () => setCurrentPage('pto-balances'));
+      router.addRoute('/management/pto-and-leaves/team-leave-calendar', () => setCurrentPage('team-leave-calendar'));
+      router.addRoute('/management/pto-and-leaves/team-leave-requests', () => setCurrentPage('team-leave-requests'));
+      router.addRoute('/management/pto-and-leaves/team-balances', () => setCurrentPage('team-balances'));
       
       // Performance routes
       router.addRoute('/management/performance/team-goals-and-performance', () => setCurrentPage('team-goals'));
       router.addRoute('/management/performance/team-reviews', () => setCurrentPage('team-reviews'));
-      router.addRoute('/management/performance/feedback-and-recognition', () => setCurrentPage('feedback-recognition'));
-      router.addRoute('/management/performance/one-on-one', () => setCurrentPage('one-on-one'));
+      router.addRoute('/management/performance/team-feedback-and-recognition', () => setCurrentPage('team-feedback-and-recognition'));
+      router.addRoute('/management/performance/team-one-on-one', () => setCurrentPage('team-one-on-one'));
       
       // Company Knowledge routes
       router.addRoute('/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
@@ -461,26 +461,26 @@ function App() {
 
       case 'reports':
         return <CompanyReports />;
-      case 'planner':
-        return <Planner />;
-      case 'attendance':
-        return <Attendance />;
-      case 'geolocation':
-        return <Geolocation />;
-      case 'pto-calendar':
-        return <PTOCalendar />;
-      case 'pto-requests':
-        return <PTORequests />;
-      case 'pto-balances':
-        return <PTOBalances />;
+      case 'team-planner':
+        return <TeamPlanner />;
+      case 'team-attendance':
+        return <TeamAttendance />;
+      case 'team-geolocation':
+        return <TeamGeolocation />;
+      case 'team-leave-calendar':
+        return <TeamLeaveCalendar />;
+      case 'team-leave-requests':
+        return <TeamLeaveRequests />;
+      case 'team-balances':
+        return <TeamBalances />;
       case 'team-goals':
         return <TeamGoalsAndPerformance />;
       case 'team-reviews':
         return <TeamReviews />;
-      case 'feedback-recognition':
-        return <FeedbackAndRecognition />;
-      case 'one-on-one':
-        return <OneOnOne />;
+      case 'team-feedback-and-recognition':
+        return <TeamFeedbackAndRecognition />;
+      case 'team-one-on-one':
+        return <TeamOneOnOne />;
       case 'about-company':
         return <AboutTheCompany />;
       case 'team-responsibilities':

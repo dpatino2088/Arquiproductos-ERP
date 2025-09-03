@@ -2,15 +2,15 @@ import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 import { Clock, Calendar, MapPin } from 'lucide-react';
 
-export default function Planner() {
+export default function TeamGeolocation() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
     // Register submodule tabs for time and attendance
     registerSubmodules('Time & Attendance', [
-      { id: 'planner', label: 'Planner', href: '/management/time-and-attendance/planner', icon: Calendar },
-      { id: 'attendance', label: 'Attendance', href: '/management/time-and-attendance/attendance', icon: Clock },
-      { id: 'geolocation', label: 'Geolocation', href: '/management/time-and-attendance/geolocation', icon: MapPin }
+      { id: 'team-planner', label: 'Team Planner', href: '/management/time-and-attendance/team-planner', icon: Calendar },
+      { id: 'team-attendance', label: 'Team Attendance', href: '/management/time-and-attendance/team-attendance', icon: Clock },
+      { id: 'team-geolocation', label: 'Team Geolocation', href: '/management/time-and-attendance/team-geolocation', icon: MapPin }
     ]);
   }, [registerSubmodules]);
 
@@ -18,8 +18,8 @@ export default function Planner() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Planner</h1>
-        <p className="text-xs text-muted-foreground">Schedule and plan time and attendance</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Team Geolocation</h1>
+        <p className="text-xs text-muted-foreground">Track team location and geofencing</p>
       </div>
 
       {/* Content */}

@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 import { Target, FileText, Award, Users } from 'lucide-react';
 
-export default function OneOnOne() {
+export default function TeamFeedbackAndRecognition() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
@@ -10,8 +10,8 @@ export default function OneOnOne() {
     registerSubmodules('Performance', [
       { id: 'team-goals', label: 'Team Goals & Performance', href: '/management/performance/team-goals-and-performance', icon: Target },
       { id: 'team-reviews', label: 'Team Reviews', href: '/management/performance/team-reviews', icon: FileText },
-      { id: 'feedback', label: 'Feedback & Recognition', href: '/management/performance/feedback-and-recognition', icon: Award },
-      { id: 'one-on-one', label: 'One-on-One', href: '/management/performance/one-on-one', icon: Users }
+      { id: 'team-feedback', label: 'Team Feedback & Recognition', href: '/management/performance/team-feedback-and-recognition', icon: Award },
+      { id: 'team-one-on-one', label: 'Team One-on-One', href: '/management/performance/team-one-on-one', icon: Users }
     ]);
   }, [registerSubmodules]);
 
@@ -19,8 +19,8 @@ export default function OneOnOne() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">One-on-One</h1>
-        <p className="text-xs text-muted-foreground">Schedule and manage one-on-one meetings</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Team Feedback & Recognition</h1>
+        <p className="text-xs text-muted-foreground">Manage team feedback and employee recognition programs</p>
       </div>
 
       {/* Content */}
