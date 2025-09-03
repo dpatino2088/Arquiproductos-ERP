@@ -44,6 +44,118 @@ const OrganizationalChart = lazy(() => {
   return import('./pages/org/cmp/management/people/OrganizationalChart');
 });
 
+const Planner = lazy(() => {
+  logger.debug('Loading Planner component');
+  return import('./pages/org/cmp/management/time-and-attendance/Planner');
+});
+
+const Attendance = lazy(() => {
+  logger.debug('Loading Attendance component');
+  return import('./pages/org/cmp/management/time-and-attendance/Attendance');
+});
+
+const Geolocation = lazy(() => {
+  logger.debug('Loading Geolocation component');
+  return import('./pages/org/cmp/management/time-and-attendance/Geolocation');
+});
+
+const PTOCalendar = lazy(() => {
+  logger.debug('Loading PTO Calendar component');
+  return import('./pages/org/cmp/management/pto-and-leaves/Calendar');
+});
+
+const PTORequests = lazy(() => {
+  logger.debug('Loading PTO Requests component');
+  return import('./pages/org/cmp/management/pto-and-leaves/Requests');
+});
+
+const PTOBalances = lazy(() => {
+  logger.debug('Loading PTO Balances component');
+  return import('./pages/org/cmp/management/pto-and-leaves/Balances');
+});
+
+const TeamGoalsAndPerformance = lazy(() => {
+  logger.debug('Loading Team Goals and Performance component');
+  return import('./pages/org/cmp/management/performance/TeamGoalsAndPerformance');
+});
+
+const TeamReviews = lazy(() => {
+  logger.debug('Loading Team Reviews component');
+  return import('./pages/org/cmp/management/performance/TeamReviews');
+});
+
+const FeedbackAndRecognition = lazy(() => {
+  logger.debug('Loading Feedback and Recognition component');
+  return import('./pages/org/cmp/management/performance/FeedbackAndRecognition');
+});
+
+const OneOnOne = lazy(() => {
+  logger.debug('Loading One-on-One component');
+  return import('./pages/org/cmp/management/performance/OneOnOne');
+});
+
+const TeamResponsibilities = lazy(() => {
+  logger.debug('Loading Team Responsibilities component');
+  return import('./pages/org/cmp/management/company-knowledge/TeamResponsibilities');
+});
+
+const TeamKnowledgeCompliance = lazy(() => {
+  logger.debug('Loading Team Knowledge Compliance component');
+  return import('./pages/org/cmp/management/company-knowledge/TeamKnowledgeCompliance');
+});
+
+const AboutTheCompany = lazy(() => {
+  logger.debug('Loading About the Company component');
+  return import('./pages/org/cmp/management/company-knowledge/AboutTheCompany');
+});
+
+const TeamBenefits = lazy(() => {
+  logger.debug('Loading Team Benefits component');
+  return import('./pages/org/cmp/management/benefits/TeamBenefits');
+});
+
+const TeamRequests = lazy(() => {
+  logger.debug('Loading Team Requests component');
+  return import('./pages/org/cmp/management/benefits/TeamRequests');
+});
+
+const TeamExpenses = lazy(() => {
+  logger.debug('Loading Team Expenses component');
+  return import('./pages/org/cmp/management/expenses/TeamExpenses');
+});
+
+const TeamDevices = lazy(() => {
+  logger.debug('Loading Team Devices component');
+  return import('./pages/org/cmp/management/it-management/TeamDevices');
+});
+
+const TeamLicenses = lazy(() => {
+  logger.debug('Loading Team Licenses component');
+  return import('./pages/org/cmp/management/it-management/TeamLicenses');
+});
+
+const ITTeamRequests = lazy(() => {
+  logger.debug('Loading IT Team Requests component');
+  return import('./pages/org/cmp/management/it-management/TeamRequests');
+});
+
+const PayrollWizards = lazy(() => {
+  logger.debug('Loading Payroll Wizards component');
+  return import('./pages/org/cmp/management/payroll/PayrollWizards');
+});
+
+const CompanyReports = lazy(() => {
+  logger.debug('Loading Company Reports component');
+  return import('./pages/org/cmp/management/reports/CompanyReports');
+});
+
+const CompanySettings = lazy(() => {
+  logger.debug('Loading Company Settings component');
+  return import('./pages/org/cmp/management/settings/CompanySettings');
+});
+
+
+
 function ThemeToggle() {
   const [theme, setTheme] = React.useState(() => localStorage.getItem('theme') || 'light');
   React.useEffect(() => {
@@ -224,6 +336,48 @@ function App() {
       // Management routes
       router.addRoute('/management/reports', () => setCurrentPage('reports'));
       
+      // Time & Attendance routes
+      router.addRoute('/management/time-and-attendance/planner', () => setCurrentPage('planner'));
+      router.addRoute('/management/time-and-attendance/attendance', () => setCurrentPage('attendance'));
+      router.addRoute('/management/time-and-attendance/geolocation', () => setCurrentPage('geolocation'));
+      
+      // PTO & Leaves routes
+      router.addRoute('/management/pto-and-leaves/calendar', () => setCurrentPage('pto-calendar'));
+      router.addRoute('/management/pto-and-leaves/requests', () => setCurrentPage('pto-requests'));
+      router.addRoute('/management/pto-and-leaves/balances', () => setCurrentPage('pto-balances'));
+      
+      // Performance routes
+      router.addRoute('/management/performance/team-goals-and-performance', () => setCurrentPage('team-goals'));
+      router.addRoute('/management/performance/team-reviews', () => setCurrentPage('team-reviews'));
+      router.addRoute('/management/performance/feedback-and-recognition', () => setCurrentPage('feedback-recognition'));
+      router.addRoute('/management/performance/one-on-one', () => setCurrentPage('one-on-one'));
+      
+      // Company Knowledge routes
+      router.addRoute('/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
+      router.addRoute('/management/company-knowledge/team-responsibilities', () => setCurrentPage('team-responsibilities'));
+      router.addRoute('/management/company-knowledge/team-knowledge-compliance', () => setCurrentPage('team-knowledge-compliance'));
+      
+      // Benefits routes
+      router.addRoute('/management/benefits/team-benefits', () => setCurrentPage('team-benefits'));
+      router.addRoute('/management/benefits/team-requests', () => setCurrentPage('team-requests'));
+      
+      // Expenses routes
+      router.addRoute('/management/expenses/team-expenses', () => setCurrentPage('team-expenses'));
+      
+      // IT Management routes
+      router.addRoute('/management/it-management/team-devices', () => setCurrentPage('team-devices'));
+      router.addRoute('/management/it-management/team-licenses', () => setCurrentPage('team-licenses'));
+      router.addRoute('/management/it-management/team-requests', () => setCurrentPage('it-team-requests'));
+      
+      // Payroll routes
+      router.addRoute('/management/payroll/payroll-wizards', () => setCurrentPage('payroll-wizards'));
+      
+      // Reports routes
+      router.addRoute('/management/reports/company-reports', () => setCurrentPage('company-reports'));
+      
+      // Settings routes
+      router.addRoute('/management/settings/company-settings', () => setCurrentPage('company-settings'));
+      
       // Legacy routes (still supported)
       router.addRoute('/employees', () => setCurrentPage('people'));
       router.addRoute('/reports', () => setCurrentPage('reports')); // Legacy route redirects to same page
@@ -310,6 +464,50 @@ function App() {
 
       case 'reports':
         return <Reports />;
+      case 'planner':
+        return <Planner />;
+      case 'attendance':
+        return <Attendance />;
+      case 'geolocation':
+        return <Geolocation />;
+      case 'pto-calendar':
+        return <PTOCalendar />;
+      case 'pto-requests':
+        return <PTORequests />;
+      case 'pto-balances':
+        return <PTOBalances />;
+      case 'team-goals':
+        return <TeamGoalsAndPerformance />;
+      case 'team-reviews':
+        return <TeamReviews />;
+      case 'feedback-recognition':
+        return <FeedbackAndRecognition />;
+      case 'one-on-one':
+        return <OneOnOne />;
+      case 'about-company':
+        return <AboutTheCompany />;
+      case 'team-responsibilities':
+        return <TeamResponsibilities />;
+      case 'team-knowledge-compliance':
+        return <TeamKnowledgeCompliance />;
+      case 'team-benefits':
+        return <TeamBenefits />;
+      case 'team-requests':
+        return <TeamRequests />;
+      case 'team-expenses':
+        return <TeamExpenses />;
+      case 'team-devices':
+        return <TeamDevices />;
+      case 'team-licenses':
+        return <TeamLicenses />;
+      case 'it-team-requests':
+        return <ITTeamRequests />;
+      case 'payroll-wizards':
+        return <PayrollWizards />;
+      case 'company-reports':
+        return <CompanyReports />;
+      case 'company-settings':
+        return <CompanySettings />;
       default:
         return <EmployeeDashboard />;
     }

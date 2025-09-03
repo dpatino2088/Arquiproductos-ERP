@@ -89,24 +89,24 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'Attendance', href: '/time-tracking', icon: Clock },
-  { name: 'PTO & Leave', href: '/pto', icon: CalendarCheck },
-  { name: 'Knowledge Hub', href: '/knowledge-hub', icon: BookMarked },
-  { name: 'Performance', href: '/performance', icon: ChartNoAxesCombined },
-  { name: 'Benefits', href: '/benefits', icon: BriefcaseBusiness },
+  { name: 'Time & Attendance', href: '/management/time-and-attendance/planner', icon: Clock },
+  { name: 'PTO & Leave', href: '/management/pto-and-leaves/calendar', icon: CalendarCheck },
+  { name: 'Knowledge Hub', href: '/management/company-knowledge/about-the-company', icon: BookMarked },
+  { name: 'Performance', href: '/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
+  { name: 'Benefits', href: '/management/benefits/team-benefits', icon: BriefcaseBusiness },
 ];
 
 const employeeOnlyNavigation = [
   { name: 'Wellness', href: '/wellness', icon: HeartPulse },
-  { name: 'Expenses', href: '/expenses', icon: Receipt },
+  { name: 'Expenses', href: '/management/expenses/team-expenses', icon: Receipt },
 ];
 
 const managementExpenses = [
-  { name: 'Expenses', href: '/expenses', icon: Receipt },
+  { name: 'Expenses', href: '/management/expenses/team-expenses', icon: Receipt },
 ];
 
 const sharedManagementNavigation = [
-  { name: 'IT Management', href: '/it-management', icon: Cpu },
+  { name: 'IT Management', href: '/management/it-management/team-devices', icon: Cpu },
 ];
 
 
@@ -187,6 +187,36 @@ function Layout({ children }: LayoutProps) {
       case 'My Info':
         // My Info is active if we're on any people or my-info route
         return currentRoute.includes('/people') || currentRoute.includes('/my-info');
+      case 'Time & Attendance':
+        // Time & Attendance is active if we're on any time-and-attendance route
+        return currentRoute.includes('/time-and-attendance');
+      case 'PTO & Leave':
+        // PTO & Leave is active if we're on any pto-and-leaves route
+        return currentRoute.includes('/pto-and-leaves');
+      case 'Performance':
+        // Performance is active if we're on any performance route
+        return currentRoute.includes('/performance');
+      case 'Knowledge Hub':
+        // Knowledge Hub is active if we're on any company-knowledge route
+        return currentRoute.includes('/company-knowledge');
+      case 'Benefits':
+        // Benefits is active if we're on any benefits route
+        return currentRoute.includes('/benefits');
+      case 'Expenses':
+        // Expenses is active if we're on any expenses route
+        return currentRoute.includes('/expenses');
+      case 'IT Management':
+        // IT Management is active if we're on any it-management route
+        return currentRoute.includes('/it-management');
+      case 'Payroll':
+        // Payroll is active if we're on any payroll route
+        return currentRoute.includes('/payroll');
+      case 'Reports':
+        // Reports is active if we're on any reports route
+        return currentRoute.includes('/reports');
+      case 'Settings':
+        // Settings is active if we're on any settings route
+        return currentRoute.includes('/settings');
       default:
         // For other items, use exact match or check if current route starts with the href
         return currentRoute === itemHref || currentRoute.startsWith(itemHref + '/');
@@ -201,7 +231,7 @@ function Layout({ children }: LayoutProps) {
     
     if (viewMode === 'manager') {
       const peopleItem = { name: 'People', href: '/people', icon: Users };
-      return [dashboardItem, peopleItem, ...restOfBase, ...managementExpenses, { name: 'Payroll', href: '/payroll', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports', icon: Printer }];
+      return [dashboardItem, peopleItem, ...restOfBase, ...managementExpenses, { name: 'Payroll', href: '/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports/company-reports', icon: Printer }];
     } else {
       const myInfoItem = { name: 'My Info', href: '/people', icon: User };
       return [dashboardItem, myInfoItem, ...restOfBase, ...employeeOnlyNavigation, ...sharedManagementNavigation];
@@ -421,23 +451,23 @@ function Layout({ children }: LayoutProps) {
 
               {/* Settings Button */}
               <button
-                onClick={() => handleNavigation('/settings')}
+                onClick={() => handleNavigation('/management/settings/company-settings')}
                 className="flex items-center font-normal transition-colors w-full relative"
               style={{
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 16px 12px 14px',
-                color: currentRoute === '/settings' ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                backgroundColor: currentRoute === '/settings' ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                borderLeft: currentRoute === '/settings' ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                color: isNavItemActive('Settings', '/management/settings/company-settings') ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                backgroundColor: isNavItemActive('Settings', '/management/settings/company-settings') ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                borderLeft: isNavItemActive('Settings', '/management/settings/company-settings') ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
               }}
               onMouseEnter={(e) => {
-                if (currentRoute !== '/settings') {
+                if (!isNavItemActive('Settings', '/management/settings/company-settings')) {
                   e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                 }
               }}
               onMouseLeave={(e) => {
-                if (currentRoute !== '/settings') {
+                if (!isNavItemActive('Settings', '/management/settings/company-settings')) {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }
               }}
