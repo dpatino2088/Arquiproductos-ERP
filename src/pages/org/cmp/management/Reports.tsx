@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { FileText, Download, Calendar, TrendingUp } from 'lucide-react';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useSubmoduleNav } from '../../../../hooks/useSubmoduleNav';
 
 export default function Reports() {
   const { setBreadcrumbs, clearSubmoduleNav } = useSubmoduleNav();

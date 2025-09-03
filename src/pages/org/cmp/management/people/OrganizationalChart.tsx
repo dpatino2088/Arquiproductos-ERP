@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../../hooks/useSubmoduleNav';
+import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 import { Users, GitBranch, User, Mail, Phone } from 'lucide-react';
 
 export default function OrganizationalChart() {

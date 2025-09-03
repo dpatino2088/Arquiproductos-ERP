@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useSubmoduleNav } from '../../../../hooks/useSubmoduleNav';
 import { User, Mail, Phone, MapPin, Calendar, Edit } from 'lucide-react';
 
 export default function MyInfo() {

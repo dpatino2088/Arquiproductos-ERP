@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
+import { useSubmoduleNav } from '../../../hooks/useSubmoduleNav';
 import { Home, Inbox as InboxIcon, Mail, Clock, User } from 'lucide-react';
-import { router } from '../lib/router';
+import { router } from '../../../lib/router';
 
 export default function Inbox() {
   const { registerSubmodules } = useSubmoduleNav();

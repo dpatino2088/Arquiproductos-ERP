@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useSubmoduleNav } from '../../../../hooks/useSubmoduleNav';
 import { Home, Inbox, Users, TrendingUp, AlertTriangle, CheckCircle, Clock, DollarSign } from 'lucide-react';
 
 export default function ManagementDashboard() {

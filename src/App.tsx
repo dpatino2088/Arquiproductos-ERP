@@ -11,37 +11,37 @@ import { useUIStore } from './stores/ui-store';
 // Code splitting with React.lazy
 const EmployeeDashboard = lazy(() => {
   logger.debug('Loading EmployeeDashboard component');
-  return import('./pages/employee/Dashboard');
+  return import('./pages/org/cmp/employee/Dashboard');
 });
 
 const ManagementDashboard = lazy(() => {
   logger.debug('Loading ManagementDashboard component');
-  return import('./pages/management/Dashboard');
+  return import('./pages/org/cmp/management/Dashboard');
 });
 
 const Inbox = lazy(() => {
   logger.debug('Loading Inbox component');
-  return import('./pages/Inbox');
+  return import('./pages/org/cmp/Inbox');
 });
 
 const Reports = lazy(() => {
   logger.debug('Loading Reports component');
-  return import('./pages/management/Reports');
+  return import('./pages/org/cmp/management/Reports');
 });
 
 const MyInfo = lazy(() => {
   logger.debug('Loading MyInfo component');
-  return import('./pages/employee/MyInfo');
+  return import('./pages/org/cmp/employee/MyInfo');
 });
 
 const Directory = lazy(() => {
   logger.debug('Loading Directory component');
-  return import('./pages/management/people/Directory');
+  return import('./pages/org/cmp/management/people/Directory');
 });
 
 const OrganizationalChart = lazy(() => {
   logger.debug('Loading OrganizationalChart component');
-  return import('./pages/management/people/OrganizationalChart');
+  return import('./pages/org/cmp/management/people/OrganizationalChart');
 });
 
 function ThemeToggle() {
