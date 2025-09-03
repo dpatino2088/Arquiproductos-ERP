@@ -285,11 +285,11 @@ const getInitials = (firstName: string, lastName: string) => {
     className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
     style={{
       backgroundColor: 
-        status === 'Active' ? '#1FB6A1' :
-        status === 'On Leave' ? '#F9A825' :
-        status === 'Onboarding' ? '#1976D2' :
-        status === 'Suspended' ? '#D32F2F' :
-        '#9E9E9E'
+        status === 'Active' ? '#16a34a' :        // Green 600 - brighter for better visibility
+        status === 'On Leave' ? '#f97316' :      // Orange 500 - brighter  
+        status === 'Onboarding' ? '#3b82f6' :    // Blue 500 - brighter
+        status === 'Suspended' ? '#ef4444' :     // Red 500 - brighter
+        '#6b7280'                                // Gray 500 - default
     }}>
   </div>
 </div>
@@ -569,7 +569,7 @@ const filteredData = useMemo(() => {
 ### **Status Colors** (WCAG 2.2 AA Compliant - UPDATED)
 ```css
 /* Status Colors (for backgrounds, borders, icons) */
---status-green: #15803d;       /* Success/Active - Green 700 (UPDATED) */
+--status-green: #166534;       /* Success/Active - Green 800 for WCAG 2.2 AA */
 --status-red: #D32F2F;         /* Error/Critical/Delete */
 --status-blue: #1976D2;        /* Info/Neutral actions */
 --status-amber: #F9A825;       /* Warning/Pending approvals */

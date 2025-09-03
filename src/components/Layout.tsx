@@ -565,7 +565,7 @@ function Layout({ children }: LayoutProps) {
                   style={{ 
                     width: '28px', 
                     height: '28px',
-                                         backgroundColor: viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)'
+                                         backgroundColor: 'var(--teal-brand-hex)'
                   }}
                   aria-label="My Account"
                   data-testid="view-toggle"
@@ -679,9 +679,9 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                          color: tab.isActive ? (viewMode === 'manager' ? 'var(--teal-600-hex)' : 'var(--teal-brand-hex)') : 'var(--graphite-black-hex)',
+                          color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
                           borderColor: 'var(--gray-250)',
-                          borderBottom: tab.isActive ? (viewMode === 'manager' ? '2px solid var(--teal-600)' : '2px solid var(--teal-700)') : 'none'
+                          borderBottom: tab.isActive ? '2px solid var(--teal-700)' : 'none'
                         }}
                         role="tab"
                         aria-selected={tab.isActive}

@@ -529,6 +529,8 @@ export default function Directory() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search employees"
+                id="employee-search"
           />
         </div>
             
@@ -553,6 +555,8 @@ export default function Directory() {
                       ? 'bg-gray-100 text-gray-900'
                       : 'bg-white text-gray-600 hover:bg-gray-50'
                   }`}
+                  aria-label="Switch to list view"
+                  title="Switch to list view"
                 >
                   <List className="w-4 h-4" />
                 </button>
@@ -563,6 +567,8 @@ export default function Directory() {
                       ? 'bg-gray-100 text-gray-900'
                       : 'bg-white text-gray-600 hover:bg-gray-50'
                   }`}
+                  aria-label="Switch to grid view"
+                  title="Switch to grid view"
                 >
                   <Grid3X3 className="w-4 h-4" />
                 </button>
@@ -579,6 +585,8 @@ export default function Directory() {
                 value={selectedDepartment}
                 onChange={(e) => setSelectedDepartment(e.target.value)}
                 className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Filter by department"
+                id="department-filter"
               >
                 <option value="">All Departments</option>
                 <option value="Executive">Executive</option>
@@ -593,6 +601,8 @@ export default function Directory() {
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
                 className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Filter by status"
+                id="status-filter"
               >
                 <option value="">All Statuses</option>
                 <option value="Active">Active</option>
@@ -605,6 +615,8 @@ export default function Directory() {
                 value={selectedEmploymentType}
                 onChange={(e) => setSelectedEmploymentType(e.target.value)}
                 className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Filter by employment type"
+                id="employment-type-filter"
               >
                 <option value="">All Employment Types</option>
                 <option value="Full-time">Full-time</option>
@@ -617,6 +629,8 @@ export default function Directory() {
                 value={selectedLocation}
                 onChange={(e) => setSelectedLocation(e.target.value)}
                 className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Filter by location"
+                id="location-filter"
               >
                 <option value="">All Locations</option>
                 <option value="San Francisco, CA">San Francisco, CA</option>
@@ -738,10 +752,10 @@ export default function Directory() {
                           className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
                           style={{
                             backgroundColor: 
-                              employee.status === 'Active' ? '#15803d' :
-                              employee.status === 'On Leave' ? '#ea580c' :
-                              employee.status === 'Onboarding' ? '#2563eb' :
-                              employee.status === 'Suspended' ? '#dc2626' :
+                              employee.status === 'Active' ? '#16a34a' :
+                              employee.status === 'On Leave' ? '#f97316' :
+                              employee.status === 'Onboarding' ? '#3b82f6' :
+                              employee.status === 'Suspended' ? '#ef4444' :
                               '#6b7280'
                           }}>
                         </div>
@@ -761,10 +775,18 @@ export default function Directory() {
                   <td className="py-4 px-4 text-gray-600 text-sm">{employee.startDate}</td>
                   <td className="py-4 px-4">
                     <div className="flex items-center gap-2">
-                      <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+                      <button 
+                        className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                        aria-label={`Edit ${employee.firstName} ${employee.lastName}`}
+                        title={`Edit ${employee.firstName} ${employee.lastName}`}
+                      >
                         <Edit className="w-4 h-4" />
                       </button>
-                      <button className="p-1 text-gray-400 hover:text-red-600 transition-colors">
+                      <button 
+                        className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                        aria-label={`Delete ${employee.firstName} ${employee.lastName}`}
+                        title={`Delete ${employee.firstName} ${employee.lastName}`}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                   </div>
@@ -803,10 +825,10 @@ export default function Directory() {
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{
                       backgroundColor: 
-                        employee.status === 'Active' ? '#15803d' :
-                        employee.status === 'On Leave' ? '#ea580c' :
-                        employee.status === 'Onboarding' ? '#2563eb' :
-                        employee.status === 'Suspended' ? '#dc2626' :
+                        employee.status === 'Active' ? '#16a34a' :
+                        employee.status === 'On Leave' ? '#f97316' :
+                        employee.status === 'Onboarding' ? '#3b82f6' :
+                        employee.status === 'Suspended' ? '#ef4444' :
                         '#6b7280'
                     }}>
                   </div>
@@ -869,6 +891,8 @@ export default function Directory() {
                 setCurrentPage(1);
               }}
               className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+              aria-label="Items per page"
+              id="items-per-page"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>

@@ -158,8 +158,8 @@ export default {
     --sidebar-foreground: var(--foreground);
 
     /* Status colors per design system specification - UPDATED */
-    --status-green: #15803d;               /* Success/Active - Green 700 */
-    --status-red: #D32F2F;                 /* Error/Critical/Delete */
+    --status-green: #166534;               /* Success/Active - Green 800 for WCAG 2.2 AA */
+    --status-red: #991b1b;                 /* Error/Critical/Delete - Red 800 for WCAG 2.2 AA */
     --status-blue: #1976D2;                /* Info/Neutral actions */
     --status-amber: #F9A825;               /* Warning/Pending approvals */
     --neutral-gray: #9E9E9E;               /* Disabled/Inactive elements */

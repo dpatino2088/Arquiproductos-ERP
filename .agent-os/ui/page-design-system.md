@@ -132,7 +132,7 @@ This document defines the complete design system and behavioral patterns for all
 
 ### **Status Colors** (From approved tokens - UPDATED)
 ```css
---status-green: #15803d;    /* Success / Active - Green 700 (UPDATED) */
+--status-green: #166534;    /* Success / Active - Green 800 for WCAG 2.2 AA */
 --status-red: #D32F2F;      /* Error / Critical */
 --status-blue: #1976D2;     /* Info / Neutral */
 --status-amber: #F9A825;    /* Warning / Pending */
