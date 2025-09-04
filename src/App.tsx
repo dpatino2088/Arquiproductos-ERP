@@ -226,6 +226,41 @@ const MyExpenses = lazy(() => {
   return import('./pages/org/cmp/employee/expenses/MyExpenses');
 });
 
+const MyDevices = lazy(() => {
+  logger.debug('Loading My Devices component');
+  return import('./pages/org/cmp/employee/it-management/MyDevices');
+});
+
+const MyLicenses = lazy(() => {
+  logger.debug('Loading My Licenses component');
+  return import('./pages/org/cmp/employee/it-management/MyLicenses');
+});
+
+const MyITRequests = lazy(() => {
+  logger.debug('Loading My IT Requests component');
+  return import('./pages/org/cmp/employee/it-management/MyITRequests');
+});
+
+const FinancialWellness = lazy(() => {
+  logger.debug('Loading Financial Wellness component');
+  return import('./pages/org/cmp/employee/wellness/FinancialWellness');
+});
+
+const MentalHealth = lazy(() => {
+  logger.debug('Loading Mental Health component');
+  return import('./pages/org/cmp/employee/wellness/MentalHealth');
+});
+
+const Fitness = lazy(() => {
+  logger.debug('Loading Fitness component');
+  return import('./pages/org/cmp/employee/wellness/Fitness');
+});
+
+const Nutrition = lazy(() => {
+  logger.debug('Loading Nutrition component');
+  return import('./pages/org/cmp/employee/wellness/Nutrition');
+});
+
 
 
 function ThemeToggle() {
@@ -251,7 +286,7 @@ function AuthForms() {
 
   const handleSubmit = (data: { email: string; password: string; name?: string; confirmPassword?: string }) => {
     if (import.meta.env.DEV) {
-      console.log('Form submitted:', data);
+    console.log('Form submitted:', data);
     }
     if (isLogin) {
       login({ email: data.email, password: data.password });
@@ -369,7 +404,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   if (import.meta.env.DEV) {
-    console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
+  console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
   }
 
   // Setup routing
@@ -379,13 +414,13 @@ function App() {
       const { viewMode } = useUIStore.getState();
       router.setViewMode(viewMode);
       if (import.meta.env.DEV) {
-        console.log('Router initialized with view mode:', viewMode);
+      console.log('Router initialized with view mode:', viewMode);
       }
       
       // Set up unauthorized redirect handler
       router.setUnauthorizedRedirectHandler(() => {
         if (import.meta.env.DEV) {
-          console.log('Unauthorized access attempt blocked - redirecting to employee dashboard');
+        console.log('Unauthorized access attempt blocked - redirecting to employee dashboard');
         }
         setCurrentPage('employee-dashboard');
       });
@@ -488,6 +523,17 @@ function App() {
       // Employee Expenses routes
       router.addRoute('/employee/expenses/my-expenses', () => setCurrentPage('my-expenses'));
       
+      // Employee IT Management routes
+      router.addRoute('/employee/it-management/my-devices', () => setCurrentPage('my-devices'));
+      router.addRoute('/employee/it-management/my-licenses', () => setCurrentPage('my-licenses'));
+      router.addRoute('/employee/it-management/my-it-requests', () => setCurrentPage('my-it-requests'));
+
+      // Employee Wellness routes
+      router.addRoute('/employee/wellness/financial-wellness', () => setCurrentPage('financial-wellness'));
+      router.addRoute('/employee/wellness/mental-health', () => setCurrentPage('mental-health'));
+      router.addRoute('/employee/wellness/fitness', () => setCurrentPage('fitness'));
+      router.addRoute('/employee/wellness/nutrition', () => setCurrentPage('nutrition'));
+      
       // Legacy routes (still supported)
       router.addRoute('/employees', () => setCurrentPage('people'));
       router.addRoute('/reports', () => setCurrentPage('reports')); // Legacy route redirects to same page
@@ -501,7 +547,7 @@ function App() {
       router.addRoute('/knowledge-hub', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/performance', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/benefits', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/wellness', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/wellness', () => setCurrentPage('fitness'));
       router.addRoute('/expenses', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/it-management', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/settings', () => setCurrentPage('employee-dashboard'));
@@ -514,7 +560,7 @@ function App() {
         // This ensures the UI updates when router redirects
         const currentRoute = router.getCurrentRoute();
         if (import.meta.env.DEV) {
-          console.log('Route changed to:', currentRoute);
+        console.log('Route changed to:', currentRoute);
         }
       });
       
@@ -535,7 +581,7 @@ function App() {
       // If URL changed but router hasn't been notified, trigger navigation
       if (currentPath !== routerPath) {
         if (import.meta.env.DEV) {
-          console.log('Direct navigation detected:', currentPath, '-> triggering router navigation');
+        console.log('Direct navigation detected:', currentPath, '-> triggering router navigation');
         }
         router.navigate(currentPath, false);
       }
@@ -652,6 +698,20 @@ function App() {
         return <MyBenefits />;
       case 'my-expenses':
         return <MyExpenses />;
+      case 'my-devices':
+        return <MyDevices />;
+      case 'my-licenses':
+        return <MyLicenses />;
+      case 'my-it-requests':
+        return <MyITRequests />;
+      case 'financial-wellness':
+        return <FinancialWellness />;
+      case 'mental-health':
+        return <MentalHealth />;
+      case 'fitness':
+        return <Fitness />;
+      case 'nutrition':
+        return <Nutrition />;
       default:
         return <EmployeeDashboard />;
     }

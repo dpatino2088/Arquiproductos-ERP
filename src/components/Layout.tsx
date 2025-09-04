@@ -213,6 +213,9 @@ function Layout({ children }: LayoutProps) {
       case 'IT Management':
         // IT Management is active if we're on any it-management route
         return currentRoute.includes('/it-management');
+      case 'Wellness':
+        // Wellness is active if we're on any wellness route
+        return currentRoute.includes('/wellness');
       case 'Payroll':
         // Payroll is active if we're on any payroll route
         return currentRoute.includes('/payroll');
@@ -241,27 +244,29 @@ function Layout({ children }: LayoutProps) {
       const remainingItems = restOfBase.slice(1); // Everything after Recruiting
       return [dashboardItem, recruitingItem, peopleItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports/company-reports', icon: Printer }];
     } else {
+      // Employee view navigation in specific order
       const myInfoItem = { name: 'My Info', href: '/people', icon: User };
-      // For employee view, skip Recruiting (index 0) and modify Time & Attendance route
       const timeAttendanceItem = { name: 'Time & Attendance', href: '/employee/time-and-attendance/my-clock', icon: Clock };
-      // For employee view, modify PTO & Leave route
-      const ptoLeaveItem = { name: 'PTO & Leave', href: '/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
-      // For employee view, modify Company Knowledge route
+      const ptoLeaveItem = { name: 'PTO & Leaves', href: '/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
       const companyKnowledgeItem = { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked };
-      // For employee view, modify Performance route
       const performanceItem = { name: 'Performance', href: '/employee/performance/my-performance', icon: ChartNoAxesCombined };
-      // For employee view, modify Benefits route
       const benefitsItem = { name: 'Benefits', href: '/employee/benefits/my-benefits', icon: WalletCards };
-      const remainingItems = restOfBase.slice(2); // Everything after Time & Attendance
-      // Replace PTO & Leave, Company Knowledge, Performance, and Benefits in remainingItems with employee versions
-      const modifiedRemainingItems = remainingItems.map(item => {
-        if (item.name === 'PTO & Leave') return ptoLeaveItem;
-        if (item.name === 'Company Knowledge') return companyKnowledgeItem;
-        if (item.name === 'Performance') return performanceItem;
-        if (item.name === 'Benefits') return benefitsItem;
-        return item;
-      });
-      return [dashboardItem, myInfoItem, timeAttendanceItem, ...modifiedRemainingItems, ...employeeOnlyNavigation, ...sharedManagementNavigation];
+      const wellnessItem = { name: 'Wellness', href: '/employee/wellness/fitness', icon: HeartPulse };
+      const expensesItem = { name: 'Expenses', href: '/employee/expenses/my-expenses', icon: Receipt };
+      const itManagementItem = { name: 'IT Management', href: '/employee/it-management/my-devices', icon: Cpu };
+      
+      return [
+        dashboardItem, 
+        myInfoItem, 
+        timeAttendanceItem, 
+        ptoLeaveItem, 
+        companyKnowledgeItem, 
+        performanceItem, 
+        benefitsItem, 
+        wellnessItem,
+        expensesItem, 
+        itManagementItem
+      ];
     }
   }, [viewMode]);
 
