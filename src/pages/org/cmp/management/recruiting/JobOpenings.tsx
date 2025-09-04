@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../../../hooks/useSubmoduleNav';
-import { User } from 'lucide-react';
+import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
+import { Briefcase } from 'lucide-react';
 
-export default function MyInfo() {
+export default function JobOpenings() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for My Information
-    registerSubmodules('My Information', [
-      { id: 'my-info', label: 'My Info', href: '/employee/my-info', icon: User }
+    // Register submodule tabs for Recruiting
+    registerSubmodules('Recruiting', [
+      { id: 'job-openings', label: 'Job Openings', href: '/management/recruiting/job-openings', icon: Briefcase }
     ]);
   }, [registerSubmodules]);
 
@@ -16,8 +16,8 @@ export default function MyInfo() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">My Information</h1>
-        <p className="text-xs text-muted-foreground">View and manage your personal information</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Job Openings</h1>
+        <p className="text-xs text-muted-foreground">Manage and track job openings and recruitment process</p>
       </div>
 
       {/* Content */}

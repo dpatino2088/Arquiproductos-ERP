@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../../../hooks/useSubmoduleNav';
-import { User } from 'lucide-react';
+import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
+import { WalletCards } from 'lucide-react';
 
-export default function MyInfo() {
+export default function MyBenefits() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for My Information
-    registerSubmodules('My Information', [
-      { id: 'my-info', label: 'My Info', href: '/employee/my-info', icon: User }
+    // Register submodule tabs for Benefits
+    registerSubmodules('Benefits', [
+      { id: 'my-benefits', label: 'My Benefits', href: '/employee/benefits/my-benefits', icon: WalletCards }
     ]);
   }, [registerSubmodules]);
 
@@ -16,8 +16,8 @@ export default function MyInfo() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">My Information</h1>
-        <p className="text-xs text-muted-foreground">View and manage your personal information</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">My Benefits</h1>
+        <p className="text-xs text-muted-foreground">View and manage your personal benefits and coverage</p>
       </div>
 
       {/* Content */}

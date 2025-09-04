@@ -1,16 +1,15 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
-import { Calendar as CalendarIcon, FileText, TrendingUp } from 'lucide-react';
+import { Calendar, Wallet } from 'lucide-react';
 
-export default function TeamBalances() {
+export default function MyRequests() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
     // Register submodule tabs for PTO & Leaves
     registerSubmodules('PTO & Leaves', [
-      { id: 'team-balances', label: 'Team Balances', href: '/management/pto-and-leaves/team-balances', icon: TrendingUp },
-      { id: 'team-leave-requests', label: 'Team Leave Requests', href: '/management/pto-and-leaves/team-leave-requests', icon: FileText },
-      { id: 'team-leave-calendar', label: 'Team Leave Calendar', href: '/management/pto-and-leaves/team-leave-calendar', icon: CalendarIcon }
+      { id: 'my-balance', label: 'My Balance', href: '/employee/pto-and-leaves/my-balance', icon: Wallet },
+      { id: 'my-requests', label: 'My Requests', href: '/employee/pto-and-leaves/my-requests', icon: Calendar }
     ]);
   }, [registerSubmodules]);
 
@@ -18,8 +17,8 @@ export default function TeamBalances() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Team Balances</h1>
-        <p className="text-xs text-muted-foreground">View and manage team PTO and leave balances</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">My Requests</h1>
+        <p className="text-xs text-muted-foreground">Submit and track your PTO and leave requests</p>
       </div>
 
       {/* Content */}

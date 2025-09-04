@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
-import { useSubmoduleNav } from '../../../../hooks/useSubmoduleNav';
-import { User } from 'lucide-react';
+import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
+import { Receipt } from 'lucide-react';
 
-export default function MyInfo() {
+export default function MyExpenses() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for My Information
-    registerSubmodules('My Information', [
-      { id: 'my-info', label: 'My Info', href: '/employee/my-info', icon: User }
+    // Register submodule tabs for Expenses
+    registerSubmodules('Expenses', [
+      { id: 'my-expenses', label: 'My Expenses', href: '/employee/expenses/my-expenses', icon: Receipt }
     ]);
   }, [registerSubmodules]);
 
@@ -16,8 +16,8 @@ export default function MyInfo() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">My Information</h1>
-        <p className="text-xs text-muted-foreground">View and manage your personal information</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">My Expenses</h1>
+        <p className="text-xs text-muted-foreground">Submit and track your personal expense reports</p>
       </div>
 
       {/* Content */}

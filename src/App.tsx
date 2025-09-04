@@ -103,7 +103,7 @@ const TeamKnowledgeCompliance = lazy(() => {
 
 const AboutTheCompany = lazy(() => {
   logger.debug('Loading About the Company component');
-  return import('./pages/org/cmp/management/company-knowledge/AboutTheCompany');
+  return import('./pages/org/cmp/AboutTheCompany');
 });
 
 const TeamBenefits = lazy(() => {
@@ -149,6 +149,81 @@ const CompanyReports = lazy(() => {
 const CompanySettings = lazy(() => {
   logger.debug('Loading Company Settings component');
   return import('./pages/org/cmp/management/settings/CompanySettings');
+});
+
+const JobOpenings = lazy(() => {
+  logger.debug('Loading Job Openings component');
+  return import('./pages/org/cmp/management/recruiting/JobOpenings');
+});
+
+const MyClock = lazy(() => {
+  logger.debug('Loading My Clock component');
+  return import('./pages/org/cmp/employee/time-and-attendance/MyClock');
+});
+
+const MyPlanner = lazy(() => {
+  logger.debug('Loading My Planner component');
+  return import('./pages/org/cmp/employee/time-and-attendance/MyPlanner');
+});
+
+const MyAttendance = lazy(() => {
+  logger.debug('Loading My Attendance component');
+  return import('./pages/org/cmp/employee/time-and-attendance/MyAttendance');
+});
+
+const MyRequests = lazy(() => {
+  logger.debug('Loading My Requests component');
+  return import('./pages/org/cmp/employee/pto-and-leaves/MyRequests');
+});
+
+const MyBalance = lazy(() => {
+  logger.debug('Loading My Balance component');
+  return import('./pages/org/cmp/employee/pto-and-leaves/MyBalance');
+});
+
+const MyResponsibility = lazy(() => {
+  logger.debug('Loading My Responsibility component');
+  return import('./pages/org/cmp/employee/company-knowledge/MyResponsibility');
+});
+
+const ProcessesAndPolicies = lazy(() => {
+  logger.debug('Loading Processes and Policies component');
+  return import('./pages/org/cmp/employee/company-knowledge/ProcessesAndPolicies');
+});
+
+const DocumentsAndFiles = lazy(() => {
+  logger.debug('Loading Documents and Files component');
+  return import('./pages/org/cmp/employee/company-knowledge/DocumentsAndFiles');
+});
+
+const CoursesAndTraining = lazy(() => {
+  logger.debug('Loading Courses and Training component');
+  return import('./pages/org/cmp/employee/company-knowledge/CoursesAndTraining');
+});
+
+const MyPerformance = lazy(() => {
+  logger.debug('Loading My Performance component');
+  return import('./pages/org/cmp/employee/performance/MyPerformance');
+});
+
+const MyFeedbackAndRecognition = lazy(() => {
+  logger.debug('Loading My Feedback and Recognition component');
+  return import('./pages/org/cmp/employee/performance/MyFeedbackAndRecognition');
+});
+
+const MyOneOnOne = lazy(() => {
+  logger.debug('Loading My One-on-One component');
+  return import('./pages/org/cmp/employee/performance/MyOneOnOne');
+});
+
+const MyBenefits = lazy(() => {
+  logger.debug('Loading My Benefits component');
+  return import('./pages/org/cmp/employee/benefits/MyBenefits');
+});
+
+const MyExpenses = lazy(() => {
+  logger.debug('Loading My Expenses component');
+  return import('./pages/org/cmp/employee/expenses/MyExpenses');
 });
 
 
@@ -351,6 +426,7 @@ function App() {
       
       // Company Knowledge routes
       router.addRoute('/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
+      router.addRoute('/cmp/about-the-company', () => setCurrentPage('about-company'));
       router.addRoute('/management/company-knowledge/team-responsibilities', () => setCurrentPage('team-responsibilities'));
       router.addRoute('/management/company-knowledge/team-knowledge-compliance', () => setCurrentPage('team-knowledge-compliance'));
       
@@ -374,6 +450,35 @@ function App() {
       
       // Settings routes
       router.addRoute('/management/settings/company-settings', () => setCurrentPage('company-settings'));
+      
+      // Recruiting routes
+      router.addRoute('/management/recruiting/job-openings', () => setCurrentPage('job-openings'));
+      
+      // Employee Time & Attendance routes
+      router.addRoute('/employee/time-and-attendance/my-clock', () => setCurrentPage('my-clock'));
+      router.addRoute('/employee/time-and-attendance/my-planner', () => setCurrentPage('my-planner'));
+      router.addRoute('/employee/time-and-attendance/my-attendance', () => setCurrentPage('my-attendance'));
+      
+      // Employee PTO & Leaves routes
+      router.addRoute('/employee/pto-and-leaves/my-requests', () => setCurrentPage('my-requests'));
+      router.addRoute('/employee/pto-and-leaves/my-balance', () => setCurrentPage('my-balance'));
+      
+      // Employee Company Knowledge routes
+      router.addRoute('/employee/company-knowledge/my-responsibility', () => setCurrentPage('my-responsibility'));
+      router.addRoute('/employee/company-knowledge/processes-and-policies', () => setCurrentPage('processes-policies'));
+      router.addRoute('/employee/company-knowledge/documents-and-files', () => setCurrentPage('documents-files'));
+      router.addRoute('/employee/company-knowledge/courses-and-training', () => setCurrentPage('courses-training'));
+      
+      // Employee Performance routes
+      router.addRoute('/employee/performance/my-performance', () => setCurrentPage('my-performance'));
+      router.addRoute('/employee/performance/my-feedback-and-recognition', () => setCurrentPage('my-feedback-recognition'));
+      router.addRoute('/employee/performance/my-one-on-one', () => setCurrentPage('my-one-on-one'));
+      
+      // Employee Benefits routes
+      router.addRoute('/employee/benefits/my-benefits', () => setCurrentPage('my-benefits'));
+      
+      // Employee Expenses routes
+      router.addRoute('/employee/expenses/my-expenses', () => setCurrentPage('my-expenses'));
       
       // Legacy routes (still supported)
       router.addRoute('/employees', () => setCurrentPage('people'));
@@ -505,6 +610,36 @@ function App() {
         return <CompanyReports />;
       case 'company-settings':
         return <CompanySettings />;
+      case 'job-openings':
+        return <JobOpenings />;
+      case 'my-clock':
+        return <MyClock />;
+      case 'my-planner':
+        return <MyPlanner />;
+      case 'my-attendance':
+        return <MyAttendance />;
+      case 'my-requests':
+        return <MyRequests />;
+      case 'my-balance':
+        return <MyBalance />;
+      case 'my-responsibility':
+        return <MyResponsibility />;
+      case 'processes-policies':
+        return <ProcessesAndPolicies />;
+      case 'documents-files':
+        return <DocumentsAndFiles />;
+      case 'courses-training':
+        return <CoursesAndTraining />;
+      case 'my-performance':
+        return <MyPerformance />;
+      case 'my-feedback-recognition':
+        return <MyFeedbackAndRecognition />;
+      case 'my-one-on-one':
+        return <MyOneOnOne />;
+      case 'my-benefits':
+        return <MyBenefits />;
+      case 'my-expenses':
+        return <MyExpenses />;
       default:
         return <EmployeeDashboard />;
     }

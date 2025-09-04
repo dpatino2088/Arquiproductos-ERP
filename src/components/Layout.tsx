@@ -19,12 +19,14 @@ import {
   Receipt,
   Printer,
   HandCoins,
+  Briefcase,
   Cpu,
   ChartNoAxesCombined,
   HeartPulse,
   BriefcaseBusiness,
   CalendarCheck,
-  BookMarked
+  BookMarked,
+  WalletCards
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -89,16 +91,17 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
+  { name: 'Recruiting', href: '/management/recruiting/job-openings', icon: Briefcase },
   { name: 'Time & Attendance', href: '/management/time-and-attendance/team-planner', icon: Clock },
-  { name: 'PTO & Leave', href: '/management/pto-and-leaves/team-leave-calendar', icon: CalendarCheck },
-  { name: 'Knowledge Hub', href: '/management/company-knowledge/about-the-company', icon: BookMarked },
+  { name: 'PTO & Leave', href: '/management/pto-and-leaves/team-balances', icon: CalendarCheck },
+  { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked },
   { name: 'Performance', href: '/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
-  { name: 'Benefits', href: '/management/benefits/team-benefits', icon: BriefcaseBusiness },
+  { name: 'Benefits', href: '/management/benefits/team-benefits', icon: WalletCards },
 ];
 
 const employeeOnlyNavigation = [
   { name: 'Wellness', href: '/wellness', icon: HeartPulse },
-  { name: 'Expenses', href: '/management/expenses/team-expenses', icon: Receipt },
+  { name: 'Expenses', href: '/employee/expenses/my-expenses', icon: Receipt },
 ];
 
 const managementExpenses = [
@@ -181,6 +184,9 @@ function Layout({ children }: LayoutProps) {
       case 'Dashboard':
         // Dashboard is active if we're on any dashboard route or inbox
         return currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
+      case 'Recruiting':
+        // Recruiting is active if we're on any recruiting route
+        return currentRoute.includes('/recruiting');
       case 'People':
         // People is active if we're on any people route
         return currentRoute.includes('/people');
@@ -196,9 +202,9 @@ function Layout({ children }: LayoutProps) {
       case 'Performance':
         // Performance is active if we're on any performance route
         return currentRoute.includes('/performance');
-      case 'Knowledge Hub':
-        // Knowledge Hub is active if we're on any company-knowledge route
-        return currentRoute.includes('/company-knowledge');
+      case 'Company Knowledge':
+        // Company Knowledge is active if we're on any company-knowledge route or cmp/about-the-company
+        return currentRoute.includes('/company-knowledge') || currentRoute.includes('/cmp/about-the-company');
       case 'Benefits':
         // Benefits is active if we're on any benefits route
         return currentRoute.includes('/benefits');
@@ -231,10 +237,32 @@ function Layout({ children }: LayoutProps) {
     
     if (viewMode === 'manager') {
       const peopleItem = { name: 'People', href: '/people', icon: Users };
-      return [dashboardItem, peopleItem, ...restOfBase, ...managementExpenses, { name: 'Payroll', href: '/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports/company-reports', icon: Printer }];
+      // Insert People after Recruiting (index 1) and before Time & Attendance (index 2)
+      const recruitingItem = restOfBase[0]; // Recruiting
+      const remainingItems = restOfBase.slice(1); // Everything after Recruiting
+      return [dashboardItem, recruitingItem, peopleItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports/company-reports', icon: Printer }];
     } else {
       const myInfoItem = { name: 'My Info', href: '/people', icon: User };
-      return [dashboardItem, myInfoItem, ...restOfBase, ...employeeOnlyNavigation, ...sharedManagementNavigation];
+      // For employee view, skip Recruiting (index 0) and modify Time & Attendance route
+      const timeAttendanceItem = { name: 'Time & Attendance', href: '/employee/time-and-attendance/my-clock', icon: Clock };
+      // For employee view, modify PTO & Leave route
+      const ptoLeaveItem = { name: 'PTO & Leave', href: '/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
+      // For employee view, modify Company Knowledge route
+      const companyKnowledgeItem = { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked };
+      // For employee view, modify Performance route
+      const performanceItem = { name: 'Performance', href: '/employee/performance/my-performance', icon: ChartNoAxesCombined };
+      // For employee view, modify Benefits route
+      const benefitsItem = { name: 'Benefits', href: '/employee/benefits/my-benefits', icon: WalletCards };
+      const remainingItems = restOfBase.slice(2); // Everything after Time & Attendance
+      // Replace PTO & Leave, Company Knowledge, Performance, and Benefits in remainingItems with employee versions
+      const modifiedRemainingItems = remainingItems.map(item => {
+        if (item.name === 'PTO & Leave') return ptoLeaveItem;
+        if (item.name === 'Company Knowledge') return companyKnowledgeItem;
+        if (item.name === 'Performance') return performanceItem;
+        if (item.name === 'Benefits') return benefitsItem;
+        return item;
+      });
+      return [dashboardItem, myInfoItem, timeAttendanceItem, ...modifiedRemainingItems, ...employeeOnlyNavigation, ...sharedManagementNavigation];
     }
   }, [viewMode]);
 
