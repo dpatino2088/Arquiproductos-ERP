@@ -23,7 +23,6 @@ import {
   Cpu,
   ChartNoAxesCombined,
   HeartPulse,
-  BriefcaseBusiness,
   CalendarCheck,
   BookMarked,
   WalletCards
