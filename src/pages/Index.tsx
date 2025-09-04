@@ -103,25 +103,41 @@ export default function Dashboard() {
       title: 'Add New Employee', 
       icon: UserPlus, 
       type: 'active',
-      onClick: () => console.log('Add employee clicked')
+      onClick: () => {
+        if (import.meta.env.DEV) {
+          console.log('Add employee clicked');
+        }
+      }
     },
     { 
       title: 'Process Payroll', 
       icon: DollarSign, 
       type: 'total',
-      onClick: () => console.log('Process payroll clicked')
+      onClick: () => {
+        if (import.meta.env.DEV) {
+          console.log('Process payroll clicked');
+        }
+      }
     },
     { 
       title: 'Generate Reports', 
       icon: FileText, 
       type: 'pending',
-      onClick: () => console.log('Generate reports clicked')
+      onClick: () => {
+        if (import.meta.env.DEV) {
+          console.log('Generate reports clicked');
+        }
+      }
     },
     { 
       title: 'Review Performance', 
       icon: Award, 
       type: 'active',
-      onClick: () => console.log('Review performance clicked')
+      onClick: () => {
+        if (import.meta.env.DEV) {
+          console.log('Review performance clicked');
+        }
+      }
     }
   ], []);
 

@@ -279,7 +279,9 @@ function Layout({ children }: LayoutProps) {
   }, [toggleSidebarCollapsed]);
 
   const handleHelpClick = useCallback(() => {
-    console.log('Help/Knowledgebase clicked');
+    if (import.meta.env.DEV) {
+      console.log('Help/Knowledgebase clicked');
+    }
   }, []);
 
   const handleViewToggle = useCallback(() => {

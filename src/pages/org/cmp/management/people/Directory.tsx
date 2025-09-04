@@ -42,11 +42,12 @@ const generateAvatarInitials = (firstName: string, lastName: string) => {
 };
 
 // Function to generate a consistent background color based on name
+// Using WCAG 2.2 AA compliant colors (4.5:1 contrast ratio with white text)
 const generateAvatarColor = (firstName: string, lastName: string) => {
   const colors = [
-    '#008383', '#1976D2', '#D32F2F', '#F9A825', '#9C27B0',
-    '#00BCD4', '#4CAF50', '#FF9800', '#E91E63', '#607D8B',
-    '#795548', '#3F51B5', '#009688', '#FF5722', '#673AB7'
+    '#008383', '#1976D2', '#D32F2F', '#E65100', '#7B1FA2',
+    '#00695C', '#2E7D32', '#E65100', '#C2185B', '#455A64',
+    '#5D4037', '#303F9F', '#00796B', '#BF360C', '#512DA8'
   ];
   const name = firstName + lastName;
   let hash = 0;

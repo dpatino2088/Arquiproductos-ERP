@@ -250,7 +250,9 @@ function AuthForms() {
   const { login, register, isLoading, error, clearError } = useAuth();
 
   const handleSubmit = (data: { email: string; password: string; name?: string; confirmPassword?: string }) => {
-    console.log('Form submitted:', data);
+    if (import.meta.env.DEV) {
+      console.log('Form submitted:', data);
+    }
     if (isLogin) {
       login({ email: data.email, password: data.password });
     } else {
@@ -366,7 +368,9 @@ function App() {
   const { isAuthenticated, user, isLoading } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
 
-  console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
+  if (import.meta.env.DEV) {
+    console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
+  }
 
   // Setup routing
   useEffect(() => {
@@ -374,11 +378,15 @@ function App() {
       // Initialize router view mode to match UI store
       const { viewMode } = useUIStore.getState();
       router.setViewMode(viewMode);
-      console.log('Router initialized with view mode:', viewMode);
+      if (import.meta.env.DEV) {
+        console.log('Router initialized with view mode:', viewMode);
+      }
       
       // Set up unauthorized redirect handler
       router.setUnauthorizedRedirectHandler(() => {
-        console.log('Unauthorized access attempt blocked - redirecting to employee dashboard');
+        if (import.meta.env.DEV) {
+          console.log('Unauthorized access attempt blocked - redirecting to employee dashboard');
+        }
         setCurrentPage('employee-dashboard');
       });
       
@@ -505,7 +513,9 @@ function App() {
       const unsubscribe = router.addListener(() => {
         // This ensures the UI updates when router redirects
         const currentRoute = router.getCurrentRoute();
-        console.log('Route changed to:', currentRoute);
+        if (import.meta.env.DEV) {
+          console.log('Route changed to:', currentRoute);
+        }
       });
       
       return () => {
@@ -524,7 +534,9 @@ function App() {
       
       // If URL changed but router hasn't been notified, trigger navigation
       if (currentPath !== routerPath) {
-        console.log('Direct navigation detected:', currentPath, '-> triggering router navigation');
+        if (import.meta.env.DEV) {
+          console.log('Direct navigation detected:', currentPath, '-> triggering router navigation');
+        }
         router.navigate(currentPath, false);
       }
     };
