@@ -1,15 +1,14 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 
-export default function MyDevices() {
+export default function Onboarding() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for IT Management
-    registerSubmodules('IT Management', [
-      { id: 'my-devices', label: 'My Devices', href: '/org/cmp/employee/it-management/my-devices' },
-      { id: 'my-licenses', label: 'My Licenses', href: '/org/cmp/employee/it-management/my-licenses' },
-      { id: 'my-it-requests', label: 'My IT Requests', href: '/org/cmp/employee/it-management/my-it-requests' }
+    registerSubmodules('Recruiting', [
+      { id: 'job-openings', label: 'Job Openings', href: '/org/cmp/management/recruiting/job-openings' },
+      { id: 'candidates', label: 'Candidates', href: '/org/cmp/management/recruiting/candidates' },
+      { id: 'onboarding', label: 'Onboarding', href: '/org/cmp/management/recruiting/onboarding' }
     ]);
   }, [registerSubmodules]);
 
@@ -17,8 +16,8 @@ export default function MyDevices() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">My Devices</h1>
-        <p className="text-xs text-muted-foreground">Manage your assigned devices and hardware</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Onboarding</h1>
+        <p className="text-xs text-muted-foreground">Manage new hire onboarding processes and documentation</p>
       </div>
 
       {/* Content */}

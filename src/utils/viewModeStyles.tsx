@@ -1,25 +1,26 @@
+import React from 'react';
 import { ViewMode } from '../stores/ui-store';
 
 // View mode color constants
 export const VIEW_MODE_COLORS = {
   employee: {
     sidebar: {
-      background: 'white',
-      border: 'var(--gray-250)',
+      background: 'var(--gray-250)',
+      border: 'var(--gray-300)',
       textPrimary: 'var(--graphite-black-hex)',
       textSecondary: 'var(--gray-950)'
     },
     buttons: {
       active: {
-        background: 'var(--gray-250)',
-        color: 'var(--teal-800)',
-        border: 'var(--teal-800)'
+        background: 'white',
+        color: 'var(--teal-700)',
+        border: 'var(--teal-700)'
       },
       inactive: {
         color: 'var(--graphite-black-hex)'
       },
       hover: {
-        background: 'var(--gray-250)'
+        background: 'white'
       }
     }
   },
@@ -67,14 +68,14 @@ export const VIEW_MODE_COLORS = {
   },
   vap: {
     sidebar: {
-      background: '#1b3556', // Navy-800
-      border: '#1b3556',
+      background: 'var(--navy-800)', // Navy-800
+      border: 'var(--navy-800)',
       textPrimary: '#FFFFFF',
       textSecondary: 'var(--gray-100)'
     },
     buttons: {
       active: {
-        background: '#10243d', // Navy-900
+        background: 'var(--navy-900)', // Navy-900
         color: 'var(--teal-500)',
         border: 'var(--teal-500)'
       },
@@ -82,20 +83,20 @@ export const VIEW_MODE_COLORS = {
         color: '#FFFFFF'
       },
       hover: {
-        background: '#10243d'
+        background: 'var(--navy-900)'
       }
     }
   },
   rp: {
     sidebar: {
-      background: '#134e4a', // Teal-900
-      border: '#134e4a',
+      background: 'var(--navy-800)', // Navy-800 (same as VAP View)
+      border: 'var(--navy-800)',
       textPrimary: '#FFFFFF',
       textSecondary: 'var(--gray-100)'
     },
     buttons: {
       active: {
-        background: '#042f2e', // Teal-950
+        background: 'var(--navy-900)', // Navy-900 (same as VAP View)
         color: 'var(--teal-500)',
         border: 'var(--teal-500)'
       },
@@ -103,28 +104,28 @@ export const VIEW_MODE_COLORS = {
         color: '#FFFFFF'
       },
       hover: {
-        background: '#042f2e'
+        background: 'var(--navy-900)'
       }
     }
   },
   personal: {
     sidebar: {
-      background: '#1b3556', // Navy-800 (same as VAP)
-      border: '#1b3556',
-      textPrimary: '#FFFFFF',
-      textSecondary: 'var(--gray-100)'
+      background: 'var(--gray-250)', // Same as Employee View
+      border: 'var(--gray-300)',
+      textPrimary: '#212121', // Black for unselected text
+      textSecondary: '#212121' // Black for secondary text
     },
     buttons: {
       active: {
-        background: '#10243d', // Navy-900 (same as VAP)
-        color: 'var(--teal-500)',
-        border: 'var(--teal-500)'
+        background: 'white', // Same as Employee View
+        color: 'var(--teal-700)', // Selected icons and text
+        border: 'var(--teal-700)'
       },
       inactive: {
-        color: '#FFFFFF'
+        color: '#212121' // Unselected icons and labels in black
       },
       hover: {
-        background: '#10243d'
+        background: 'white'
       }
     }
   }

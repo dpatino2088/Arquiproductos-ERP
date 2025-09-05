@@ -226,6 +226,16 @@ const JobOpenings = lazy(() => {
   return import('./pages/org/cmp/management/recruiting/JobOpenings');
 });
 
+const Candidates = lazy(() => {
+  logger.debug('Loading Candidates component');
+  return import('./pages/org/cmp/management/recruiting/Candidates');
+});
+
+const Onboarding = lazy(() => {
+  logger.debug('Loading Onboarding component');
+  return import('./pages/org/cmp/management/recruiting/Onboarding');
+});
+
 const MyClock = lazy(() => {
   logger.debug('Loading My Clock component');
   return import('./pages/org/cmp/employee/time-and-attendance/MyClock');
@@ -631,6 +641,8 @@ function App() {
       
       // Recruiting routes
       router.addRoute('/org/cmp/management/recruiting/job-openings', () => setCurrentPage('job-openings'));
+      router.addRoute('/org/cmp/management/recruiting/candidates', () => setCurrentPage('candidates'));
+      router.addRoute('/org/cmp/management/recruiting/onboarding', () => setCurrentPage('onboarding'));
       
       // Employee Time & Attendance routes
       router.addRoute('/org/cmp/employee/time-and-attendance/my-clock', () => setCurrentPage('my-clock'));
@@ -833,6 +845,10 @@ function App() {
         return <CompanySettings />;
       case 'job-openings':
         return <JobOpenings />;
+      case 'candidates':
+        return <Candidates />;
+      case 'onboarding':
+        return <Onboarding />;
       case 'my-clock':
         return <MyClock />;
       case 'my-planner':

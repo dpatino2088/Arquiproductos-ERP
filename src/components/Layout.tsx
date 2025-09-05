@@ -624,14 +624,14 @@ function Layout({ children }: LayoutProps) {
                           <div className="text-xs text-gray-500 mb-2">View Mode</div>
                           <div className="space-y-1">
                             {/* Group View Button */}
-                          <button
-                            onClick={() => {
+                            <button
+                              onClick={() => {
                                 if (viewMode !== 'group') {
                                   setViewMode('group');
                                   router.setViewMode('group');
                                   router.navigate('/org/grp/dashboard');
                                   setCurrentRoute('/org/grp/dashboard');
-                              setIsUserMenuOpen(false);
+                                  setIsUserMenuOpen(false);
                                 }
                               }}
                               className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
@@ -692,6 +692,29 @@ function Layout({ children }: LayoutProps) {
                               Employee View {viewMode === 'employee' && '✓'}
                             </button>
                             
+                            {/* Personal View Button */}
+                            <button
+                              onClick={() => {
+                                if (viewMode !== 'personal') {
+                                  setViewMode('personal');
+                                  router.setViewMode('personal');
+                                  router.navigate('/me/dashboard');
+                                  setCurrentRoute('/me/dashboard');
+                                  setIsUserMenuOpen(false);
+                                }
+                              }}
+                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
+                                viewMode === 'personal' 
+                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
+                                  : 'bg-gray-50 hover:bg-gray-100'
+                              }`}
+                              style={{ color: viewMode === 'personal' ? 'var(--blue-800)' : 'var(--gray-950)' }}
+                              data-testid="personal-view-btn"
+                              disabled={viewMode === 'personal'}
+                            >
+                              Personal View {viewMode === 'personal' && '✓'}
+                            </button>
+                            
                             {/* VAP View Button */}
                             <button
                               onClick={() => {
@@ -737,29 +760,6 @@ function Layout({ children }: LayoutProps) {
                             >
                               RP View {viewMode === 'rp' && '✓'}
                             </button>
-                            
-                            {/* Personal View Button */}
-                            <button
-                              onClick={() => {
-                                if (viewMode !== 'personal') {
-                                  setViewMode('personal');
-                                  router.setViewMode('personal');
-                                  router.navigate('/me/dashboard');
-                                  setCurrentRoute('/me/dashboard');
-                                  setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'personal' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'personal' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="personal-view-btn"
-                              disabled={viewMode === 'personal'}
-                            >
-                              Personal View {viewMode === 'personal' && '✓'}
-                          </button>
                           </div>
                         </div>
                       </div>
