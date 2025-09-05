@@ -39,6 +39,26 @@ const GroupSettings = lazy(() => {
   return import('./pages/org/grp/Settings');
 });
 
+const VapDashboard = lazy(() => {
+  logger.debug('Loading VapDashboard component');
+  return import('./pages/org/vap/Dashboard');
+});
+
+const VapCompanies = lazy(() => {
+  logger.debug('Loading VapCompanies component');
+  return import('./pages/org/vap/Companies');
+});
+
+const VapReports = lazy(() => {
+  logger.debug('Loading VapReports component');
+  return import('./pages/org/vap/Reports');
+});
+
+const VapSettings = lazy(() => {
+  logger.debug('Loading VapSettings component');
+  return import('./pages/org/vap/Settings');
+});
+
 const Inbox = lazy(() => {
   logger.debug('Loading Inbox component');
   return import('./pages/org/cmp/Inbox');
@@ -486,6 +506,24 @@ function App() {
         setViewMode('group');
         setCurrentPage('group-settings');
       });
+
+      // VAP view routes
+      router.addRoute('/org/vap/dashboard', () => {
+        setViewMode('vap');
+        setCurrentPage('vap-dashboard');
+      });
+      router.addRoute('/org/vap/companies', () => {
+        setViewMode('vap');
+        setCurrentPage('vap-companies');
+      });
+      router.addRoute('/org/vap/reports', () => {
+        setViewMode('vap');
+        setCurrentPage('vap-reports');
+      });
+      router.addRoute('/org/vap/settings', () => {
+        setViewMode('vap');
+        setCurrentPage('vap-settings');
+      });
       
       // Management routes
       router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));
@@ -660,6 +698,14 @@ function App() {
         return <GroupReports />;
       case 'group-settings':
         return <GroupSettings />;
+      case 'vap-dashboard':
+        return <VapDashboard />;
+      case 'vap-companies':
+        return <VapCompanies />;
+      case 'vap-reports':
+        return <VapReports />;
+      case 'vap-settings':
+        return <VapSettings />;
       case 'inbox':
         return <Inbox />;
       case 'my-info':

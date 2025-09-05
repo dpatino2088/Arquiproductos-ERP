@@ -1,21 +1,21 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../hooks/useSubmoduleNav';
-import { Home } from 'lucide-react';
+import { Settings as SettingsIcon } from 'lucide-react';
 
-export default function Dashboard() {
+export default function Settings() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    registerSubmodules('Home', [
-      { id: 'dashboard', label: 'Dashboard', href: '/org/grp/dashboard', icon: Home }
+    registerSubmodules('Settings', [
+      { id: 'settings', label: 'Settings', href: '/org/vap/settings', icon: SettingsIcon }
     ]);
   }, [registerSubmodules]);
 
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Group Dashboard</h1>
-        <p className="text-xs text-muted-foreground">Overview of your group's activities</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Settings</h1>
+        <p className="text-xs text-muted-foreground">Configure VAP settings and preferences</p>
       </div>
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">

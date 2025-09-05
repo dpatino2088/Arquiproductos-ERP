@@ -39,13 +39,13 @@ const NavigationItem = memo(({
   isActive, 
   isCollapsed, 
   onClick,
-  viewMode = 'employee'
+  viewMode
 }: {
   item: { name: string; href: string; icon: React.ComponentType<{ style?: React.CSSProperties }> };
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
-  viewMode?: 'employee' | 'manager' | 'group';
+  viewMode: 'employee' | 'manager' | 'group' | 'vap';
 }) => (
   <button
     onClick={onClick}
@@ -55,16 +55,16 @@ const NavigationItem = memo(({
       minHeight: '36px',
       padding: '12px 16px 12px 14px',
       color: isActive ? 
-        (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-        (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+        (viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+        (viewMode === 'vap' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
       backgroundColor: isActive ? 
-        (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+        (viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
       borderLeft: isActive ? 
-        `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+        `3px solid ${viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
     }}
     onMouseEnter={(e) => {
       if (!isActive) {
-        e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+        e.currentTarget.style.backgroundColor = viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
       }
     }}
     onMouseLeave={(e) => {
@@ -84,8 +84,8 @@ const NavigationItem = memo(({
         pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
         color: isActive ? 
-          (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-          (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)')
+          (viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+          (viewMode === 'vap' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)')
       }}
     >
       {item.name}
@@ -244,12 +244,19 @@ function Layout({ children }: LayoutProps) {
     const dashboardItem = baseNavigation[0]; // Dashboard
     const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
-    if (viewMode === 'group') {
+    if (viewMode === 'vap') {
+      // VAP view navigation - Home, Companies, Reports, Settings
+      const homeItem = { name: 'Home', href: '/org/vap/dashboard', icon: Home };
+      const companiesItem = { name: 'Companies', href: '/org/vap/companies', icon: Building2 };
+      const reportsItem = { name: 'Reports', href: '/org/vap/reports', icon: Printer };
+      const settingsItem = { name: 'Settings', href: '/org/vap/settings', icon: Settings };
+      return [homeItem, companiesItem, reportsItem, settingsItem];
+    } else if (viewMode === 'group') {
       // Group view navigation - Home, Companies, Reports, Settings
       const homeItem = { name: 'Home', href: '/org/grp/dashboard', icon: Home };
       const companiesItem = { name: 'Companies', href: '/org/grp/companies', icon: Building2 };
       const reportsItem = { name: 'Reports', href: '/org/grp/reports', icon: Printer };
-      const settingsItem = { name: 'Settings', href: '/org/org/grp/settings', icon: Settings };
+      const settingsItem = { name: 'Settings', href: '/org/grp/settings', icon: Settings };
       return [homeItem, companiesItem, reportsItem, settingsItem];
     } else if (viewMode === 'manager') {
       const peopleItem = { name: 'People', href: '/people', icon: Users };
@@ -292,7 +299,7 @@ function Layout({ children }: LayoutProps) {
     navigation.filter(item => 
       item?.name !== 'Dashboard' && 
       item?.name !== 'Home' && 
-      !(viewMode === 'group' && item?.name === 'Settings') // Exclude Settings in group view since it's rendered separately
+      !((viewMode === 'vap' || viewMode === 'group') && item?.name === 'Settings') // Exclude Settings in vap and group view since it's rendered separately
     ), [navigation, viewMode]
   );
 
@@ -308,12 +315,12 @@ function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleViewToggle = useCallback(() => {
-    const newMode = viewMode === 'employee' ? 'manager' : viewMode === 'manager' ? 'group' : 'employee';
+    const newMode = viewMode === 'employee' ? 'manager' : viewMode === 'manager' ? 'group' : viewMode === 'group' ? 'vap' : 'employee';
     setViewMode(newMode);
     router.setViewMode(newMode);
     
     // Navigate to appropriate dashboard based on view mode
-    const newPath = newMode === 'employee' ? '/org/cmp/employee/dashboard' : newMode === 'manager' ? '/org/cmp/management/dashboard' : '/org/grp/dashboard';
+    const newPath = newMode === 'employee' ? '/org/cmp/employee/dashboard' : newMode === 'manager' ? '/org/cmp/management/dashboard' : newMode === 'group' ? '/org/grp/dashboard' : '/org/vap/dashboard';
     router.navigate(newPath);
     setCurrentRoute(newPath);
   }, [viewMode]);
@@ -325,7 +332,9 @@ function Layout({ children }: LayoutProps) {
         ? '/org/cmp/employee/dashboard' 
         : viewMode === 'manager' 
         ? '/org/cmp/management/dashboard'
-        : '/org/grp/dashboard';
+        : viewMode === 'group' 
+        ? '/org/grp/dashboard'
+        : '/org/vap/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/people') {
@@ -366,8 +375,8 @@ function Layout({ children }: LayoutProps) {
           }`}
           style={{ 
             width: sidebarWidth,
-            backgroundColor: viewMode === 'group' ? '#2c313a' : viewMode === 'manager' ? 'var(--gray-950)' : 'white',
-            borderColor: viewMode === 'group' ? '#2c313a' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)'
+            backgroundColor: viewMode === 'vap' ? '#1b3556' : viewMode === 'group' ? '#2c313a' : viewMode === 'manager' ? 'var(--gray-950)' : 'white',
+            borderColor: viewMode === 'vap' ? '#1b3556' : viewMode === 'group' ? '#2c313a' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)'
           }}
           role="navigation"
           aria-label="Main navigation"
@@ -390,7 +399,7 @@ function Layout({ children }: LayoutProps) {
                 left: '52px',
                 opacity: isCollapsed ? 0 : 1,
                 pointerEvents: isCollapsed ? 'none' : 'auto',
-                color: viewMode === 'group' ? 'var(--gray-100)' : viewMode === 'manager' ? 'var(--gray-100)' : 'var(--gray-950)',
+                color: viewMode === 'vap' ? 'var(--gray-100)' : viewMode === 'group' ? 'var(--gray-100)' : viewMode === 'manager' ? 'var(--gray-100)' : 'var(--gray-950)',
                 fontSize: '16px'
               }}
             >
@@ -411,16 +420,16 @@ function Layout({ children }: LayoutProps) {
                       minHeight: '40px',
                       padding: '11px 16px 11px 14px',
                       color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
-                        (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-                        (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                        (viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+                        (viewMode === 'vap' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
                       backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
-                        (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                        (viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
                       borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
-                        `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                        `3px solid ${viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                     }}
                     onMouseEnter={(e) => {
                       if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
-                        e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                        e.currentTarget.style.backgroundColor = viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                       }
                     }}
                     onMouseLeave={(e) => {
@@ -467,16 +476,16 @@ function Layout({ children }: LayoutProps) {
                           minHeight: '36px',
                           padding: '12px 16px 12px 14px',
                           color: isActive ? 
-                            (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-                            (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                            (viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+                            (viewMode === 'vap' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
                           backgroundColor: isActive ? 
-                            (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                            (viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
                           borderLeft: isActive ? 
-                            `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                            `3px solid ${viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                         }}
                         onMouseEnter={(e) => {
                           if (!isActive) {
-                            e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                            e.currentTarget.style.backgroundColor = viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                           }
                         }}
                         onMouseLeave={(e) => {
@@ -511,38 +520,38 @@ function Layout({ children }: LayoutProps) {
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
-              {/* Settings Button - Only show in manager and group views */}
+              {/* Settings Button - Only show in manager, group, and vap views */}
               {viewMode !== 'employee' && (
               <button
                 onClick={() => {
-                  const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
+                  const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                   handleNavigation(settingsUrl);
                 }}
                 className="flex items-center font-normal transition-colors w-full relative"
               style={(() => {
-                const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
+                const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                 const isActive = isNavItemActive('Settings', settingsUrl);
                 return {
                   fontSize: '14px',
                   minHeight: '36px',
                   padding: '12px 16px 12px 14px',
                   color: isActive ? 
-                    (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-                    (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                    (viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+                    (viewMode === 'vap' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
                   backgroundColor: isActive ? 
-                    (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                    (viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
                   borderLeft: isActive ? 
-                    `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                    `3px solid ${viewMode === 'vap' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                 };
               })()}
               onMouseEnter={(e) => {
-                const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
+                const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                 if (!isNavItemActive('Settings', settingsUrl)) {
-                  e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                  e.currentTarget.style.backgroundColor = viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                 }
               }}
               onMouseLeave={(e) => {
-                const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
+                const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                 if (!isNavItemActive('Settings', settingsUrl)) {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }
@@ -573,12 +582,12 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 16px 12px 14px',
-                color: viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--gray-950)',
+                color: viewMode === 'vap' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--gray-950)',
                 borderLeft: '3px solid transparent',
                 backgroundColor: 'transparent'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                e.currentTarget.style.backgroundColor = viewMode === 'vap' ? '#10243d' : viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent';
@@ -636,7 +645,7 @@ function Layout({ children }: LayoutProps) {
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
               <span className="font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                {viewMode === 'employee' ? 'Employee View' : viewMode === 'manager' ? 'Management View' : 'Group View'}
+                {viewMode === 'employee' ? 'Employee View' : viewMode === 'manager' ? 'Management View' : viewMode === 'group' ? 'Group View' : 'VAP View'}
               </span>
 
               <button 
@@ -721,17 +730,99 @@ function Layout({ children }: LayoutProps) {
                       <div className="border-t border-gray-100 mt-1 pt-1">
                         <div className="px-4 py-2">
                           <div className="text-xs text-gray-500 mb-2">View Mode</div>
-                          <button
-                            onClick={() => {
-                              handleViewToggle();
-                              setIsUserMenuOpen(false);
-                            }}
-                            className="w-full px-3 py-2 text-sm bg-gray-50 hover:bg-gray-100 rounded transition-colors text-left"
-                            style={{ color: 'var(--gray-950)' }}
-                            data-testid={viewMode === 'employee' ? 'manager-view-btn' : 'employee-view-btn'}
-                          >
-                            Switch to {viewMode === 'employee' ? 'Manager' : viewMode === 'manager' ? 'Group' : 'Employee'} View
-                          </button>
+                          <div className="space-y-1">
+                            {/* Employee View Button */}
+                            <button
+                              onClick={() => {
+                                if (viewMode !== 'employee') {
+                                  setViewMode('employee');
+                                  router.setViewMode('employee');
+                                  router.navigate('/org/cmp/employee/dashboard');
+                                  setCurrentRoute('/org/cmp/employee/dashboard');
+                                  setIsUserMenuOpen(false);
+                                }
+                              }}
+                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
+                                viewMode === 'employee' 
+                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
+                                  : 'bg-gray-50 hover:bg-gray-100'
+                              }`}
+                              style={{ color: viewMode === 'employee' ? 'var(--blue-800)' : 'var(--gray-950)' }}
+                              data-testid="employee-view-btn"
+                              disabled={viewMode === 'employee'}
+                            >
+                              Employee View {viewMode === 'employee' && '✓'}
+                            </button>
+                            
+                            {/* Management View Button */}
+                            <button
+                              onClick={() => {
+                                if (viewMode !== 'manager') {
+                                  setViewMode('manager');
+                                  router.setViewMode('manager');
+                                  router.navigate('/org/cmp/management/dashboard');
+                                  setCurrentRoute('/org/cmp/management/dashboard');
+                                  setIsUserMenuOpen(false);
+                                }
+                              }}
+                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
+                                viewMode === 'manager' 
+                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
+                                  : 'bg-gray-50 hover:bg-gray-100'
+                              }`}
+                              style={{ color: viewMode === 'manager' ? 'var(--blue-800)' : 'var(--gray-950)' }}
+                              data-testid="manager-view-btn"
+                              disabled={viewMode === 'manager'}
+                            >
+                              Management View {viewMode === 'manager' && '✓'}
+                            </button>
+                            
+                            {/* Group View Button */}
+                            <button
+                              onClick={() => {
+                                if (viewMode !== 'group') {
+                                  setViewMode('group');
+                                  router.setViewMode('group');
+                                  router.navigate('/org/grp/dashboard');
+                                  setCurrentRoute('/org/grp/dashboard');
+                                  setIsUserMenuOpen(false);
+                                }
+                              }}
+                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
+                                viewMode === 'group' 
+                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
+                                  : 'bg-gray-50 hover:bg-gray-100'
+                              }`}
+                              style={{ color: viewMode === 'group' ? 'var(--blue-800)' : 'var(--gray-950)' }}
+                              data-testid="group-view-btn"
+                              disabled={viewMode === 'group'}
+                            >
+                              Group View {viewMode === 'group' && '✓'}
+                            </button>
+                            
+                            {/* VAP View Button */}
+                            <button
+                              onClick={() => {
+                                if (viewMode !== 'vap') {
+                                  setViewMode('vap');
+                                  router.setViewMode('vap');
+                                  router.navigate('/org/vap/dashboard');
+                                  setCurrentRoute('/org/vap/dashboard');
+                                  setIsUserMenuOpen(false);
+                                }
+                              }}
+                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
+                                viewMode === 'vap' 
+                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
+                                  : 'bg-gray-50 hover:bg-gray-100'
+                              }`}
+                              style={{ color: viewMode === 'vap' ? 'var(--blue-800)' : 'var(--gray-950)' }}
+                              data-testid="vap-view-btn"
+                              disabled={viewMode === 'vap'}
+                            >
+                              VAP View {viewMode === 'vap' && '✓'}
+                            </button>
+                          </div>
                         </div>
                       </div>
 

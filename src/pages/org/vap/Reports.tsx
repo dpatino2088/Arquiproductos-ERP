@@ -1,21 +1,21 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../hooks/useSubmoduleNav';
-import { Home } from 'lucide-react';
+import { Printer } from 'lucide-react';
 
-export default function Dashboard() {
+export default function Reports() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    registerSubmodules('Home', [
-      { id: 'dashboard', label: 'Dashboard', href: '/org/grp/dashboard', icon: Home }
+    registerSubmodules('Reports', [
+      { id: 'reports', label: 'Reports', href: '/org/vap/reports', icon: Printer }
     ]);
   }, [registerSubmodules]);
 
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Group Dashboard</h1>
-        <p className="text-xs text-muted-foreground">Overview of your group's activities</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Reports</h1>
+        <p className="text-xs text-muted-foreground">Generate and view VAP service reports</p>
       </div>
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
