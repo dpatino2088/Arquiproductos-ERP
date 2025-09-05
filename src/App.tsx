@@ -79,6 +79,16 @@ const RpSettings = lazy(() => {
   return import('./pages/org/rp/Settings');
 });
 
+const PersonalDashboard = lazy(() => {
+  logger.debug('Loading PersonalDashboard component');
+  return import('./pages/me/Dashboard');
+});
+
+const PersonalSettings = lazy(() => {
+  logger.debug('Loading PersonalSettings component');
+  return import('./pages/me/Settings');
+});
+
 const Inbox = lazy(() => {
   logger.debug('Loading Inbox component');
   return import('./pages/org/cmp/Inbox');
@@ -562,6 +572,16 @@ function App() {
         setViewMode('rp');
         setCurrentPage('rp-settings');
       });
+
+      // Personal view routes
+      router.addRoute('/me/dashboard', () => {
+        setViewMode('personal');
+        setCurrentPage('personal-dashboard');
+      });
+      router.addRoute('/me/settings', () => {
+        setViewMode('personal');
+        setCurrentPage('personal-settings');
+      });
       
       // Management routes
       router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));
@@ -752,6 +772,10 @@ function App() {
         return <RpReports />;
       case 'rp-settings':
         return <RpSettings />;
+      case 'personal-dashboard':
+        return <PersonalDashboard />;
+      case 'personal-settings':
+        return <PersonalSettings />;
       case 'inbox':
         return <Inbox />;
       case 'my-info':
