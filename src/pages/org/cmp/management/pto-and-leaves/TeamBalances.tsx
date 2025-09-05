@@ -8,9 +8,9 @@ export default function TeamBalances() {
   useEffect(() => {
     // Register submodule tabs for PTO & Leaves
     registerSubmodules('PTO & Leaves', [
-      { id: 'team-balances', label: 'Team Balances', href: '/management/pto-and-leaves/team-balances', icon: TrendingUp },
-      { id: 'team-leave-requests', label: 'Team Leave Requests', href: '/management/pto-and-leaves/team-leave-requests', icon: FileText },
-      { id: 'team-leave-calendar', label: 'Team Leave Calendar', href: '/management/pto-and-leaves/team-leave-calendar', icon: CalendarIcon }
+      { id: 'team-balances', label: 'Team Balances', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: TrendingUp },
+      { id: 'team-leave-requests', label: 'Team Leave Requests', href: '/org/cmp/management/pto-and-leaves/team-leave-requests', icon: FileText },
+      { id: 'team-leave-calendar', label: 'Team Leave Calendar', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: CalendarIcon }
     ]);
   }, [registerSubmodules]);
 

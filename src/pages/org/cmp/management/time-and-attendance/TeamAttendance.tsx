@@ -8,9 +8,9 @@ export default function TeamAttendance() {
   useEffect(() => {
     // Register submodule tabs for time and attendance
     registerSubmodules('Time & Attendance', [
-      { id: 'team-planner', label: 'Team Planner', href: '/management/time-and-attendance/team-planner', icon: Calendar },
-      { id: 'team-attendance', label: 'Team Attendance', href: '/management/time-and-attendance/team-attendance', icon: Clock },
-      { id: 'team-geolocation', label: 'Team Geolocation', href: '/management/time-and-attendance/team-geolocation', icon: MapPin }
+      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
+      { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
+      { id: 'team-geolocation', label: 'Team Geolocation', href: '/org/cmp/management/time-and-attendance/team-geolocation', icon: MapPin }
     ]);
   }, [registerSubmodules]);
 

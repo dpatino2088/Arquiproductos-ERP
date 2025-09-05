@@ -8,10 +8,10 @@ export default function TeamGoalsAndPerformance() {
   useEffect(() => {
     // Register submodule tabs for Performance
     registerSubmodules('Performance', [
-      { id: 'team-goals', label: 'Team Goals & Performance', href: '/management/performance/team-goals-and-performance', icon: Target },
-      { id: 'team-reviews', label: 'Team Reviews', href: '/management/performance/team-reviews', icon: FileText },
-      { id: 'team-feedback', label: 'Team Feedback & Recognition', href: '/management/performance/team-feedback-and-recognition', icon: Award },
-      { id: 'team-one-on-one', label: 'Team One-on-One', href: '/management/performance/team-one-on-one', icon: Users }
+      { id: 'team-goals', label: 'Team Goals & Performance', href: '/org/cmp/management/performance/team-goals-and-performance', icon: Target },
+      { id: 'team-reviews', label: 'Team Reviews', href: '/org/cmp/management/performance/team-reviews', icon: FileText },
+      { id: 'team-feedback', label: 'Team Feedback & Recognition', href: '/org/cmp/management/performance/team-feedback-and-recognition', icon: Award },
+      { id: 'team-one-on-one', label: 'Team One-on-One', href: '/org/cmp/management/performance/team-one-on-one', icon: Users }
     ]);
   }, [registerSubmodules]);
 

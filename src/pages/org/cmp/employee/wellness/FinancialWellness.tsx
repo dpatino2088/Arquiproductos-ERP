@@ -8,10 +8,10 @@ export default function FinancialWellness() {
   useEffect(() => {
     // Register submodule tabs for Wellness
     registerSubmodules('Wellness', [
-      { id: 'fitness', label: 'Fitness', href: '/employee/wellness/fitness', icon: Dumbbell },
-      { id: 'nutrition', label: 'Nutrition', href: '/employee/wellness/nutrition', icon: Apple },
-      { id: 'mental-health', label: 'Mental Health', href: '/employee/wellness/mental-health', icon: Brain },
-      { id: 'financial-wellness', label: 'Financial Wellness', href: '/employee/wellness/financial-wellness', icon: DollarSign }
+      { id: 'fitness', label: 'Fitness', href: '/org/cmp/employee/wellness/fitness', icon: Dumbbell },
+      { id: 'nutrition', label: 'Nutrition', href: '/org/cmp/employee/wellness/nutrition', icon: Apple },
+      { id: 'mental-health', label: 'Mental Health', href: '/org/cmp/employee/wellness/mental-health', icon: Brain },
+      { id: 'financial-wellness', label: 'Financial Wellness', href: '/org/cmp/employee/wellness/financial-wellness', icon: DollarSign }
     ]);
   }, [registerSubmodules]);
 

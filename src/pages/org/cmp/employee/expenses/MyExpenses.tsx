@@ -8,7 +8,7 @@ export default function MyExpenses() {
   useEffect(() => {
     // Register submodule tabs for Expenses
     registerSubmodules('Expenses', [
-      { id: 'my-expenses', label: 'My Expenses', href: '/employee/expenses/my-expenses', icon: Receipt }
+      { id: 'my-expenses', label: 'My Expenses', href: '/org/cmp/employee/expenses/my-expenses', icon: Receipt }
     ]);
   }, [registerSubmodules]);
 

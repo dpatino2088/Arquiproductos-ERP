@@ -8,8 +8,8 @@ export default function MyRequests() {
   useEffect(() => {
     // Register submodule tabs for PTO & Leaves
     registerSubmodules('PTO & Leaves', [
-      { id: 'my-balance', label: 'My Balance', href: '/employee/pto-and-leaves/my-balance', icon: Wallet },
-      { id: 'my-requests', label: 'My Requests', href: '/employee/pto-and-leaves/my-requests', icon: Calendar }
+      { id: 'my-balance', label: 'My Balance', href: '/org/cmp/employee/pto-and-leaves/my-balance', icon: Wallet },
+      { id: 'my-requests', label: 'My Requests', href: '/org/cmp/employee/pto-and-leaves/my-requests', icon: Calendar }
     ]);
   }, [registerSubmodules]);
 

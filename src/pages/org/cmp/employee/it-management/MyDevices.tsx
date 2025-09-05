@@ -8,9 +8,9 @@ export default function MyDevices() {
   useEffect(() => {
     // Register submodule tabs for IT Management
     registerSubmodules('IT Management', [
-      { id: 'my-devices', label: 'My Devices', href: '/employee/it-management/my-devices', icon: Cpu },
-      { id: 'my-licenses', label: 'My Licenses', href: '/employee/it-management/my-licenses', icon: Smartphone },
-      { id: 'my-it-requests', label: 'My IT Requests', href: '/employee/it-management/my-it-requests', icon: Laptop }
+      { id: 'my-devices', label: 'My Devices', href: '/org/cmp/employee/it-management/my-devices', icon: Cpu },
+      { id: 'my-licenses', label: 'My Licenses', href: '/org/cmp/employee/it-management/my-licenses', icon: Smartphone },
+      { id: 'my-it-requests', label: 'My IT Requests', href: '/org/cmp/employee/it-management/my-it-requests', icon: Laptop }
     ]);
   }, [registerSubmodules]);
 

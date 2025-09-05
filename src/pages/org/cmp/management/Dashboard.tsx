@@ -8,8 +8,8 @@ export default function ManagementDashboard() {
   useEffect(() => {
     // Register submodule tabs for management dashboard
     registerSubmodules('Management Dashboard', [
-      { id: 'dashboard', label: 'Dashboard', href: '/management/dashboard', icon: Home },
-      { id: 'inbox', label: 'Inbox', href: '/inbox', icon: Inbox }
+      { id: 'dashboard', label: 'Dashboard', href: '/org/cmp/management/dashboard', icon: Home },
+      { id: 'inbox', label: 'Inbox', href: '/org/cmp/inbox', icon: Inbox }
     ]);
   }, [registerSubmodules]);
 

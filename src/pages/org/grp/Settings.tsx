@@ -7,7 +7,7 @@ export default function Settings() {
 
   useEffect(() => {
     registerSubmodules('Settings', [
-      { id: 'settings', label: 'Settings', href: '/grp/settings', icon: SettingsIcon }
+      { id: 'settings', label: 'Settings', href: '/org/grp/settings', icon: SettingsIcon }
     ]);
   }, [registerSubmodules]);
 

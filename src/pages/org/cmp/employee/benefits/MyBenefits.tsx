@@ -8,7 +8,7 @@ export default function MyBenefits() {
   useEffect(() => {
     // Register submodule tabs for Benefits
     registerSubmodules('Benefits', [
-      { id: 'my-benefits', label: 'My Benefits', href: '/employee/benefits/my-benefits', icon: WalletCards }
+      { id: 'my-benefits', label: 'My Benefits', href: '/org/cmp/employee/benefits/my-benefits', icon: WalletCards }
     ]);
   }, [registerSubmodules]);
 

@@ -74,8 +74,8 @@ export default function Directory() {
   useEffect(() => {
     // Register submodule tabs for management people section
     registerSubmodules('People Directory', [
-      { id: 'directory', label: 'Directory', href: '/management/people/directory', icon: Users },
-      { id: 'org-chart', label: 'Organizational Chart', href: '/management/people/organizational-chart', icon: GitBranch }
+      { id: 'directory', label: 'Directory', href: '/org/cmp/management/people/directory', icon: Users },
+      { id: 'org-chart', label: 'Organizational Chart', href: '/org/cmp/management/people/organizational-chart', icon: GitBranch }
     ]);
   }, [registerSubmodules]);
 

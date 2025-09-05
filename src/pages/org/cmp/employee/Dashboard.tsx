@@ -8,8 +8,8 @@ export default function PersonalDashboard() {
   useEffect(() => {
     // Register submodule tabs for employee dashboard
     registerSubmodules('Employee Dashboard', [
-      { id: 'dashboard', label: 'Dashboard', href: '/employee/dashboard', icon: Home },
-      { id: 'inbox', label: 'Inbox', href: '/inbox', icon: Inbox }
+      { id: 'dashboard', label: 'Dashboard', href: '/org/cmp/employee/dashboard', icon: Home },
+      { id: 'inbox', label: 'Inbox', href: '/org/cmp/inbox', icon: Inbox }
     ]);
   }, [registerSubmodules]);
 

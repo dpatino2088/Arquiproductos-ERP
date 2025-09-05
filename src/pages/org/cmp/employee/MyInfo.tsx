@@ -8,7 +8,7 @@ export default function MyInfo() {
   useEffect(() => {
     // Register submodule tabs for My Information
     registerSubmodules('My Information', [
-      { id: 'my-info', label: 'My Info', href: '/employee/my-info', icon: User }
+      { id: 'my-info', label: 'My Info', href: '/org/cmp/employee/my-info', icon: User }
     ]);
   }, [registerSubmodules]);
 

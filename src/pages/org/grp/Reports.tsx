@@ -7,7 +7,7 @@ export default function Reports() {
 
   useEffect(() => {
     registerSubmodules('Reports', [
-      { id: 'reports', label: 'Reports', href: '/grp/reports', icon: Printer }
+      { id: 'reports', label: 'Reports', href: '/org/grp/reports', icon: Printer }
     ]);
   }, [registerSubmodules]);
 

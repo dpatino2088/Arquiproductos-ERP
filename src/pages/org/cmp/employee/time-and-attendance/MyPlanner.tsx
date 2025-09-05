@@ -8,9 +8,9 @@ export default function MyPlanner() {
   useEffect(() => {
     // Register submodule tabs for Time & Attendance
     registerSubmodules('Time & Attendance', [
-      { id: 'my-clock', label: 'My Clock', href: '/employee/time-and-attendance/my-clock', icon: Clock },
-      { id: 'my-planner', label: 'My Planner', href: '/employee/time-and-attendance/my-planner', icon: Calendar },
-      { id: 'my-attendance', label: 'My Attendance', href: '/employee/time-and-attendance/my-attendance', icon: MapPin }
+      { id: 'my-clock', label: 'My Clock', href: '/org/cmp/employee/time-and-attendance/my-clock', icon: Clock },
+      { id: 'my-planner', label: 'My Planner', href: '/org/cmp/employee/time-and-attendance/my-planner', icon: Calendar },
+      { id: 'my-attendance', label: 'My Attendance', href: '/org/cmp/employee/time-and-attendance/my-attendance', icon: MapPin }
     ]);
   }, [registerSubmodules]);
 

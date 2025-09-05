@@ -7,7 +7,7 @@ export default function Companies() {
 
   useEffect(() => {
     registerSubmodules('Companies', [
-      { id: 'companies', label: 'Companies', href: '/grp/companies', icon: Building2 }
+      { id: 'companies', label: 'Companies', href: '/org/grp/companies', icon: Building2 }
     ]);
   }, [registerSubmodules]);
 

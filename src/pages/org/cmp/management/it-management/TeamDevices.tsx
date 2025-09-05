@@ -8,9 +8,9 @@ export default function TeamDevices() {
   useEffect(() => {
     // Register submodule tabs for IT Management
     registerSubmodules('IT Management', [
-      { id: 'team-devices', label: 'Team Devices', href: '/management/it-management/team-devices', icon: Monitor },
-      { id: 'team-licenses', label: 'Team Licenses', href: '/management/it-management/team-licenses', icon: Key },
-      { id: 'team-requests', label: 'Team Requests', href: '/management/it-management/team-requests', icon: FileText }
+      { id: 'team-devices', label: 'Team Devices', href: '/org/cmp/management/it-management/team-devices', icon: Monitor },
+      { id: 'team-licenses', label: 'Team Licenses', href: '/org/cmp/management/it-management/team-licenses', icon: Key },
+      { id: 'team-requests', label: 'Team Requests', href: '/org/cmp/management/it-management/team-requests', icon: FileText }
     ]);
   }, [registerSubmodules]);
 

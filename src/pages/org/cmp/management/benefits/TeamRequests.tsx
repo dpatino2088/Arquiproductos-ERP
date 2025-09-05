@@ -8,8 +8,8 @@ export default function TeamRequests() {
   useEffect(() => {
     // Register submodule tabs for Benefits
     registerSubmodules('Benefits', [
-      { id: 'team-benefits', label: 'Team Benefits', href: '/management/benefits/team-benefits', icon: BriefcaseBusiness },
-      { id: 'team-requests', label: 'Team Requests', href: '/management/benefits/team-requests', icon: FileText }
+      { id: 'team-benefits', label: 'Team Benefits', href: '/org/cmp/management/benefits/team-benefits', icon: BriefcaseBusiness },
+      { id: 'team-requests', label: 'Team Requests', href: '/org/cmp/management/benefits/team-requests', icon: FileText }
     ]);
   }, [registerSubmodules]);
 

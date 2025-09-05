@@ -7,7 +7,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     registerSubmodules('Home', [
-      { id: 'dashboard', label: 'Dashboard', href: '/grp/dashboard', icon: Home }
+      { id: 'dashboard', label: 'Dashboard', href: '/org/grp/dashboard', icon: Home }
     ]);
   }, [registerSubmodules]);
 

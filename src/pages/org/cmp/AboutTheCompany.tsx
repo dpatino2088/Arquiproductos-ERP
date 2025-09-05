@@ -11,18 +11,18 @@ export default function AboutTheCompany() {
     if (viewMode === 'employee') {
       // Register submodule tabs for Employee Company Knowledge
       registerSubmodules('Company Knowledge', [
-        { id: 'about-company', label: 'About the Company', href: '/cmp/about-the-company', icon: Building2 },
-        { id: 'my-responsibility', label: 'My Responsibility', href: '/employee/company-knowledge/my-responsibility', icon: UserCheck },
-        { id: 'processes-policies', label: 'Processes & Policies', href: '/employee/company-knowledge/processes-and-policies', icon: FileText },
-        { id: 'courses-training', label: 'Courses & Training', href: '/employee/company-knowledge/courses-and-training', icon: GraduationCap },
-        { id: 'documents-files', label: 'Documents & Files', href: '/employee/company-knowledge/documents-and-files', icon: FolderOpen }
+        { id: 'about-company', label: 'About the Company', href: '/org/cmp/about-the-company', icon: Building2 },
+        { id: 'my-responsibility', label: 'My Responsibility', href: '/org/cmp/employee/company-knowledge/my-responsibility', icon: UserCheck },
+        { id: 'processes-policies', label: 'Processes & Policies', href: '/org/cmp/employee/company-knowledge/processes-and-policies', icon: FileText },
+        { id: 'courses-training', label: 'Courses & Training', href: '/org/cmp/employee/company-knowledge/courses-and-training', icon: GraduationCap },
+        { id: 'documents-files', label: 'Documents & Files', href: '/org/cmp/employee/company-knowledge/documents-and-files', icon: FolderOpen }
       ]);
     } else {
       // Register submodule tabs for Management Company Knowledge
       registerSubmodules('Company Knowledge', [
-        { id: 'about-company', label: 'About the Company', href: '/cmp/about-the-company', icon: Building2 },
-        { id: 'team-responsibilities', label: 'Team Responsibilities', href: '/management/company-knowledge/team-responsibilities', icon: Users },
-        { id: 'team-knowledge-compliance', label: 'Team Knowledge Compliance', href: '/management/company-knowledge/team-knowledge-compliance', icon: Shield }
+        { id: 'about-company', label: 'About the Company', href: '/org/cmp/about-the-company', icon: Building2 },
+        { id: 'team-responsibilities', label: 'Team Responsibilities', href: '/org/cmp/management/company-knowledge/team-responsibilities', icon: Users },
+        { id: 'team-knowledge-compliance', label: 'Team Knowledge Compliance', href: '/org/cmp/management/company-knowledge/team-knowledge-compliance', icon: Shield }
       ]);
     }
   }, [registerSubmodules, viewMode]);

@@ -8,7 +8,7 @@ export default function JobOpenings() {
   useEffect(() => {
     // Register submodule tabs for Recruiting
     registerSubmodules('Recruiting', [
-      { id: 'job-openings', label: 'Job Openings', href: '/management/recruiting/job-openings', icon: Briefcase }
+      { id: 'job-openings', label: 'Job Openings', href: '/org/cmp/management/recruiting/job-openings', icon: Briefcase }
     ]);
   }, [registerSubmodules]);
 

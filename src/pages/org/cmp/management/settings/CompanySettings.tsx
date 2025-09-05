@@ -8,7 +8,7 @@ export default function CompanySettings() {
   useEffect(() => {
     // Register submodule tabs for Settings
     registerSubmodules('Settings', [
-      { id: 'company-settings', label: 'Company Settings', href: '/management/settings/company-settings', icon: Settings }
+      { id: 'company-settings', label: 'Company Settings', href: '/org/cmp/management/settings/company-settings', icon: Settings }
     ]);
   }, [registerSubmodules]);
 

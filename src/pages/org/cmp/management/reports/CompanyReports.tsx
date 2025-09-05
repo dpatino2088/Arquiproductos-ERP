@@ -8,7 +8,7 @@ export default function CompanyReports() {
   useEffect(() => {
     // Register submodule tabs for Reports
     registerSubmodules('Reports', [
-      { id: 'company-reports', label: 'Company Reports', href: '/management/reports/company-reports', icon: Printer }
+      { id: 'company-reports', label: 'Company Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }
     ]);
   }, [registerSubmodules]);
 

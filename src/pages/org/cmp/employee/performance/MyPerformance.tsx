@@ -8,9 +8,9 @@ export default function MyPerformance() {
   useEffect(() => {
     // Register submodule tabs for Performance
     registerSubmodules('Performance', [
-      { id: 'my-performance', label: 'My Performance', href: '/employee/performance/my-performance', icon: ChartNoAxesCombined },
-      { id: 'my-feedback-recognition', label: 'My Feedback & Recognition', href: '/employee/performance/my-feedback-and-recognition', icon: MessageSquare },
-      { id: 'my-one-on-one', label: 'My One-on-One', href: '/employee/performance/my-one-on-one', icon: Users }
+      { id: 'my-performance', label: 'My Performance', href: '/org/cmp/employee/performance/my-performance', icon: ChartNoAxesCombined },
+      { id: 'my-feedback-recognition', label: 'My Feedback & Recognition', href: '/org/cmp/employee/performance/my-feedback-and-recognition', icon: MessageSquare },
+      { id: 'my-one-on-one', label: 'My One-on-One', href: '/org/cmp/employee/performance/my-one-on-one', icon: Users }
     ]);
   }, [registerSubmodules]);
 

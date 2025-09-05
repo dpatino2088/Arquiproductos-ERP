@@ -450,128 +450,128 @@ function App() {
       router.addRoute('/', () => setCurrentPage('employee-dashboard'));
       // Legacy routes for backward compatibility
       router.addRoute('/home/dashboard', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/home/inbox', () => setCurrentPage('inbox'));
-      router.addRoute('/inbox', () => setCurrentPage('inbox'));
+      router.addRoute('/org/cmp/inbox', () => setCurrentPage('inbox'));
+      router.addRoute('/org/cmp/inbox', () => setCurrentPage('inbox'));
       
       // Employee view routes
-      router.addRoute('/employee/dashboard', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/employee/my-info', () => setCurrentPage('my-info'));
+      router.addRoute('/org/cmp/employee/dashboard', () => setCurrentPage('employee-dashboard'));
+      router.addRoute('/org/cmp/employee/my-info', () => setCurrentPage('my-info'));
       
       // Legacy personal routes (redirect to employee)
       router.addRoute('/personal/dashboard', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/personal/people/my-info', () => setCurrentPage('my-info'));
       
       // Legacy employee routes (redirect to new path)
-      router.addRoute('/employee/people/my-info', () => setCurrentPage('my-info'));
+      router.addRoute('/org/cmp/employee/people/my-info', () => setCurrentPage('my-info'));
       
       // Management view routes
-      router.addRoute('/management/dashboard', () => setCurrentPage('management-dashboard'));
-      router.addRoute('/management/people/directory', () => setCurrentPage('directory'));
-      router.addRoute('/management/people/organizational-chart', () => setCurrentPage('org-chart'));
+      router.addRoute('/org/cmp/management/dashboard', () => setCurrentPage('management-dashboard'));
+      router.addRoute('/org/cmp/management/people/directory', () => setCurrentPage('directory'));
+      router.addRoute('/org/cmp/management/people/organizational-chart', () => setCurrentPage('org-chart'));
 
       // Group view routes
-      router.addRoute('/grp/dashboard', () => {
+      router.addRoute('/org/grp/dashboard', () => {
         setViewMode('group');
         setCurrentPage('group-dashboard');
       });
-      router.addRoute('/grp/companies', () => {
+      router.addRoute('/org/grp/companies', () => {
         setViewMode('group');
         setCurrentPage('group-companies');
       });
-      router.addRoute('/grp/reports', () => {
+      router.addRoute('/org/grp/reports', () => {
         setViewMode('group');
         setCurrentPage('group-reports');
       });
-      router.addRoute('/grp/settings', () => {
+      router.addRoute('/org/grp/settings', () => {
         setViewMode('group');
         setCurrentPage('group-settings');
       });
       
       // Management routes
-      router.addRoute('/management/reports', () => setCurrentPage('reports'));
+      router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));
       
       // Time & Attendance routes
-      router.addRoute('/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
-      router.addRoute('/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
-      router.addRoute('/management/time-and-attendance/team-geolocation', () => setCurrentPage('team-geolocation'));
+      router.addRoute('/org/cmp/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
+      router.addRoute('/org/cmp/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
+      router.addRoute('/org/cmp/management/time-and-attendance/team-geolocation', () => setCurrentPage('team-geolocation'));
       
       // PTO & Leaves routes
-      router.addRoute('/management/pto-and-leaves/team-leave-calendar', () => setCurrentPage('team-leave-calendar'));
-      router.addRoute('/management/pto-and-leaves/team-leave-requests', () => setCurrentPage('team-leave-requests'));
-      router.addRoute('/management/pto-and-leaves/team-balances', () => setCurrentPage('team-balances'));
+      router.addRoute('/org/cmp/management/pto-and-leaves/team-leave-calendar', () => setCurrentPage('team-leave-calendar'));
+      router.addRoute('/org/cmp/management/pto-and-leaves/team-leave-requests', () => setCurrentPage('team-leave-requests'));
+      router.addRoute('/org/cmp/management/pto-and-leaves/team-balances', () => setCurrentPage('team-balances'));
       
       // Performance routes
-      router.addRoute('/management/performance/team-goals-and-performance', () => setCurrentPage('team-goals'));
-      router.addRoute('/management/performance/team-reviews', () => setCurrentPage('team-reviews'));
-      router.addRoute('/management/performance/team-feedback-and-recognition', () => setCurrentPage('team-feedback-and-recognition'));
-      router.addRoute('/management/performance/team-one-on-one', () => setCurrentPage('team-one-on-one'));
+      router.addRoute('/org/cmp/management/performance/team-goals-and-performance', () => setCurrentPage('team-goals'));
+      router.addRoute('/org/cmp/management/performance/team-reviews', () => setCurrentPage('team-reviews'));
+      router.addRoute('/org/cmp/management/performance/team-feedback-and-recognition', () => setCurrentPage('team-feedback-and-recognition'));
+      router.addRoute('/org/cmp/management/performance/team-one-on-one', () => setCurrentPage('team-one-on-one'));
       
       // Company Knowledge routes
-      router.addRoute('/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
-      router.addRoute('/cmp/about-the-company', () => setCurrentPage('about-company'));
-      router.addRoute('/management/company-knowledge/team-responsibilities', () => setCurrentPage('team-responsibilities'));
-      router.addRoute('/management/company-knowledge/team-knowledge-compliance', () => setCurrentPage('team-knowledge-compliance'));
+      router.addRoute('/org/cmp/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
+      router.addRoute('/org/cmp/about-the-company', () => setCurrentPage('about-company'));
+      router.addRoute('/org/cmp/management/company-knowledge/team-responsibilities', () => setCurrentPage('team-responsibilities'));
+      router.addRoute('/org/cmp/management/company-knowledge/team-knowledge-compliance', () => setCurrentPage('team-knowledge-compliance'));
       
       // Benefits routes
-      router.addRoute('/management/benefits/team-benefits', () => setCurrentPage('team-benefits'));
-      router.addRoute('/management/benefits/team-requests', () => setCurrentPage('team-requests'));
+      router.addRoute('/org/cmp/management/benefits/team-benefits', () => setCurrentPage('team-benefits'));
+      router.addRoute('/org/cmp/management/benefits/team-requests', () => setCurrentPage('team-requests'));
       
       // Expenses routes
-      router.addRoute('/management/expenses/team-expenses', () => setCurrentPage('team-expenses'));
+      router.addRoute('/org/cmp/management/expenses/team-expenses', () => setCurrentPage('team-expenses'));
       
       // IT Management routes
-      router.addRoute('/management/it-management/team-devices', () => setCurrentPage('team-devices'));
-      router.addRoute('/management/it-management/team-licenses', () => setCurrentPage('team-licenses'));
-      router.addRoute('/management/it-management/team-requests', () => setCurrentPage('it-team-requests'));
+      router.addRoute('/org/cmp/management/it-management/team-devices', () => setCurrentPage('team-devices'));
+      router.addRoute('/org/cmp/management/it-management/team-licenses', () => setCurrentPage('team-licenses'));
+      router.addRoute('/org/cmp/management/it-management/team-requests', () => setCurrentPage('it-team-requests'));
       
       // Payroll routes
-      router.addRoute('/management/payroll/payroll-wizards', () => setCurrentPage('payroll-wizards'));
+      router.addRoute('/org/cmp/management/payroll/payroll-wizards', () => setCurrentPage('payroll-wizards'));
       
       // Reports routes
-      router.addRoute('/management/reports/company-reports', () => setCurrentPage('company-reports'));
+      router.addRoute('/org/cmp/management/reports/company-reports', () => setCurrentPage('company-reports'));
       
       // Settings routes
-      router.addRoute('/management/settings/company-settings', () => setCurrentPage('company-settings'));
+      router.addRoute('/org/cmp/management/settings/company-settings', () => setCurrentPage('company-settings'));
       
       // Recruiting routes
-      router.addRoute('/management/recruiting/job-openings', () => setCurrentPage('job-openings'));
+      router.addRoute('/org/cmp/management/recruiting/job-openings', () => setCurrentPage('job-openings'));
       
       // Employee Time & Attendance routes
-      router.addRoute('/employee/time-and-attendance/my-clock', () => setCurrentPage('my-clock'));
-      router.addRoute('/employee/time-and-attendance/my-planner', () => setCurrentPage('my-planner'));
-      router.addRoute('/employee/time-and-attendance/my-attendance', () => setCurrentPage('my-attendance'));
+      router.addRoute('/org/cmp/employee/time-and-attendance/my-clock', () => setCurrentPage('my-clock'));
+      router.addRoute('/org/cmp/employee/time-and-attendance/my-planner', () => setCurrentPage('my-planner'));
+      router.addRoute('/org/cmp/employee/time-and-attendance/my-attendance', () => setCurrentPage('my-attendance'));
       
       // Employee PTO & Leaves routes
-      router.addRoute('/employee/pto-and-leaves/my-requests', () => setCurrentPage('my-requests'));
-      router.addRoute('/employee/pto-and-leaves/my-balance', () => setCurrentPage('my-balance'));
+      router.addRoute('/org/cmp/employee/pto-and-leaves/my-requests', () => setCurrentPage('my-requests'));
+      router.addRoute('/org/cmp/employee/pto-and-leaves/my-balance', () => setCurrentPage('my-balance'));
       
       // Employee Company Knowledge routes
-      router.addRoute('/employee/company-knowledge/my-responsibility', () => setCurrentPage('my-responsibility'));
-      router.addRoute('/employee/company-knowledge/processes-and-policies', () => setCurrentPage('processes-policies'));
-      router.addRoute('/employee/company-knowledge/documents-and-files', () => setCurrentPage('documents-files'));
-      router.addRoute('/employee/company-knowledge/courses-and-training', () => setCurrentPage('courses-training'));
+      router.addRoute('/org/cmp/employee/company-knowledge/my-responsibility', () => setCurrentPage('my-responsibility'));
+      router.addRoute('/org/cmp/employee/company-knowledge/processes-and-policies', () => setCurrentPage('processes-policies'));
+      router.addRoute('/org/cmp/employee/company-knowledge/documents-and-files', () => setCurrentPage('documents-files'));
+      router.addRoute('/org/cmp/employee/company-knowledge/courses-and-training', () => setCurrentPage('courses-training'));
       
       // Employee Performance routes
-      router.addRoute('/employee/performance/my-performance', () => setCurrentPage('my-performance'));
-      router.addRoute('/employee/performance/my-feedback-and-recognition', () => setCurrentPage('my-feedback-recognition'));
-      router.addRoute('/employee/performance/my-one-on-one', () => setCurrentPage('my-one-on-one'));
+      router.addRoute('/org/cmp/employee/performance/my-performance', () => setCurrentPage('my-performance'));
+      router.addRoute('/org/cmp/employee/performance/my-feedback-and-recognition', () => setCurrentPage('my-feedback-recognition'));
+      router.addRoute('/org/cmp/employee/performance/my-one-on-one', () => setCurrentPage('my-one-on-one'));
       
       // Employee Benefits routes
-      router.addRoute('/employee/benefits/my-benefits', () => setCurrentPage('my-benefits'));
+      router.addRoute('/org/cmp/employee/benefits/my-benefits', () => setCurrentPage('my-benefits'));
       
       // Employee Expenses routes
-      router.addRoute('/employee/expenses/my-expenses', () => setCurrentPage('my-expenses'));
+      router.addRoute('/org/cmp/employee/expenses/my-expenses', () => setCurrentPage('my-expenses'));
       
       // Employee IT Management routes
-      router.addRoute('/employee/it-management/my-devices', () => setCurrentPage('my-devices'));
-      router.addRoute('/employee/it-management/my-licenses', () => setCurrentPage('my-licenses'));
-      router.addRoute('/employee/it-management/my-it-requests', () => setCurrentPage('my-it-requests'));
+      router.addRoute('/org/cmp/employee/it-management/my-devices', () => setCurrentPage('my-devices'));
+      router.addRoute('/org/cmp/employee/it-management/my-licenses', () => setCurrentPage('my-licenses'));
+      router.addRoute('/org/cmp/employee/it-management/my-it-requests', () => setCurrentPage('my-it-requests'));
 
       // Employee Wellness routes
-      router.addRoute('/employee/wellness/financial-wellness', () => setCurrentPage('financial-wellness'));
-      router.addRoute('/employee/wellness/mental-health', () => setCurrentPage('mental-health'));
-      router.addRoute('/employee/wellness/fitness', () => setCurrentPage('fitness'));
-      router.addRoute('/employee/wellness/nutrition', () => setCurrentPage('nutrition'));
+      router.addRoute('/org/cmp/employee/wellness/financial-wellness', () => setCurrentPage('financial-wellness'));
+      router.addRoute('/org/cmp/employee/wellness/mental-health', () => setCurrentPage('mental-health'));
+      router.addRoute('/org/cmp/employee/wellness/fitness', () => setCurrentPage('fitness'));
+      router.addRoute('/org/cmp/employee/wellness/nutrition', () => setCurrentPage('nutrition'));
       
       // Legacy routes (still supported)
       router.addRoute('/employees', () => setCurrentPage('people'));

@@ -9,12 +9,12 @@ export default function Inbox() {
   useEffect(() => {
     // Get current view mode from router and register appropriate dashboard
     const viewMode = router.getViewMode();
-    const dashboardHref = viewMode === 'employee' ? '/employee/dashboard' : '/management/dashboard';
+    const dashboardHref = viewMode === 'employee' ? '/org/cmp/employee/dashboard' : '/org/cmp/management/dashboard';
     
     // Register submodule tabs for inbox
     registerSubmodules('Inbox', [
       { id: 'dashboard', label: 'Dashboard', href: dashboardHref, icon: Home },
-      { id: 'inbox', label: 'Inbox', href: '/inbox', icon: InboxIcon }
+      { id: 'inbox', label: 'Inbox', href: '/org/cmp/inbox', icon: InboxIcon }
     ]);
   }, [registerSubmodules]);
 

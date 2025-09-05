@@ -97,25 +97,25 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'Recruiting', href: '/management/recruiting/job-openings', icon: Briefcase },
-  { name: 'Time & Attendance', href: '/management/time-and-attendance/team-planner', icon: Clock },
-  { name: 'PTO & Leave', href: '/management/pto-and-leaves/team-balances', icon: CalendarCheck },
+  { name: 'Recruiting', href: '/org/cmp/management/recruiting/job-openings', icon: Briefcase },
+  { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Clock },
+  { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: CalendarCheck },
   { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked },
-  { name: 'Performance', href: '/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
-  { name: 'Benefits', href: '/management/benefits/team-benefits', icon: WalletCards },
+  { name: 'Performance', href: '/org/cmp/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
+  { name: 'Benefits', href: '/org/cmp/management/benefits/team-benefits', icon: WalletCards },
 ];
 
 const employeeOnlyNavigation = [
   { name: 'Wellness', href: '/wellness', icon: HeartPulse },
-  { name: 'Expenses', href: '/employee/expenses/my-expenses', icon: Receipt },
+  { name: 'Expenses', href: '/org/cmp/employee/expenses/my-expenses', icon: Receipt },
 ];
 
 const managementExpenses = [
-  { name: 'Expenses', href: '/management/expenses/team-expenses', icon: Receipt },
+  { name: 'Expenses', href: '/org/cmp/management/expenses/team-expenses', icon: Receipt },
 ];
 
 const sharedManagementNavigation = [
-  { name: 'IT Management', href: '/management/it-management/team-devices', icon: Cpu },
+  { name: 'IT Management', href: '/org/cmp/management/it-management/team-devices', icon: Cpu },
 ];
 
 
@@ -246,28 +246,28 @@ function Layout({ children }: LayoutProps) {
     
     if (viewMode === 'group') {
       // Group view navigation - Home, Companies, Reports, Settings
-      const homeItem = { name: 'Home', href: '/grp/dashboard', icon: Home };
-      const companiesItem = { name: 'Companies', href: '/grp/companies', icon: Building2 };
-      const reportsItem = { name: 'Reports', href: '/grp/reports', icon: Printer };
-      const settingsItem = { name: 'Settings', href: '/grp/settings', icon: Settings };
+      const homeItem = { name: 'Home', href: '/org/grp/dashboard', icon: Home };
+      const companiesItem = { name: 'Companies', href: '/org/grp/companies', icon: Building2 };
+      const reportsItem = { name: 'Reports', href: '/org/grp/reports', icon: Printer };
+      const settingsItem = { name: 'Settings', href: '/org/org/grp/settings', icon: Settings };
       return [homeItem, companiesItem, reportsItem, settingsItem];
     } else if (viewMode === 'manager') {
       const peopleItem = { name: 'People', href: '/people', icon: Users };
       // Insert People after Recruiting (index 1) and before Time & Attendance (index 2)
       const recruitingItem = restOfBase[0]; // Recruiting
       const remainingItems = restOfBase.slice(1); // Everything after Recruiting
-      return [dashboardItem, recruitingItem, peopleItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/management/reports/company-reports', icon: Printer }];
+      return [dashboardItem, recruitingItem, peopleItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }];
     } else {
       // Employee view navigation in specific order
       const myInfoItem = { name: 'My Info', href: '/people', icon: User };
-      const timeAttendanceItem = { name: 'Time & Attendance', href: '/employee/time-and-attendance/my-clock', icon: Clock };
-      const ptoLeaveItem = { name: 'PTO & Leaves', href: '/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
+      const timeAttendanceItem = { name: 'Time & Attendance', href: '/org/cmp/employee/time-and-attendance/my-clock', icon: Clock };
+      const ptoLeaveItem = { name: 'PTO & Leaves', href: '/org/cmp/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
       const companyKnowledgeItem = { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked };
-      const performanceItem = { name: 'Performance', href: '/employee/performance/my-performance', icon: ChartNoAxesCombined };
-      const benefitsItem = { name: 'Benefits', href: '/employee/benefits/my-benefits', icon: WalletCards };
-      const wellnessItem = { name: 'Wellness', href: '/employee/wellness/fitness', icon: HeartPulse };
-      const expensesItem = { name: 'Expenses', href: '/employee/expenses/my-expenses', icon: Receipt };
-      const itManagementItem = { name: 'IT Management', href: '/employee/it-management/my-devices', icon: Cpu };
+      const performanceItem = { name: 'Performance', href: '/org/cmp/employee/performance/my-performance', icon: ChartNoAxesCombined };
+      const benefitsItem = { name: 'Benefits', href: '/org/cmp/employee/benefits/my-benefits', icon: WalletCards };
+      const wellnessItem = { name: 'Wellness', href: '/org/cmp/employee/wellness/fitness', icon: HeartPulse };
+      const expensesItem = { name: 'Expenses', href: '/org/cmp/employee/expenses/my-expenses', icon: Receipt };
+      const itManagementItem = { name: 'IT Management', href: '/org/cmp/employee/it-management/my-devices', icon: Cpu };
       
       return [
         dashboardItem, 
@@ -313,7 +313,7 @@ function Layout({ children }: LayoutProps) {
     router.setViewMode(newMode);
     
     // Navigate to appropriate dashboard based on view mode
-    const newPath = newMode === 'employee' ? '/employee/dashboard' : newMode === 'manager' ? '/management/dashboard' : '/grp/dashboard';
+    const newPath = newMode === 'employee' ? '/org/cmp/employee/dashboard' : newMode === 'manager' ? '/org/cmp/management/dashboard' : '/org/grp/dashboard';
     router.navigate(newPath);
     setCurrentRoute(newPath);
   }, [viewMode]);
@@ -322,16 +322,16 @@ function Layout({ children }: LayoutProps) {
     // Handle dynamic navigation based on view mode
     if (path === '/dashboard') {
       const actualPath = viewMode === 'employee' 
-        ? '/employee/dashboard' 
+        ? '/org/cmp/employee/dashboard' 
         : viewMode === 'manager' 
-        ? '/management/dashboard'
-        : '/grp/dashboard';
+        ? '/org/cmp/management/dashboard'
+        : '/org/grp/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/people') {
       const actualPath = viewMode === 'employee' 
-        ? '/employee/my-info' 
-        : '/management/people/directory';
+        ? '/org/cmp/employee/my-info' 
+        : '/org/cmp/management/people/directory';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
@@ -515,12 +515,12 @@ function Layout({ children }: LayoutProps) {
               {viewMode !== 'employee' && (
               <button
                 onClick={() => {
-                  const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                  const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                   handleNavigation(settingsUrl);
                 }}
                 className="flex items-center font-normal transition-colors w-full relative"
               style={(() => {
-                const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                 const isActive = isNavItemActive('Settings', settingsUrl);
                 return {
                   fontSize: '14px',
@@ -536,13 +536,13 @@ function Layout({ children }: LayoutProps) {
                 };
               })()}
               onMouseEnter={(e) => {
-                const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                 if (!isNavItemActive('Settings', settingsUrl)) {
                   e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                 }
               }}
               onMouseLeave={(e) => {
-                const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                const settingsUrl = viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
                 if (!isNavItemActive('Settings', settingsUrl)) {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }

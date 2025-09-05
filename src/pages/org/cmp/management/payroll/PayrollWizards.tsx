@@ -8,7 +8,7 @@ export default function PayrollWizards() {
   useEffect(() => {
     // Register submodule tabs for Payroll
     registerSubmodules('Payroll', [
-      { id: 'payroll-wizards', label: 'Payroll Wizards', href: '/management/payroll/payroll-wizards', icon: HandCoins }
+      { id: 'payroll-wizards', label: 'Payroll Wizards', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }
     ]);
   }, [registerSubmodules]);
 
