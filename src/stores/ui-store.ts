@@ -24,7 +24,7 @@ interface UIState {
   theme: 'light' | 'dark' | 'system';
 
   // View mode state
-  viewMode: 'employee' | 'manager' | 'group' | 'vap';
+  viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp';
 
   // Notifications
   notifications: Notification[];
@@ -44,7 +44,7 @@ interface UIState {
   
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   
-  setViewMode: (mode: 'employee' | 'manager' | 'group' | 'vap') => void;
+  setViewMode: (mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => void;
   
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
   markNotificationRead: (id: string) => void;
@@ -107,7 +107,7 @@ export const useUIStore = create<UIState>()(
       },
 
       // View mode actions
-      setViewMode: (mode: 'employee' | 'manager' | 'group' | 'vap') => {
+      setViewMode: (mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => {
         logger.info('View mode changed', { viewMode: mode });
         set({ viewMode: mode });
       },
