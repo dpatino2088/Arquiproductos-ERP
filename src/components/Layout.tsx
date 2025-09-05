@@ -15,6 +15,7 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Building, 
+  Building2,
   HelpCircle,
   Receipt,
   Printer,
@@ -44,7 +45,7 @@ const NavigationItem = memo(({
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
-  viewMode?: 'employee' | 'manager';
+  viewMode?: 'employee' | 'manager' | 'group';
 }) => (
   <button
     onClick={onClick}
@@ -53,13 +54,17 @@ const NavigationItem = memo(({
       fontSize: '14px',
       minHeight: '36px',
       padding: '12px 16px 12px 14px',
-      color: isActive ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-      backgroundColor: isActive ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-      borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+      color: isActive ? 
+        (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+        (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+      backgroundColor: isActive ? 
+        (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+      borderLeft: isActive ? 
+        `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
     }}
     onMouseEnter={(e) => {
       if (!isActive) {
-        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+        e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
       }
     }}
     onMouseLeave={(e) => {
@@ -78,7 +83,9 @@ const NavigationItem = memo(({
         opacity: isCollapsed ? 0 : 1,
         pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
-        color: isActive ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 'var(--graphite-black-hex)'
+        color: isActive ? 
+          (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+          (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)')
       }}
     >
       {item.name}
@@ -237,7 +244,14 @@ function Layout({ children }: LayoutProps) {
     const dashboardItem = baseNavigation[0]; // Dashboard
     const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
-    if (viewMode === 'manager') {
+    if (viewMode === 'group') {
+      // Group view navigation - Home, Companies, Reports, Settings
+      const homeItem = { name: 'Home', href: '/grp/dashboard', icon: Home };
+      const companiesItem = { name: 'Companies', href: '/grp/companies', icon: Building2 };
+      const reportsItem = { name: 'Reports', href: '/grp/reports', icon: Printer };
+      const settingsItem = { name: 'Settings', href: '/grp/settings', icon: Settings };
+      return [homeItem, companiesItem, reportsItem, settingsItem];
+    } else if (viewMode === 'manager') {
       const peopleItem = { name: 'People', href: '/people', icon: Users };
       // Insert People after Recruiting (index 1) and before Time & Attendance (index 2)
       const recruitingItem = restOfBase[0]; // Recruiting
@@ -271,11 +285,15 @@ function Layout({ children }: LayoutProps) {
   }, [viewMode]);
 
   const dashboardItem = useMemo(() => 
-    navigation.find(item => item?.name === 'Dashboard'), [navigation]
+    navigation.find(item => item?.name === 'Dashboard' || item?.name === 'Home'), [navigation]
   );
   
   const otherNavItems = useMemo(() => 
-    navigation.filter(item => item?.name !== 'Dashboard'), [navigation]
+    navigation.filter(item => 
+      item?.name !== 'Dashboard' && 
+      item?.name !== 'Home' && 
+      !(viewMode === 'group' && item?.name === 'Settings') // Exclude Settings in group view since it's rendered separately
+    ), [navigation, viewMode]
   );
 
   // Memoized handlers
@@ -290,12 +308,12 @@ function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleViewToggle = useCallback(() => {
-    const newMode = viewMode === 'employee' ? 'manager' : 'employee';
+    const newMode = viewMode === 'employee' ? 'manager' : viewMode === 'manager' ? 'group' : 'employee';
     setViewMode(newMode);
     router.setViewMode(newMode);
     
     // Navigate to appropriate dashboard based on view mode
-    const newPath = newMode === 'employee' ? '/employee/dashboard' : '/management/dashboard';
+    const newPath = newMode === 'employee' ? '/employee/dashboard' : newMode === 'manager' ? '/management/dashboard' : '/grp/dashboard';
     router.navigate(newPath);
     setCurrentRoute(newPath);
   }, [viewMode]);
@@ -305,7 +323,9 @@ function Layout({ children }: LayoutProps) {
     if (path === '/dashboard') {
       const actualPath = viewMode === 'employee' 
         ? '/employee/dashboard' 
-        : '/management/dashboard';
+        : viewMode === 'manager' 
+        ? '/management/dashboard'
+        : '/grp/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/people') {
@@ -346,8 +366,8 @@ function Layout({ children }: LayoutProps) {
           }`}
           style={{ 
             width: sidebarWidth,
-            backgroundColor: viewMode === 'manager' ? 'var(--gray-950)' : 'white',
-            borderColor: viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)'
+            backgroundColor: viewMode === 'group' ? '#2c313a' : viewMode === 'manager' ? 'var(--gray-950)' : 'white',
+            borderColor: viewMode === 'group' ? '#2c313a' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)'
           }}
           role="navigation"
           aria-label="Main navigation"
@@ -370,7 +390,7 @@ function Layout({ children }: LayoutProps) {
                 left: '52px',
                 opacity: isCollapsed ? 0 : 1,
                 pointerEvents: isCollapsed ? 'none' : 'auto',
-                color: viewMode === 'manager' ? 'var(--gray-100)' : 'var(--gray-950)',
+                color: viewMode === 'group' ? 'var(--gray-100)' : viewMode === 'manager' ? 'var(--gray-100)' : 'var(--gray-950)',
                 fontSize: '16px'
               }}
             >
@@ -390,13 +410,17 @@ function Layout({ children }: LayoutProps) {
                       fontSize: '14px',
                       minHeight: '40px',
                       padding: '11px 16px 11px 14px',
-                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                      backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                      borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
+                        (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+                        (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                      backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
+                        (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                      borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
+                        `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                     }}
                     onMouseEnter={(e) => {
                       if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
-                        e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                        e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                       }
                     }}
                     onMouseLeave={(e) => {
@@ -442,13 +466,17 @@ function Layout({ children }: LayoutProps) {
                           fontSize: '14px',
                           minHeight: '36px',
                           padding: '12px 16px 12px 14px',
-                          color: isActive ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                          backgroundColor: isActive ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                          borderLeft: isActive ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                          color: isActive ? 
+                            (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+                            (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                          backgroundColor: isActive ? 
+                            (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                          borderLeft: isActive ? 
+                            `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
                         }}
                         onMouseEnter={(e) => {
                           if (!isActive) {
-                            e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                            e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                           }
                         }}
                         onMouseLeave={(e) => {
@@ -483,25 +511,39 @@ function Layout({ children }: LayoutProps) {
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
-              {/* Settings Button */}
+              {/* Settings Button - Only show in manager and group views */}
+              {viewMode !== 'employee' && (
               <button
-                onClick={() => handleNavigation('/management/settings/company-settings')}
+                onClick={() => {
+                  const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                  handleNavigation(settingsUrl);
+                }}
                 className="flex items-center font-normal transition-colors w-full relative"
-              style={{
-                fontSize: '14px',
-                minHeight: '36px',
-                padding: '12px 16px 12px 14px',
-                color: isNavItemActive('Settings', '/management/settings/company-settings') ? (viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : (viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                backgroundColor: isNavItemActive('Settings', '/management/settings/company-settings') ? (viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                borderLeft: isNavItemActive('Settings', '/management/settings/company-settings') ? `3px solid ${viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
-              }}
+              style={(() => {
+                const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                const isActive = isNavItemActive('Settings', settingsUrl);
+                return {
+                  fontSize: '14px',
+                  minHeight: '36px',
+                  padding: '12px 16px 12px 14px',
+                  color: isActive ? 
+                    (viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
+                    (viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
+                  backgroundColor: isActive ? 
+                    (viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
+                  borderLeft: isActive ? 
+                    `3px solid ${viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
+                };
+              })()}
               onMouseEnter={(e) => {
-                if (!isNavItemActive('Settings', '/management/settings/company-settings')) {
-                  e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                if (!isNavItemActive('Settings', settingsUrl)) {
+                  e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
                 }
               }}
               onMouseLeave={(e) => {
-                if (!isNavItemActive('Settings', '/management/settings/company-settings')) {
+                const settingsUrl = viewMode === 'group' ? '/grp/settings' : '/management/settings/company-settings';
+                if (!isNavItemActive('Settings', settingsUrl)) {
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }
               }}
@@ -521,21 +563,22 @@ function Layout({ children }: LayoutProps) {
                 Settings
               </span>
             </button>
+            )}
 
-              {/* Collapse/Expand Button */}
-              <button
+            {/* Collapse/Expand Button */}
+            <button
                 onClick={handleCollapseToggle}
                 className="flex items-center font-normal transition-colors w-full relative"
               style={{
                 fontSize: '14px',
                 minHeight: '36px',
                 padding: '12px 16px 12px 14px',
-                color: viewMode === 'manager' ? 'var(--gray-300)' : 'var(--gray-950)',
+                color: viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--gray-950)',
                 borderLeft: '3px solid transparent',
                 backgroundColor: 'transparent'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
+                e.currentTarget.style.backgroundColor = viewMode === 'group' ? '#1A1A1A' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent';
@@ -593,7 +636,7 @@ function Layout({ children }: LayoutProps) {
             {/* Right side - User actions */}
             <div className="flex items-center gap-3">
               <span className="font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                {viewMode === 'employee' ? 'Employee View' : 'Management View'}
+                {viewMode === 'employee' ? 'Employee View' : viewMode === 'manager' ? 'Management View' : 'Group View'}
               </span>
 
               <button 
@@ -687,7 +730,7 @@ function Layout({ children }: LayoutProps) {
                             style={{ color: 'var(--gray-950)' }}
                             data-testid={viewMode === 'employee' ? 'manager-view-btn' : 'employee-view-btn'}
                           >
-                            Switch to {viewMode === 'employee' ? 'Manager' : 'Employee'} View
+                            Switch to {viewMode === 'employee' ? 'Manager' : viewMode === 'manager' ? 'Group' : 'Employee'} View
                           </button>
                         </div>
                       </div>

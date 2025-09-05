@@ -3,7 +3,7 @@ import React from 'react';
 interface RhemoLogoProps {
   width?: string | number;
   height?: string | number;
-  viewMode?: 'employee' | 'manager';
+  viewMode?: 'employee' | 'manager' | 'group';
   style?: React.CSSProperties;
 }
 
@@ -13,8 +13,8 @@ export const RhemoLogo: React.FC<RhemoLogoProps> = ({
   viewMode = 'employee',
   style 
 }) => {
-  const primaryColor = viewMode === 'manager' ? 'var(--teal-brand-hex)' : 'var(--teal-brand-hex)'; // Teal 700 for both management and employee views
-  const secondaryColor = viewMode === 'manager' ? 'var(--white-hex)' : 'var(--graphite-black-hex)'; // Graphite Black in employee, white in manager
+  const primaryColor = 'var(--teal-brand-hex)'; // Teal 700 for all views
+  const secondaryColor = viewMode === 'employee' ? 'var(--graphite-black-hex)' : 'var(--white-hex)'; // Graphite Black in employee, white in manager and group
   
   return (
     <svg 

@@ -2,7 +2,7 @@
 export class Router {
   private routes: Map<string, () => void> = new Map();
   private currentRoute: string = '/';
-  private viewMode: 'employee' | 'manager' = 'employee';
+  private viewMode: 'employee' | 'manager' | 'group' = 'employee';
   private listeners: Set<() => void> = new Set();
   private unauthorizedRedirectHandler?: () => void;
 
@@ -17,11 +17,11 @@ export class Router {
     this.routes.set(path, handler);
   }
 
-  setViewMode(mode: 'employee' | 'manager') {
+  setViewMode(mode: 'employee' | 'manager' | 'group') {
     this.viewMode = mode;
   }
 
-  getViewMode(): 'employee' | 'manager' {
+  getViewMode(): 'employee' | 'manager' | 'group' {
     return this.viewMode;
   }
 
@@ -46,8 +46,8 @@ export class Router {
       return true; // Public routes are always accessible
     }
     
-    // Protected routes require manager view mode
-    return this.viewMode === 'manager';
+    // Protected routes require manager or group view mode
+    return this.viewMode === 'manager' || this.viewMode === 'group';
   }
 
   navigate(path: string, pushState: boolean = true) {

@@ -19,6 +19,26 @@ const ManagementDashboard = lazy(() => {
   return import('./pages/org/cmp/management/Dashboard');
 });
 
+const GroupDashboard = lazy(() => {
+  logger.debug('Loading GroupDashboard component');
+  return import('./pages/org/grp/Dashboard');
+});
+
+const GroupCompanies = lazy(() => {
+  logger.debug('Loading GroupCompanies component');
+  return import('./pages/org/grp/Companies');
+});
+
+const GroupReports = lazy(() => {
+  logger.debug('Loading GroupReports component');
+  return import('./pages/org/grp/Reports');
+});
+
+const GroupSettings = lazy(() => {
+  logger.debug('Loading GroupSettings component');
+  return import('./pages/org/grp/Settings');
+});
+
 const Inbox = lazy(() => {
   logger.debug('Loading Inbox component');
   return import('./pages/org/cmp/Inbox');
@@ -401,6 +421,7 @@ function _UserDashboard() {
 
 function App() {
   const { isAuthenticated, user, isLoading } = useAuth();
+  const { setViewMode } = useUIStore();
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   if (import.meta.env.DEV) {
@@ -447,6 +468,24 @@ function App() {
       router.addRoute('/management/dashboard', () => setCurrentPage('management-dashboard'));
       router.addRoute('/management/people/directory', () => setCurrentPage('directory'));
       router.addRoute('/management/people/organizational-chart', () => setCurrentPage('org-chart'));
+
+      // Group view routes
+      router.addRoute('/grp/dashboard', () => {
+        setViewMode('group');
+        setCurrentPage('group-dashboard');
+      });
+      router.addRoute('/grp/companies', () => {
+        setViewMode('group');
+        setCurrentPage('group-companies');
+      });
+      router.addRoute('/grp/reports', () => {
+        setViewMode('group');
+        setCurrentPage('group-reports');
+      });
+      router.addRoute('/grp/settings', () => {
+        setViewMode('group');
+        setCurrentPage('group-settings');
+      });
       
       // Management routes
       router.addRoute('/management/reports', () => setCurrentPage('reports'));
@@ -613,6 +652,14 @@ function App() {
         return <EmployeeDashboard />;
       case 'management-dashboard':
         return <ManagementDashboard />;
+      case 'group-dashboard':
+        return <GroupDashboard />;
+      case 'group-companies':
+        return <GroupCompanies />;
+      case 'group-reports':
+        return <GroupReports />;
+      case 'group-settings':
+        return <GroupSettings />;
       case 'inbox':
         return <Inbox />;
       case 'my-info':
