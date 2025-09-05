@@ -5,6 +5,22 @@ import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { RhemoLogo } from './RhemoLogo';
 import { 
+  getSidebarStyles, 
+  getButtonStyles, 
+  getHoverStyles, 
+  getTextStyles, 
+  getLogoTextColor,
+  getNextViewMode,
+  getSettingsUrl,
+  getDashboardUrl,
+  getViewModeLabel,
+  getNavigationButtonProps,
+  getDashboardButtonProps,
+  getSettingsButtonState,
+  createNavItemContent,
+  createCollapseExpandContent
+} from '../utils/viewModeStyles';
+import { 
   Users, 
   User,
   Clock, 
@@ -46,52 +62,50 @@ const NavigationItem = memo(({
   isCollapsed: boolean;
   onClick: () => void;
   viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal';
-}) => (
-  <button
-    onClick={onClick}
-    className="flex items-center font-normal transition-colors group relative w-full"
-    style={{
-      fontSize: '14px',
-      minHeight: '36px',
-      padding: '12px 16px 12px 14px',
-      color: isActive ? 
-        (viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-        (viewMode === 'rp' ? '#FFFFFF' : viewMode === 'vap' || viewMode === 'personal' ? '#FFFFFF' : viewMode === 'group' ? 'var(--gray-300)' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-      backgroundColor: isActive ? 
-        (viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-      borderLeft: isActive ? 
-        `3px solid ${viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
-    }}
-    onMouseEnter={(e) => {
-      if (!isActive) {
-        e.currentTarget.style.backgroundColor = viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
-      }
-    }}
-    onMouseLeave={(e) => {
-      if (!isActive) {
-        e.currentTarget.style.backgroundColor = 'transparent';
-      }
-    }}
-    aria-current={isActive ? 'page' : undefined}
-  >
-    <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-      <item.icon style={{ width: '18px', height: '18px' }} />
-    </div>
-    <span 
-      className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
+}) => {
+  const buttonStyles = getButtonStyles(viewMode, isActive);
+  const textStyles = getTextStyles(viewMode, isActive);
+  const hoverStyles = getHoverStyles(viewMode);
+
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center font-normal transition-colors group relative w-full"
       style={{
-        opacity: isCollapsed ? 0 : 1,
-        pointerEvents: isCollapsed ? 'none' : 'auto',
         fontSize: '14px',
-        color: isActive ? 
-          (viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-          (viewMode === 'rp' ? '#FFFFFF' : viewMode === 'vap' || viewMode === 'personal' ? '#FFFFFF' : viewMode === 'group' ? '#FFFFFF' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)')
+        minHeight: '36px',
+        padding: '12px 16px 12px 14px',
+        ...buttonStyles
       }}
+      onMouseEnter={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = hoverStyles.backgroundColor;
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+        }
+      }}
+      aria-current={isActive ? 'page' : undefined}
     >
-      {item.name}
-    </span>
-  </button>
-));
+      <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
+        <item.icon style={{ width: '18px', height: '18px' }} />
+      </div>
+      <span 
+        className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
+        style={{
+          opacity: isCollapsed ? 0 : 1,
+          pointerEvents: isCollapsed ? 'none' : 'auto',
+          fontSize: '14px',
+          ...textStyles
+        }}
+      >
+        {item.name}
+      </span>
+    </button>
+  );
+});
 
 NavigationItem.displayName = 'NavigationItem';
 
@@ -327,12 +341,12 @@ function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleViewToggle = useCallback(() => {
-    const newMode = viewMode === 'employee' ? 'manager' : viewMode === 'manager' ? 'group' : viewMode === 'group' ? 'vap' : viewMode === 'vap' ? 'rp' : viewMode === 'rp' ? 'personal' : 'employee';
+    const newMode = getNextViewMode(viewMode);
     setViewMode(newMode);
     router.setViewMode(newMode);
     
     // Navigate to appropriate dashboard based on view mode
-    const newPath = newMode === 'employee' ? '/org/cmp/employee/dashboard' : newMode === 'manager' ? '/org/cmp/management/dashboard' : newMode === 'group' ? '/org/grp/dashboard' : newMode === 'vap' ? '/org/vap/dashboard' : newMode === 'rp' ? '/org/rp/dashboard' : '/me/dashboard';
+    const newPath = getDashboardUrl(newMode);
     router.navigate(newPath);
     setCurrentRoute(newPath);
   }, [viewMode]);
@@ -340,17 +354,7 @@ function Layout({ children }: LayoutProps) {
   const handleNavigation = useCallback((path: string) => {
     // Handle dynamic navigation based on view mode
     if (path === '/dashboard') {
-      const actualPath = viewMode === 'employee' 
-        ? '/org/cmp/employee/dashboard' 
-        : viewMode === 'manager' 
-        ? '/org/cmp/management/dashboard'
-        : viewMode === 'group' 
-        ? '/org/grp/dashboard'
-        : viewMode === 'vap' 
-        ? '/org/vap/dashboard'
-        : viewMode === 'rp'
-        ? '/org/rp/dashboard'
-        : '/me/dashboard';
+      const actualPath = getDashboardUrl(viewMode);
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/people') {
@@ -391,8 +395,7 @@ function Layout({ children }: LayoutProps) {
           }`}
           style={{ 
             width: sidebarWidth,
-            backgroundColor: viewMode === 'rp' ? '#134e4a' : viewMode === 'vap' || viewMode === 'personal' ? '#1b3556' : viewMode === 'group' ? 'var(--gray-950)' : viewMode === 'manager' ? 'var(--gray-950)' : 'white',
-            borderColor: viewMode === 'rp' ? '#134e4a' : viewMode === 'vap' || viewMode === 'personal' ? '#1b3556' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)'
+            ...getSidebarStyles(viewMode)
           }}
           role="navigation"
           aria-label="Main navigation"
@@ -415,7 +418,7 @@ function Layout({ children }: LayoutProps) {
                 left: '52px',
                 opacity: isCollapsed ? 0 : 1,
                 pointerEvents: isCollapsed ? 'none' : 'auto',
-                color: viewMode === 'rp' ? 'var(--gray-100)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--gray-100)' : viewMode === 'group' ? 'var(--gray-100)' : viewMode === 'manager' ? 'var(--gray-100)' : 'var(--gray-950)',
+                color: getLogoTextColor(viewMode),
                 fontSize: '16px'
               }}
             >
@@ -429,45 +432,15 @@ function Layout({ children }: LayoutProps) {
             {dashboardItem && (
               <div style={{ marginTop: '-1px' }}>
                 <button
-                    onClick={() => handleNavigation(dashboardItem.href)}
-                    className="flex items-center font-normal transition-colors group relative w-full"
-                    style={{
-                      fontSize: '14px',
-                      minHeight: '40px',
-                      padding: '11px 16px 11px 14px',
-                      color: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
-                        (viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-                        (viewMode === 'rp' ? '#FFFFFF' : viewMode === 'vap' || viewMode === 'personal' ? '#FFFFFF' : viewMode === 'group' ? 'var(--gray-300)' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                      backgroundColor: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
-                        (viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                      borderLeft: isNavItemActive(dashboardItem.name, dashboardItem.href) ? 
-                        `3px solid ${viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
-                        e.currentTarget.style.backgroundColor = viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isNavItemActive(dashboardItem.name, dashboardItem.href)) {
-                        e.currentTarget.style.backgroundColor = 'transparent';
-                      }
-                    }}
+                    {...getDashboardButtonProps(
+                      viewMode, 
+                      isNavItemActive(dashboardItem.name, dashboardItem.href),
+                      () => handleNavigation(dashboardItem.href)
+                    )}
                     title={isCollapsed ? dashboardItem.name : undefined}
                     aria-label={dashboardItem.name}
                   >
-                    <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-                      <dashboardItem.icon style={{ width: '18px', height: '18px' }} />
-                    </div>
-                    <span 
-                      className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
-                      style={{ 
-                        opacity: isCollapsed ? 0 : 1,
-                        pointerEvents: isCollapsed ? 'none' : 'auto'
-                      }}
-                    >
-                      {dashboardItem.name}
-                    </span>
+                    {createNavItemContent(dashboardItem.icon, dashboardItem.name, isCollapsed)}
                   </button>
               </div>
             )}
@@ -485,45 +458,15 @@ function Layout({ children }: LayoutProps) {
                 return (
                   <li key={item.name} role="listitem">
                     <button
-                        onClick={() => handleNavigation(item.href)}
-                        className="flex items-center font-normal transition-colors group relative w-full"
-                        style={{
-                          fontSize: '14px',
-                          minHeight: '36px',
-                          padding: '12px 16px 12px 14px',
-                          color: isActive ? 
-                            (viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-                            (viewMode === 'rp' ? '#FFFFFF' : viewMode === 'vap' || viewMode === 'personal' ? '#FFFFFF' : viewMode === 'group' ? 'var(--gray-300)' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                          backgroundColor: isActive ? 
-                            (viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                          borderLeft: isActive ? 
-                            `3px solid ${viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isActive) {
-                            e.currentTarget.style.backgroundColor = viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isActive) {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                          }
-                        }}
+                        {...getNavigationButtonProps(
+                          viewMode,
+                          isActive,
+                          () => handleNavigation(item.href)
+                        )}
                         title={isCollapsed ? item.name : undefined}
                         aria-label={item.name}
                       >
-                        <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-                          <Icon style={{ width: '18px', height: '18px' }} />
-                        </div>
-                        <span 
-                          className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
-                          style={{ 
-                            opacity: isCollapsed ? 0 : 1,
-                            pointerEvents: isCollapsed ? 'none' : 'auto'
-                          }}
-                        >
-                          {item.name}
-                        </span>
+                        {createNavItemContent(Icon, item.name, isCollapsed)}
                       </button>
                   </li>
                 );
@@ -537,96 +480,28 @@ function Layout({ children }: LayoutProps) {
 
 
               {/* Settings Button - Only show in manager, group, and vap views */}
-              {viewMode !== 'employee' && (
-              <button
-                onClick={() => {
-                  const settingsUrl = viewMode === 'rp' ? '/org/rp/settings' : viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'personal' ? '/me/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
-                  handleNavigation(settingsUrl);
-                }}
-                className="flex items-center font-normal transition-colors w-full relative"
-              style={(() => {
-                const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'personal' ? '/me/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
-                const isActive = isNavItemActive('Settings', settingsUrl);
-                return {
-                fontSize: '14px',
-                minHeight: '36px',
-                  padding: '12px 16px 12px 14px',
-                  color: isActive ? 
-                    (viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)') : 
-                    (viewMode === 'rp' ? '#FFFFFF' : viewMode === 'vap' || viewMode === 'personal' ? '#FFFFFF' : viewMode === 'group' ? 'var(--gray-300)' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--graphite-black-hex)'),
-                  backgroundColor: isActive ? 
-                    (viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)') : 'transparent',
-                  borderLeft: isActive ? 
-                    `3px solid ${viewMode === 'rp' ? 'var(--teal-500)' : viewMode === 'vap' || viewMode === 'personal' ? 'var(--teal-500)' : viewMode === 'group' ? 'var(--teal-500)' : viewMode === 'manager' ? 'var(--teal-500)' : 'var(--teal-800)'}` : '3px solid transparent'
-                };
+              {viewMode !== 'employee' && (() => {
+                const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
+                return (
+                  <button
+                    {...getNavigationButtonProps(viewMode, isActive, () => handleNavigation(settingsUrl))}
+                    title="Settings"
+                    aria-label="Settings"
+                  >
+                    {createNavItemContent(Settings, 'Settings', isCollapsed)}
+                  </button>
+                );
               })()}
-              onMouseEnter={(e) => {
-                const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
-                if (!isNavItemActive('Settings', settingsUrl)) {
-                  e.currentTarget.style.backgroundColor = viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                const settingsUrl = viewMode === 'vap' ? '/org/vap/settings' : viewMode === 'group' ? '/org/grp/settings' : '/org/cmp/management/settings/company-settings';
-                if (!isNavItemActive('Settings', settingsUrl)) {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }
-              }}
-              title="Settings"
-              aria-label="Settings"
-            >
-              <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-                <Settings style={{ width: '18px', height: '18px' }} />
-              </div>
-              <span 
-                className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
-                style={{ 
-                  opacity: isCollapsed ? 0 : 1,
-                  pointerEvents: isCollapsed ? 'none' : 'auto'
-                }}
-              >
-                Settings
-              </span>
-            </button>
-            )}
 
               {/* Collapse/Expand Button */}
               <button
-                onClick={handleCollapseToggle}
-                className="flex items-center font-normal transition-colors w-full relative"
-              style={{
-                fontSize: '14px',
-                minHeight: '36px',
-                padding: '12px 16px 12px 14px',
-                color: viewMode === 'rp' ? '#FFFFFF' : viewMode === 'vap' || viewMode === 'personal' ? '#FFFFFF' : viewMode === 'group' ? 'var(--gray-300)' : viewMode === 'manager' ? 'var(--gray-300)' : 'var(--gray-950)',
-                borderLeft: '3px solid transparent',
-                backgroundColor: 'transparent'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = viewMode === 'rp' ? '#042f2e' : viewMode === 'vap' || viewMode === 'personal' ? '#10243d' : viewMode === 'group' ? 'var(--gray-800)' : viewMode === 'manager' ? 'var(--gray-800)' : 'var(--gray-250)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
-              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!isCollapsed}
+                {...getNavigationButtonProps(viewMode, false, handleCollapseToggle, {
+                  borderLeft: '3px solid transparent'
+                })}
+                aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-expanded={!isCollapsed}
             >
-              <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-                {isCollapsed ? (
-                  <ChevronRight style={{ width: '18px', height: '18px' }} />
-                ) : (
-                  <ChevronLeft style={{ width: '18px', height: '18px' }} />
-                )}
-              </div>
-              <span 
-                className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
-                style={{ 
-                  opacity: isCollapsed ? 0 : 1,
-                  pointerEvents: isCollapsed ? 'none' : 'auto'
-                }}
-              >
-                {isCollapsed ? 'Show Labels' : 'Hide Labels'}
-              </span>
+              {createCollapseExpandContent(isCollapsed, ChevronRight, ChevronLeft, 'Show Labels', 'Hide Labels')}
             </button>
             </div>
           </div>
@@ -687,7 +562,7 @@ function Layout({ children }: LayoutProps) {
               </button>
 
               <span className="font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                {viewMode === 'employee' ? 'Employee View' : viewMode === 'manager' ? 'Management View' : viewMode === 'group' ? 'Group View' : viewMode === 'vap' ? 'VAP View' : viewMode === 'rp' ? 'RP View' : 'Personal View'}
+                {getViewModeLabel(viewMode)}
               </span>
 
 
