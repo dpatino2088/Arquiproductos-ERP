@@ -269,7 +269,17 @@ export const getNavigationButtonProps = (
       if (!isActive) {
         e.currentTarget.style.backgroundColor = 'transparent';
       }
-    }
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      // Enhanced keyboard support
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onClick();
+      }
+    },
+    // Enhanced accessibility attributes
+    'aria-current': isActive ? 'page' : undefined,
+    tabIndex: 0
   };
 };
 

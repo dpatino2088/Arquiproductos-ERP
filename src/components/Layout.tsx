@@ -88,8 +88,15 @@ const NavigationItem = memo(({
         }
       }}
       aria-current={isActive ? 'page' : undefined}
+      aria-label={`${item.name}${isActive ? ' (current page)' : ''}`}
+      aria-describedby={isCollapsed ? `${item.name.toLowerCase().replace(/\s+/g, '-')}-tooltip` : undefined}
+      role="menuitem"
     >
-      <div className="flex items-center justify-center" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
+      <div 
+        className="flex items-center justify-center" 
+        style={{ width: '18px', height: '18px', flexShrink: 0 }}
+        aria-hidden="true"
+      >
         <item.icon style={{ width: '18px', height: '18px' }} />
       </div>
       <span 
@@ -387,9 +394,81 @@ function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--gray-200)' }}>
+      {/* Enhanced Skip Links for comprehensive keyboard navigation */}
+      <div className="skip-links-container">
+        <a 
+          href="#main-content" 
+          className="skip-link"
+          onClick={(e) => {
+            e.preventDefault();
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) {
+              mainContent.focus();
+              mainContent.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}
+        >
+          Skip to main content
+        </a>
+        
+        <a 
+          href="#main-navigation" 
+          className="skip-link"
+          onClick={(e) => {
+            e.preventDefault();
+            const mainNav = document.getElementById('main-navigation');
+            if (mainNav) {
+              const firstButton = mainNav.querySelector('button');
+              if (firstButton) {
+                firstButton.focus();
+                firstButton.scrollIntoView({ behavior: 'smooth' });
+              }
+            }
+          }}
+        >
+          Skip to navigation
+        </a>
+
+        {submoduleTabs.length > 0 && (
+          <a 
+            href="#secondary-navigation" 
+            className="skip-link"
+            onClick={(e) => {
+              e.preventDefault();
+              const secondaryNav = document.getElementById('secondary-navigation');
+              if (secondaryNav) {
+                const firstTab = secondaryNav.querySelector('button');
+                if (firstTab) {
+                  firstTab.focus();
+                  firstTab.scrollIntoView({ behavior: 'smooth' });
+                }
+              }
+            }}
+          >
+            Skip to page navigation
+          </a>
+        )}
+
+        <a 
+          href="#user-menu" 
+          className="skip-link"
+          onClick={(e) => {
+            e.preventDefault();
+            const userMenu = document.getElementById('user-menu');
+            if (userMenu) {
+              userMenu.focus();
+              userMenu.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}
+        >
+          Skip to user menu
+        </a>
+      </div>
+      
       <div className="flex">
         {/* Sidebar Navigation */}
         <nav 
+          id="main-navigation"
           className={`min-h-screen fixed left-0 top-0 bottom-0 overflow-y-auto transition-all duration-300 z-50 border-r ${
             isCollapsed ? 'w-14' : 'w-60'
           }`}
@@ -438,7 +517,9 @@ function Layout({ children }: LayoutProps) {
                       () => handleNavigation(dashboardItem.href)
                     )}
                     title={isCollapsed ? dashboardItem.name : undefined}
-                    aria-label={dashboardItem.name}
+                    aria-label={`${dashboardItem.name}${isNavItemActive(dashboardItem.name, dashboardItem.href) ? ' (current page)' : ''}`}
+                    aria-current={isNavItemActive(dashboardItem.name, dashboardItem.href) ? 'page' : undefined}
+                    role="menuitem"
                   >
                     {createNavItemContent(dashboardItem.icon, dashboardItem.name, isCollapsed)}
                   </button>
@@ -449,14 +530,19 @@ function Layout({ children }: LayoutProps) {
             <div style={{ height: '18px' }}></div>
 
             {/* Other Navigation Items */}
-            <ul style={{ gap: '1px', marginTop: '-3px' }} className="flex flex-col" role="list">
+            <ul 
+              style={{ gap: '1px', marginTop: '-3px' }} 
+              className="flex flex-col" 
+              role="menu"
+              aria-label="Main navigation menu"
+            >
               {otherNavItems.map((item) => {
                 if (!item) return null;
                 const isActive = isNavItemActive(item.name, item.href);
                 const Icon = item.icon;
 
                 return (
-                  <li key={item.name} role="listitem">
+                  <li key={item.name} role="none">
                     <button
                         {...getNavigationButtonProps(
                           viewMode,
@@ -486,7 +572,9 @@ function Layout({ children }: LayoutProps) {
                   <button
                     {...getNavigationButtonProps(viewMode, isActive, () => handleNavigation(settingsUrl))}
                     title="Settings"
-                    aria-label="Settings"
+                    aria-label={`Settings${isActive ? ' (current page)' : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                    role="menuitem"
                   >
                     {createNavItemContent(Settings, 'Settings', isCollapsed)}
                   </button>
@@ -498,8 +586,10 @@ function Layout({ children }: LayoutProps) {
                 {...getNavigationButtonProps(viewMode, false, handleCollapseToggle, {
                   borderLeft: '3px solid transparent'
                 })}
-                aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-label={isCollapsed ? "Expand sidebar navigation" : "Collapse sidebar navigation"}
                 aria-expanded={!isCollapsed}
+                aria-controls="main-navigation"
+                title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {createCollapseExpandContent(isCollapsed, ChevronRight, ChevronLeft, 'Show Labels', 'Hide Labels')}
             </button>
@@ -538,7 +628,8 @@ function Layout({ children }: LayoutProps) {
               <button 
                 className="p-1 rounded"
                 style={{ color: 'var(--gray-950)' }}
-                aria-label="Search"
+                aria-label="Open search"
+                title="Search"
               >
                 <Search style={{ width: '16px', height: '16px' }} />
               </button>
@@ -546,7 +637,8 @@ function Layout({ children }: LayoutProps) {
               <button 
                 className="p-1 rounded"
                 style={{ color: 'var(--gray-950)' }}
-                aria-label="Notifications"
+                aria-label="View notifications"
+                title="Notifications"
               >
                 <Bell style={{ width: '16px', height: '16px' }} />
               </button>
@@ -555,7 +647,7 @@ function Layout({ children }: LayoutProps) {
                 onClick={handleHelpClick}
                 className="p-1 rounded"
                 style={{ color: 'var(--gray-950)' }}
-                aria-label="Help & Knowledge Base"
+                aria-label="Open help and knowledge base"
                 title="Help & Knowledge Base"
               >
                 <HelpCircle style={{ width: '16px', height: '16px' }} />
@@ -569,14 +661,18 @@ function Layout({ children }: LayoutProps) {
               {/* User Menu */}
               <div className="relative" data-user-menu>
                 <button 
+                  id="user-menu"
                   className="rounded-full flex items-center justify-center hover:opacity-80 transition-colors"
                   style={{ 
                     width: '28px', 
                     height: '28px',
                                          backgroundColor: 'var(--teal-brand-hex)'
                   }}
-                  aria-label="My Account"
+                  aria-label={`My Account${isUserMenuOpen ? ' (menu open)' : ' (menu closed)'}`}
+                  aria-expanded={isUserMenuOpen}
+                  aria-haspopup="menu"
                   data-testid="view-toggle"
+                  title="My Account"
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 >
                   <User style={{ width: '14px', height: '14px', color: 'white' }} />
@@ -587,6 +683,9 @@ function Layout({ children }: LayoutProps) {
                   <div 
                     className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50"
                     style={{ top: '100%' }}
+                    role="menu"
+                    aria-label="User account menu"
+                    aria-orientation="vertical"
                   >
                     {/* User Info Section */}
                     <div className="px-4 py-3 border-b border-gray-100">
@@ -602,8 +701,10 @@ function Layout({ children }: LayoutProps) {
                           setIsUserMenuOpen(false);
                           // Add navigation to account page if needed
                         }}
+                        role="menuitem"
+                        aria-label="Go to my account settings"
                       >
-                        <User style={{ width: '16px', height: '16px' }} />
+                        <User style={{ width: '16px', height: '16px' }} aria-hidden="true" />
                         My Account
                       </button>
                       
@@ -613,15 +714,17 @@ function Layout({ children }: LayoutProps) {
                           setIsUserMenuOpen(false);
                           // Add navigation to change password if needed
                         }}
+                        role="menuitem"
+                        aria-label="Change my password"
                       >
-                        <Settings style={{ width: '16px', height: '16px' }} />
+                        <Settings style={{ width: '16px', height: '16px' }} aria-hidden="true" />
                         Change Password
                       </button>
 
                       {/* View Mode Toggle */}
                       <div className="border-t border-gray-100 mt-1 pt-1">
                         <div className="px-4 py-2">
-                          <div className="text-xs text-gray-500 mb-2">View Mode</div>
+                          <div className="text-xs text-gray-500 mb-2" role="group" aria-label="View mode selection">View Mode</div>
                           <div className="space-y-1">
                             {/* Group View Button */}
                             <button
@@ -642,6 +745,9 @@ function Layout({ children }: LayoutProps) {
                               style={{ color: viewMode === 'group' ? 'var(--blue-800)' : 'var(--gray-950)' }}
                               data-testid="group-view-btn"
                               disabled={viewMode === 'group'}
+                              role="menuitemradio"
+                              aria-checked={viewMode === 'group'}
+                              aria-label={`Switch to Group View${viewMode === 'group' ? ' (currently selected)' : ''}`}
                             >
                               Group View {viewMode === 'group' && '✓'}
                             </button>
@@ -798,7 +904,7 @@ function Layout({ children }: LayoutProps) {
           >
             <div className="flex items-center h-full" style={{ paddingRight: '1.5rem' }}>
               {submoduleTabs.length > 0 ? (
-                <div className="flex items-stretch h-full" role="tablist">
+                <div id="secondary-navigation" className="flex items-stretch h-full" role="tablist">
                   {submoduleTabs.map((tab) => {
                     return (
                       <button
@@ -821,7 +927,9 @@ function Layout({ children }: LayoutProps) {
                         }}
                         role="tab"
                         aria-selected={tab.isActive}
-                        aria-label={tab.label}
+                        aria-label={`${tab.label}${tab.isActive ? ' (current tab)' : ''}`}
+                        aria-controls={`${tab.id}-panel`}
+                        tabIndex={tab.isActive ? 0 : -1}
                       >
                         {tab.label}
                       </button>
@@ -852,6 +960,7 @@ function Layout({ children }: LayoutProps) {
 
         {/* Main Content */}
         <main 
+          id="main-content"
           className="flex-1 transition-all duration-300"
           style={{
             marginLeft: mainMarginLeft,
@@ -860,6 +969,7 @@ function Layout({ children }: LayoutProps) {
             backgroundColor: 'var(--gray-200)'
           }}
           role="main"
+          tabIndex={-1}
         >
           {children}
         </main>

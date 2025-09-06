@@ -202,8 +202,117 @@
   .border-subtle { border-color: var(--gray-200); }
   .border-strong { border-color: var(--gray-300); }
 
-  /* Focus ring using Tailwind v3 */
-  .focus-ring { box-shadow: 0 0 0 2px var(--focus-ring); }
+  /* Enhanced Focus Management for WCAG 2.2 AA Compliance */
+  .focus-ring { 
+    box-shadow: 0 0 0 2px var(--focus-ring); 
+  }
+
+  /* Universal focus styles - Very subtle like Directory search bar */
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  a:focus-visible,
+  [tabindex]:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.2) !important;
+  }
+
+  /* Enhanced focus for buttons - Subtle ring */
+  button:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.25) !important;
+  }
+
+  /* Focus for navigation elements - Very subtle */
+  nav button:focus-visible,
+  [role="navigation"] button:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.3) !important;
+  }
+
+  /* Focus for form elements - Like Directory search */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.2) !important;
+    border-color: rgba(0, 131, 131, 0.5) !important;
+  }
+
+  /* Enhanced Skip Links Container */
+  .skip-links-container {
+    position: absolute;
+    top: -200px;
+    left: 6px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: top 0.2s ease-in-out;
+  }
+
+  .skip-links-container:focus-within {
+    top: 6px;
+  }
+
+  /* Individual Skip Links */
+  .skip-link {
+    background: var(--teal-700);
+    color: white;
+    padding: 8px 12px;
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 14px;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    border: 2px solid transparent;
+    transition: all 0.2s ease-in-out;
+  }
+
+  .skip-link:focus {
+    outline: none;
+    border-color: white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .skip-link:hover {
+    background: var(--teal-600);
+    transform: translateY(-1px);
+  }
+
+  .skip-link:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+
+  /* High contrast mode support - Enhanced but still subtle */
+  @media (prefers-contrast: high) {
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    a:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--teal-700) !important;
+      outline-offset: 1px !important;
+      box-shadow: 0 0 0 3px rgba(0, 131, 131, 0.4) !important;
+    }
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    a:focus-visible,
+    [tabindex]:focus-visible {
+      transition: none !important;
+    }
+  }
 
   /* Legacy compatibility variants */
   .bg-status-green-10 { background-color: var(--green-100); }

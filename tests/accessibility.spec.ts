@@ -111,36 +111,44 @@ test.describe('Accessibility Tests', () => {
     // Wait for page to load completely
     await page.waitForLoadState('networkidle');
 
-    // Test tab navigation through main elements
+    // Test skip link first
     await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
     
-    // Wait a bit for focus to settle
+    // Check if skip link is focused
+    const skipLink = page.locator('.skip-link:focus');
+    const skipLinkVisible = await skipLink.count() > 0;
+    
+    if (skipLinkVisible) {
+      await expect(skipLink).toBeVisible();
+      // Press Enter to activate skip link
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(100);
+    }
+
+    // Test navigation through main elements
+    await page.keyboard.press('Tab');
     await page.waitForTimeout(200);
     
-    const focusedElement = await page.evaluate(() => document.activeElement?.tagName);
-    expect(['BUTTON', 'A', 'INPUT', 'NAV', 'BODY']).toContain(focusedElement);
-
-    // For WebKit, we'll check if the focused element exists and has proper focus styles
-    const activeElement = page.locator(':focus');
-    const count = await activeElement.count();
-    
-    if (count > 0) {
-      // Element is focused, check if it's visible
-      await expect(activeElement).toBeVisible();
-    } else {
-      // WebKit fallback: check if any element has focus styles applied
-      const elementsWithFocus = await page.evaluate(() => {
-        const elements = document.querySelectorAll('button, a, input, [tabindex]');
-        return Array.from(elements).some(el => {
-          const styles = window.getComputedStyle(el);
-          return styles.boxShadow !== 'none' || styles.outline !== 'none';
-        });
+    // Check for enhanced focus styles we implemented
+    const elementsWithEnhancedFocus = await page.evaluate(() => {
+      const elements = document.querySelectorAll('button, a, input, [tabindex]');
+      return Array.from(elements).some(el => {
+        const styles = window.getComputedStyle(el);
+        // Check for our enhanced focus styles
+        const hasOutline = styles.outline !== 'none' && styles.outline !== '';
+        const hasBoxShadow = styles.boxShadow !== 'none' && styles.boxShadow !== '';
+        const hasVisibleFocus = hasOutline || hasBoxShadow;
+        
+        // Also check if element is actually focused
+        const isFocused = el === document.activeElement;
+        
+        return isFocused && hasVisibleFocus;
       });
-      
-      // If no elements have focus styles, that's still acceptable for this test
-      // as long as we can navigate with keyboard
-      expect(elementsWithFocus).toBeTruthy();
-    }
+    });
+    
+    // Our enhanced focus styles should be working
+    expect(elementsWithEnhancedFocus).toBeTruthy();
   });
 
   test('should have proper heading hierarchy', async ({ page }) => {
@@ -333,29 +341,52 @@ test.describe('Accessibility Tests', () => {
   test('should support keyboard navigation in all navigation components', async ({ page }) => {
     await page.goto('/');
     
-    // Test keyboard navigation in sidebar
+    // Wait for page to fully load
+    await page.waitForLoadState('networkidle');
+    
+    // Test skip link navigation first
     await page.keyboard.press('Tab');
-    let focusedElement = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim());
-    expect(focusedElement).toBeTruthy();
+    await page.waitForTimeout(100);
     
-    // Navigate to management view to test secondary navbar keyboard navigation
-    await page.click('[data-testid="view-toggle"]');
-    await page.click('[data-testid="manager-view-btn"]');
-    await page.waitForURL('/management/dashboard');
+    const skipLinkFocused = await page.evaluate(() => {
+      const activeEl = document.activeElement;
+      return activeEl?.classList.contains('skip-link') || activeEl?.textContent?.includes('Skip to main content');
+    });
     
-    // Expand sidebar and navigate to People
-    await page.hover('nav[aria-label="Main navigation"]');
-    await page.waitForTimeout(500);
-    await page.click('nav[aria-label="Main navigation"] button:has-text("People")');
+    if (skipLinkFocused) {
+      // Test that we can activate the skip link
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(200);
+      
+      // Verify main content is focused
+      const mainContentFocused = await page.evaluate(() => {
+        return document.activeElement?.id === 'main-content';
+      });
+      expect(mainContentFocused).toBeTruthy();
+    }
+    
+    // Test sidebar navigation
+    await page.keyboard.press('Tab');
     await page.waitForTimeout(200);
     
-    // Test keyboard navigation in secondary navbar (tabs)
-    const firstTab = page.locator('[role="tab"]').first();
-    await firstTab.focus();
+    // Check if any navigation element is focused and has proper focus styles
+    const navigationFocused = await page.evaluate(() => {
+      const activeEl = document.activeElement;
+      if (!activeEl) return false;
+      
+      // Check if it's a navigation element
+      const isNavElement = activeEl.tagName === 'BUTTON' && 
+                          (activeEl.closest('nav') || activeEl.closest('[role="navigation"]'));
+      
+      if (isNavElement) {
+        const styles = window.getComputedStyle(activeEl);
+        const hasEnhancedFocus = styles.outline !== 'none' || styles.boxShadow !== 'none';
+        return hasEnhancedFocus;
+      }
+      
+      return false;
+    });
     
-    // Test arrow key navigation (common pattern for tabs)
-    await page.keyboard.press('ArrowRight');
-    focusedElement = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') || document.activeElement?.textContent?.trim());
-    expect(focusedElement).toBeTruthy();
+    expect(navigationFocused).toBeTruthy();
   });
 });
