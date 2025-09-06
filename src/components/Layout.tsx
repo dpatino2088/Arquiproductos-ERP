@@ -68,49 +68,48 @@ const NavigationItem = memo(({
   const hoverStyles = getHoverStyles(viewMode);
 
   return (
-    <button
-      onClick={onClick}
+  <button
+    onClick={onClick}
       className="flex items-center font-normal transition-colors group relative w-full"
-      style={{
-        fontSize: '14px',
-        minHeight: '36px',
+    style={{
+      fontSize: '14px',
+      minHeight: '36px',
         padding: '12px 16px 12px 14px',
         ...buttonStyles
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive) {
+    }}
+    onMouseEnter={(e) => {
+      if (!isActive) {
           e.currentTarget.style.backgroundColor = hoverStyles.backgroundColor;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive) {
-          e.currentTarget.style.backgroundColor = 'transparent';
-        }
-      }}
-      aria-current={isActive ? 'page' : undefined}
+      }
+    }}
+    onMouseLeave={(e) => {
+      if (!isActive) {
+        e.currentTarget.style.backgroundColor = 'transparent';
+      }
+    }}
+    aria-current={isActive ? 'page' : undefined}
       aria-label={`${item.name}${isActive ? ' (current page)' : ''}`}
       aria-describedby={isCollapsed ? `${item.name.toLowerCase().replace(/\s+/g, '-')}-tooltip` : undefined}
-      role="menuitem"
     >
       <div 
         className="flex items-center justify-center" 
         style={{ width: '18px', height: '18px', flexShrink: 0 }}
         aria-hidden="true"
       >
-        <item.icon style={{ width: '18px', height: '18px' }} />
-      </div>
-      <span 
-        className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
-        style={{
-          opacity: isCollapsed ? 0 : 1,
-          pointerEvents: isCollapsed ? 'none' : 'auto',
-          fontSize: '14px',
+      <item.icon style={{ width: '18px', height: '18px' }} />
+    </div>
+    <span 
+      className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
+      style={{
+        opacity: isCollapsed ? 0 : 1,
+        pointerEvents: isCollapsed ? 'none' : 'auto',
+        fontSize: '14px',
           ...textStyles
-        }}
-      >
-        {item.name}
-      </span>
-    </button>
+      }}
+    >
+      {item.name}
+    </span>
+  </button>
   );
 });
 
@@ -393,7 +392,7 @@ function Layout({ children }: LayoutProps) {
   }, [submoduleTabs.length, breadcrumbs.length]);
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--gray-200)' }}>
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--gray-200)' }} data-testid="main-layout">
       {/* Enhanced Skip Links for comprehensive keyboard navigation */}
       <div className="skip-links-container">
         <a 
@@ -478,6 +477,7 @@ function Layout({ children }: LayoutProps) {
           }}
           role="navigation"
           aria-label="Main navigation"
+          data-testid="main-navigation"
         >
           {/* Logo Section */}
                     <div>
@@ -519,7 +519,6 @@ function Layout({ children }: LayoutProps) {
                     title={isCollapsed ? dashboardItem.name : undefined}
                     aria-label={`${dashboardItem.name}${isNavItemActive(dashboardItem.name, dashboardItem.href) ? ' (current page)' : ''}`}
                     aria-current={isNavItemActive(dashboardItem.name, dashboardItem.href) ? 'page' : undefined}
-                    role="menuitem"
                   >
                     {createNavItemContent(dashboardItem.icon, dashboardItem.name, isCollapsed)}
                   </button>
@@ -530,11 +529,11 @@ function Layout({ children }: LayoutProps) {
             <div style={{ height: '18px' }}></div>
 
             {/* Other Navigation Items */}
-            <ul 
+            <div 
               style={{ gap: '1px', marginTop: '-3px' }} 
               className="flex flex-col" 
-              role="menu"
-              aria-label="Main navigation menu"
+              role="navigation"
+              aria-label="Main navigation items"
             >
               {otherNavItems.map((item) => {
                 if (!item) return null;
@@ -542,22 +541,21 @@ function Layout({ children }: LayoutProps) {
                 const Icon = item.icon;
 
                 return (
-                  <li key={item.name} role="none">
-                    <button
-                        {...getNavigationButtonProps(
-                          viewMode,
-                          isActive,
-                          () => handleNavigation(item.href)
-                        )}
-                        title={isCollapsed ? item.name : undefined}
-                        aria-label={item.name}
-                      >
-                        {createNavItemContent(Icon, item.name, isCollapsed)}
-                      </button>
-                  </li>
+                  <button
+                    key={item.name}
+                    {...getNavigationButtonProps(
+                      viewMode,
+                      isActive,
+                      () => handleNavigation(item.href)
+                    )}
+                    title={isCollapsed ? item.name : undefined}
+                    aria-label={item.name}
+                  >
+                    {createNavItemContent(Icon, item.name, isCollapsed)}
+                  </button>
                 );
               })}
-            </ul>
+            </div>
           </div>
 
           {/* Help, Settings and Collapse/Expand Buttons */}
@@ -569,15 +567,14 @@ function Layout({ children }: LayoutProps) {
               {viewMode !== 'employee' && (() => {
                 const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
                 return (
-                  <button
+              <button
                     {...getNavigationButtonProps(viewMode, isActive, () => handleNavigation(settingsUrl))}
-                    title="Settings"
+              title="Settings"
                     aria-label={`Settings${isActive ? ' (current page)' : ''}`}
                     aria-current={isActive ? 'page' : undefined}
-                    role="menuitem"
                   >
                     {createNavItemContent(Settings, 'Settings', isCollapsed)}
-                  </button>
+            </button>
                 );
               })()}
 
@@ -587,7 +584,7 @@ function Layout({ children }: LayoutProps) {
                   borderLeft: '3px solid transparent'
                 })}
                 aria-label={isCollapsed ? "Expand sidebar navigation" : "Collapse sidebar navigation"}
-                aria-expanded={!isCollapsed}
+              aria-expanded={!isCollapsed}
                 aria-controls="main-navigation"
                 title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
@@ -845,14 +842,14 @@ function Layout({ children }: LayoutProps) {
                             </button>
                             
                             {/* RP View Button */}
-                            <button
-                              onClick={() => {
+                          <button
+                            onClick={() => {
                                 if (viewMode !== 'rp') {
                                   setViewMode('rp');
                                   router.setViewMode('rp');
                                   router.navigate('/org/rp/dashboard');
                                   setCurrentRoute('/org/rp/dashboard');
-                                  setIsUserMenuOpen(false);
+                              setIsUserMenuOpen(false);
                                 }
                               }}
                               className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
@@ -865,7 +862,7 @@ function Layout({ children }: LayoutProps) {
                               disabled={viewMode === 'rp'}
                             >
                               RP View {viewMode === 'rp' && '✓'}
-                            </button>
+                          </button>
                           </div>
                         </div>
                       </div>
