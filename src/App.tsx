@@ -498,6 +498,14 @@ function App() {
       console.log('Router initialized with view mode:', viewMode);
       }
       
+      // Set up view mode change handler to sync router changes with UI store
+      router.setViewModeChangeHandler((newViewMode) => {
+        if (import.meta.env.DEV) {
+        console.log('Router detected view mode change, updating UI store:', newViewMode);
+        }
+        setViewMode(newViewMode);
+      });
+      
       // Set up unauthorized redirect handler
       router.setUnauthorizedRedirectHandler(() => {
         if (import.meta.env.DEV) {
@@ -529,69 +537,27 @@ function App() {
       router.addRoute('/org/cmp/management/people/directory', () => setCurrentPage('directory'));
       router.addRoute('/org/cmp/management/people/organizational-chart', () => setCurrentPage('org-chart'));
 
-      // Group view routes
-      router.addRoute('/org/grp/dashboard', () => {
-        setViewMode('group');
-        setCurrentPage('group-dashboard');
-      });
-      router.addRoute('/org/grp/companies', () => {
-        setViewMode('group');
-        setCurrentPage('group-companies');
-      });
-      router.addRoute('/org/grp/reports', () => {
-        setViewMode('group');
-        setCurrentPage('group-reports');
-      });
-      router.addRoute('/org/grp/settings', () => {
-        setViewMode('group');
-        setCurrentPage('group-settings');
-      });
+      // Group view routes (viewMode auto-inferred from URL)
+      router.addRoute('/org/grp/dashboard', () => setCurrentPage('group-dashboard'));
+      router.addRoute('/org/grp/companies', () => setCurrentPage('group-companies'));
+      router.addRoute('/org/grp/reports', () => setCurrentPage('group-reports'));
+      router.addRoute('/org/grp/settings', () => setCurrentPage('group-settings'));
 
-      // VAP view routes
-      router.addRoute('/org/vap/dashboard', () => {
-        setViewMode('vap');
-        setCurrentPage('vap-dashboard');
-      });
-      router.addRoute('/org/vap/companies', () => {
-        setViewMode('vap');
-        setCurrentPage('vap-companies');
-      });
-      router.addRoute('/org/vap/reports', () => {
-        setViewMode('vap');
-        setCurrentPage('vap-reports');
-      });
-      router.addRoute('/org/vap/settings', () => {
-        setViewMode('vap');
-        setCurrentPage('vap-settings');
-      });
+      // VAP view routes (viewMode auto-inferred from URL)
+      router.addRoute('/org/vap/dashboard', () => setCurrentPage('vap-dashboard'));
+      router.addRoute('/org/vap/companies', () => setCurrentPage('vap-companies'));
+      router.addRoute('/org/vap/reports', () => setCurrentPage('vap-reports'));
+      router.addRoute('/org/vap/settings', () => setCurrentPage('vap-settings'));
 
-      // RP view routes
-      router.addRoute('/org/rp/dashboard', () => {
-        setViewMode('rp');
-        setCurrentPage('rp-dashboard');
-      });
-      router.addRoute('/org/rp/companies', () => {
-        setViewMode('rp');
-        setCurrentPage('rp-companies');
-      });
-      router.addRoute('/org/rp/reports', () => {
-        setViewMode('rp');
-        setCurrentPage('rp-reports');
-      });
-      router.addRoute('/org/rp/settings', () => {
-        setViewMode('rp');
-        setCurrentPage('rp-settings');
-      });
+      // RP view routes (viewMode auto-inferred from URL)
+      router.addRoute('/org/rp/dashboard', () => setCurrentPage('rp-dashboard'));
+      router.addRoute('/org/rp/companies', () => setCurrentPage('rp-companies'));
+      router.addRoute('/org/rp/reports', () => setCurrentPage('rp-reports'));
+      router.addRoute('/org/rp/settings', () => setCurrentPage('rp-settings'));
 
-      // Personal view routes
-      router.addRoute('/me/dashboard', () => {
-        setViewMode('personal');
-        setCurrentPage('personal-dashboard');
-      });
-      router.addRoute('/me/settings', () => {
-        setViewMode('personal');
-        setCurrentPage('personal-settings');
-      });
+      // Personal view routes (viewMode auto-inferred from URL)
+      router.addRoute('/me/dashboard', () => setCurrentPage('personal-dashboard'));
+      router.addRoute('/me/settings', () => setCurrentPage('personal-settings'));
       
       // Management routes
       router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));

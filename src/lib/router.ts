@@ -5,6 +5,7 @@ export class Router {
   private viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal' = 'employee';
   private listeners: Set<() => void> = new Set();
   private unauthorizedRedirectHandler?: () => void;
+  private viewModeChangeHandler?: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal') => void;
 
   constructor() {
     // Handle browser back/forward buttons
@@ -23,6 +24,22 @@ export class Router {
 
   getViewMode(): 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal' {
     return this.viewMode;
+  }
+
+  // Set handler for view mode changes (to sync with UI store)
+  setViewModeChangeHandler(handler: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal') => void) {
+    this.viewModeChangeHandler = handler;
+  }
+
+  // Infer view mode from URL path
+  private inferViewModeFromPath(path: string): 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal' {
+    if (path.includes('/org/grp/')) return 'group';
+    if (path.includes('/org/vap/')) return 'vap';
+    if (path.includes('/org/rp/')) return 'rp';
+    if (path.includes('/org/cmp/management/')) return 'manager';
+    if (path.includes('/personal/') || path.includes('/me/')) return 'personal';
+    // Default to employee for /org/cmp/employee/ or other paths
+    return 'employee';
   }
 
   // Set handler for unauthorized access redirects
@@ -51,6 +68,24 @@ export class Router {
   }
 
   navigate(path: string, pushState: boolean = true) {
+    // Infer and update view mode from URL path
+    const inferredViewMode = this.inferViewModeFromPath(path);
+    const oldViewMode = this.viewMode;
+    
+    // Update view mode if it changed
+    if (inferredViewMode !== oldViewMode) {
+      this.viewMode = inferredViewMode;
+      
+      // Notify view mode change handler (to sync with UI store)
+      if (this.viewModeChangeHandler) {
+        this.viewModeChangeHandler(inferredViewMode);
+      }
+      
+      if (import.meta.env.DEV) {
+        console.log(`View mode changed from ${oldViewMode} to ${inferredViewMode} based on URL: ${path}`);
+      }
+    }
+    
     // Check route access before navigation
     if (!this.hasRouteAccess(path)) {
       console.warn(`Access denied to route: ${path}. Redirecting to employee dashboard.`);
