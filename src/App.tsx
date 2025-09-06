@@ -94,7 +94,10 @@ const Inbox = lazy(() => {
   return import('./pages/org/cmp/Inbox');
 });
 
-
+const NotFound = lazy(() => {
+  logger.debug('Loading NotFound component');
+  return import('./pages/NotFound');
+});
 
 const MyInfo = lazy(() => {
   logger.debug('Loading MyInfo component');
@@ -516,8 +519,9 @@ function App() {
       
       // Set up routes - default route goes to employee dashboard
       router.addRoute('/', () => setCurrentPage('employee-dashboard'));
-      // Legacy routes for backward compatibility
-      router.addRoute('/home/dashboard', () => setCurrentPage('employee-dashboard'));
+      
+      // 404 route handler for unknown routes
+      router.addRoute('*', () => setCurrentPage('not-found'));
       router.addRoute('/org/cmp/inbox', () => setCurrentPage('inbox'));
       router.addRoute('/org/cmp/inbox', () => setCurrentPage('inbox'));
       
@@ -869,6 +873,8 @@ function App() {
           <div className="min-h-dvh flex items-center justify-center p-6">
             <AuthForms />
           </div>
+        ) : currentPage === 'not-found' ? (
+          <NotFound />
         ) : (
           <SubmoduleNavProvider>
             <Layout>

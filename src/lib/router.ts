@@ -119,12 +119,20 @@ export class Router {
       // Scroll to top after navigation
       window.scrollTo(0, 0);
     } else {
-      // Default to dashboard
-      const defaultHandler = this.routes.get('/home/dashboard') || this.routes.get('/');
-      if (defaultHandler) {
-        defaultHandler();
+      // No route found - trigger 404 page
+      const notFoundHandler = this.routes.get('*');
+      if (notFoundHandler) {
+        notFoundHandler();
         // Scroll to top after navigation
         window.scrollTo(0, 0);
+      } else {
+        // Fallback to dashboard if no 404 handler is set
+        const defaultHandler = this.routes.get('/');
+        if (defaultHandler) {
+          defaultHandler();
+          // Scroll to top after navigation
+          window.scrollTo(0, 0);
+        }
       }
     }
     
