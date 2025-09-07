@@ -9,7 +9,7 @@ export default function PersonalDashboard() {
     // Register submodule tabs for employee dashboard
     registerSubmodules('Employee Dashboard', [
       { id: 'dashboard', label: 'Dashboard', href: '/org/cmp/employee/dashboard', icon: Home },
-      { id: 'inbox', label: 'Inbox', href: '/org/cmp/inbox', icon: Inbox }
+      { id: 'inbox', label: 'Inbox', href: '/org/cmp/employee/inbox', icon: Inbox }
     ]);
   }, [registerSubmodules]);
 

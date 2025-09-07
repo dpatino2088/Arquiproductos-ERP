@@ -94,7 +94,7 @@ export default function EmployeeInfo() {
     const slug = `${employee.firstName.toLowerCase()}-${employee.lastName.toLowerCase()}`;
     
     setBreadcrumbs([
-      { label: 'Employees', href: '/org/cmp/management/employees/directory' },
+      { label: 'Employees' }, // Not clickable - use sidebar button instead
       { label: 'Directory', href: '/org/cmp/management/employees/directory' },
       { label: employee.fullName }
     ]);

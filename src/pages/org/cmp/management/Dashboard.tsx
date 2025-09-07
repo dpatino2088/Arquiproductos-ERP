@@ -9,7 +9,7 @@ export default function ManagementDashboard() {
     // Register submodule tabs for management dashboard
     registerSubmodules('Management Dashboard', [
       { id: 'dashboard', label: 'Dashboard', href: '/org/cmp/management/dashboard', icon: Home },
-      { id: 'inbox', label: 'Inbox', href: '/org/cmp/inbox', icon: Inbox }
+      { id: 'inbox', label: 'Inbox', href: '/org/cmp/management/inbox', icon: Inbox }
     ]);
   }, [registerSubmodules]);
 

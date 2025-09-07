@@ -298,7 +298,7 @@ function Layout({ children }: LayoutProps) {
       return [dashboardItem, recruitingItem, employeesItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }];
     } else {
       // Employee view navigation in specific order
-      const myInfoItem = { name: 'My Info', href: '/employees', icon: User };
+      const myInfoItem = { name: 'My Info', href: '/org/cmp/employee/my-info', icon: User };
       const timeAttendanceItem = { name: 'Time & Attendance', href: '/org/cmp/employee/time-and-attendance/my-clock', icon: Clock };
       const ptoLeaveItem = { name: 'PTO & Leaves', href: '/org/cmp/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
       const companyKnowledgeItem = { name: 'Company Knowledge', href: '/org/cmp/employee/company-knowledge/about-the-company', icon: BookMarked };
@@ -365,7 +365,7 @@ function Layout({ children }: LayoutProps) {
       setCurrentRoute(actualPath);
     } else if (path === '/employees') {
       const actualPath = viewMode === 'employee' 
-        ? '/org/cmp/employee/employees/my-info' 
+        ? '/org/cmp/employee/my-info' 
         : '/org/cmp/management/employees/directory';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);

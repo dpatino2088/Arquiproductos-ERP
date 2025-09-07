@@ -101,7 +101,7 @@ const NotFound = lazy(() => {
 
 const MyInfo = lazy(() => {
   logger.debug('Loading MyInfo component');
-  return import('./pages/org/cmp/employee/employees/MyInfo');
+  return import('./pages/org/cmp/employee/MyInfo');
 });
 
 const Directory = lazy(() => {
@@ -527,8 +527,9 @@ function App() {
       
       // 404 route handler for unknown routes
       router.addRoute('*', () => setCurrentPage('not-found'));
-      router.addRoute('/org/cmp/inbox', () => setCurrentPage('inbox'));
-      router.addRoute('/org/cmp/inbox', () => setCurrentPage('inbox'));
+      // Specific inbox routes for each view mode
+      router.addRoute('/org/cmp/management/inbox', () => setCurrentPage('inbox'));
+      router.addRoute('/org/cmp/employee/inbox', () => setCurrentPage('inbox'));
       
       // Employee view routes
       router.addRoute('/org/cmp/employee/dashboard', () => setCurrentPage('employee-dashboard'));
@@ -539,7 +540,7 @@ function App() {
       router.addRoute('/personal/employees/my-info', () => setCurrentPage('my-info'));
       
       // Legacy employee routes (redirect to new path)
-      router.addRoute('/org/cmp/employee/employees/my-info', () => setCurrentPage('my-info'));
+      router.addRoute('/org/cmp/employee/my-info', () => setCurrentPage('my-info'));
       
       // Management view routes
       router.addRoute('/org/cmp/management/dashboard', () => setCurrentPage('management-dashboard'));
