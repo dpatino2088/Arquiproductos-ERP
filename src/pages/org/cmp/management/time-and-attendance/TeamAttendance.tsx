@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
+import { router } from '../../../../../lib/router';
 import { 
   Clock, 
   Calendar, 
@@ -408,6 +409,25 @@ export default function TeamAttendance() {
     return lastEntry.clockOut;
   };
 
+  const handleViewEmployeeAttendance = (record: AttendanceRecord) => {
+    // Store employee data in sessionStorage
+    const employeeData = {
+      id: record.id,
+      employeeId: record.employeeId,
+      employeeName: record.employeeName,
+      role: record.role,
+      department: record.department,
+      location: record.location
+    };
+    sessionStorage.setItem('selectedEmployee', JSON.stringify(employeeData));
+    
+    // Navigate to employee attendance page with slug
+    const slug = record.employeeName.toLowerCase().replace(/\s+/g, '-');
+    const url = `/org/cmp/management/time-and-attendance/employee-attendance/${slug}`;
+    console.log('Navigating to:', url);
+    router.navigate(url);
+  };
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -623,13 +643,16 @@ export default function TeamAttendance() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('employeeName')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Employee
-                      {sortBy === 'employeeName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <div className="w-6"></div>
+                      <button
+                        onClick={() => handleSort('employeeName')}
+                        className="flex items-center gap-1 hover:text-gray-700"
+                      >
+                        Employee
+                        {sortBy === 'employeeName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                      </button>
+                    </div>
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
@@ -711,7 +734,13 @@ export default function TeamAttendance() {
                             <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
                               {record.employeeName.split(' ').map(n => n[0]).join('')}
                             </div>
-                            <div className="text-sm font-medium text-gray-900">{record.employeeName}</div>
+                            <button
+                              onClick={() => handleViewEmployeeAttendance(record)}
+                              className="text-sm font-medium text-gray-900 hover:text-primary transition-colors text-left"
+                              aria-label={`View ${record.employeeName} attendance details`}
+                            >
+                              {record.employeeName}
+                            </button>
                           </div>
                         </td>
                       <td className="py-2 px-4">
@@ -738,8 +767,9 @@ export default function TeamAttendance() {
                       <td className="py-2 px-4">
                         <div className="flex items-center gap-2">
                           <button
+                            onClick={() => handleViewEmployeeAttendance(record)}
                             className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            aria-label={`View ${record.employeeName} details`}
+                            aria-label={`View ${record.employeeName} attendance details`}
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -761,45 +791,56 @@ export default function TeamAttendance() {
                     
                     {/* Expanded time entries */}
                     {expandedRows.has(record.id) && record.timeEntries.length > 0 && (
-                      <tr className="bg-gray-50">
-                        <td colSpan={8} className="py-4 px-6">
-                          <div className="space-y-3">
-                            <h4 className="text-sm font-medium text-gray-900 mb-3">Time Entries</h4>
-                            <div className="space-y-2">
-                              {record.timeEntries.map((entry, index) => (
-                                <div key={entry.id} className="bg-white border border-gray-200 rounded-lg p-4">
-                                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <div>
-                                      <div className="text-xs text-gray-500 mb-1">Time</div>
-                                      <div className="text-sm font-medium text-gray-900">
-                                        {entry.clockIn} - {entry.clockOut || 'In Progress'}
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <div className="text-xs text-gray-500 mb-1">Project</div>
-                                      <div className="text-sm text-gray-900">{entry.project}</div>
-                                    </div>
-                                    <div>
-                                      <div className="text-xs text-gray-500 mb-1">Activity</div>
-                                      <div className="text-sm text-gray-900">{entry.activity}</div>
-                                    </div>
-                                    <div>
-                                      <div className="text-xs text-gray-500 mb-1">Hours</div>
-                                      <div className="text-sm font-medium text-gray-900">{entry.hours}h</div>
-                                    </div>
-                                  </div>
-                                  {entry.notes && (
-                                    <div className="mt-3">
-                                      <div className="text-xs text-gray-500 mb-1">Notes</div>
-                                      <div className="text-sm text-gray-700">{entry.notes}</div>
-                                    </div>
-                                  )}
+                      <>
+                        {record.timeEntries.map((entry, index) => (
+                          <tr key={entry.id} className="bg-gray-50 border-t border-gray-200">
+                            <td className="py-2 px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="w-6"></div>
+                                <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-gray-600 text-xs font-medium">
+                                  {index + 1}
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
+                                <div className="text-sm text-gray-600">Time Entry</div>
+                              </div>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-sm text-gray-900">{entry.project}</span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-sm text-gray-900">{entry.clockIn}</span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-sm text-gray-900">{entry.clockOut || 'In Progress'}</span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-sm text-gray-900">{entry.hours}h</span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                                  {entry.activity}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-sm text-gray-900">{record.location}</span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <div className="flex items-center gap-2">
+                                {entry.notes && (
+                                  <button
+                                    className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                    aria-label={`View notes for ${entry.project}`}
+                                    title={entry.notes}
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </>
                     )}
                   </>
                 ))}

@@ -129,6 +129,11 @@ const TeamAttendance = lazy(() => {
   return import('./pages/org/cmp/management/time-and-attendance/TeamAttendance');
 });
 
+const EmployeeAttendance = lazy(() => {
+  logger.debug('Loading Employee Attendance component');
+  return import('./pages/org/cmp/management/time-and-attendance/EmployeeAttendance');
+});
+
 const TeamGeolocation = lazy(() => {
   logger.debug('Loading Team Geolocation component');
   return import('./pages/org/cmp/management/time-and-attendance/TeamGeolocation');
@@ -577,6 +582,8 @@ function App() {
       // Time & Attendance routes
       router.addRoute('/org/cmp/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
+      router.addRoute('/org/cmp/management/time-and-attendance/employee-attendance/:slug', () => setCurrentPage('employee-attendance'));
+      router.addRoute('/org/cmp/management/time-and-attendance/employee-attendance', () => setCurrentPage('employee-attendance'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-geolocation', () => setCurrentPage('team-geolocation'));
       
       // PTO & Leaves routes
@@ -783,6 +790,8 @@ function App() {
         return <TeamPlanner />;
       case 'team-attendance':
         return <TeamAttendance />;
+      case 'employee-attendance':
+        return <EmployeeAttendance />;
       case 'team-geolocation':
         return <TeamGeolocation />;
       case 'team-leave-calendar':
