@@ -73,7 +73,7 @@ export default function Directory() {
   const [selectedLocation, setSelectedLocation] = useState<string>('');
 
   useEffect(() => {
-    // Register submodule tabs for management people section
+    // Register submodule tabs for management employees section
     registerSubmodules('Employee Directory', [
       { id: 'directory', label: 'Directory', href: '/org/cmp/management/employees/directory', icon: Users },
       { id: 'org-chart', label: 'Organizational Chart', href: '/org/cmp/management/employees/organizational-chart', icon: GitBranch }

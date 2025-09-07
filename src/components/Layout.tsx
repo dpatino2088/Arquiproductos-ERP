@@ -120,7 +120,7 @@ const baseNavigation = [
   { name: 'Recruiting', href: '/org/cmp/management/recruiting/job-openings', icon: Briefcase },
   { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Clock },
   { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: CalendarCheck },
-  { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked },
+  { name: 'Company Knowledge', href: '/org/cmp/management/company-knowledge/about-the-company', icon: BookMarked },
   { name: 'Performance', href: '/org/cmp/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
   { name: 'Benefits', href: '/org/cmp/management/benefits/team-benefits', icon: WalletCards },
 ];
@@ -213,12 +213,12 @@ function Layout({ children }: LayoutProps) {
       case 'Recruiting':
         // Recruiting is active if we're on any recruiting route
         return currentRoute.includes('/recruiting');
-      case 'People':
-        // People is active if we're on any people route
-        return currentRoute.includes('/people');
+      case 'Employees':
+        // Employees is active if we're on any employees route
+        return currentRoute.includes('/employees');
       case 'My Info':
-        // My Info is active if we're on any people or my-info route
-        return currentRoute.includes('/people') || currentRoute.includes('/my-info');
+        // My Info is active if we're on any employees or my-info route
+        return currentRoute.includes('/employees') || currentRoute.includes('/my-info');
       case 'Time & Attendance':
         // Time & Attendance is active if we're on any time-and-attendance route
         return currentRoute.includes('/time-and-attendance');
@@ -291,17 +291,17 @@ function Layout({ children }: LayoutProps) {
       const settingsItem = { name: 'Settings', href: '/org/grp/settings', icon: Settings };
       return [homeItem, companiesItem, reportsItem, settingsItem];
     } else if (viewMode === 'manager') {
-      const peopleItem = { name: 'People', href: '/people', icon: Users };
+      const employeesItem = { name: 'Employees', href: '/employees', icon: Users };
       // Insert People after Recruiting (index 1) and before Time & Attendance (index 2)
       const recruitingItem = restOfBase[0]; // Recruiting
       const remainingItems = restOfBase.slice(1); // Everything after Recruiting
-      return [dashboardItem, recruitingItem, peopleItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }];
+      return [dashboardItem, recruitingItem, employeesItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }];
     } else {
       // Employee view navigation in specific order
-      const myInfoItem = { name: 'My Info', href: '/people', icon: User };
+      const myInfoItem = { name: 'My Info', href: '/employees', icon: User };
       const timeAttendanceItem = { name: 'Time & Attendance', href: '/org/cmp/employee/time-and-attendance/my-clock', icon: Clock };
       const ptoLeaveItem = { name: 'PTO & Leaves', href: '/org/cmp/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
-      const companyKnowledgeItem = { name: 'Company Knowledge', href: '/cmp/about-the-company', icon: BookMarked };
+      const companyKnowledgeItem = { name: 'Company Knowledge', href: '/org/cmp/employee/company-knowledge/about-the-company', icon: BookMarked };
       const performanceItem = { name: 'Performance', href: '/org/cmp/employee/performance/my-performance', icon: ChartNoAxesCombined };
       const benefitsItem = { name: 'Benefits', href: '/org/cmp/employee/benefits/my-benefits', icon: WalletCards };
       const wellnessItem = { name: 'Wellness', href: '/org/cmp/employee/wellness/fitness', icon: HeartPulse };
@@ -363,10 +363,10 @@ function Layout({ children }: LayoutProps) {
       const actualPath = getDashboardUrl(viewMode);
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
-    } else if (path === '/people') {
+    } else if (path === '/employees') {
       const actualPath = viewMode === 'employee' 
-        ? '/org/cmp/employee/my-info' 
-        : '/org/cmp/management/people/directory';
+        ? '/org/cmp/employee/employees/my-info' 
+        : '/org/cmp/management/employees/directory';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
@@ -541,18 +541,18 @@ function Layout({ children }: LayoutProps) {
                 const Icon = item.icon;
 
                 return (
-                  <button
+                    <button
                     key={item.name}
                     {...getNavigationButtonProps(
                       viewMode,
                       isActive,
                       () => handleNavigation(item.href)
                     )}
-                    title={isCollapsed ? item.name : undefined}
-                    aria-label={item.name}
-                  >
+                        title={isCollapsed ? item.name : undefined}
+                        aria-label={item.name}
+                      >
                     {createNavItemContent(Icon, item.name, isCollapsed)}
-                  </button>
+                      </button>
                 );
               })}
             </div>
@@ -934,8 +934,8 @@ function Layout({ children }: LayoutProps) {
                   })}
                 </div>
               ) : breadcrumbs.length > 0 ? (
-                <nav className="flex items-center h-full" style={{ paddingLeft: '1.5rem' }} aria-label="Breadcrumb">
-                  <ol className="flex items-center gap-2" style={{ fontSize: '14px', color: 'var(--gray-950)' }}>
+                <nav className="flex items-center h-full" style={{ paddingLeft: '3rem' }} aria-label="Breadcrumb">
+                  <ol className="flex items-center gap-2" style={{ fontSize: '12px', color: 'var(--gray-950)' }}>
                     {breadcrumbs.map((crumb, index) => (
                       <li key={index} className="flex items-center gap-2">
                         {crumb.href ? (
@@ -976,3 +976,4 @@ function Layout({ children }: LayoutProps) {
 }
 
 export default memo(Layout);
+

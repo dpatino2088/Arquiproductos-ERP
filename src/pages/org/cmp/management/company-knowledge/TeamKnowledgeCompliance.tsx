@@ -8,7 +8,7 @@ export default function TeamKnowledgeCompliance() {
   useEffect(() => {
     // Register submodule tabs for Company Knowledge
     registerSubmodules('Company Knowledge', [
-      { id: 'about-company', label: 'About the Company', href: '/org/cmp/about-the-company', icon: Building2 },
+      { id: 'about-company', label: 'About the Company', href: '/org/cmp/management/company-knowledge/about-the-company', icon: Building2 },
       { id: 'team-responsibilities', label: 'Team Responsibilities', href: '/org/cmp/management/company-knowledge/team-responsibilities', icon: Users },
       { id: 'team-knowledge-compliance', label: 'Team Knowledge Compliance', href: '/org/cmp/management/company-knowledge/team-knowledge-compliance', icon: Shield }
     ]);

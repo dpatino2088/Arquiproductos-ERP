@@ -8,7 +8,7 @@ export default function ProcessesAndPolicies() {
   useEffect(() => {
     // Register submodule tabs for Company Knowledge
     registerSubmodules('Company Knowledge', [
-      { id: 'about-company', label: 'About the Company', href: '/org/cmp/about-the-company', icon: Building2 },
+      { id: 'about-company', label: 'About the Company', href: '/org/cmp/employee/company-knowledge/about-the-company', icon: Building2 },
       { id: 'my-responsibility', label: 'My Responsibility', href: '/org/cmp/employee/company-knowledge/my-responsibility', icon: UserCheck },
       { id: 'processes-policies', label: 'Processes & Policies', href: '/org/cmp/employee/company-knowledge/processes-and-policies', icon: FileText },
       { id: 'courses-training', label: 'Courses & Training', href: '/org/cmp/employee/company-knowledge/courses-and-training', icon: GraduationCap },

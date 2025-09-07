@@ -18,6 +18,27 @@ export class Router {
     this.routes.set(path, handler);
   }
 
+  // Check if a route pattern matches a given path (handles parameters like :slug)
+  private matchesRoute(routePattern: string, path: string): boolean {
+    // Convert route pattern to regex
+    const regexPattern = routePattern
+      .replace(/:\w+/g, '[^/]+') // Replace :param with [^/]+ (any chars except /)
+      .replace(/\//g, '\\/'); // Escape forward slashes
+    
+    
+    // Ensure we have a valid regex pattern
+    if (!regexPattern || regexPattern === '^$') {
+      return false;
+    }
+    
+    try {
+      const regex = new RegExp(`^${regexPattern}$`);
+      return regex.test(path);
+    } catch (error) {
+      return false;
+    }
+  }
+
   setViewMode(mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal') {
     this.viewMode = mode;
   }
@@ -38,7 +59,9 @@ export class Router {
     if (path.includes('/org/rp/')) return 'rp';
     if (path.includes('/org/cmp/management/')) return 'manager';
     if (path.includes('/personal/') || path.includes('/me/')) return 'personal';
-    // Default to employee for /org/cmp/employee/ or other paths
+    if (path.includes('/org/cmp/employee/')) return 'employee';
+    
+    // Default to employee for other paths
     return 'employee';
   }
 
@@ -112,7 +135,19 @@ export class Router {
     
     const oldRoute = this.currentRoute;
     this.currentRoute = path;
-    const handler = this.routes.get(path);
+    
+    // First try exact match
+    let handler = this.routes.get(path);
+    
+    // If no exact match, try to find a route with parameters
+    if (!handler) {
+      for (const [routePattern, routeHandler] of this.routes.entries()) {
+        if (this.matchesRoute(routePattern, path)) {
+          handler = routeHandler;
+          break;
+        }
+      }
+    }
     
     if (handler) {
       handler();

@@ -101,17 +101,22 @@ const NotFound = lazy(() => {
 
 const MyInfo = lazy(() => {
   logger.debug('Loading MyInfo component');
-  return import('./pages/org/cmp/employee/MyInfo');
+  return import('./pages/org/cmp/employee/employees/MyInfo');
 });
 
 const Directory = lazy(() => {
   logger.debug('Loading Directory component');
-  return import('./pages/org/cmp/management/people/Directory');
+  return import('./pages/org/cmp/management/employees/Directory');
+});
+
+const EmployeeInfo = lazy(() => {
+  logger.debug('Loading EmployeeInfo component');
+  return import('./pages/org/cmp/management/employees/EmployeeInfo');
 });
 
 const OrganizationalChart = lazy(() => {
   logger.debug('Loading OrganizationalChart component');
-  return import('./pages/org/cmp/management/people/OrganizationalChart');
+  return import('./pages/org/cmp/management/employees/OrganizationalChart');
 });
 
 const TeamPlanner = lazy(() => {
@@ -531,15 +536,17 @@ function App() {
       
       // Legacy personal routes (redirect to employee)
       router.addRoute('/personal/dashboard', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/personal/people/my-info', () => setCurrentPage('my-info'));
+      router.addRoute('/personal/employees/my-info', () => setCurrentPage('my-info'));
       
       // Legacy employee routes (redirect to new path)
-      router.addRoute('/org/cmp/employee/people/my-info', () => setCurrentPage('my-info'));
+      router.addRoute('/org/cmp/employee/employees/my-info', () => setCurrentPage('my-info'));
       
       // Management view routes
       router.addRoute('/org/cmp/management/dashboard', () => setCurrentPage('management-dashboard'));
-      router.addRoute('/org/cmp/management/people/directory', () => setCurrentPage('directory'));
-      router.addRoute('/org/cmp/management/people/organizational-chart', () => setCurrentPage('org-chart'));
+      router.addRoute('/org/cmp/management/employees/directory', () => setCurrentPage('directory'));
+        router.addRoute('/org/cmp/management/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
+        router.addRoute('/org/cmp/management/employees/employee-info', () => setCurrentPage('employee-info'));
+      router.addRoute('/org/cmp/management/employees/organizational-chart', () => setCurrentPage('org-chart'));
 
       // Group view routes (viewMode auto-inferred from URL)
       router.addRoute('/org/grp/dashboard', () => setCurrentPage('group-dashboard'));
@@ -584,7 +591,7 @@ function App() {
       
       // Company Knowledge routes
       router.addRoute('/org/cmp/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
-      router.addRoute('/org/cmp/about-the-company', () => setCurrentPage('about-company'));
+      router.addRoute('/org/cmp/employee/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
       router.addRoute('/org/cmp/management/company-knowledge/team-responsibilities', () => setCurrentPage('team-responsibilities'));
       router.addRoute('/org/cmp/management/company-knowledge/team-knowledge-compliance', () => setCurrentPage('team-knowledge-compliance'));
       
@@ -652,7 +659,7 @@ function App() {
       router.addRoute('/org/cmp/employee/wellness/nutrition', () => setCurrentPage('nutrition'));
       
       // Legacy routes (still supported)
-      router.addRoute('/employees', () => setCurrentPage('people'));
+      router.addRoute('/employees', () => setCurrentPage('employees'));
       router.addRoute('/reports', () => setCurrentPage('reports')); // Legacy route redirects to same page
       
       // Protected routes (management only)
@@ -764,6 +771,8 @@ function App() {
         return <MyInfo />;
       case 'directory':
         return <Directory />;
+      case 'employee-info':
+        return <EmployeeInfo />;
       case 'org-chart':
         return <OrganizationalChart />;
 
@@ -899,3 +908,4 @@ function App() {
 }
 
 export default App;
+

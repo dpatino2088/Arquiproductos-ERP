@@ -6,10 +6,10 @@ export default function OrganizationalChart() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for management people section
+    // Register submodule tabs for management employees section
     registerSubmodules('Organizational Chart', [
-      { id: 'directory', label: 'Directory', href: '/org/cmp/management/people/directory', icon: Users },
-      { id: 'org-chart', label: 'Organizational Chart', href: '/org/cmp/management/people/organizational-chart', icon: GitBranch }
+      { id: 'directory', label: 'Directory', href: '/org/cmp/management/employees/directory', icon: Users },
+      { id: 'org-chart', label: 'Organizational Chart', href: '/org/cmp/management/employees/organizational-chart', icon: GitBranch }
     ]);
   }, [registerSubmodules]);
 
