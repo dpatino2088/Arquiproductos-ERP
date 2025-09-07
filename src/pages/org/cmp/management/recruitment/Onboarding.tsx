@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 
-export default function Candidates() {
+export default function Onboarding() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    registerSubmodules('Recruiting', [
-      { id: 'job-openings', label: 'Job Openings', href: '/org/cmp/management/recruiting/job-openings' },
-      { id: 'candidates', label: 'Candidates', href: '/org/cmp/management/recruiting/candidates' },
-      { id: 'onboarding', label: 'Onboarding', href: '/org/cmp/management/recruiting/onboarding' }
+    registerSubmodules('Recruitment', [
+      { id: 'job-openings', label: 'Job Openings', href: '/org/cmp/management/recruitment/job-openings' },
+      { id: 'candidates', label: 'Candidates', href: '/org/cmp/management/recruitment/candidates' },
+      { id: 'onboarding', label: 'Onboarding', href: '/org/cmp/management/recruitment/onboarding' }
     ]);
   }, [registerSubmodules]);
 
@@ -16,8 +16,8 @@ export default function Candidates() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Candidates</h1>
-        <p className="text-xs text-muted-foreground">Manage candidate applications and recruitment pipeline</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Onboarding</h1>
+        <p className="text-xs text-muted-foreground">Manage new hire onboarding processes and documentation</p>
       </div>
 
       {/* Content */}

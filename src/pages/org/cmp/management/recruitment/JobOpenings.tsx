@@ -6,11 +6,11 @@ export default function JobOpenings() {
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
-    // Register submodule tabs for Recruiting
-    registerSubmodules('Recruiting', [
-      { id: 'job-openings', label: 'Job Openings', href: '/org/cmp/management/recruiting/job-openings' },
-      { id: 'candidates', label: 'Candidates', href: '/org/cmp/management/recruiting/candidates' },
-      { id: 'onboarding', label: 'Onboarding', href: '/org/cmp/management/recruiting/onboarding' }
+    // Register submodule tabs for Recruitment
+    registerSubmodules('Recruitment', [
+      { id: 'job-openings', label: 'Job Openings', href: '/org/cmp/management/recruitment/job-openings' },
+      { id: 'candidates', label: 'Candidates', href: '/org/cmp/management/recruitment/candidates' },
+      { id: 'onboarding', label: 'Onboarding', href: '/org/cmp/management/recruitment/onboarding' }
     ]);
   }, [registerSubmodules]);
 

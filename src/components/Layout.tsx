@@ -117,7 +117,7 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'Recruiting', href: '/org/cmp/management/recruiting/job-openings', icon: Briefcase },
+  { name: 'Recruitment', href: '/org/cmp/management/recruitment/job-openings', icon: Briefcase },
   { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Clock },
   { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: CalendarCheck },
   { name: 'Company Knowledge', href: '/org/cmp/management/company-knowledge/about-the-company', icon: BookMarked },
@@ -210,9 +210,9 @@ function Layout({ children }: LayoutProps) {
       case 'Dashboard':
         // Dashboard is active if we're on any dashboard route or inbox
         return currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
-      case 'Recruiting':
-        // Recruiting is active if we're on any recruiting route
-        return currentRoute.includes('/recruiting');
+      case 'Recruitment':
+        // Recruitment is active if we're on any recruitment route
+        return currentRoute.includes('/recruitment');
       case 'Employees':
         // Employees is active if we're on any employees route
         return currentRoute.includes('/employees');
@@ -293,7 +293,7 @@ function Layout({ children }: LayoutProps) {
     } else if (viewMode === 'manager') {
       const employeesItem = { name: 'Employees', href: '/employees', icon: Users };
       // Insert People after Recruiting (index 1) and before Time & Attendance (index 2)
-      const recruitingItem = restOfBase[0]; // Recruiting
+      const recruitingItem = restOfBase[0]; // Recruitment
       const remainingItems = restOfBase.slice(1); // Everything after Recruiting
       return [dashboardItem, recruitingItem, employeesItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }];
     } else {

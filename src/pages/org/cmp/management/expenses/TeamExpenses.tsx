@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Eye,
   Settings,
+  Laptop,
   DollarSign,
   UserPlus,
   Package,
