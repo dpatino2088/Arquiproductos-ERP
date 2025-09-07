@@ -41,33 +41,38 @@ import {
   DollarSign,
   Building,
   User,
-  MessageSquare
+  MessageSquare,
+  UserPlus,
+  Package,
+  CreditCard
 } from 'lucide-react';
 
-interface License {
+interface ITRequest {
   id: string;
-  softwareName: string;
-  softwareType: 'Operating System' | 'Productivity' | 'Development' | 'Design' | 'Security' | 'Database' | 'Cloud Service' | 'Other';
-  vendor: string;
-  version: string;
-  licenseKey: string;
-  licenseType: 'Perpetual' | 'Subscription' | 'Volume' | 'Enterprise' | 'Trial' | 'Free';
-  status: 'Active' | 'Expired' | 'Expiring Soon' | 'Suspended' | 'Cancelled' | 'Unused';
-  assignedEmployeeId: string;
-  assignedEmployeeName: string;
-  assignedEmployeeEmail: string;
-  assignedEmployeeJobTitle: string;
-  assignedEmployeeDepartment: string;
-  assignedEmployeeLocation: string;
-  purchaseDate: string;
-  activationDate: string;
-  expirationDate: string;
-  renewalDate?: string;
-  cost: number;
+  requestType: 'Hardware' | 'Software' | 'Access' | 'Support' | 'Other';
+  title: string;
+  description: string;
+  priority: 'Low' | 'Medium' | 'High' | 'Critical';
+  status: 'Pending' | 'In Review' | 'Approved' | 'Rejected' | 'In Progress' | 'Completed' | 'Cancelled';
+  requestedBy: string;
+  requestedByEmail: string;
+  requestedByJobTitle: string;
+  requestedByDepartment: string;
+  requestedByLocation: string;
+  assignedTo?: string;
+  assignedToEmail?: string;
+  assignedToJobTitle?: string;
+  assignedToDepartment?: string;
+  assignedToLocation?: string;
+  requestDate: string;
+  dueDate?: string;
+  completedDate?: string;
+  estimatedCost?: number;
   currency: string;
-  seats: number;
-  usedSeats: number;
+  category: string;
+  subcategory?: string;
   notes?: string;
+  attachments?: string[];
   avatar?: string;
   phone?: string;
 }
@@ -95,40 +100,46 @@ const generateAvatarColor = (firstName: string, lastName: string) => {
 
 const getStatusBadge = (status: string) => {
   switch (status) {
-    case 'Active':
+    case 'Pending':
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+          Pending
+        </span>
+      );
+    case 'In Review':
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+          In Review
+        </span>
+      );
+    case 'Approved':
       return (
         <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
-          Active
+          Approved
         </span>
       );
-    case 'Expired':
+    case 'Rejected':
       return (
         <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
-          Expired
+          Rejected
         </span>
       );
-    case 'Expiring Soon':
+    case 'In Progress':
       return (
         <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
-          Expiring Soon
+          In Progress
         </span>
       );
-    case 'Suspended':
+    case 'Completed':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
-          Suspended
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+          Completed
         </span>
       );
     case 'Cancelled':
       return (
         <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
           Cancelled
-        </span>
-      );
-    case 'Unused':
-      return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
-          Unused
         </span>
       );
     default:
@@ -140,76 +151,85 @@ const getStatusBadge = (status: string) => {
   }
 };
 
-const getSoftwareTypeIcon = (softwareType: string) => {
-  switch (softwareType) {
-    case 'Operating System':
-      return <Monitor className="w-4 h-4 text-blue-600" />;
-    case 'Productivity':
-      return <FileText className="w-4 h-4 text-green-600" />;
-    case 'Development':
-      return <Settings className="w-4 h-4 text-purple-600" />;
-    case 'Design':
-      return <Laptop className="w-4 h-4 text-pink-600" />;
-    case 'Security':
-      return <Shield className="w-4 h-4 text-red-600" />;
-    case 'Database':
-      return <HardDrive className="w-4 h-4 text-indigo-600" />;
-    case 'Cloud Service':
-      return <Wifi className="w-4 h-4 text-cyan-600" />;
+const getPriorityBadge = (priority: string) => {
+  switch (priority) {
+    case 'Low':
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+          Low
+        </span>
+      );
+    case 'Medium':
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+          Medium
+        </span>
+      );
+    case 'High':
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+          High
+        </span>
+      );
+    case 'Critical':
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+          Critical
+        </span>
+      );
+    default:
+      return (
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+          {priority}
+        </span>
+      );
+  }
+};
+
+const getRequestTypeIcon = (requestType: string) => {
+  switch (requestType) {
+    case 'Hardware':
+      return <Laptop className="w-4 h-4 text-blue-600" />;
+    case 'Software':
+      return <Package className="w-4 h-4 text-green-600" />;
+    case 'Access':
+      return <Key className="w-4 h-4 text-purple-600" />;
+    case 'Support':
+      return <MessageSquare className="w-4 h-4 text-orange-600" />;
+    case 'Other':
+      return <Settings className="w-4 h-4 text-gray-600" />;
     default:
       return <Settings className="w-4 h-4 text-gray-600" />;
   }
 };
 
-const getSoftwareTypeBadge = (softwareType: string) => {
+const getRequestTypeBadge = (requestType: string) => {
   const typeConfig = {
-    'Operating System': { bg: 'bg-blue-100', text: 'text-blue-800' },
-    'Productivity': { bg: 'bg-green-100', text: 'text-green-800' },
-    'Development': { bg: 'bg-purple-100', text: 'text-purple-800' },
-    'Design': { bg: 'bg-pink-100', text: 'text-pink-800' },
-    'Security': { bg: 'bg-red-100', text: 'text-red-800' },
-    'Database': { bg: 'bg-indigo-100', text: 'text-indigo-800' },
-    'Cloud Service': { bg: 'bg-cyan-100', text: 'text-cyan-800' },
+    'Hardware': { bg: 'bg-blue-100', text: 'text-blue-800' },
+    'Software': { bg: 'bg-green-100', text: 'text-green-800' },
+    'Access': { bg: 'bg-purple-100', text: 'text-purple-800' },
+    'Support': { bg: 'bg-orange-100', text: 'text-orange-800' },
     'Other': { bg: 'bg-gray-100', text: 'text-gray-800' }
   };
   
-  const config = typeConfig[softwareType as keyof typeof typeConfig] || typeConfig['Other'];
+  const config = typeConfig[requestType as keyof typeof typeConfig] || typeConfig['Other'];
   
   return (
     <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
-      {softwareType}
+      {requestType}
     </span>
   );
 };
 
-const getLicenseTypeBadge = (licenseType: string) => {
-  const typeConfig = {
-    'Perpetual': { bg: 'bg-green-100', text: 'text-green-800' },
-    'Subscription': { bg: 'bg-blue-100', text: 'text-blue-800' },
-    'Volume': { bg: 'bg-purple-100', text: 'text-purple-800' },
-    'Enterprise': { bg: 'bg-indigo-100', text: 'text-indigo-800' },
-    'Trial': { bg: 'bg-orange-100', text: 'text-orange-800' },
-    'Free': { bg: 'bg-gray-100', text: 'text-gray-800' }
-  };
-  
-  const config = typeConfig[licenseType as keyof typeof typeConfig] || typeConfig['Free'];
-  
-  return (
-    <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.text}`}>
-      {licenseType}
-    </span>
-  );
-};
-
-export default function TeamLicenses() {
+export default function TeamITRequests() {
   const { registerSubmodules } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [sortBy, setSortBy] = useState<'softwareName' | 'softwareType' | 'assignedEmployeeName' | 'status' | 'expirationDate'>('softwareName');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedSoftwareType, setSelectedSoftwareType] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'title' | 'requestType' | 'requestedBy' | 'status' | 'requestDate'>('requestDate');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [selectedRequestType, setSelectedRequestType] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('');
 
@@ -222,306 +242,284 @@ export default function TeamLicenses() {
     ]);
   }, [registerSubmodules]);
 
-  const licenses: License[] = [
+  const itRequests: ITRequest[] = [
     {
       id: '1',
-      softwareName: 'Microsoft Office 365',
-      softwareType: 'Productivity',
-      vendor: 'Microsoft',
-      version: '2023',
-      licenseKey: 'MS-365-XXXX-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-001',
-      assignedEmployeeName: 'Amanda Foster',
-      assignedEmployeeEmail: 'amanda.foster@arquiluz.com',
-      assignedEmployeeJobTitle: 'Senior UX Designer',
-      assignedEmployeeDepartment: 'Design',
-      assignedEmployeeLocation: 'San Francisco, CA',
-      purchaseDate: '2023-01-15',
-      activationDate: '2023-01-20',
-      expirationDate: '2024-01-20',
-      renewalDate: '2024-01-15',
-      cost: 150.00,
+      requestType: 'Hardware',
+      title: 'New MacBook Pro for Design Team',
+      description: 'Need a new MacBook Pro 16" for the new UX designer joining the team. Current laptop is outdated and cannot handle design software requirements.',
+      priority: 'High',
+      status: 'Pending',
+      requestedBy: 'Amanda Foster',
+      requestedByEmail: 'amanda.foster@arquiluz.com',
+      requestedByJobTitle: 'Senior UX Designer',
+      requestedByDepartment: 'Design',
+      requestedByLocation: 'San Francisco, CA',
+      requestDate: '2024-01-15',
+      dueDate: '2024-01-30',
+      estimatedCost: 2499.00,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Annual subscription for design team'
+      category: 'Laptop',
+      subcategory: 'MacBook Pro 16"',
+      notes: 'Urgent request for new team member onboarding'
     },
     {
       id: '2',
-      softwareName: 'Adobe Creative Cloud',
-      softwareType: 'Design',
-      vendor: 'Adobe',
-      version: '2024',
-      licenseKey: 'ADOBE-CC-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-002',
-      assignedEmployeeName: 'Marcus Chen',
-      assignedEmployeeEmail: 'marcus.chen@arquiluz.com',
-      assignedEmployeeJobTitle: 'Full Stack Developer',
-      assignedEmployeeDepartment: 'Engineering',
-      assignedEmployeeLocation: 'Austin, TX',
-      purchaseDate: '2023-03-01',
-      activationDate: '2023-03-05',
-      expirationDate: '2024-03-01',
-      renewalDate: '2024-02-15',
-      cost: 52.99,
+      requestType: 'Software',
+      title: 'Adobe Creative Cloud License',
+      description: 'Request for Adobe Creative Cloud license for the marketing team. Need access to Photoshop, Illustrator, and After Effects for campaign creation.',
+      priority: 'Medium',
+      status: 'Approved',
+      requestedBy: 'Marcus Chen',
+      requestedByEmail: 'marcus.chen@arquiluz.com',
+      requestedByJobTitle: 'Full Stack Developer',
+      requestedByDepartment: 'Engineering',
+      requestedByLocation: 'Austin, TX',
+      assignedTo: 'IT Support Team',
+      assignedToEmail: 'it-support@arquiluz.com',
+      assignedToJobTitle: 'IT Support Specialist',
+      assignedToDepartment: 'IT',
+      assignedToLocation: 'Austin, TX',
+      requestDate: '2024-01-10',
+      dueDate: '2024-01-25',
+      completedDate: '2024-01-20',
+      estimatedCost: 52.99,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Complete Creative Suite for development'
+      category: 'Design Software',
+      subcategory: 'Adobe Creative Cloud',
+      notes: 'License activated and user notified'
     },
     {
       id: '3',
-      softwareName: 'Visual Studio Professional',
-      softwareType: 'Development',
-      vendor: 'Microsoft',
-      version: '2022',
-      licenseKey: 'VS-PRO-XXXX-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-003',
-      assignedEmployeeName: 'Elena Rodriguez',
-      assignedEmployeeEmail: 'elena.rodriguez@arquiluz.com',
-      assignedEmployeeJobTitle: 'Product Manager',
-      assignedEmployeeDepartment: 'Product',
-      assignedEmployeeLocation: 'Miami, FL',
-      purchaseDate: '2023-02-10',
-      activationDate: '2023-02-15',
-      expirationDate: '2024-02-10',
-      renewalDate: '2024-01-25',
-      cost: 45.00,
+      requestType: 'Access',
+      title: 'Database Access Request',
+      description: 'Need read-only access to the production database for data analysis and reporting purposes. Will be used for generating monthly reports.',
+      priority: 'Medium',
+      status: 'In Review',
+      requestedBy: 'Elena Rodriguez',
+      requestedByEmail: 'elena.rodriguez@arquiluz.com',
+      requestedByJobTitle: 'Product Manager',
+      requestedByDepartment: 'Product',
+      requestedByLocation: 'Miami, FL',
+      requestDate: '2024-01-12',
+      dueDate: '2024-01-27',
+      estimatedCost: 0,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Professional development environment'
+      category: 'Database Access',
+      subcategory: 'Read-Only Access',
+      notes: 'Security review in progress'
     },
     {
       id: '4',
-      softwareName: 'Slack Business+',
-      softwareType: 'Productivity',
-      vendor: 'Slack Technologies',
-      version: 'Latest',
-      licenseKey: 'SLACK-BIZ-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-004',
-      assignedEmployeeName: 'James Wilson',
-      assignedEmployeeEmail: 'james.wilson@arquiluz.com',
-      assignedEmployeeJobTitle: 'Marketing Specialist',
-      assignedEmployeeDepartment: 'Marketing',
-      assignedEmployeeLocation: 'Seattle, WA',
-      purchaseDate: '2023-01-01',
-      activationDate: '2023-01-01',
-      expirationDate: '2024-01-01',
-      renewalDate: '2023-12-15',
-      cost: 12.50,
+      requestType: 'Support',
+      title: 'VPN Connection Issues',
+      description: 'Experiencing frequent disconnections from VPN when working remotely. Connection drops every 30 minutes and requires re-authentication.',
+      priority: 'High',
+      status: 'In Progress',
+      requestedBy: 'James Wilson',
+      requestedByEmail: 'james.wilson@arquiluz.com',
+      requestedByJobTitle: 'Marketing Specialist',
+      requestedByDepartment: 'Marketing',
+      requestedByLocation: 'Seattle, WA',
+      assignedTo: 'Network Team',
+      assignedToEmail: 'network@arquiluz.com',
+      assignedToJobTitle: 'Network Administrator',
+      assignedToDepartment: 'IT',
+      assignedToLocation: 'Seattle, WA',
+      requestDate: '2024-01-08',
+      dueDate: '2024-01-22',
+      estimatedCost: 0,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Team communication platform'
+      category: 'Network Support',
+      subcategory: 'VPN Issues',
+      notes: 'Investigating network configuration'
     },
     {
       id: '5',
-      softwareName: 'Windows 11 Pro',
-      softwareType: 'Operating System',
-      vendor: 'Microsoft',
-      version: '11 Pro',
-      licenseKey: 'WIN11-PRO-XXXX-XXXX-XXXX',
-      licenseType: 'Perpetual',
-      status: 'Active',
-      assignedEmployeeId: 'emp-005',
-      assignedEmployeeName: 'Sophie Anderson',
-      assignedEmployeeEmail: 'sophie.anderson@arquiluz.com',
-      assignedEmployeeJobTitle: 'Data Analyst',
-      assignedEmployeeDepartment: 'Analytics',
-      assignedEmployeeLocation: 'Denver, CO',
-      purchaseDate: '2023-08-15',
-      activationDate: '2023-08-20',
-      expirationDate: 'N/A',
-      cost: 199.99,
+      requestType: 'Hardware',
+      title: 'Additional Monitor Setup',
+      description: 'Need a second monitor for improved productivity. Current single monitor setup is limiting workflow efficiency.',
+      priority: 'Low',
+      status: 'Completed',
+      requestedBy: 'Sophie Anderson',
+      requestedByEmail: 'sophie.anderson@arquiluz.com',
+      requestedByJobTitle: 'Data Analyst',
+      requestedByDepartment: 'Analytics',
+      requestedByLocation: 'Denver, CO',
+      assignedTo: 'IT Support Team',
+      assignedToEmail: 'it-support@arquiluz.com',
+      assignedToJobTitle: 'IT Support Specialist',
+      assignedToDepartment: 'IT',
+      assignedToLocation: 'Denver, CO',
+      requestDate: '2024-01-05',
+      dueDate: '2024-01-20',
+      completedDate: '2024-01-18',
+      estimatedCost: 299.99,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Perpetual license for business use'
+      category: 'Monitor',
+      subcategory: 'Dell UltraSharp 27"',
+      notes: 'Monitor installed and configured successfully'
     },
     {
       id: '6',
-      softwareName: 'AWS Business Support',
-      softwareType: 'Cloud Service',
-      vendor: 'Amazon Web Services',
-      version: 'Business',
-      licenseKey: 'AWS-BIZ-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-006',
-      assignedEmployeeName: 'Alex Thompson',
-      assignedEmployeeEmail: 'alex.thompson@arquiluz.com',
-      assignedEmployeeJobTitle: 'DevOps Engineer',
-      assignedEmployeeDepartment: 'Engineering',
-      assignedEmployeeLocation: 'Portland, OR',
-      purchaseDate: '2023-06-01',
-      activationDate: '2023-06-01',
-      expirationDate: '2024-06-01',
-      renewalDate: '2024-05-15',
-      cost: 100.00,
+      requestType: 'Software',
+      title: 'GitHub Enterprise Access',
+      description: 'Request for GitHub Enterprise access for the new DevOps engineer. Need full repository access and ability to create new repositories.',
+      priority: 'High',
+      status: 'Approved',
+      requestedBy: 'Alex Thompson',
+      requestedByEmail: 'alex.thompson@arquiluz.com',
+      requestedByJobTitle: 'DevOps Engineer',
+      requestedByDepartment: 'Engineering',
+      requestedByLocation: 'Portland, OR',
+      assignedTo: 'DevOps Team',
+      assignedToEmail: 'devops@arquiluz.com',
+      assignedToJobTitle: 'Senior DevOps Engineer',
+      assignedToDepartment: 'Engineering',
+      assignedToLocation: 'Portland, OR',
+      requestDate: '2024-01-14',
+      dueDate: '2024-01-28',
+      completedDate: '2024-01-16',
+      estimatedCost: 21.00,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Cloud infrastructure support'
+      category: 'Development Tools',
+      subcategory: 'GitHub Enterprise',
+      notes: 'Access granted and user onboarded'
     },
     {
       id: '7',
-      softwareName: 'Norton Antivirus Business',
-      softwareType: 'Security',
-      vendor: 'NortonLifeLock',
-      version: '2024',
-      licenseKey: 'NORTON-BIZ-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Expiring Soon',
-      assignedEmployeeId: 'emp-007',
-      assignedEmployeeName: 'Maria Garcia',
-      assignedEmployeeEmail: 'maria.garcia@arquiluz.com',
-      assignedEmployeeJobTitle: 'HR Coordinator',
-      assignedEmployeeDepartment: 'Human Resources',
-      assignedEmployeeLocation: 'Phoenix, AZ',
-      purchaseDate: '2023-01-15',
-      activationDate: '2023-01-20',
-      expirationDate: '2024-01-20',
-      renewalDate: '2024-01-10',
-      cost: 89.99,
+      requestType: 'Support',
+      title: 'Email Configuration Issues',
+      description: 'Having trouble setting up email on new mobile device. Keep getting authentication errors when trying to add corporate email account.',
+      priority: 'Medium',
+      status: 'Pending',
+      requestedBy: 'Maria Garcia',
+      requestedByEmail: 'maria.garcia@arquiluz.com',
+      requestedByJobTitle: 'HR Coordinator',
+      requestedByDepartment: 'Human Resources',
+      requestedByLocation: 'Phoenix, AZ',
+      requestDate: '2024-01-16',
+      dueDate: '2024-01-31',
+      estimatedCost: 0,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Enterprise antivirus protection'
+      category: 'Email Support',
+      subcategory: 'Mobile Configuration',
+      notes: 'Waiting for IT support response'
     },
     {
       id: '8',
-      softwareName: 'Figma Professional',
-      softwareType: 'Design',
-      vendor: 'Figma',
-      version: 'Latest',
-      licenseKey: 'FIGMA-PRO-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-008',
-      assignedEmployeeName: 'David Park',
-      assignedEmployeeEmail: 'david.park@arquiluz.com',
-      assignedEmployeeJobTitle: 'Sales Manager',
-      assignedEmployeeDepartment: 'Sales',
-      assignedEmployeeLocation: 'Los Angeles, CA',
-      purchaseDate: '2023-04-01',
-      activationDate: '2023-04-05',
-      expirationDate: '2024-04-01',
-      renewalDate: '2024-03-15',
-      cost: 15.00,
+      requestType: 'Hardware',
+      title: 'Standing Desk Request',
+      description: 'Request for a standing desk to improve ergonomics and reduce back pain from prolonged sitting. Current desk setup is not adjustable.',
+      priority: 'Low',
+      status: 'Rejected',
+      requestedBy: 'David Park',
+      requestedByEmail: 'david.park@arquiluz.com',
+      requestedByJobTitle: 'Sales Manager',
+      requestedByDepartment: 'Sales',
+      requestedByLocation: 'Los Angeles, CA',
+      requestDate: '2024-01-11',
+      dueDate: '2024-01-26',
+      estimatedCost: 450.00,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'UI/UX design collaboration tool'
+      category: 'Office Furniture',
+      subcategory: 'Standing Desk',
+      notes: 'Request denied - budget constraints. Alternative solutions provided.'
     },
     {
       id: '9',
-      softwareName: 'PostgreSQL Enterprise',
-      softwareType: 'Database',
-      vendor: 'PostgreSQL Global Development Group',
-      version: '15',
-      licenseKey: 'POSTGRES-ENT-XXXX',
-      licenseType: 'Enterprise',
-      status: 'Active',
-      assignedEmployeeId: 'emp-009',
-      assignedEmployeeName: 'Rachel Brown',
-      assignedEmployeeEmail: 'rachel.brown@arquiluz.com',
-      assignedEmployeeJobTitle: 'Content Writer',
-      assignedEmployeeDepartment: 'Marketing',
-      assignedEmployeeLocation: 'Chicago, IL',
-      purchaseDate: '2023-05-10',
-      activationDate: '2023-05-15',
-      expirationDate: '2024-05-10',
-      renewalDate: '2024-04-25',
-      cost: 500.00,
+      requestType: 'Access',
+      title: 'Slack Admin Access',
+      description: 'Need admin access to Slack workspace to manage channels, users, and integrations for the marketing team.',
+      priority: 'Medium',
+      status: 'In Review',
+      requestedBy: 'Rachel Brown',
+      requestedByEmail: 'rachel.brown@arquiluz.com',
+      requestedByJobTitle: 'Content Writer',
+      requestedByDepartment: 'Marketing',
+      requestedByLocation: 'Chicago, IL',
+      requestDate: '2024-01-13',
+      dueDate: '2024-01-28',
+      estimatedCost: 0,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Enterprise database management'
+      category: 'Communication Tools',
+      subcategory: 'Slack Admin',
+      notes: 'Security review required for admin access'
     },
     {
       id: '10',
-      softwareName: 'GitHub Enterprise',
-      softwareType: 'Development',
-      vendor: 'GitHub',
-      version: 'Enterprise',
-      licenseKey: 'GITHUB-ENT-XXXX-XXXX',
-      licenseType: 'Subscription',
-      status: 'Active',
-      assignedEmployeeId: 'emp-010',
-      assignedEmployeeName: 'Kevin Lee',
-      assignedEmployeeEmail: 'kevin.lee@arquiluz.com',
-      assignedEmployeeJobTitle: 'QA Engineer',
-      assignedEmployeeDepartment: 'Engineering',
-      assignedEmployeeLocation: 'Boston, MA',
-      purchaseDate: '2023-07-01',
-      activationDate: '2023-07-01',
-      expirationDate: '2024-07-01',
-      renewalDate: '2024-06-15',
-      cost: 21.00,
+      requestType: 'Software',
+      title: 'Project Management Tool License',
+      description: 'Need additional license for Asana project management tool. Current team has grown and we need more seats for project collaboration.',
+      priority: 'High',
+      status: 'In Progress',
+      requestedBy: 'Kevin Lee',
+      requestedByEmail: 'kevin.lee@arquiluz.com',
+      requestedByJobTitle: 'QA Engineer',
+      assignedTo: 'IT Support Team',
+      assignedToEmail: 'it-support@arquiluz.com',
+      assignedToJobTitle: 'IT Support Specialist',
+      assignedToDepartment: 'IT',
+      assignedToLocation: 'Boston, MA',
+      requestedByDepartment: 'Engineering',
+      requestedByLocation: 'Boston, MA',
+      requestDate: '2024-01-09',
+      dueDate: '2024-01-24',
+      estimatedCost: 10.99,
       currency: 'USD',
-      seats: 1,
-      usedSeats: 1,
-      notes: 'Version control and collaboration'
+      category: 'Project Management',
+      subcategory: 'Asana License',
+      notes: 'License procurement in progress'
     }
   ];
 
-  const filteredLicenses = useMemo(() => {
-    return licenses.filter(license => {
+  const filteredRequests = useMemo(() => {
+    return itRequests.filter(request => {
       const matchesSearch = 
-        license.softwareName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.version.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.licenseKey.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.assignedEmployeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.assignedEmployeeJobTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        license.assignedEmployeeDepartment.toLowerCase().includes(searchTerm.toLowerCase());
+        request.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        request.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        request.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        request.requestedBy.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        request.requestedByJobTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        request.requestedByDepartment.toLowerCase().includes(searchTerm.toLowerCase());
       
-      const matchesSoftwareType = !selectedSoftwareType || license.softwareType === selectedSoftwareType;
-      const matchesStatus = !selectedStatus || license.status === selectedStatus;
-      const matchesDepartment = !selectedDepartment || license.assignedEmployeeDepartment === selectedDepartment;
+      const matchesRequestType = !selectedRequestType || request.requestType === selectedRequestType;
+      const matchesStatus = !selectedStatus || request.status === selectedStatus;
+      const matchesDepartment = !selectedDepartment || request.requestedByDepartment === selectedDepartment;
       
-      return matchesSearch && matchesSoftwareType && matchesStatus && matchesDepartment;
+      return matchesSearch && matchesRequestType && matchesStatus && matchesDepartment;
     });
-  }, [licenses, searchTerm, selectedSoftwareType, selectedStatus, selectedDepartment]);
+  }, [itRequests, searchTerm, selectedRequestType, selectedStatus, selectedDepartment]);
 
-  const sortedLicenses = useMemo(() => {
-    return [...filteredLicenses].sort((a, b) => {
+  const sortedRequests = useMemo(() => {
+    return [...filteredRequests].sort((a, b) => {
       let aValue: string | number;
       let bValue: string | number;
       
       switch (sortBy) {
-        case 'softwareName':
-          aValue = a.softwareName;
-          bValue = b.softwareName;
+        case 'title':
+          aValue = a.title;
+          bValue = b.title;
           break;
-        case 'softwareType':
-          aValue = a.softwareType;
-          bValue = b.softwareType;
+        case 'requestType':
+          aValue = a.requestType;
+          bValue = b.requestType;
           break;
-        case 'assignedEmployeeName':
-          aValue = a.assignedEmployeeName;
-          bValue = b.assignedEmployeeName;
+        case 'requestedBy':
+          aValue = a.requestedBy;
+          bValue = b.requestedBy;
           break;
         case 'status':
           aValue = a.status;
           bValue = b.status;
           break;
-        case 'expirationDate':
-          aValue = new Date(a.expirationDate).getTime();
-          bValue = new Date(b.expirationDate).getTime();
+        case 'requestDate':
+          aValue = new Date(a.requestDate).getTime();
+          bValue = new Date(b.requestDate).getTime();
           break;
         default:
-          aValue = a.softwareName;
-          bValue = b.softwareName;
+          aValue = a.requestDate;
+          bValue = b.requestDate;
       }
       
       if (typeof aValue === 'string' && typeof bValue === 'string') {
@@ -534,11 +532,11 @@ export default function TeamLicenses() {
         ? (aValue as number) - (bValue as number)
         : (bValue as number) - (aValue as number);
     });
-  }, [filteredLicenses, sortBy, sortOrder]);
+  }, [filteredRequests, sortBy, sortOrder]);
 
-  const totalPages = Math.ceil(sortedLicenses.length / itemsPerPage);
+  const totalPages = Math.ceil(sortedRequests.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedLicenses = sortedLicenses.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedRequests = sortedRequests.slice(startIndex, startIndex + itemsPerPage);
 
   const handleSort = (field: typeof sortBy) => {
     if (sortBy === field) {
@@ -551,31 +549,31 @@ export default function TeamLicenses() {
 
   const clearFilters = () => {
     setSearchTerm('');
-    setSelectedSoftwareType('');
+    setSelectedRequestType('');
     setSelectedStatus('');
     setSelectedDepartment('');
   };
 
-  const softwareTypes = [...new Set(licenses.map(license => license.softwareType))];
-  const statuses = [...new Set(licenses.map(license => license.status))];
-  const departments = [...new Set(licenses.map(license => license.assignedEmployeeDepartment))];
+  const requestTypes = [...new Set(itRequests.map(request => request.requestType))];
+  const statuses = [...new Set(itRequests.map(request => request.status))];
+  const departments = [...new Set(itRequests.map(request => request.requestedByDepartment))];
 
   return (
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Team Licenses</h1>
-        <p className="text-xs text-muted-foreground">Manage and track software licenses assigned to employees</p>
+        <h1 className="text-xl font-semibold text-foreground mb-1">Team IT Requests</h1>
+        <p className="text-xs text-muted-foreground">Manage and track IT requests from employees</p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <Shield className="h-5 w-5 text-primary" />
+            <MessageSquare className="h-5 w-5 text-primary" />
             <div>
-              <div className="text-2xl font-bold">{licenses.filter(l => l.status === 'Active').length}</div>
-              <div className="text-sm text-muted-foreground">Active Licenses</div>
+              <div className="text-2xl font-bold">{itRequests.filter(r => r.status === 'Pending').length}</div>
+              <div className="text-sm text-muted-foreground">Pending</div>
             </div>
           </div>
         </div>
@@ -583,17 +581,17 @@ export default function TeamLicenses() {
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-status-orange" />
             <div>
-              <div className="text-2xl font-bold">{licenses.filter(l => l.status === 'Expiring Soon').length}</div>
-              <div className="text-sm text-muted-foreground">Expiring Soon</div>
+              <div className="text-2xl font-bold">{itRequests.filter(r => r.status === 'In Review' || r.status === 'In Progress').length}</div>
+              <div className="text-sm text-muted-foreground">In Progress</div>
             </div>
           </div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <XCircle className="h-5 w-5 text-status-red" />
+            <CheckCircle className="h-5 w-5 text-status-green" />
             <div>
-              <div className="text-2xl font-bold">{licenses.filter(l => l.status === 'Expired').length}</div>
-              <div className="text-sm text-muted-foreground">Expired</div>
+              <div className="text-2xl font-bold">{itRequests.filter(r => r.status === 'Completed').length}</div>
+              <div className="text-sm text-muted-foreground">Completed</div>
             </div>
           </div>
         </div>
@@ -601,7 +599,7 @@ export default function TeamLicenses() {
           <div className="flex items-center gap-3">
             <DollarSign className="h-5 w-5" style={{ color: '#9E9E9E' }} />
             <div>
-              <div className="text-2xl font-bold">${licenses.reduce((sum, l) => sum + l.cost, 0).toLocaleString()}</div>
+              <div className="text-2xl font-bold">${itRequests.reduce((sum, r) => sum + (r.estimatedCost || 0), 0).toLocaleString()}</div>
               <div className="text-sm text-muted-foreground">Total Cost</div>
             </div>
           </div>
@@ -616,11 +614,11 @@ export default function TeamLicenses() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search software, employees, or license keys..."
+                placeholder="Search requests, employees, or categories..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Search licenses"
+                aria-label="Search IT requests"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -644,14 +642,14 @@ export default function TeamLicenses() {
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
               <select
-                value={selectedSoftwareType}
-                onChange={(e) => setSelectedSoftwareType(e.target.value)}
+                value={selectedRequestType}
+                onChange={(e) => setSelectedRequestType(e.target.value)}
                 className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by software type"
-                id="software-type-filter"
+                aria-label="Filter by request type"
+                id="request-type-filter"
               >
-                <option value="">All Software Types</option>
-                {softwareTypes.map(type => (
+                <option value="">All Request Types</option>
+                {requestTypes.map(type => (
                   <option key={type} value={type}>{type}</option>
                 ))}
               </select>
@@ -690,31 +688,31 @@ export default function TeamLicenses() {
               <div className="flex gap-3 items-center">
                 <span className="text-xs text-gray-500">Sort by:</span>
                 <button
-                  onClick={() => handleSort('softwareName')}
+                  onClick={() => handleSort('title')}
                   className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
-                    sortBy === 'softwareName' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                    sortBy === 'title' ? 'text-gray-900 font-medium' : 'text-gray-600'
                   }`}
                 >
-                  Software Name
-                  {sortBy === 'softwareName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  Title
+                  {sortBy === 'title' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                 </button>
                 <button
-                  onClick={() => handleSort('softwareType')}
+                  onClick={() => handleSort('requestType')}
                   className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
-                    sortBy === 'softwareType' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                    sortBy === 'requestType' ? 'text-gray-900 font-medium' : 'text-gray-600'
                   }`}
                 >
-                  Software Type
-                  {sortBy === 'softwareType' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  Request Type
+                  {sortBy === 'requestType' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                 </button>
                 <button
-                  onClick={() => handleSort('assignedEmployeeName')}
+                  onClick={() => handleSort('requestedBy')}
                   className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
-                    sortBy === 'assignedEmployeeName' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                    sortBy === 'requestedBy' ? 'text-gray-900 font-medium' : 'text-gray-600'
                   }`}
                 >
-                  Employee
-                  {sortBy === 'assignedEmployeeName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  Requested By
+                  {sortBy === 'requestedBy' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                 </button>
                 <button
                   onClick={() => handleSort('status')}
@@ -726,13 +724,13 @@ export default function TeamLicenses() {
                   {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                 </button>
                 <button
-                  onClick={() => handleSort('expirationDate')}
+                  onClick={() => handleSort('requestDate')}
                   className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
-                    sortBy === 'expirationDate' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                    sortBy === 'requestDate' ? 'text-gray-900 font-medium' : 'text-gray-600'
                   }`}
                 >
-                  Expiration Date
-                  {sortBy === 'expirationDate' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  Request Date
+                  {sortBy === 'requestDate' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                 </button>
               </div>
             </div>
@@ -748,32 +746,32 @@ export default function TeamLicenses() {
               <tr>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                   <button
-                    onClick={() => handleSort('softwareName')}
+                    onClick={() => handleSort('title')}
                     className="flex items-center gap-1 hover:text-gray-700"
                   >
-                    Software
-                    {sortBy === 'softwareName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    Request
+                    {sortBy === 'title' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                   <button
-                    onClick={() => handleSort('softwareType')}
+                    onClick={() => handleSort('requestType')}
                     className="flex items-center gap-1 hover:text-gray-700"
                   >
                     Type
-                    {sortBy === 'softwareType' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    {sortBy === 'requestType' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
-                  License Type
+                  Priority
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                   <button
-                    onClick={() => handleSort('assignedEmployeeName')}
+                    onClick={() => handleSort('requestedBy')}
                     className="flex items-center gap-1 hover:text-gray-700"
                   >
-                    Assigned To
-                    {sortBy === 'assignedEmployeeName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    Requested By
+                    {sortBy === 'requestedBy' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
@@ -787,11 +785,11 @@ export default function TeamLicenses() {
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                   <button
-                    onClick={() => handleSort('expirationDate')}
+                    onClick={() => handleSort('requestDate')}
                     className="flex items-center gap-1 hover:text-gray-700"
                   >
-                    Expiration
-                    {sortBy === 'expirationDate' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    Request Date
+                    {sortBy === 'requestDate' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
@@ -803,30 +801,30 @@ export default function TeamLicenses() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {paginatedLicenses.map((license) => {
-                const [firstName, lastName] = license.assignedEmployeeName.split(' ');
+              {paginatedRequests.map((request) => {
+                const [firstName, lastName] = request.requestedBy.split(' ');
                 const avatarColor = generateAvatarColor(firstName, lastName);
                 const avatarInitials = generateAvatarInitials(firstName, lastName);
                 
                 return (
-                  <tr key={license.id} className="hover:bg-gray-50">
+                  <tr key={request.id} className="hover:bg-gray-50">
                     <td className="py-2 px-6">
                       <div className="flex items-center gap-3">
-                        {getSoftwareTypeIcon(license.softwareType)}
+                        {getRequestTypeIcon(request.requestType)}
                         <div>
-                          <div className="text-sm font-medium text-gray-900">{license.softwareName}</div>
-                          <div className="text-xs text-gray-500">{license.vendor} {license.version}</div>
+                          <div className="text-sm font-medium text-gray-900">{request.title}</div>
+                          <div className="text-xs text-gray-500">{request.category}</div>
                         </div>
                       </div>
                     </td>
                     <td className="py-2 px-4">
                       <div className="flex items-center gap-2">
-                        {getSoftwareTypeIcon(license.softwareType)}
-                        {getSoftwareTypeBadge(license.softwareType)}
+                        {getRequestTypeIcon(request.requestType)}
+                        {getRequestTypeBadge(request.requestType)}
                       </div>
                     </td>
                     <td className="py-2 px-4">
-                      {getLicenseTypeBadge(license.licenseType)}
+                      {getPriorityBadge(request.priority)}
                     </td>
                     <td className="py-2 px-4">
                       <div className="flex items-center gap-3">
@@ -834,10 +832,10 @@ export default function TeamLicenses() {
                           className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium"
                           style={{ backgroundColor: avatarColor }}
                         >
-                          {license.avatar ? (
+                          {request.avatar ? (
                             <img 
-                              src={license.avatar} 
-                              alt={license.assignedEmployeeName}
+                              src={request.avatar} 
+                              alt={request.requestedBy}
                               className="w-8 h-8 rounded-full object-cover"
                             />
                           ) : (
@@ -845,41 +843,39 @@ export default function TeamLicenses() {
                           )}
                         </div>
                         <div>
-                          <div className="text-sm font-medium text-gray-900">{license.assignedEmployeeName}</div>
-                          <div className="text-xs text-gray-500">{license.assignedEmployeeJobTitle}</div>
+                          <div className="text-sm font-medium text-gray-900">{request.requestedBy}</div>
+                          <div className="text-xs text-gray-500">{request.requestedByJobTitle}</div>
                         </div>
                       </div>
                     </td>
                     <td className="py-2 px-4">
-                      {getStatusBadge(license.status)}
+                      {getStatusBadge(request.status)}
                     </td>
                     <td className="py-2 px-4">
-                      <span className="text-sm text-gray-900">
-                        {license.expirationDate === 'N/A' ? 'N/A' : new Date(license.expirationDate).toLocaleDateString()}
-                      </span>
+                      <span className="text-sm text-gray-900">{new Date(request.requestDate).toLocaleDateString()}</span>
                     </td>
                     <td className="py-2 px-4">
                       <span className="text-sm text-gray-900 font-medium">
-                        {license.currency} {license.cost.toFixed(2)}
+                        {request.estimatedCost ? `${request.currency} ${request.estimatedCost.toFixed(2)}` : 'N/A'}
                       </span>
                     </td>
                     <td className="py-2 px-4">
                       <div className="flex items-center gap-2">
                         <button
                           className="p-1 hover:bg-gray-100 rounded transition-colors"
-                          aria-label={`View details for ${license.softwareName}`}
+                          aria-label={`View details for ${request.title}`}
                         >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
                           className="p-1 hover:bg-gray-100 rounded transition-colors"
-                          aria-label={`Edit ${license.softwareName}`}
+                          aria-label={`Edit ${request.title}`}
                         >
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
                           className="p-1 hover:bg-gray-100 rounded transition-colors"
-                          aria-label={`Delete ${license.softwareName}`}
+                          aria-label={`Delete ${request.title}`}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -914,7 +910,7 @@ export default function TeamLicenses() {
               <option value={100}>100</option>
             </select>
             <span className="text-xs text-gray-600">
-              Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, sortedLicenses.length)} of {sortedLicenses.length}
+              Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, sortedRequests.length)} of {sortedRequests.length}
             </span>
           </div>
           {totalPages > 1 && (

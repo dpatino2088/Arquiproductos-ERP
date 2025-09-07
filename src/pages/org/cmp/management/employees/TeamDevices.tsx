@@ -30,8 +30,7 @@ import {
   Wifi,
   Battery,
   Shield,
-  GitBranch,
-  MessageSquare
+  GitBranch
 } from 'lucide-react';
 
 interface Device {
@@ -182,7 +181,7 @@ export default function TeamDevices() {
     registerSubmodules('IT Management', [
       { id: 'team-devices', label: 'Team Devices', href: '/org/cmp/management/it-management/team-devices', icon: Laptop },
       { id: 'team-licenses', label: 'Team Licenses', href: '/org/cmp/management/it-management/team-licenses', icon: Shield },
-      { id: 'team-it-requests', label: 'Team IT Requests', href: '/org/cmp/management/it-management/team-it-requests', icon: MessageSquare }
+      { id: 'team-requests', label: 'Team Requests', href: '/org/cmp/management/it-management/team-requests', icon: Settings }
     ]);
   }, [registerSubmodules]);
 

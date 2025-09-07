@@ -154,6 +154,26 @@ const TeamBalances = lazy(() => {
   return import('./pages/org/cmp/management/pto-and-leaves/TeamBalances');
 });
 
+const TeamDevices = lazy(() => {
+  logger.debug('Loading Team Devices component');
+  return import('./pages/org/cmp/management/it-management/TeamDevices');
+});
+
+const TeamLicenses = lazy(() => {
+  logger.debug('Loading Team Licenses component');
+  return import('./pages/org/cmp/management/it-management/TeamLicenses');
+});
+
+const TeamITRequests = lazy(() => {
+  logger.debug('Loading Team IT Requests component');
+  return import('./pages/org/cmp/management/it-management/TeamITRequests');
+});
+
+const TeamExpenses = lazy(() => {
+  logger.debug('Loading Team Expenses component');
+  return import('./pages/org/cmp/management/expenses/TeamExpenses');
+});
+
 const TeamGoalsAndPerformance = lazy(() => {
   logger.debug('Loading Team Goals and Performance component');
   return import('./pages/org/cmp/management/performance/TeamGoalsAndPerformance');
@@ -197,26 +217,6 @@ const TeamBenefits = lazy(() => {
 const TeamRequests = lazy(() => {
   logger.debug('Loading Team Requests component');
   return import('./pages/org/cmp/management/benefits/TeamRequests');
-});
-
-const TeamExpenses = lazy(() => {
-  logger.debug('Loading Team Expenses component');
-  return import('./pages/org/cmp/management/expenses/TeamExpenses');
-});
-
-const TeamDevices = lazy(() => {
-  logger.debug('Loading Team Devices component');
-  return import('./pages/org/cmp/management/it-management/TeamDevices');
-});
-
-const TeamLicenses = lazy(() => {
-  logger.debug('Loading Team Licenses component');
-  return import('./pages/org/cmp/management/it-management/TeamLicenses');
-});
-
-const ITTeamRequests = lazy(() => {
-  logger.debug('Loading IT Team Requests component');
-  return import('./pages/org/cmp/management/it-management/TeamRequests');
 });
 
 const PayrollWizards = lazy(() => {
@@ -550,6 +550,7 @@ function App() {
       // Management view routes
       router.addRoute('/org/cmp/management/dashboard', () => setCurrentPage('management-dashboard'));
       router.addRoute('/org/cmp/management/employees/directory', () => setCurrentPage('directory'));
+      router.addRoute('/org/cmp/management/it-management/team-devices', () => setCurrentPage('team-devices'));
         router.addRoute('/org/cmp/management/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
         router.addRoute('/org/cmp/management/employees/employee-info', () => setCurrentPage('employee-info'));
       router.addRoute('/org/cmp/management/employees/organizational-chart', () => setCurrentPage('org-chart'));
@@ -613,7 +614,7 @@ function App() {
       // IT Management routes
       router.addRoute('/org/cmp/management/it-management/team-devices', () => setCurrentPage('team-devices'));
       router.addRoute('/org/cmp/management/it-management/team-licenses', () => setCurrentPage('team-licenses'));
-      router.addRoute('/org/cmp/management/it-management/team-requests', () => setCurrentPage('it-team-requests'));
+      router.addRoute('/org/cmp/management/it-management/team-it-requests', () => setCurrentPage('team-it-requests'));
       
       // Payroll routes
       router.addRoute('/org/cmp/management/payroll/payroll-wizards', () => setCurrentPage('payroll-wizards'));
@@ -779,6 +780,8 @@ function App() {
         return <MyInfo />;
       case 'directory':
         return <Directory />;
+      case 'team-devices':
+        return <TeamDevices />;
       case 'employee-info':
         return <EmployeeInfo />;
       case 'org-chart':
@@ -824,8 +827,10 @@ function App() {
         return <TeamDevices />;
       case 'team-licenses':
         return <TeamLicenses />;
-      case 'it-team-requests':
-        return <ITTeamRequests />;
+      case 'team-it-requests':
+        return <TeamITRequests />;
+      case 'team-expenses':
+        return <TeamExpenses />;
       case 'payroll-wizards':
         return <PayrollWizards />;
       case 'company-reports':
