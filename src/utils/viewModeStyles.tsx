@@ -107,27 +107,6 @@ export const VIEW_MODE_COLORS = {
         background: 'var(--navy-900)'
       }
     }
-  },
-  personal: {
-    sidebar: {
-      background: 'var(--gray-250)', // Same as Employee View
-      border: 'var(--gray-300)',
-      textPrimary: '#212121', // Black for unselected text
-      textSecondary: '#212121' // Black for secondary text
-    },
-    buttons: {
-      active: {
-        background: 'white', // Same as Employee View
-        color: 'var(--teal-700)', // Selected icons and text
-        border: 'var(--teal-700)'
-      },
-      inactive: {
-        color: '#212121' // Unselected icons and labels in black
-      },
-      hover: {
-        background: 'white'
-      }
-    }
   }
 } as const;
 
@@ -189,7 +168,7 @@ export const getLogoTextColor = (viewMode: ViewMode) => {
 };
 
 // View mode cycling utility
-const VIEW_MODE_CYCLE: ViewMode[] = ['employee', 'manager', 'group', 'vap', 'rp', 'personal'];
+const VIEW_MODE_CYCLE: ViewMode[] = ['employee', 'manager', 'group', 'vap', 'rp'];
 
 export const getNextViewMode = (currentMode: ViewMode): ViewMode => {
   const currentIndex = VIEW_MODE_CYCLE.indexOf(currentMode);
@@ -204,7 +183,6 @@ const SETTINGS_URLS: Record<ViewMode, string> = {
   group: '/org/grp/settings',
   vap: '/org/vap/settings',
   rp: '/org/rp/settings',
-  personal: '/me/settings'
 };
 
 export const getSettingsUrl = (viewMode: ViewMode): string => {
@@ -218,7 +196,6 @@ const DASHBOARD_URLS: Record<ViewMode, string> = {
   group: '/org/grp/dashboard',
   vap: '/org/vap/dashboard',
   rp: '/org/rp/dashboard',
-  personal: '/me/dashboard'
 };
 
 export const getDashboardUrl = (viewMode: ViewMode): string => {
@@ -232,7 +209,6 @@ const VIEW_MODE_LABELS: Record<ViewMode, string> = {
   group: 'Group View',
   vap: 'VAP View',
   rp: 'RP View',
-  personal: 'Personal View'
 };
 
 export const getViewModeLabel = (viewMode: ViewMode): string => {

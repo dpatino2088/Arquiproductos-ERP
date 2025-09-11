@@ -61,7 +61,7 @@ const NavigationItem = memo(({
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
-  viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal';
+  viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp';
 }) => {
   const buttonStyles = getButtonStyles(viewMode, isActive);
   const textStyles = getTextStyles(viewMode, isActive);
@@ -278,11 +278,6 @@ function Layout({ children }: LayoutProps) {
       const reportsItem = { name: 'Reports', href: '/org/vap/reports', icon: Printer };
       const settingsItem = { name: 'Settings', href: '/org/vap/settings', icon: Settings };
       return [homeItem, companiesItem, reportsItem, settingsItem];
-    } else if (viewMode === 'personal') {
-      // Personal view navigation - Home, Settings
-      const homeItem = { name: 'Home', href: '/me/dashboard', icon: Home };
-      const settingsItem = { name: 'Settings', href: '/me/settings', icon: Settings };
-      return [homeItem, settingsItem];
     } else if (viewMode === 'group') {
       // Group view navigation - Home, Companies, Reports, Settings
       const homeItem = { name: 'Home', href: '/org/grp/dashboard', icon: Home };
@@ -331,7 +326,7 @@ function Layout({ children }: LayoutProps) {
     navigation.filter(item => 
       item?.name !== 'Dashboard' && 
       item?.name !== 'Home' && 
-      !((viewMode === 'vap' || viewMode === 'group' || viewMode === 'rp' || viewMode === 'personal') && item?.name === 'Settings') // Exclude Settings in vap, group, rp, and personal view since it's rendered separately
+      !((viewMode === 'vap' || viewMode === 'group' || viewMode === 'rp') && item?.name === 'Settings') // Exclude Settings in vap, group, and rp view since it's rendered separately
     ), [navigation, viewMode]
   );
 
@@ -795,28 +790,6 @@ function Layout({ children }: LayoutProps) {
                               Employee View {viewMode === 'employee' && '✓'}
                             </button>
                             
-                            {/* Personal View Button */}
-                            <button
-                              onClick={() => {
-                                if (viewMode !== 'personal') {
-                                  setViewMode('personal');
-                                  router.setViewMode('personal');
-                                  router.navigate('/me/dashboard');
-                                  setCurrentRoute('/me/dashboard');
-                                  setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'personal' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'personal' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="personal-view-btn"
-                              disabled={viewMode === 'personal'}
-                            >
-                              Personal View {viewMode === 'personal' && '✓'}
-                            </button>
                             
                             {/* VAP View Button */}
                             <button

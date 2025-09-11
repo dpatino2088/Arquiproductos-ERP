@@ -21,7 +21,9 @@ import {
   Plane,
   Utensils,
   Check,
-  X
+  X,
+  Plus,
+  Upload
 } from 'lucide-react';
 
 interface Expense {
@@ -502,9 +504,24 @@ export default function TeamExpenses() {
   return (
     <div className="p-6">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Team Expenses</h1>
-        <p className="text-xs text-muted-foreground">Manage and approve employee expense reimbursements</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Team Expenses</h1>
+          <p className="text-xs" style={{ color: '#6B7280' }}>
+            Manage and approve employee expense reimbursements
+            {filteredExpenses.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
+            <Upload style={{ width: '14px', height: '14px' }} />
+            Import
+          </button>
+          <button className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm" style={{ backgroundColor: 'var(--teal-brand-hex)' }}>
+            <Plus style={{ width: '14px', height: '14px' }} />
+            Add Expense
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}

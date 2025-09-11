@@ -2,10 +2,10 @@
 export class Router {
   private routes: Map<string, () => void> = new Map();
   private currentRoute: string = '/';
-  private viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal' = 'employee';
+  private viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' = 'employee';
   private listeners: Set<() => void> = new Set();
   private unauthorizedRedirectHandler?: () => void;
-  private viewModeChangeHandler?: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal') => void;
+  private viewModeChangeHandler?: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => void;
 
   constructor() {
     // Handle browser back/forward buttons
@@ -39,26 +39,25 @@ export class Router {
     }
   }
 
-  setViewMode(mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal') {
+  setViewMode(mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') {
     this.viewMode = mode;
   }
 
-  getViewMode(): 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal' {
+  getViewMode(): 'employee' | 'manager' | 'group' | 'vap' | 'rp' {
     return this.viewMode;
   }
 
   // Set handler for view mode changes (to sync with UI store)
-  setViewModeChangeHandler(handler: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal') => void) {
+  setViewModeChangeHandler(handler: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => void) {
     this.viewModeChangeHandler = handler;
   }
 
   // Infer view mode from URL path
-  private inferViewModeFromPath(path: string): 'employee' | 'manager' | 'group' | 'vap' | 'rp' | 'personal' {
+  private inferViewModeFromPath(path: string): 'employee' | 'manager' | 'group' | 'vap' | 'rp' {
     if (path.includes('/org/grp/')) return 'group';
     if (path.includes('/org/vap/')) return 'vap';
     if (path.includes('/org/rp/')) return 'rp';
     if (path.includes('/org/cmp/management/')) return 'manager';
-    if (path.includes('/personal/') || path.includes('/me/')) return 'personal';
     if (path.includes('/org/cmp/employee/')) return 'employee';
     
     // Default to employee for other paths
@@ -86,8 +85,8 @@ export class Router {
       return true; // Public routes are always accessible
     }
     
-    // Protected routes require manager, group, vap, rp, or personal view mode
-    return this.viewMode === 'manager' || this.viewMode === 'group' || this.viewMode === 'vap' || this.viewMode === 'rp' || this.viewMode === 'personal';
+    // Protected routes require manager, group, vap, or rp view mode
+    return this.viewMode === 'manager' || this.viewMode === 'group' || this.viewMode === 'vap' || this.viewMode === 'rp';
   }
 
   navigate(path: string, pushState: boolean = true) {

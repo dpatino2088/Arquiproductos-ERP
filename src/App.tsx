@@ -79,15 +79,6 @@ const RpSettings = lazy(() => {
   return import('./pages/org/rp/Settings');
 });
 
-const PersonalDashboard = lazy(() => {
-  logger.debug('Loading PersonalDashboard component');
-  return import('./pages/me/Dashboard');
-});
-
-const PersonalSettings = lazy(() => {
-  logger.debug('Loading PersonalSettings component');
-  return import('./pages/me/Settings');
-});
 
 const Inbox = lazy(() => {
   logger.debug('Loading Inbox component');
@@ -540,9 +531,6 @@ function App() {
       router.addRoute('/org/cmp/employee/dashboard', () => setCurrentPage('employee-dashboard'));
       router.addRoute('/org/cmp/employee/my-info', () => setCurrentPage('my-info'));
       
-      // Legacy personal routes (redirect to employee)
-      router.addRoute('/personal/dashboard', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/personal/employees/my-info', () => setCurrentPage('my-info'));
       
       // Legacy employee routes (redirect to new path)
       router.addRoute('/org/cmp/employee/my-info', () => setCurrentPage('my-info'));
@@ -573,9 +561,6 @@ function App() {
       router.addRoute('/org/rp/reports', () => setCurrentPage('rp-reports'));
       router.addRoute('/org/rp/settings', () => setCurrentPage('rp-settings'));
 
-      // Personal view routes (viewMode auto-inferred from URL)
-      router.addRoute('/me/dashboard', () => setCurrentPage('personal-dashboard'));
-      router.addRoute('/me/settings', () => setCurrentPage('personal-settings'));
       
       // Management routes
       router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));
@@ -770,10 +755,6 @@ function App() {
         return <RpReports />;
       case 'rp-settings':
         return <RpSettings />;
-      case 'personal-dashboard':
-        return <PersonalDashboard />;
-      case 'personal-settings':
-        return <PersonalSettings />;
       case 'inbox':
         return <Inbox />;
       case 'my-info':
@@ -823,14 +804,10 @@ function App() {
         return <TeamRequests />;
       case 'team-expenses':
         return <TeamExpenses />;
-      case 'team-devices':
-        return <TeamDevices />;
       case 'team-licenses':
         return <TeamLicenses />;
       case 'team-it-requests':
         return <TeamITRequests />;
-      case 'team-expenses':
-        return <TeamExpenses />;
       case 'payroll-wizards':
         return <PayrollWizards />;
       case 'company-reports':
