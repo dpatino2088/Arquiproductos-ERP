@@ -95,6 +95,19 @@
     --green-100: #dcfce7;
     --green-50: #f0fdf4;
 
+    /* Purple palette - for leave status and special states */
+    --purple-950: #3b0764;
+    --purple-900: #581c87;
+    --purple-800: #6b21a8;
+    --purple-700: #7e22ce;
+    --purple-600: #9333ea;
+    --purple-500: #a855f7;
+    --purple-400: #c084fc;
+    --purple-300: #d8b4fe;
+    --purple-200: #e9d5ff;
+    --purple-100: #f3e8ff;
+    --purple-50: #faf5ff;
+
     /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
     --foreground: 218 15% 12%;               /* Dark text - HSL for new gray-900 #1c1f26 */
     --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
@@ -176,6 +189,7 @@
   .text-status-red { color: var(--status-red); }
   .text-status-blue { color: var(--status-blue); }
   .text-status-orange { color: var(--status-amber); }
+  .text-status-purple { color: var(--purple-700); }
   .text-neutral-gray { color: var(--neutral-gray); }
 
   /* Text utilities */
@@ -188,6 +202,7 @@
   .bg-status-red-light { background-color: var(--red-100); }
   .bg-status-blue-light { background-color: var(--blue-100); }
   .bg-status-orange-light { background-color: var(--orange-100); }
+  .bg-status-purple-light { background-color: var(--purple-100); }
 
   /* Solid backgrounds */
   .bg-status-green { background-color: var(--status-green); }
