@@ -143,7 +143,7 @@
     /* Status colors per design system specification - WCAG 2.2 AA compliant */
     --status-green: #166534;               /* Success/Active - Green 800 for better contrast */
     --status-red: #991b1b;                 /* Error/Critical/Delete - Red 800 for better contrast */
-    --status-blue: #1976D2;                /* Info/Neutral actions */
+    --status-blue: #1d4ed8;                /* Info/Neutral actions - Blue 700 from our palette */
     --status-amber: #9a3412;               /* Warning/Pending approvals - Orange 900 for WCAG 2.2 AA */
     
     /* Utility colors */
@@ -212,6 +212,12 @@
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
   .bg-row-highlight { background-color: var(--row-highlight); }
+
+  /* Border colors for tooltip arrows */
+  .border-t-status-green { border-top-color: var(--status-green); }
+  .border-t-status-red { border-top-color: var(--status-red); }
+  .border-t-status-blue { border-top-color: var(--status-blue); }
+  .border-t-status-orange { border-top-color: var(--status-amber); }
 
   /* Borders using Tailwind v3 */
   .border-subtle { border-color: var(--gray-200); }

@@ -1327,21 +1327,21 @@ export default function TeamAttendance() {
     // Priority: incidents (red) > rejected (gray) > acknowledged (blue) > resolved (green)
     let flagColor, bgColor, borderColor;
     if (hasIncidents) {
-      flagColor = 'text-red-600 hover:text-red-700';
-      bgColor = 'bg-red-600';
-      borderColor = 'border-t-red-600';
+      flagColor = 'text-status-red hover:text-red-700';
+      bgColor = 'bg-status-red';
+      borderColor = 'border-t-status-red';
     } else if (hasRejected) {
-      flagColor = 'text-gray-600 hover:text-gray-700';
-      bgColor = 'bg-gray-600';
-      borderColor = 'border-t-gray-600';
+      flagColor = 'text-gray-500 hover:text-gray-600';
+      bgColor = 'bg-gray-500';
+      borderColor = 'border-t-gray-500';
     } else if (hasAcknowledged) {
-      flagColor = 'text-blue-600 hover:text-blue-700';
-      bgColor = 'bg-blue-600';
-      borderColor = 'border-t-blue-600';
+      flagColor = 'text-status-blue hover:text-blue-700';
+      bgColor = 'bg-status-blue';
+      borderColor = 'border-t-status-blue';
     } else {
-      flagColor = 'text-green-600 hover:text-green-700';
-      bgColor = 'bg-green-600';
-      borderColor = 'border-t-green-600';
+      flagColor = 'text-status-green hover:text-green-700';
+      bgColor = 'bg-status-green';
+      borderColor = 'border-t-status-green';
     }
     
     return (
@@ -1362,23 +1362,25 @@ export default function TeamAttendance() {
                   <div key={index}>{flag.message}</div>
                 ))}
               </div>
-              <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${borderColor}`}></div>
+              <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
+                hasIncidents ? 'border-t-[#991b1b]' : hasRejected ? 'border-t-gray-500' : hasAcknowledged ? 'border-t-[#1d4ed8]' : 'border-t-[#166534]'
+              }`}></div>
             </div>
           )}
         </div>
-        {hasResolved && (
-          <Check 
-            className="w-3 h-3 text-green-600 ml-1"
-          />
-        )}
-        {hasRejected && !hasIncidents && !hasResolved && !hasAcknowledged && (
-          <X 
-            className="w-3 h-3 text-gray-600 ml-1"
-          />
-        )}
+                 {hasResolved && (
+                   <Check
+                     className="w-3 h-3 text-status-green ml-1"
+                   />
+                 )}
+                 {hasRejected && !hasIncidents && !hasResolved && !hasAcknowledged && (
+                   <X
+                     className="w-3 h-3 text-gray-500 ml-1"
+                   />
+                 )}
                  {hasAcknowledged && !hasIncidents && !hasResolved && !hasRejected && (
                    <Minus
-                     className="w-3 h-3 text-blue-600 ml-1"
+                     className="w-3 h-3 text-status-blue ml-1"
                    />
                  )}
       </div>
@@ -2091,11 +2093,11 @@ export default function TeamAttendance() {
               setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
             }}
           >
-            <ScheduleIcon className="w-3 h-3 text-gray-400" />
+            <ScheduleIcon className="w-3 h-3 text-gray-500" />
             {activeTooltip === tooltipKey && (
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-400 text-white text-xs rounded whitespace-nowrap z-50">
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-500 text-white text-xs rounded whitespace-nowrap z-50">
                 Scheduled: {scheduled}
-                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-400"></div>
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-500"></div>
               </div>
             )}
           </div>
@@ -2122,14 +2124,14 @@ export default function TeamAttendance() {
             setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
           }}
         >
-          <ScheduleIcon className={`w-3 h-3 ${isOnTime ? 'text-green-600' : isLate ? 'text-red-600' : 'text-blue-600'}`} />
+          <ScheduleIcon className={`w-3 h-3 ${isOnTime ? 'text-status-green' : isLate ? 'text-status-red' : 'text-status-blue'}`} />
           {activeTooltip === tooltipKey && (
             <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-white text-xs rounded whitespace-nowrap z-50 ${
-              isOnTime ? 'bg-green-600' : isLate ? 'bg-red-600' : 'bg-blue-600'
+              isOnTime ? 'bg-status-green' : isLate ? 'bg-status-red' : 'bg-status-blue'
             }`}>
               {isOnTime ? `On time (scheduled: ${scheduled})` : isLate ? `Late (scheduled: ${scheduled})` : `Early (scheduled: ${scheduled})`}
               <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-                isOnTime ? 'border-t-green-600' : isLate ? 'border-t-red-600' : 'border-t-blue-600'
+                isOnTime ? 'border-t-[#166534]' : isLate ? 'border-t-[#991b1b]' : 'border-t-[#1d4ed8]'
               }`}></div>
             </div>
           )}
@@ -2168,11 +2170,11 @@ export default function TeamAttendance() {
               setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
             }}
           >
-            <ScheduleIcon className="w-3 h-3 text-gray-400" />
+            <ScheduleIcon className="w-3 h-3 text-gray-500" />
             {activeTooltip === tooltipKey && (
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-400 text-white text-xs rounded whitespace-nowrap z-50">
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-500 text-white text-xs rounded whitespace-nowrap z-50">
                 Scheduled: {scheduledLocation}
-                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-400"></div>
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-500"></div>
               </div>
             )}
           </div>
@@ -2193,14 +2195,14 @@ export default function TeamAttendance() {
             setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
           }}
         >
-          <ScheduleIcon className={`w-3 h-3 ${isCorrectLocation ? 'text-green-600' : 'text-orange-600'}`} />
+          <ScheduleIcon className={`w-3 h-3 ${isCorrectLocation ? 'text-status-green' : 'text-status-orange'}`} />
           {activeTooltip === tooltipKey && (
             <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-white text-xs rounded whitespace-nowrap z-50 ${
-              isCorrectLocation ? 'bg-green-600' : 'bg-orange-600'
+              isCorrectLocation ? 'bg-status-green' : 'bg-status-orange'
             }`}>
               {isCorrectLocation ? `Correct location (scheduled: ${scheduledLocation})` : `Wrong location (scheduled: ${scheduledLocation})`}
               <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-                isCorrectLocation ? 'border-t-green-600' : 'border-t-orange-600'
+                isCorrectLocation ? 'border-t-[#166534]' : 'border-t-[#9a3412]'
               }`}></div>
             </div>
           )}
