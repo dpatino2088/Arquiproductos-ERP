@@ -160,7 +160,7 @@ export const SecureForm: React.FC<SecureFormProps> = ({
             disabled={isLoading}
           />
           {getFieldError('name') && (
-            <p className="mt-1 text-sm text-red-600">{getFieldError('name')}</p>
+            <p className="mt-1 text-sm text-status-red">{getFieldError('name')}</p>
           )}
         </div>
       )}
@@ -184,7 +184,7 @@ export const SecureForm: React.FC<SecureFormProps> = ({
           autoComplete="email"
         />
         {getFieldError('email') && (
-          <p className="mt-1 text-sm text-red-600">{getFieldError('email')}</p>
+          <p className="mt-1 text-sm text-status-red">{getFieldError('email')}</p>
         )}
       </div>
       
@@ -207,7 +207,7 @@ export const SecureForm: React.FC<SecureFormProps> = ({
           autoComplete={type === 'login' ? 'current-password' : 'new-password'}
         />
         {getFieldError('password') && (
-          <p className="mt-1 text-sm text-red-600">{getFieldError('password')}</p>
+          <p className="mt-1 text-sm text-status-red">{getFieldError('password')}</p>
         )}
       </div>
       
@@ -231,7 +231,7 @@ export const SecureForm: React.FC<SecureFormProps> = ({
             autoComplete="new-password"
           />
           {getFieldError('confirmPassword') && (
-            <p className="mt-1 text-sm text-red-600">{getFieldError('confirmPassword')}</p>
+            <p className="mt-1 text-sm text-status-red">{getFieldError('confirmPassword')}</p>
           )}
         </div>
       )}

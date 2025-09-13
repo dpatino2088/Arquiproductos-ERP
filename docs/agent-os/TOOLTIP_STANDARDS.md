@@ -252,6 +252,15 @@ When updating existing tooltips:
 
 ---
 
+## 📚 Related Standards
+
+- **Complete Standards**: See `COMPLETE_STANDARDS.md` for master design system documentation
+- **Search Card Standards**: See `SEARCH_CARD_STANDARDS.md` for button active states and search card implementation
+- **Pagination Standards**: See `PAGINATION_STANDARDS.md` for pagination button styling
+- **Component Standards**: See `COMPREHENSIVE_PRODUCT_ANALYSIS.md` for overall design system guidelines
+
+---
+
 **Last Updated**: January 2025  
 **Version**: 1.0  
 **Status**: Active Standard

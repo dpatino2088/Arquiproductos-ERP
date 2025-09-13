@@ -190,11 +190,11 @@ export default function TeamPlanner() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'scheduled': return 'bg-status-blue-light text-status-blue';
-      case 'confirmed': return 'bg-status-green-light text-status-green';
-      case 'completed': return 'bg-status-green-light text-status-green';
-      case 'cancelled': return 'bg-status-red-light text-status-red';
-      default: return 'bg-neutral-gray text-neutral-gray';
+      case 'scheduled': return 'bg-blue-50 text-status-blue';
+      case 'confirmed': return 'bg-green-50 text-status-green';
+      case 'completed': return 'bg-green-50 text-status-green';
+      case 'cancelled': return 'bg-red-50 text-status-red';
+      default: return 'bg-gray-50 text-status-gray';
     }
   };
 

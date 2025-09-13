@@ -117,11 +117,11 @@ export default function EmployeeInfo() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Active': return 'bg-status-green-light text-status-green';
-      case 'On Leave': return 'bg-status-orange-light text-status-orange';
-      case 'Onboarding': return 'bg-status-blue-light text-status-blue';
-      case 'Suspended': return 'bg-status-red-light text-status-red';
-      default: return 'bg-muted text-muted-foreground';
+      case 'Active': return 'bg-green-50 text-status-green';
+      case 'On Leave': return 'bg-orange-50 text-status-orange';
+      case 'Onboarding': return 'bg-blue-50 text-status-blue';
+      case 'Suspended': return 'bg-red-50 text-status-red';
+      default: return 'bg-gray-50 text-status-gray';
     }
   };
 
@@ -146,10 +146,10 @@ export default function EmployeeInfo() {
 
   const getTaskPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'High': return 'bg-status-red-light text-status-red';
-      case 'Medium': return 'bg-status-orange-light text-status-orange';
-      case 'Low': return 'bg-status-green-light text-status-green';
-      default: return 'bg-muted text-muted-foreground';
+      case 'High': return 'bg-red-50 text-status-red';
+      case 'Medium': return 'bg-orange-50 text-status-orange';
+      case 'Low': return 'bg-green-50 text-status-green';
+      default: return 'bg-gray-50 text-status-gray';
     }
   };
 
@@ -311,14 +311,14 @@ export default function EmployeeInfo() {
                   <p className="text-small text-muted-foreground">Goal Achievement</p>
                 </div>
                 <div className="text-center">
-                  <div className="bg-status-blue-light rounded-lg p-4 mb-2">
+                  <div className="bg-blue-50 rounded-lg p-4 mb-2">
                     <Star className="text-status-blue mx-auto w-6 h-6" />
                   </div>
                   <h3 className="text-body font-semibold text-foreground">4.8</h3>
                   <p className="text-small text-muted-foreground">Average Rating</p>
                 </div>
                 <div className="text-center">
-                  <div className="bg-status-orange-light rounded-lg p-4 mb-2">
+                  <div className="bg-orange-50 rounded-lg p-4 mb-2">
                     <Award className="text-status-orange mx-auto w-6 h-6" />
                   </div>
                   <h3 className="text-body font-semibold text-foreground">3</h3>

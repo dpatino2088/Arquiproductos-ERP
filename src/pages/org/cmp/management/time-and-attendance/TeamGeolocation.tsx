@@ -246,31 +246,31 @@ export default function TeamGeolocation() {
     switch (status) {
       case 'present':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
             Present
           </span>
         );
       case 'absent':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
             Absent
           </span>
         );
       case 'late':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-status-orange">
             Late
           </span>
         );
       case 'partial':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-status-blue">
             Partial
           </span>
         );
       case 'on-break':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-purple-light text-status-purple">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-status-purple">
             On Break
           </span>
         );
@@ -406,8 +406,8 @@ export default function TeamGeolocation() {
               <button
                 className={`px-3 py-1 border rounded text-sm transition-colors ${
                   showFilters
-                    ? 'bg-gray-100 text-gray-900 border-gray-300'
-                    : 'border-gray-300 hover:bg-gray-50'
+                    ? 'bg-gray-300 text-black border-gray-300'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                 }`}
                 onClick={() => setShowFilters(!showFilters)}
                 aria-label="Toggle filters"

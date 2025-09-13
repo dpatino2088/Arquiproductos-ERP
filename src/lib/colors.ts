@@ -1,9 +1,9 @@
 export const STATUS = {
-  success: 'bg-status-green-light text-status-green',
-  info: 'bg-status-blue-light text-status-blue',
-  warning: 'bg-status-orange-light text-status-orange',
-  error: 'bg-status-red-light text-status-red',
-  neutral: 'bg-neutral-gray-10 text-neutral-gray',
+  success: 'bg-green-50 text-status-green',
+  info: 'bg-blue-50 text-status-blue',
+  warning: 'bg-orange-50 text-status-orange',
+  error: 'bg-red-50 text-status-red',
+  neutral: 'bg-gray-50 text-status-gray',
 } as const;
 
 export function getStatusClasses(status?: string) {

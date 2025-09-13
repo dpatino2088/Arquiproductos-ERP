@@ -208,31 +208,31 @@ export default function EmployeeAttendance() {
     switch (status) {
       case 'present':
         return (
-          <span className="px-2 py-1 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-50 text-status-green">
             Present
           </span>
         );
       case 'absent':
         return (
-          <span className="px-2 py-1 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-50 text-status-red">
             Absent
           </span>
         );
       case 'late':
         return (
-          <span className="px-2 py-1 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-orange-50 text-status-orange">
             Late
           </span>
         );
       case 'partial':
         return (
-          <span className="px-2 py-1 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-status-blue">
             Partial
           </span>
         );
       case 'on-break':
         return (
-          <span className="px-2 py-1 rounded-full text-xs font-medium bg-status-purple-light text-status-purple">
+          <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-50 text-status-purple">
             On Break
           </span>
         );

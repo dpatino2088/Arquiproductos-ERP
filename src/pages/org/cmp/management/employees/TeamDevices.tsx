@@ -85,43 +85,43 @@ const getStatusBadge = (status: string) => {
   switch (status) {
     case 'Active':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
           Active
         </span>
       );
     case 'Inactive':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
           Inactive
         </span>
       );
     case 'Maintenance':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-status-orange">
           Maintenance
         </span>
       );
     case 'Retired':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
           Retired
         </span>
       );
     case 'Lost':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
           Lost
         </span>
       );
     case 'Stolen':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
           Stolen
         </span>
       );
     default:
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
           {status}
         </span>
       );
@@ -131,17 +131,17 @@ const getStatusBadge = (status: string) => {
 const getDeviceTypeIcon = (deviceType: string) => {
   switch (deviceType) {
     case 'Laptop':
-      return <Laptop className="w-4 h-4 text-blue-600" />;
+      return <Laptop className="w-4 h-4 text-status-blue" />;
     case 'Desktop':
-      return <Monitor className="w-4 h-4 text-gray-600" />;
+      return <Monitor className="w-4 h-4 text-status-blue" />;
     case 'Smartphone':
-      return <Smartphone className="w-4 h-4 text-green-600" />;
+      return <Smartphone className="w-4 h-4 text-status-green" />;
     case 'Tablet':
-      return <Tablet className="w-4 h-4 text-purple-600" />;
+      return <Tablet className="w-4 h-4 text-status-purple" />;
     case 'Monitor':
-      return <Monitor className="w-4 h-4 text-indigo-600" />;
+      return <Monitor className="w-4 h-4 text-status-blue" />;
     default:
-      return <Settings className="w-4 h-4 text-gray-600" />;
+      return <Settings className="w-4 h-4 text-status-blue" />;
   }
 };
 
@@ -560,8 +560,8 @@ export default function TeamDevices() {
               <button
                 className={`px-3 py-1 border rounded text-sm transition-colors ${
                   showFilters
-                    ? 'bg-gray-100 text-gray-900 border-gray-300'
-                    : 'border-gray-300 hover:bg-gray-50'
+                    ? 'bg-gray-300 text-black border-gray-300'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                 }`}
                 onClick={() => setShowFilters(!showFilters)}
                 aria-label="Toggle filters"
@@ -871,10 +871,10 @@ export default function TeamDevices() {
                     <button
                       key={pageNum}
                       onClick={() => setCurrentPage(pageNum)}
-                      className={`px-2 py-1 text-xs border rounded transition-colors ${
+                      className={`w-6 h-6 text-xs rounded transition-colors flex items-center justify-center ${
                         currentPage === pageNum
-                          ? 'border-primary bg-primary text-white'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                          ? 'bg-gray-300 text-black'
+                          : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
                       }`}
                     >
                       {pageNum}

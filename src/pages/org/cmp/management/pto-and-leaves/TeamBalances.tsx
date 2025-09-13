@@ -63,19 +63,9 @@ const generateAvatarInitials = (firstName: string, lastName: string) => {
 };
 
 // Function to generate a consistent background color based on name
-// Using WCAG 2.2 AA compliant colors (4.5:1 contrast ratio with white text)
+// Using primary Teal 700 for all avatars for consistency
 const generateAvatarColor = (firstName: string, lastName: string) => {
-  const colors = [
-    '#008383', '#1976D2', '#D32F2F', '#E65100', '#7B1FA2',
-    '#00695C', '#2E7D32', '#E65100', '#C2185B', '#455A64',
-    '#5D4037', '#303F9F', '#00796B', '#BF360C', '#512DA8'
-  ];
-  const name = firstName + lastName;
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
+  return '#008383'; // Primary Teal 700
 };
 
 export default function TeamBalances() {
@@ -603,25 +593,25 @@ export default function TeamBalances() {
     switch (status) {
       case 'Active':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
             Active
           </span>
         );
       case 'Suspended':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
             Suspended
           </span>
         );
       case 'Onboarding':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-status-blue">
             Onboarding
           </span>
         );
       case 'On Leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-status-yellow">
             On Leave
           </span>
         );
@@ -643,9 +633,9 @@ export default function TeamBalances() {
 
   const getBalanceBadge = (remaining: number, total: number) => {
     const percentage = (remaining / total) * 100;
-    if (percentage >= 50) return 'bg-status-green-light text-status-green';
-    if (percentage >= 25) return 'bg-status-orange-light text-status-orange';
-    return 'bg-status-red-light text-status-red';
+    if (percentage >= 50) return 'bg-green-50 text-status-green';
+    if (percentage >= 25) return 'bg-yellow-50 text-status-yellow';
+    return 'bg-red-50 text-status-red';
   };
 
   return (
@@ -744,7 +734,7 @@ export default function TeamBalances() {
               <button
                 onClick={() => setShowFilters(!showFilters)}
                 className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
-                  showFilters ? 'bg-gray-100 text-gray-900' : 'bg-white text-gray-700 hover:bg-gray-50'
+                  showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 <Filter style={{ width: '14px', height: '14px' }} />
@@ -757,7 +747,7 @@ export default function TeamBalances() {
                   onClick={() => setViewMode('table')}
                   className={`p-1.5 transition-colors ${
                     viewMode === 'table'
-                      ? 'bg-gray-100 text-gray-900'
+                      ? 'bg-gray-300 text-black'
                       : 'bg-white text-gray-600 hover:bg-gray-50'
                   }`}
                   aria-label="Switch to list view"
@@ -769,7 +759,7 @@ export default function TeamBalances() {
                   onClick={() => setViewMode('grid')}
                   className={`p-1.5 transition-colors ${
                     viewMode === 'grid'
-                      ? 'bg-gray-100 text-gray-900'
+                      ? 'bg-gray-300 text-black'
                       : 'bg-white text-gray-600 hover:bg-gray-50'
                   }`}
                   aria-label="Switch to grid view"
@@ -965,7 +955,7 @@ export default function TeamBalances() {
                           {employee.vacationBalance.remaining}/{employee.vacationBalance.total}
                         </span>
                         {employee.vacationBalance.pending > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+                          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-status-yellow">
                             +{employee.vacationBalance.pending}
                           </span>
                         )}
@@ -977,7 +967,7 @@ export default function TeamBalances() {
                           {employee.sickLeaveBalance.remaining}/{employee.sickLeaveBalance.total}
                         </span>
                         {employee.sickLeaveBalance.pending > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+                          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-status-yellow">
                             +{employee.sickLeaveBalance.pending}
                           </span>
                         )}
@@ -1046,7 +1036,7 @@ export default function TeamBalances() {
                       {employee.vacationBalance.remaining}/{employee.vacationBalance.total}
                     </span>
                     {employee.vacationBalance.pending > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+                      <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-status-yellow">
                         +{employee.vacationBalance.pending}
                       </span>
                     )}
@@ -1060,7 +1050,7 @@ export default function TeamBalances() {
                       {employee.sickLeaveBalance.remaining}/{employee.sickLeaveBalance.total}
                     </span>
                     {employee.sickLeaveBalance.pending > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+                      <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-status-yellow">
                         +{employee.sickLeaveBalance.pending}
                       </span>
                     )}
@@ -1158,10 +1148,9 @@ export default function TeamBalances() {
                       onClick={() => setCurrentPage(pageNum)}
                       className={`w-6 h-6 text-xs rounded transition-colors flex items-center justify-center ${
                         currentPage === pageNum
-                          ? 'text-white'
+                          ? 'bg-gray-300 text-black'
                           : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
                       }`}
-                      style={currentPage === pageNum ? { backgroundColor: 'var(--teal-brand-hex)' } : {}}
                     >
                       {pageNum}
                     </button>

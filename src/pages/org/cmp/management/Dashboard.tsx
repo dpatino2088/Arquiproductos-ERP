@@ -43,9 +43,9 @@ export default function ManagementDashboard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'text-status-red bg-status-red-light';
-      case 'medium': return 'text-status-orange bg-status-orange-light';
-      default: return 'text-status-green bg-status-green-light';
+      case 'high': return 'text-status-red bg-red-50';
+      case 'medium': return 'text-status-yellow bg-yellow-50';
+      default: return 'text-status-green bg-green-50';
     }
   };
 
@@ -88,7 +88,7 @@ export default function ManagementDashboard() {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-heading font-semibold">Pending Approvals</h2>
-            <div className="bg-status-red-light text-status-red text-xs px-2 py-1 rounded-full">
+            <div className="bg-red-50 text-status-red text-xs px-2 py-1 rounded-full">
               {pendingApprovals.length} pending
             </div>
           </div>
@@ -106,10 +106,10 @@ export default function ManagementDashboard() {
                   <div className="text-xs text-muted-foreground">{approval.details}</div>
                 </div>
                 <div className="flex gap-2">
-                  <button className="px-3 py-1 text-xs bg-status-green-light text-status-green rounded hover:opacity-80">
+                  <button className="px-3 py-1 text-xs bg-green-50 text-status-green rounded hover:opacity-80">
                     Approve
                   </button>
-                  <button className="px-3 py-1 text-xs bg-status-red-light text-status-red rounded hover:opacity-80">
+                  <button className="px-3 py-1 text-xs bg-red-50 text-status-red rounded hover:opacity-80">
                     Reject
                   </button>
                 </div>

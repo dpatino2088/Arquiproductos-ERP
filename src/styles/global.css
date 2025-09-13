@@ -140,11 +140,14 @@
     --sidebar-background: var(--sidebar-light-background);
     --sidebar-foreground: var(--foreground);
 
-    /* Status colors per design system specification - WCAG 2.2 AA compliant */
-    --status-green: #166534;               /* Success/Active - Green 800 for better contrast */
-    --status-red: #991b1b;                 /* Error/Critical/Delete - Red 800 for better contrast */
-    --status-blue: #1d4ed8;                /* Info/Neutral actions - Blue 700 from our palette */
-    --status-amber: #9a3412;               /* Warning/Pending approvals - Orange 900 for WCAG 2.2 AA */
+/* Status colors per design system specification - WCAG 2.2 AA compliant */
+--status-green: #15803d;               /* Success/Active - Green 700 for better contrast */
+--status-red: #b91c1c;                 /* Error/Critical/Delete - Red 700 for better contrast */
+--status-blue: #2563eb;                /* Info/Neutral actions - Blue 500 from our palette */
+--status-purple: #9333ea;              /* Purple status - Purple 600 for better contrast */
+--status-yellow: #a16207;              /* Yellow status - Yellow 700 for better contrast */
+--status-orange: #c2410c;              /* Orange status - Orange 700 for better contrast */
+--status-gray: #6b7280;                /* Gray status - Gray 500 for neutral/inactive states */
     
     /* Utility colors */
     --focus-ring: var(--brand-primary);     /* Focus indicator - primary teal */
@@ -184,12 +187,14 @@
   .text-heading { font-size: var(--font-size-heading); }
   .text-title { font-size: var(--font-size-title); }
 
-  /* Status utilities using design system colors */
-  .text-status-green { color: var(--status-green); }
-  .text-status-red { color: var(--status-red); }
-  .text-status-blue { color: var(--status-blue); }
-  .text-status-orange { color: var(--status-amber); }
-  .text-status-purple { color: var(--purple-700); }
+/* Status utilities using design system colors */
+.text-status-green { color: var(--status-green); }
+.text-status-red { color: var(--status-red); }
+.text-status-blue { color: var(--status-blue); }
+.text-status-purple { color: var(--status-purple); }
+.text-status-yellow { color: var(--status-yellow); }
+.text-status-orange { color: var(--status-orange); }
+.text-status-gray { color: var(--status-gray); }
   .text-neutral-gray { color: var(--neutral-gray); }
 
   /* Text utilities */
@@ -204,20 +209,26 @@
   .bg-status-orange-light { background-color: var(--orange-100); }
   .bg-status-purple-light { background-color: var(--purple-100); }
 
-  /* Solid backgrounds */
-  .bg-status-green { background-color: var(--status-green); }
-  .bg-status-red { background-color: var(--status-red); }
-  .bg-status-blue { background-color: var(--status-blue); }
-  .bg-status-orange { background-color: var(--status-amber); }
+/* Solid backgrounds */
+.bg-status-green { background-color: var(--status-green); }
+.bg-status-red { background-color: var(--status-red); }
+.bg-status-blue { background-color: var(--status-blue); }
+.bg-status-purple { background-color: var(--status-purple); }
+.bg-status-yellow { background-color: var(--status-yellow); }
+.bg-status-orange { background-color: var(--status-orange); }
+.bg-status-gray { background-color: var(--status-gray); }
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
   .bg-row-highlight { background-color: var(--row-highlight); }
 
-  /* Border colors for tooltip arrows */
-  .border-t-status-green { border-top-color: var(--status-green); }
-  .border-t-status-red { border-top-color: var(--status-red); }
-  .border-t-status-blue { border-top-color: var(--status-blue); }
-  .border-t-status-orange { border-top-color: var(--status-amber); }
+/* Border colors for tooltip arrows */
+.border-t-status-green { border-top-color: var(--status-green); }
+.border-t-status-red { border-top-color: var(--status-red); }
+.border-t-status-blue { border-top-color: var(--status-blue); }
+.border-t-status-purple { border-top-color: var(--status-purple); }
+.border-t-status-yellow { border-top-color: var(--status-yellow); }
+.border-t-status-orange { border-top-color: var(--status-orange); }
+.border-t-status-gray { border-top-color: var(--status-gray); }
 
   /* Borders using Tailwind v3 */
   .border-subtle { border-color: var(--gray-200); }

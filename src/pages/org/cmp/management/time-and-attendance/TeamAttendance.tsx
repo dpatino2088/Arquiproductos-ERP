@@ -36,19 +36,9 @@ const generateAvatarInitials = (firstName: string, lastName: string) => {
 };
 
 // Function to generate a consistent background color based on name
-// Using WCAG 2.2 AA compliant colors (4.5:1 contrast ratio with white text)
+// Using primary Teal 700 for all avatars for consistency
 const generateAvatarColor = (firstName: string, lastName: string) => {
-  const colors = [
-    '#008383', '#1976D2', '#D32F2F', '#E65100', '#7B1FA2',
-    '#00695C', '#2E7D32', '#E65100', '#C2185B', '#455A64',
-    '#5D4037', '#303F9F', '#00796B', '#BF360C', '#512DA8'
-  ];
-  const name = firstName + lastName;
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
+  return '#008383'; // Primary Teal 700
 };
 
 interface TimeEntry {
@@ -1279,7 +1269,7 @@ export default function TeamAttendance() {
     return (
       <div className="relative">
         <div 
-          className="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center cursor-pointer select-none"
+          className="w-4 h-4 rounded-full bg-status-blue flex items-center justify-center cursor-pointer select-none"
           title="Hold to see original times"
           onMouseDown={(e) => {
             e.stopPropagation();
@@ -1331,15 +1321,15 @@ export default function TeamAttendance() {
       bgColor = 'bg-status-red';
       borderColor = 'border-t-status-red';
     } else if (hasRejected) {
-      flagColor = 'text-gray-500 hover:text-gray-600';
-      bgColor = 'bg-gray-500';
+      flagColor = 'text-status-gray hover:text-gray-600';
+      bgColor = 'bg-status-gray';
       borderColor = 'border-t-gray-500';
     } else if (hasAcknowledged) {
       flagColor = 'text-status-blue hover:text-blue-700';
       bgColor = 'bg-status-blue';
       borderColor = 'border-t-status-blue';
     } else {
-      flagColor = 'text-status-green hover:text-green-700';
+      flagColor = 'text-status-green hover:text-green-800';
       bgColor = 'bg-status-green';
       borderColor = 'border-t-status-green';
     }
@@ -1363,7 +1353,7 @@ export default function TeamAttendance() {
                 ))}
               </div>
               <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-                hasIncidents ? 'border-t-[#991b1b]' : hasRejected ? 'border-t-gray-500' : hasAcknowledged ? 'border-t-[#1d4ed8]' : 'border-t-[#166534]'
+                hasIncidents ? 'border-t-[#b91c1c]' : hasRejected ? 'border-t-[#6b7280]' : hasAcknowledged ? 'border-t-[#2563eb]' : 'border-t-[#15803d]'
               }`}></div>
             </div>
           )}
@@ -1375,7 +1365,7 @@ export default function TeamAttendance() {
                  )}
                  {hasRejected && !hasIncidents && !hasResolved && !hasAcknowledged && (
                    <X
-                     className="w-3 h-3 text-gray-500 ml-1"
+                     className="w-3 h-3 text-status-gray ml-1"
                    />
                  )}
                  {hasAcknowledged && !hasIncidents && !hasResolved && !hasRejected && (
@@ -1434,6 +1424,27 @@ export default function TeamAttendance() {
     }
   }, [currentPage, validCurrentPage]);
 
+  // Function to get status dot color for avatars
+  const getStatusDotColor = (record: AttendanceRecord) => {
+    const currentStatus = getCurrentStatus(record);
+    
+    switch (currentStatus) {
+      case 'present':
+        return 'var(--status-green)';
+      case 'on-break':
+        return 'var(--status-yellow)';
+      case 'on-transfer':
+        return 'var(--status-blue)';
+      case 'on-leave':
+        return 'var(--status-purple)';
+      case 'absent':
+        return 'var(--status-red)';
+      case 'not-present':
+      default:
+        return 'var(--status-gray)'; // #6b7280
+    }
+  };
+
   // Function to determine current status based on activity
   const getCurrentStatus = (record: AttendanceRecord) => {
     const now = new Date();
@@ -1480,33 +1491,37 @@ export default function TeamAttendance() {
     switch (currentStatus) {
       case 'present':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
             Present
           </span>
         );
       case 'not-present':
-        return null; // No mostrar nada cuando no están presentes
+        return (
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
+            Not Present
+          </span>
+        );
       case 'on-break':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-amber-10 text-status-orange">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-status-yellow">
             On Break
           </span>
         );
       case 'on-transfer':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-status-blue">
             In Transfer
           </span>
         );
       case 'on-leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-purple-light text-status-purple">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-status-purple">
             On Leave
           </span>
         );
       case 'absent':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
             Absent
           </span>
         );
@@ -1522,9 +1537,9 @@ export default function TeamAttendance() {
       case 'present':
         return <CheckCircle className="w-4 h-4 text-status-green" />;
       case 'not-present':
-        return null; // No mostrar ícono cuando no están presentes
+        return <XCircle className="w-4 h-4 text-status-gray" />;
       case 'on-break':
-        return <ClockIcon className="w-4 h-4 text-status-orange" />;
+        return <ClockIcon className="w-4 h-4 text-status-yellow" />;
       case 'on-transfer':
         return <MapPin className="w-4 h-4 text-status-blue" />;
       case 'on-leave':
@@ -1872,7 +1887,7 @@ export default function TeamAttendance() {
                <div className="relative inline-block">
                  <span className="text-sm text-gray-900">{time}</span>
                  {isModified && !showOriginal && (
-                   <span className="absolute -top-1 -right-2 text-xs text-blue-600 font-bold">*</span>
+                   <span className="absolute -top-1 -right-2 text-xs text-gray-900 font-bold">*</span>
                  )}
                </div>
     );
@@ -2093,11 +2108,11 @@ export default function TeamAttendance() {
               setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
             }}
           >
-            <ScheduleIcon className="w-3 h-3 text-gray-500" />
+            <ScheduleIcon className="w-3 h-3 text-status-gray" />
             {activeTooltip === tooltipKey && (
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-500 text-white text-xs rounded whitespace-nowrap z-50">
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-status-gray text-white text-xs rounded whitespace-nowrap z-50">
                 Scheduled: {scheduled}
-                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-500"></div>
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#6b7280]"></div>
               </div>
             )}
           </div>
@@ -2131,7 +2146,7 @@ export default function TeamAttendance() {
             }`}>
               {isOnTime ? `On time (scheduled: ${scheduled})` : isLate ? `Late (scheduled: ${scheduled})` : `Early (scheduled: ${scheduled})`}
               <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-                isOnTime ? 'border-t-[#166534]' : isLate ? 'border-t-[#991b1b]' : 'border-t-[#1d4ed8]'
+                isOnTime ? 'border-t-[#15803d]' : isLate ? 'border-t-[#b91c1c]' : 'border-t-[#2563eb]'
               }`}></div>
             </div>
           )}
@@ -2170,11 +2185,11 @@ export default function TeamAttendance() {
               setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
             }}
           >
-            <ScheduleIcon className="w-3 h-3 text-gray-500" />
+            <ScheduleIcon className="w-3 h-3 text-status-gray" />
             {activeTooltip === tooltipKey && (
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-500 text-white text-xs rounded whitespace-nowrap z-50">
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-status-gray text-white text-xs rounded whitespace-nowrap z-50">
                 Scheduled: {scheduledLocation}
-                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-500"></div>
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[#6b7280]"></div>
               </div>
             )}
           </div>
@@ -2202,7 +2217,7 @@ export default function TeamAttendance() {
             }`}>
               {isCorrectLocation ? `Correct location (scheduled: ${scheduledLocation})` : `Wrong location (scheduled: ${scheduledLocation})`}
               <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-                isCorrectLocation ? 'border-t-[#166534]' : 'border-t-[#9a3412]'
+                isCorrectLocation ? 'border-t-[#15803d]' : 'border-t-[#c2410c]'
               }`}></div>
             </div>
           )}
@@ -2526,8 +2541,8 @@ export default function TeamAttendance() {
               <button
                 className={`px-3 py-1 border rounded text-sm transition-colors ${
                   showFilters
-                    ? 'bg-gray-100 text-gray-900 border-gray-300'
-                    : 'border-gray-300 hover:bg-gray-50'
+                    ? 'bg-gray-300 text-black border-gray-300'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                 }`}
                 onClick={() => setShowFilters(!showFilters)}
                 aria-label="Toggle filters"
@@ -2676,7 +2691,7 @@ export default function TeamAttendance() {
               <button className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 transition-colors">
                 Bulk Edit
               </button>
-              <button className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 transition-colors">
+              <button className="px-3 py-1 bg-status-red text-white rounded text-sm hover:bg-red-700 transition-colors">
                 Delete Selected
               </button>
             </div>
@@ -2812,11 +2827,18 @@ export default function TeamAttendance() {
                         </td>
                         <td className="py-2 pl-1 pr-6">
                           <div className="flex items-center gap-3">
-                            <div 
-                              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium"
-                              style={{ backgroundColor: generateAvatarColor(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '') }}
-                            >
-                              {generateAvatarInitials(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '')}
+                            <div className="relative">
+                              <div 
+                                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium"
+                                style={{ backgroundColor: generateAvatarColor(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '') }}
+                              >
+                                {generateAvatarInitials(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '')}
+                              </div>
+                              <div 
+                                className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
+                                style={{ backgroundColor: getStatusDotColor(record) }}
+                              >
+                              </div>
                             </div>
                             <div>
                               <button
@@ -3054,36 +3076,57 @@ export default function TeamAttendance() {
           {totalPages > 1 && (
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setCurrentPage(Math.max(1, validCurrentPage - 1))}
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={validCurrentPage === 1}
-                className="px-2 py-1 border rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                aria-label="Previous page"
+                className={`flex items-center gap-1 px-2 py-1 border rounded text-xs transition-colors ${
+                  validCurrentPage === 1
+                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
               >
                 <ChevronLeft className="w-3 h-3" />
+                Previous
               </button>
               
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (validCurrentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (validCurrentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = validCurrentPage - 2 + i;
+                  }
+
+                  return (
                 <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
                   className={`w-6 h-6 text-xs rounded transition-colors flex items-center justify-center ${
-                    validCurrentPage === page
-                      ? 'text-white'
-                      : 'hover:bg-gray-50'
-                  }`}
-                  style={{ backgroundColor: validCurrentPage === page ? '#008383' : 'transparent' }}
-                  aria-label={`Go to page ${page}`}
-                >
-                  {page}
+                        validCurrentPage === pageNum
+                          ? 'bg-gray-300 text-black'
+                          : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {pageNum}
                 </button>
-              ))}
+                  );
+                })}
+              </div>
               
               <button
-                onClick={() => setCurrentPage(Math.min(totalPages, validCurrentPage + 1))}
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={validCurrentPage === totalPages}
-                className="px-2 py-1 border rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                aria-label="Next page"
+                className={`flex items-center gap-1 px-2 py-1 border rounded text-xs transition-colors ${
+                  validCurrentPage === totalPages
+                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
               >
+                Next
                 <ChevronRight className="w-3 h-3" />
               </button>
             </div>
@@ -3098,11 +3141,18 @@ export default function TeamAttendance() {
             {/* Modal Header */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <div className="flex items-center gap-3">
-                <div 
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium"
-                  style={{ backgroundColor: generateAvatarColor(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '') }}
-                >
-                  {generateAvatarInitials(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '')}
+                <div className="relative">
+                  <div 
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium"
+                    style={{ backgroundColor: generateAvatarColor(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '') }}
+                  >
+                    {generateAvatarInitials(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '')}
+                  </div>
+                  <div 
+                    className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
+                    style={{ backgroundColor: getStatusDotColor(selectedRecord) }}
+                  >
+                  </div>
                 </div>
                 <div>
                   <div className="flex items-center gap-4">
@@ -3226,7 +3276,7 @@ export default function TeamAttendance() {
                           {/* Session Number */}
                           <div className="col-span-3">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-sm font-medium border border-green-200">
+                              <div className="w-8 h-8 rounded-full bg-green-100 text-status-green flex items-center justify-center text-sm font-medium border border-green-200">
                                 {session.sessionNumber}
                               </div>
                               <span className="text-sm font-medium text-gray-900">
@@ -3382,7 +3432,7 @@ export default function TeamAttendance() {
                             {/* Break Number */}
                             <div className="col-span-3">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-medium border border-orange-200">
+                                <div className="w-8 h-8 rounded-full bg-orange-100 text-status-orange flex items-center justify-center text-sm font-medium border border-orange-200">
                                   {breakIndex + 1}
                                 </div>
                                 <span className="text-sm font-medium text-gray-900">
@@ -3473,7 +3523,7 @@ export default function TeamAttendance() {
                         </div>
                         
                         <div className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg">
-                          <div className="w-2 h-2 bg-orange-500 rounded-full mt-2"></div>
+                          <div className="w-2 h-2 bg-status-orange rounded-full mt-2"></div>
                           <div className="flex-1">
                             <div className="text-sm font-medium text-gray-900">Break started</div>
                             <div className="text-xs text-gray-600">10:15 AM • Lunch break • Duration: 30 min</div>

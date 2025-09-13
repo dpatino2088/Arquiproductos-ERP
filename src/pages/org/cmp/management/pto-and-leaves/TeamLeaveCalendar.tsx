@@ -73,31 +73,31 @@ const getStatusBadge = (status: string) => {
   switch (status) {
     case 'Pending':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-status-orange">
           Pending
         </span>
       );
     case 'Approved':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-green-light text-status-green">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
           Approved
         </span>
       );
     case 'Rejected':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
           Rejected
         </span>
       );
     case 'Cancelled':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
           Cancelled
         </span>
       );
     default:
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
           {status}
         </span>
       );
@@ -106,12 +106,12 @@ const getStatusBadge = (status: string) => {
 
 const getLeaveTypeIcon = (leaveType: string) => {
   const iconConfig = {
-    'Vacation': { icon: Plane, color: 'text-blue-600' },
-    'Sick Leave': { icon: Heart, color: 'text-red-600' },
-    'Personal Day': { icon: Coffee, color: 'text-purple-600' },
-    'Maternity/Paternity': { icon: User, color: 'text-pink-600' },
-    'Bereavement': { icon: Heart, color: 'text-gray-600' },
-    'Other': { icon: FileText, color: 'text-gray-600' }
+    'Vacation': { icon: Plane, color: 'text-status-blue' },
+    'Sick Leave': { icon: Heart, color: 'text-status-red' },
+    'Personal Day': { icon: Coffee, color: 'text-status-purple' },
+    'Maternity/Paternity': { icon: User, color: 'text-status-purple' },
+    'Bereavement': { icon: Heart, color: 'text-status-red' },
+    'Other': { icon: FileText, color: 'text-status-gray' }
   };
   
   const config = iconConfig[leaveType as keyof typeof iconConfig] || iconConfig['Other'];
@@ -122,12 +122,12 @@ const getLeaveTypeIcon = (leaveType: string) => {
 
 const getLeaveTypeBadge = (leaveType: string) => {
   const typeConfig = {
-    'Vacation': { bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-200' },
-    'Sick Leave': { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200' },
-    'Personal Day': { bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-200' },
-    'Maternity/Paternity': { bg: 'bg-pink-100', text: 'text-pink-800', border: 'border-pink-200' },
-    'Bereavement': { bg: 'bg-gray-100', text: 'text-gray-800', border: 'border-gray-200' },
-    'Other': { bg: 'bg-gray-100', text: 'text-gray-800', border: 'border-gray-200' }
+    'Vacation': { bg: 'bg-blue-50', text: 'text-status-blue', border: 'border-blue-200' },
+    'Sick Leave': { bg: 'bg-red-50', text: 'text-status-red', border: 'border-red-200' },
+    'Personal Day': { bg: 'bg-purple-50', text: 'text-status-purple', border: 'border-purple-200' },
+    'Maternity/Paternity': { bg: 'bg-purple-50', text: 'text-status-purple', border: 'border-purple-200' },
+    'Bereavement': { bg: 'bg-red-50', text: 'text-status-red', border: 'border-red-200' },
+    'Other': { bg: 'bg-gray-50', text: 'text-status-gray', border: 'border-gray-200' }
   };
   
   const config = typeConfig[leaveType as keyof typeof typeConfig] || typeConfig['Other'];
@@ -144,25 +144,25 @@ const getConflictSeverityBadge = (severity: string) => {
   switch (severity) {
     case 'high':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-red-light text-status-red">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-status-red">
           High Risk
         </span>
       );
     case 'medium':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-orange-light text-status-orange">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-status-orange">
           Medium Risk
         </span>
       );
     case 'low':
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-light text-status-blue">
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-status-blue">
           Low Risk
         </span>
       );
     default:
       return (
-        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(158, 158, 158, 0.1)', color: '#9E9E9E' }}>
+        <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
           {severity}
         </span>
       );
@@ -529,8 +529,8 @@ export default function TeamLeaveCalendar() {
             onClick={() => setShowConflicts(!showConflicts)}
             className={`px-3 py-1 border rounded text-sm transition-colors ${
               showConflicts
-                ? 'bg-gray-100 text-gray-900 border-gray-300'
-                : 'border-gray-300 hover:bg-gray-50'
+                ? 'bg-gray-300 text-black border-gray-300'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
             }`}
             aria-label="Toggle conflict visibility"
           >
