@@ -24,7 +24,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Calendar as ScheduleIcon,
-  Edit3
+  Edit3,
+  Flag,
+  Check,
+  Minus
 } from 'lucide-react';
 
 // Function to generate avatar initials (100% reliable, works everywhere)
@@ -159,6 +162,7 @@ export default function TeamAttendance() {
   const [selectedDepartment, setSelectedDepartment] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [selectedFlags, setSelectedFlags] = useState<string>('');
   const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set());
@@ -778,7 +782,9 @@ export default function TeamAttendance() {
       // Scheduled information - supposed to be at client site
       scheduledClockIn: '08:00',
       scheduledClockOut: '16:00',
-      scheduledLocation: 'Client Site'
+      scheduledLocation: 'Client Site',
+      // Modified times for demo
+      modifiedClockIn: '08:15'
     },
     // More employees to test pagination
     {
@@ -1098,9 +1104,261 @@ export default function TeamAttendance() {
       // Scheduled information - expected to work
       scheduledClockIn: '09:00',
       scheduledClockOut: '17:00',
-      scheduledLocation: 'Main Office'
+      scheduledLocation: 'Main Office',
+      // Modified times for demo
+      modifiedClockIn: '09:15',
+      modifiedClockOut: '17:30'
     }
   ];
+
+  // Helper functions for approval status (moved before useMemo to avoid initialization errors)
+  const getOvertimeHours = (totalHours: number) => {
+    const standardHours = 8;
+    const overtime = Math.max(0, totalHours - standardHours);
+    return overtime;
+  };
+
+  const getWorkSessionsCount = (record: AttendanceRecord) => {
+    // For now, we'll estimate sessions based on transfers + 1
+    // A transfer creates a new session, so sessions = transfers + 1
+    const baseSessions = 1; // At least one session
+    const additionalSessions = record.transfers.length; // Each transfer creates a new session
+    return baseSessions + additionalSessions;
+  };
+
+  // Helper function to get approval status for a single work session
+  const getSessionApprovalStatus = (sessionId: string, record: AttendanceRecord): 'approved_without_modifications' | 'approved_with_modifications' | 'pending_without_incidents' | 'pending_with_incidents' | 'rejected' => {
+    // For demo purposes, create different approval statuses for different sessions
+    // In real implementation, this would come from the backend
+    const sessionNumber = parseInt(sessionId.split('-').pop() || '1');
+    
+    // Check if record has incidents (overtime, late arrival, early departure, etc.)
+    const hasIncidents = (record: AttendanceRecord) => {
+      const overtimeHours = getOvertimeHours(record.totalHours);
+      const hasOvertime = overtimeHours > 0;
+      const isLate = record.scheduledClockIn && record.timeEntries[0]?.clockIn && record.timeEntries[0].clockIn > record.scheduledClockIn;
+      const isEarly = record.scheduledClockOut && record.timeEntries[0]?.clockOut && record.timeEntries[0].clockOut < record.scheduledClockOut;
+      const wrongLocation = record.scheduledLocation && record.location !== record.scheduledLocation;
+      
+      return hasOvertime || isLate || isEarly || wrongLocation;
+    };
+    
+    // Check if record has been modified (simulated for demo)
+    const isModified = (record: AttendanceRecord, sessionId: string) => {
+      // In real implementation, this would check if original hours were edited
+      return record.employeeName === 'Lisa Chen' || (record.employeeName === 'Jane Smith' && sessionNumber === 2);
+    };
+    
+    if (record.employeeName === 'John Doe') {
+      // John Doe: Session 1 approved without modifications, Session 2 pending without incidents
+      return sessionNumber === 1 ? 'approved_without_modifications' : 'pending_without_incidents';
+    } else if (record.employeeName === 'Jane Smith') {
+      // Jane Smith: Session 1 pending with incidents (overtime), Session 2 approved with modifications
+      return sessionNumber === 1 ? 'pending_with_incidents' : 'approved_with_modifications';
+    } else if (record.employeeName === 'Mike Johnson') {
+      // Mike Johnson: All sessions rejected
+      return 'rejected';
+    } else if (record.employeeName === 'Lisa Chen') {
+      // Lisa Chen: Session 1 approved with modifications, Session 2 pending with incidents
+      return sessionNumber === 1 ? 'approved_with_modifications' : 'pending_with_incidents';
+    } else if (record.employeeName === 'Emma Wilson') {
+      // Emma Wilson: Pending without incidents (normal attendance, no issues)
+      return 'pending_without_incidents';
+    }
+    
+    // Default for other employees - check if they have incidents
+    const incidents = hasIncidents(record);
+    const modified = isModified(record, sessionId);
+    
+    if (incidents) {
+      return 'pending_with_incidents';
+    } else if (modified) {
+      return 'approved_with_modifications';
+    } else {
+      return 'approved_without_modifications';
+    }
+  };
+
+  // Helper function to get flags for incidents
+  const getRecordFlags = (record: AttendanceRecord): { type: 'incident' | 'resolved' | 'rejected' | 'acknowledged', message: string }[] => {
+    const flags: { type: 'incident' | 'resolved' | 'rejected' | 'acknowledged', message: string }[] = [];
+    
+    // Check for overtime
+    const overtimeHours = getOvertimeHours(record.totalHours);
+    if (overtimeHours > 0) {
+      flags.push({ type: 'incident', message: `Overtime: ${overtimeHours.toFixed(2)} hours` });
+    }
+    
+    // Check for late arrival
+    if (record.scheduledClockIn && record.timeEntries[0]?.clockIn && record.timeEntries[0].clockIn > record.scheduledClockIn) {
+      flags.push({ type: 'incident', message: 'Late arrival' });
+    }
+    
+    // Check for early departure
+    if (record.scheduledClockOut && record.timeEntries[0]?.clockOut && record.timeEntries[0].clockOut < record.scheduledClockOut) {
+      flags.push({ type: 'incident', message: 'Early departure' });
+    }
+    
+    // Check for wrong location
+    if (record.scheduledLocation && record.location !== record.scheduledLocation) {
+      flags.push({ type: 'incident', message: 'Wrong location' });
+    }
+    
+    // Check for missing clock out (if clock in exists but no clock out)
+    if (record.timeEntries[0]?.clockIn && !record.timeEntries[0]?.clockOut) {
+      flags.push({ type: 'incident', message: 'Missing clock out' });
+    }
+    
+    // Check for missing clock in (if scheduled but no clock in)
+    if (record.scheduledClockIn && !record.timeEntries[0]?.clockIn) {
+      flags.push({ type: 'incident', message: 'Missing clock in' });
+    }
+    
+    // Add some resolved, rejected, and acknowledged flags for demo (in real app, this would come from backend)
+    // Only add these if no incidents were detected (resolved/rejected/acknowledged replace incidents)
+    if (record.employeeName === 'Emma Wilson' && flags.length === 0) {
+      flags.push({ type: 'resolved', message: 'Late arrival - Approved' });
+    }
+    if (record.employeeName === 'Mike Chen' && flags.length === 0) {
+      flags.push({ type: 'resolved', message: 'Overtime - Approved' });
+    }
+    if (record.employeeName === 'Robert Garcia' && flags.length === 0) {
+      flags.push({ type: 'rejected', message: 'Overtime - Rejected' });
+    }
+    if (record.employeeName === 'Jennifer Davis' && flags.length === 0) {
+      flags.push({ type: 'rejected', message: 'Late arrival - Rejected' });
+    }
+    if (record.employeeName === 'David Kim' && flags.length === 0) {
+      flags.push({ type: 'acknowledged', message: 'Late arrival - Acknowledged' });
+    }
+    if (record.employeeName === 'Lisa Thompson' && flags.length === 0) {
+      flags.push({ type: 'acknowledged', message: 'Early departure - Acknowledged' });
+    }
+    
+    return flags;
+  };
+
+  // Helper function to check if record has any flags
+  const hasFlags = (record: AttendanceRecord): boolean => {
+    return getRecordFlags(record).length > 0;
+  };
+
+  // Helper function to check if record was manually modified
+  const isRecordModified = (record: AttendanceRecord): boolean => {
+    // Check if times were manually edited
+    const hasModifiedTimes = Boolean(record.modifiedClockIn || record.modifiedClockOut);
+    
+    // For demo purposes, also mark some records as manually entered
+    const manuallyEnteredEmployees = ['Lisa Chen', 'David Brown', 'Amanda Taylor'];
+    const isManuallyEntered = manuallyEnteredEmployees.includes(record.employeeName);
+    
+    return hasModifiedTimes || isManuallyEntered;
+  };
+
+  // Helper function to render modified icon with tooltip
+  const renderModifiedIcon = (record: AttendanceRecord, tooltipId: string) => {
+    if (!isRecordModified(record)) {
+      return null;
+    }
+
+    const tooltipKey = `modified-${tooltipId}-${record.employeeName.replace(/\s+/g, '-')}`;
+
+    return (
+      <div className="relative">
+        <div 
+          className="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
+          }}
+        >
+          <span className="text-[10px] font-medium text-white">M</span>
+        </div>
+        {activeTooltip === tooltipKey && (
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-blue-600 text-white text-xs rounded whitespace-nowrap z-50">
+            Manually modified
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-blue-600"></div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Helper function to render flag icon with tooltip
+  const renderFlagIcon = (record: AttendanceRecord, tooltipId: string) => {
+    const flags = getRecordFlags(record);
+    
+    if (flags.length === 0) {
+      return null; // No flag if no incidents
+    }
+
+    const hasIncidents = flags.some(flag => flag.type === 'incident');
+    const hasResolved = flags.some(flag => flag.type === 'resolved');
+    const hasRejected = flags.some(flag => flag.type === 'rejected');
+    const hasAcknowledged = flags.some(flag => flag.type === 'acknowledged');
+    
+    const tooltipKey = `flag-${tooltipId}-${record.employeeName.replace(/\s+/g, '-')}`;
+    
+    // Priority: incidents (red) > rejected (gray) > acknowledged (blue) > resolved (green)
+    let flagColor, bgColor, borderColor;
+    if (hasIncidents) {
+      flagColor = 'text-red-600 hover:text-red-700';
+      bgColor = 'bg-red-600';
+      borderColor = 'border-t-red-600';
+    } else if (hasRejected) {
+      flagColor = 'text-gray-600 hover:text-gray-700';
+      bgColor = 'bg-gray-600';
+      borderColor = 'border-t-gray-600';
+    } else if (hasAcknowledged) {
+      flagColor = 'text-blue-600 hover:text-blue-700';
+      bgColor = 'bg-blue-600';
+      borderColor = 'border-t-blue-600';
+    } else {
+      flagColor = 'text-green-600 hover:text-green-700';
+      bgColor = 'bg-green-600';
+      borderColor = 'border-t-green-600';
+    }
+    
+    return (
+      <div className="flex items-center cursor-pointer"
+        onClick={(e) => {
+          e.stopPropagation();
+          setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
+        }}
+      >
+        <div className="relative">
+          <Flag 
+            className={`w-4 h-4 transition-colors ${flagColor}`}
+          />
+          {activeTooltip === tooltipKey && (
+            <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-white text-xs rounded whitespace-nowrap z-50 ${bgColor}`}>
+              <div className="space-y-1">
+                {flags.map((flag, index) => (
+                  <div key={index}>{flag.message}</div>
+                ))}
+              </div>
+              <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${borderColor}`}></div>
+            </div>
+          )}
+        </div>
+        {hasResolved && (
+          <Check 
+            className="w-3 h-3 text-green-600 ml-1"
+          />
+        )}
+        {hasRejected && !hasIncidents && !hasResolved && !hasAcknowledged && (
+          <X 
+            className="w-3 h-3 text-gray-600 ml-1"
+          />
+        )}
+                 {hasAcknowledged && !hasIncidents && !hasResolved && !hasRejected && (
+                   <Minus
+                     className="w-3 h-3 text-blue-600 ml-1"
+                   />
+                 )}
+      </div>
+    );
+  };
 
   const filteredRecords = useMemo(() => {
     let filtered = attendanceRecords.filter(record => {
@@ -1112,8 +1370,9 @@ export default function TeamAttendance() {
       const matchesDepartment = !selectedDepartment || record.department === selectedDepartment;
       const matchesStatus = !selectedStatus || record.status === selectedStatus;
       const matchesLocation = !selectedLocation || record.location === selectedLocation;
+      const matchesFlags = !selectedFlags || (selectedFlags === 'flagged' ? hasFlags(record) : !hasFlags(record));
       
-      return matchesSearch && matchesDepartment && matchesStatus && matchesLocation;
+      return matchesSearch && matchesDepartment && matchesStatus && matchesLocation && matchesFlags;
     });
 
     // Sort records
@@ -1129,7 +1388,7 @@ export default function TeamAttendance() {
     });
 
     return filtered;
-  }, [attendanceRecords, searchTerm, selectedDepartment, selectedStatus, selectedLocation, sortBy, sortOrder]);
+  }, [attendanceRecords, searchTerm, selectedDepartment, selectedStatus, selectedLocation, selectedFlags, sortBy, sortOrder]);
 
   const totalPages = Math.ceil(filteredRecords.length / itemsPerPage);
 
@@ -1403,6 +1662,7 @@ export default function TeamAttendance() {
     setSelectedDepartment('');
     setSelectedStatus('');
     setSelectedLocation('');
+    setSelectedFlags('');
     setSearchTerm('');
   };
 
@@ -1559,6 +1819,23 @@ export default function TeamAttendance() {
     } else {
       return record.modifiedClockOut || getLastClockOut(record.timeEntries) || '--';
     }
+  };
+
+  // Helper function to render time with asterisk if modified
+  const renderTimeWithModifiedIndicator = (record: AttendanceRecord, type: 'clockIn' | 'clockOut') => {
+    const time = getDisplayTime(record, type);
+    const isModified = type === 'clockIn' ? record.modifiedClockIn : record.modifiedClockOut;
+    
+    if (!time || time === '--') return <span className="text-sm text-gray-500 pl-1">--</span>;
+    
+    return (
+               <div className="relative inline-block">
+                 <span className="text-sm text-gray-900">{time}</span>
+                 {isModified && (
+                   <span className="absolute -top-1 -right-2 text-xs text-blue-600 font-bold">*</span>
+                 )}
+               </div>
+    );
   };
 
   // Check if record is being edited
@@ -1753,12 +2030,14 @@ export default function TeamAttendance() {
   };
 
   // Helper function to format actual vs scheduled time with plan icon
-  const formatActualVsScheduled = (actual: string | null, scheduled?: string, tooltipId?: string) => {
+  const formatActualVsScheduled = (actual: string | null, scheduled?: string, tooltipId?: string, record?: AttendanceRecord, type?: 'clockIn' | 'clockOut') => {
     if (!scheduled) {
       return (
         <div className="flex items-center">
           <ScheduleIcon className="w-3 h-3 invisible -ml-4 mr-1" />
-          <span className={`text-sm text-gray-900 ${!actual ? 'pl-1' : ''}`}>{actual || '--'}</span>
+          {record && type ? renderTimeWithModifiedIndicator(record, type) : (
+            <span className={`text-sm text-gray-900 ${!actual ? 'pl-1' : ''}`}>{actual || '--'}</span>
+          )}
         </div>
       );
     }
@@ -1817,7 +2096,9 @@ export default function TeamAttendance() {
             </div>
           )}
         </div>
-        <span className="text-sm text-gray-900">{actual}</span>
+        {record && type ? renderTimeWithModifiedIndicator(record, type) : (
+          <span className="text-sm text-gray-900">{actual}</span>
+        )}
       </div>
     );
   };
@@ -1891,218 +2172,8 @@ export default function TeamAttendance() {
     );
   };
 
-  const getOvertimeHours = (totalHours: number) => {
-    const standardHours = 8;
-    const overtime = Math.max(0, totalHours - standardHours);
-    return overtime;
-  };
 
-  // Helper function to get approval status for a single work session
-  const getSessionApprovalStatus = (sessionId: string, record: AttendanceRecord): 'approved_without_modifications' | 'approved_with_modifications' | 'pending_without_incidents' | 'pending_with_incidents' | 'rejected' => {
-    // For demo purposes, create different approval statuses for different sessions
-    // In real implementation, this would come from the backend
-    const sessionNumber = parseInt(sessionId.split('-').pop() || '1');
-    
-    // Check if record has incidents (overtime, late arrival, early departure, etc.)
-    const hasIncidents = (record: AttendanceRecord) => {
-      const overtimeHours = getOvertimeHours(record.totalHours);
-      const hasOvertime = overtimeHours > 0;
-      const isLate = record.scheduledClockIn && record.timeEntries[0]?.clockIn && record.timeEntries[0].clockIn > record.scheduledClockIn;
-      const isEarly = record.scheduledClockOut && record.timeEntries[0]?.clockOut && record.timeEntries[0].clockOut < record.scheduledClockOut;
-      const wrongLocation = record.scheduledLocation && record.location !== record.scheduledLocation;
-      
-      return hasOvertime || isLate || isEarly || wrongLocation;
-    };
-    
-    // Check if record has been modified (simulated for demo)
-    const isModified = (record: AttendanceRecord, sessionId: string) => {
-      // In real implementation, this would check if original hours were edited
-      return record.employeeName === 'Lisa Chen' || (record.employeeName === 'Jane Smith' && sessionNumber === 2);
-    };
-    
-    if (record.employeeName === 'John Doe') {
-      // John Doe: Session 1 approved without modifications, Session 2 pending without incidents
-      return sessionNumber === 1 ? 'approved_without_modifications' : 'pending_without_incidents';
-    } else if (record.employeeName === 'Jane Smith') {
-      // Jane Smith: Session 1 pending with incidents (overtime), Session 2 approved with modifications
-      return sessionNumber === 1 ? 'pending_with_incidents' : 'approved_with_modifications';
-    } else if (record.employeeName === 'Mike Johnson') {
-      // Mike Johnson: All sessions rejected
-      return 'rejected';
-    } else if (record.employeeName === 'Lisa Chen') {
-      // Lisa Chen: Session 1 approved with modifications, Session 2 pending with incidents
-      return sessionNumber === 1 ? 'approved_with_modifications' : 'pending_with_incidents';
-    } else if (record.employeeName === 'Sarah Wilson') {
-      // Sarah Wilson: Pending without incidents (normal attendance, no issues)
-      return 'pending_without_incidents';
-    }
-    
-    // Default for other employees - check if they have incidents
-    const incidents = hasIncidents(record);
-    const modified = isModified(record, sessionId);
-    
-    if (incidents) {
-      return 'pending_with_incidents';
-    } else if (modified) {
-      return 'approved_with_modifications';
-    } else {
-      return 'approved_without_modifications';
-    }
-  };
 
-  // Helper function to get consolidated approval status for parent record (AND function)
-  const getConsolidatedApprovalStatus = (record: AttendanceRecord): 'approved' | 'alert' => {
-    const workSessionsCount = getWorkSessionsCount(record);
-    
-    if (workSessionsCount <= 1) {
-      // Single session - check if it has any pending with incidents status
-      const sessionStatus = getSessionApprovalStatus('session-1', record);
-      return sessionStatus === 'pending_with_incidents' ? 'alert' : 'approved';
-    }
-    
-    // Multiple sessions - check if ANY session has pending with incidents status
-    let hasAlert = false;
-    
-    for (let i = 1; i <= workSessionsCount; i++) {
-      const sessionStatus = getSessionApprovalStatus(`session-${i}`, record);
-      if (sessionStatus === 'pending_with_incidents') {
-        hasAlert = true;
-        break;
-      }
-    }
-    
-    return hasAlert ? 'alert' : 'approved';
-  };
-
-  // Helper function to get approval status for a record (legacy - now only for single sessions)
-  const getApprovalStatus = (record: AttendanceRecord): 'approved_without_modifications' | 'approved_with_modifications' | 'pending_without_incidents' | 'pending_with_incidents' | 'rejected' => {
-    return getSessionApprovalStatus('session-1', record);
-  };
-
-  // Helper function to get approval icon for parent rows (consolidated status)
-  const getParentApprovalIcon = (record: AttendanceRecord, tooltipId: string) => {
-    const consolidatedStatus = getConsolidatedApprovalStatus(record);
-    const workSessionsCount = getWorkSessionsCount(record);
-    const tooltipKey = `parent-approval-${tooltipId}-${record.employeeName.replace(/\s+/g, '-')}`;
-    
-    let icon, colorClass, message;
-    
-    if (consolidatedStatus === 'approved') {
-      icon = <CheckCircle className="w-4 h-4" />;
-      colorClass = 'text-green-600';
-      message = workSessionsCount > 1 
-        ? `All ${workSessionsCount} work sessions approved` 
-        : 'Work session approved';
-    } else {
-      icon = <AlertTriangle className="w-4 h-4" />;
-      colorClass = 'text-red-600';
-      message = workSessionsCount > 1 
-        ? `${workSessionsCount} work sessions - some pending approval` 
-        : 'Work session pending approval';
-    }
-
-    const bgClass = consolidatedStatus === 'approved' ? 'bg-green-600' : 'bg-red-600';
-    
-    return (
-      <div className="relative flex items-center justify-center">
-        <button
-          className={`${colorClass} cursor-pointer relative flex items-center justify-center`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
-          }}
-        >
-          {icon}
-        </button>
-        {activeTooltip === tooltipKey && (
-          <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-white text-xs rounded whitespace-nowrap z-50 ${bgClass}`}>
-            {message}
-            <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-              consolidatedStatus === 'approved' ? 'border-t-green-600' : 'border-t-red-600'
-            }`}></div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Helper function to get approval icon for individual work sessions
-  const getSessionApprovalIcon = (sessionId: string, record: AttendanceRecord, tooltipId: string) => {
-    const status = getSessionApprovalStatus(sessionId, record);
-    const sessionNumber = parseInt(sessionId.split('-').pop() || '1');
-    const tooltipKey = `session-approval-${sessionId}-${record.id}-${record.employeeName.replace(/\s+/g, '-')}`;
-    
-    let icon, colorClass, message;
-    
-    switch (status) {
-      case 'approved_without_modifications':
-        icon = <CheckCircle className="w-4 h-4" />;
-        colorClass = 'text-green-600';
-        message = `Work Session ${sessionNumber} approved`;
-        break;
-      case 'approved_with_modifications':
-        icon = (
-          <div className="relative">
-            <CheckCircle className="w-4 h-4 text-gray-600" />
-            <Edit3 className="w-2 h-2 text-gray-600 absolute -bottom-0.5 -right-2" />
-          </div>
-        );
-        colorClass = 'text-gray-600';
-        message = `Work Session ${sessionNumber} approved with modifications`;
-        break;
-      case 'pending_without_incidents':
-        // No icon shown for pending without incidents
-        return null;
-      case 'pending_with_incidents':
-        icon = <AlertTriangle className="w-4 h-4" />;
-        colorClass = 'text-red-600';
-        message = `Work Session ${sessionNumber} pending approval - has incidents`;
-        break;
-      case 'rejected':
-        icon = <XCircle className="w-4 h-4" />;
-        colorClass = 'text-gray-600';
-        message = `Work Session ${sessionNumber} rejected`;
-        break;
-      default:
-        return null;
-    }
-
-    const bgClass = status === 'approved_without_modifications'
-      ? 'bg-green-600' 
-      : status === 'approved_with_modifications'
-        ? 'bg-gray-600'
-      : status === 'pending_with_incidents' 
-        ? 'bg-red-600' 
-        : 'bg-gray-600';
-    
-    return (
-      <div className="relative flex items-center justify-center">
-        <button
-          className={`${colorClass} cursor-pointer relative flex items-center justify-center`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
-          }}
-        >
-          {icon}
-        </button>
-        {activeTooltip === tooltipKey && (
-          <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-white text-xs rounded whitespace-nowrap z-50 ${bgClass}`}>
-            {message}
-            <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
-              status === 'approved_without_modifications'
-                ? 'border-t-green-600' 
-                : status === 'approved_with_modifications'
-                  ? 'border-t-gray-600'
-                : status === 'pending_with_incidents' 
-                  ? 'border-t-red-600' 
-                  : 'border-t-gray-600'
-            }`}></div>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   const getLocationInfo = (record: AttendanceRecord) => {
     const locations = new Set<string>();
@@ -2134,14 +2205,6 @@ export default function TeamAttendance() {
       primaryLocation: record.location || uniqueLocations[0] || 'Unknown',
       locationCount: uniqueLocations.length
     };
-  };
-
-  const getWorkSessionsCount = (record: AttendanceRecord) => {
-    // For now, we'll estimate sessions based on transfers + 1
-    // A transfer creates a new session, so sessions = transfers + 1
-    const baseSessions = 1; // At least one session
-    const additionalSessions = record.transfers.length; // Each transfer creates a new session
-    return baseSessions + additionalSessions;
   };
 
   const organizeIntoSessions = (record: AttendanceRecord) => {
@@ -2438,7 +2501,23 @@ export default function TeamAttendance() {
         
         {showFilters && (
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <select 
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Filter by status"
+                id="status-filter"
+              >
+                <option value="">All Statuses</option>
+                <option value="present">Present</option>
+                <option value="absent">Absent</option>
+                <option value="late">Late</option>
+                <option value="partial">Partial</option>
+                <option value="on-break">On Break</option>
+                <option value="on-leave">On Leave</option>
+              </select>
+
               <select 
                 value={selectedDepartment}
                 onChange={(e) => setSelectedDepartment(e.target.value)}
@@ -2469,19 +2548,15 @@ export default function TeamAttendance() {
               </select>
 
               <select 
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
+                value={selectedFlags}
+                onChange={(e) => setSelectedFlags(e.target.value)}
                 className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by status"
-                id="status-filter"
+                aria-label="Filter by flags"
+                id="flags-filter"
               >
-                <option value="">All Statuses</option>
-                <option value="present">Present</option>
-                <option value="absent">Absent</option>
-                <option value="late">Late</option>
-                <option value="partial">Partial</option>
-                <option value="on-break">On Break</option>
-                <option value="on-leave">On Leave</option>
+                <option value="">All Records</option>
+                <option value="flagged">Flagged Only</option>
+                <option value="clean">Clean Only</option>
               </select>
             </div>
 
@@ -2644,8 +2719,13 @@ export default function TeamAttendance() {
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     Overtime
                   </th>
-                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">
-                    Approval
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                      <span className="text-[10px] font-medium text-gray-900">M</span>
+                    </div>
+                  </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <Flag className="w-4 h-4 inline text-gray-900" />
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
@@ -2723,7 +2803,7 @@ export default function TeamAttendance() {
                             onChange={setEditClockIn}
                           />
                         ) : (
-                          formatActualVsScheduled(getDisplayTime(record, 'clockIn'), record.scheduledClockIn, `clockin-${record.id}`)
+                          formatActualVsScheduled(getDisplayTime(record, 'clockIn'), record.scheduledClockIn, `clockin-${record.id}`, record, 'clockIn')
                         )}
                       </td>
                       <td className="py-2 px-4">
@@ -2733,7 +2813,7 @@ export default function TeamAttendance() {
                             onChange={setEditClockOut}
                           />
                         ) : (
-                          formatActualVsScheduled(getDisplayTime(record, 'clockOut'), record.scheduledClockOut, `clockout-${record.id}`)
+                          formatActualVsScheduled(getDisplayTime(record, 'clockOut'), record.scheduledClockOut, `clockout-${record.id}`, record, 'clockOut')
                         )}
                       </td>
                       <td className="py-2 px-4">
@@ -2777,8 +2857,13 @@ export default function TeamAttendance() {
                                 </span>
                             </td>
                             <td className="py-2 px-4">
-                              <div className="flex items-center justify-center">
-                                {getParentApprovalIcon(record, record.id)}
+                              <div className="flex items-center justify-start">
+                                {renderModifiedIcon(record, record.id)}
+                              </div>
+                            </td>
+                            <td className="py-2 px-4">
+                              <div className="flex items-center justify-start">
+                                {renderFlagIcon(record, record.id)}
                               </div>
                             </td>
                       <td className="py-2 px-4">
@@ -2865,8 +2950,11 @@ export default function TeamAttendance() {
                             {/* Overtime - empty for individual sessions */}
                           </td>
                           <td className="py-2 px-4">
-                            <div className="flex items-center justify-center">
-                              {getSessionApprovalIcon(session.id, record, `${session.id}-${record.id}`)}
+                            {/* Modified - empty for individual sessions */}
+                          </td>
+                          <td className="py-2 px-4">
+                            <div className="flex items-center justify-start">
+                              {renderFlagIcon(record, `${session.id}-${record.id}`)}
                             </div>
                           </td>
                           <td className="py-2 px-4">
