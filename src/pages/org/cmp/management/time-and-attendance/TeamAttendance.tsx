@@ -106,6 +106,9 @@ interface AttendanceRecord {
   // Modified times (manual edits)
   modifiedClockIn?: string;
   modifiedClockOut?: string;
+  // Original times (before modification)
+  originalClockIn?: string;
+  originalClockOut?: string;
 }
 
 // New hierarchical structure for better attendance management
@@ -175,6 +178,7 @@ export default function TeamAttendance() {
   const [editingSession, setEditingSession] = useState<string | null>(null);
   const [editClockIn, setEditClockIn] = useState('');
   const [editClockOut, setEditClockOut] = useState('');
+  const [showOriginalTimes, setShowOriginalTimes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // Register submodule tabs for time and attendance
@@ -784,7 +788,9 @@ export default function TeamAttendance() {
       scheduledClockOut: '16:00',
       scheduledLocation: 'Client Site',
       // Modified times for demo
-      modifiedClockIn: '08:15'
+      modifiedClockIn: '08:15',
+      // Original times (what was actually clocked before modification)
+      originalClockIn: '08:45'
     },
     // More employees to test pagination
     {
@@ -820,7 +826,11 @@ export default function TeamAttendance() {
       totalTransferTime: 0,
       status: 'present',
       location: 'Remote',
-      notes: 'Completed development tasks'
+      notes: 'Completed development tasks',
+      // Modified times for demo
+      modifiedClockOut: '18:00',
+      // Original times (what was actually clocked before modification)
+      originalClockOut: '17:15'
     },
     {
       id: '9',
@@ -1107,7 +1117,10 @@ export default function TeamAttendance() {
       scheduledLocation: 'Main Office',
       // Modified times for demo
       modifiedClockIn: '09:15',
-      modifiedClockOut: '17:30'
+      modifiedClockOut: '17:30',
+      // Original times (what was actually clocked before modification)
+      originalClockIn: '09:45',
+      originalClockOut: '16:45'
     }
   ];
 
@@ -1266,20 +1279,32 @@ export default function TeamAttendance() {
     return (
       <div className="relative">
         <div 
-          className="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center cursor-pointer"
-          onClick={(e) => {
+          className="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center cursor-pointer select-none"
+          title="Hold to see original times"
+          onMouseDown={(e) => {
             e.stopPropagation();
-            setActiveTooltip(activeTooltip === tooltipKey ? null : tooltipKey);
+            setShowOriginalTimes(prev => new Set([...prev, record.id]));
+          }}
+          onMouseUp={(e) => {
+            e.stopPropagation();
+            setShowOriginalTimes(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(record.id);
+              return newSet;
+            });
+          }}
+          onMouseLeave={(e) => {
+            e.stopPropagation();
+            // Also hide original times if mouse leaves while pressed
+            setShowOriginalTimes(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(record.id);
+              return newSet;
+            });
           }}
         >
           <span className="text-[10px] font-medium text-white">M</span>
         </div>
-        {activeTooltip === tooltipKey && (
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-blue-600 text-white text-xs rounded whitespace-nowrap z-50">
-            Manually modified
-            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-blue-600"></div>
-          </div>
-        )}
       </div>
     );
   };
@@ -1823,15 +1848,28 @@ export default function TeamAttendance() {
 
   // Helper function to render time with asterisk if modified
   const renderTimeWithModifiedIndicator = (record: AttendanceRecord, type: 'clockIn' | 'clockOut') => {
-    const time = getDisplayTime(record, type);
     const isModified = type === 'clockIn' ? record.modifiedClockIn : record.modifiedClockOut;
+    const showOriginal = showOriginalTimes.has(record.id);
+    
+    // Get the appropriate time based on whether we're showing original or modified
+    let time;
+    if (isModified && !showOriginal) {
+      // Show modified time
+      time = type === 'clockIn' ? record.modifiedClockIn : record.modifiedClockOut;
+    } else if (isModified && showOriginal) {
+      // Show original time (before modification)
+      time = type === 'clockIn' ? record.originalClockIn : record.originalClockOut;
+    } else {
+      // Show regular time (no modifications)
+      time = getDisplayTime(record, type);
+    }
     
     if (!time || time === '--') return <span className="text-sm text-gray-500 pl-1">--</span>;
     
     return (
                <div className="relative inline-block">
                  <span className="text-sm text-gray-900">{time}</span>
-                 {isModified && (
+                 {isModified && !showOriginal && (
                    <span className="absolute -top-1 -right-2 text-xs text-blue-600 font-bold">*</span>
                  )}
                </div>
