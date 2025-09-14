@@ -27,7 +27,8 @@ import {
   Edit3,
   Flag,
   Check,
-  Minus
+  Minus,
+  MessageSquare
 } from 'lucide-react';
 
 // Function to generate avatar initials (100% reliable, works everywhere)
@@ -2713,10 +2714,10 @@ export default function TeamAttendance() {
       {/* Table View */}
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full table-fixed">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-4 pr-1 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-2 font-medium text-gray-900 text-xs w-14">
                     <div className="flex items-center justify-center h-full">
                       <input
                         type="checkbox"
@@ -2727,7 +2728,7 @@ export default function TeamAttendance() {
                       />
                     </div>
                   </th>
-                  <th className="text-left py-3 pl-1 pr-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 pl-1 pr-6 font-medium text-gray-900 text-xs w-56">
                     <div className="flex items-center gap-3">
                       <div className="w-6"></div>
                       <button
@@ -2739,7 +2740,7 @@ export default function TeamAttendance() {
                       </button>
                     </div>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                     <button
                       onClick={() => handleSort('status')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -2757,7 +2758,7 @@ export default function TeamAttendance() {
                       {sortBy === 'location' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                     <button
                       onClick={() => handleSort('clockIn')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -2766,14 +2767,14 @@ export default function TeamAttendance() {
                       {sortBy === 'clockIn' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Clock Out</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock Out</th>
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                     Breaks
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                     Transfers
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                     <button
                       onClick={() => handleSort('totalHours')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -2782,18 +2783,18 @@ export default function TeamAttendance() {
                       {sortBy === 'totalHours' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                     Overtime
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
                     <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
                       <span className="text-[10px] font-medium text-gray-900">M</span>
                     </div>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
                     <Flag className="w-4 h-4 inline text-gray-900" />
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -2806,7 +2807,7 @@ export default function TeamAttendance() {
                   return (
                   <>
                     <tr key={record.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="py-2 px-4 pr-1">
+                        <td className="py-2 px-2">
                           <div className="flex items-center justify-center h-full">
                             {hasMultipleSessions ? (
                             <div className="flex items-center gap-1">
@@ -2836,7 +2837,7 @@ export default function TeamAttendance() {
                             )}
                           </div>
                         </td>
-                        <td className="py-2 pl-1 pr-6">
+                        <td className="py-2 pl-1 pr-6 w-56">
                           <div className="flex items-center gap-3">
                             <div className="relative">
                             <div 
@@ -2863,13 +2864,13 @@ export default function TeamAttendance() {
                             </div>
                           </div>
                         </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2 w-24">
                         {formatStatusWithIcon(record)}
                       </td>
                       <td className="py-2 px-4">
                         {formatLocationVsScheduled(record)}
                       </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2">
                         {isRecordEditing(record.id) ? (
                           <SmartTimeInput
                             value={editClockIn}
@@ -2879,7 +2880,7 @@ export default function TeamAttendance() {
                           formatActualVsScheduled(getDisplayTime(record, 'clockIn'), record.scheduledClockIn, `clockin-${record.id}`, record, 'clockIn')
                         )}
                       </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2">
                         {isRecordEditing(record.id) ? (
                           <SmartTimeInput
                             value={editClockOut}
@@ -2889,7 +2890,7 @@ export default function TeamAttendance() {
                           formatActualVsScheduled(getDisplayTime(record, 'clockOut'), record.scheduledClockOut, `clockout-${record.id}`, record, 'clockOut')
                         )}
                       </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2">
                         <div className="flex items-center gap-1">
                           {record.breaks.length > 0 ? (
                             <div className="flex items-center gap-1">
@@ -2905,7 +2906,7 @@ export default function TeamAttendance() {
                           )}
                         </div>
                       </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2">
                         <div className="flex items-center gap-1">
                           {record.transfers.length > 0 ? (
                             <div className="flex items-center gap-1">
@@ -2921,25 +2922,25 @@ export default function TeamAttendance() {
                           )}
                               </div>
                       </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2">
                         <span className="text-sm text-gray-900">{record.totalHours.toFixed(2)}h</span>
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2">
                         <span className="text-sm text-gray-900">
                           {getOvertimeHours(record.totalHours) > 0 ? `${getOvertimeHours(record.totalHours).toFixed(2)}h` : '--'}
                                 </span>
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2">
                               <div className="flex items-center justify-start">
                                 {renderModifiedIcon(record, record.id)}
                               </div>
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2">
                               <div className="flex items-center justify-start">
                                 {renderFlagIcon(record, record.id)}
                               </div>
                             </td>
-                      <td className="py-2 px-4">
+                      <td className="py-2 px-2">
                         <div className="flex items-center">
                           <button
                             onClick={() => openDetailsModal(record)}
@@ -2951,8 +2952,8 @@ export default function TeamAttendance() {
                           <div className="relative">
                           <button
                               onClick={(e) => toggleFloatingMenu(record.id, e)}
-                            className={`p-1 hover:bg-gray-100 rounded transition-colors ${
-                              activeFloatingMenu === record.id ? 'border border-gray-300 bg-gray-50' : ''
+                            className={`p-1 hover:bg-gray-100 rounded transition-colors border ${
+                              activeFloatingMenu === record.id ? 'border-gray-300 bg-gray-50' : 'border-transparent'
                             }`}
                             aria-label={`More options for ${record.employeeName}`}
                           >
@@ -2967,10 +2968,10 @@ export default function TeamAttendance() {
                       {/* Expanded Work Sessions */}
                       {hasMultipleSessions && isExpanded && workSessions.map((session: any) => session ? (
                         <tr key={session.id} className="bg-gray-25 hover:bg-gray-50 transition-colors border-l-2 border-l-primary/20">
-                          <td className="py-2 px-4 pr-1">
+                          <td className="py-2 px-2">
                             {/* Empty space to align with expand arrow column */}
                           </td>
-                           <td className="py-2 pl-1 pr-6">
+                           <td className="py-2 pl-1 pr-6 w-56">
                               <div className="flex items-center gap-3">
                                <div className="w-8 flex items-center justify-center">
                                  <input
@@ -2986,7 +2987,7 @@ export default function TeamAttendance() {
                                </span>
                               </div>
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                             {/* Status column - empty for sessions */}
                             </td>
                             <td className="py-2 px-4">
@@ -3020,8 +3021,8 @@ export default function TeamAttendance() {
                             </td>
                             <td className="py-2 px-4">
                             <span className="text-sm text-gray-900">{(session.totalHours || 0).toFixed(2)}h</span>
-                          </td>
-                          <td className="py-2 px-4">
+                            </td>
+                            <td className="py-2 px-4">
                             {/* Overtime - empty for individual sessions */}
                           </td>
                           <td className="py-2 px-4">
@@ -3044,8 +3045,8 @@ export default function TeamAttendance() {
                               <div className="relative">
                                 <button
                                   onClick={(e) => toggleFloatingMenu(`${record.id}-${session.id}`, e)}
-                                  className={`p-1 hover:bg-gray-100 rounded transition-colors ${
-                                    activeFloatingMenu === `${record.id}-${session.id}` ? 'border border-gray-300 bg-gray-50' : ''
+                                  className={`p-1 hover:bg-gray-100 rounded transition-colors border ${
+                                    activeFloatingMenu === `${record.id}-${session.id}` ? 'border-gray-300 bg-gray-50' : 'border-transparent'
                                   }`}
                                   aria-label={`More options for ${record.employeeName} Work Session ${session.sessionNumber}`}
                                 >
@@ -3152,7 +3153,7 @@ export default function TeamAttendance() {
       {/* Details Modal */}
       {isModalOpen && selectedRecord && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <div className="flex items-center gap-3">
@@ -3162,7 +3163,7 @@ export default function TeamAttendance() {
                     style={{ backgroundColor: generateAvatarColor(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '') }}
                   >
                     {generateAvatarInitials(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '')}
-                  </div>
+    </div>
                   <div 
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{ backgroundColor: getStatusDotColor(selectedRecord) }}
@@ -3232,7 +3233,7 @@ export default function TeamAttendance() {
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                     }`}
                   >
-                    Work Sessions
+                    Sessions
                   </button>
                   <button
                     onClick={() => setActiveTab('comments')}
@@ -3271,71 +3272,91 @@ export default function TeamAttendance() {
                     </div>
                 
                 <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                  {/* Header */}
-                  <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
-                    <div className="grid grid-cols-12 gap-4 text-xs font-medium text-gray-900">
-                      <div className="col-span-3">Session</div>
-                      <div className="col-span-2">Location</div>
-                      <div className="col-span-2">Clock In</div>
-                      <div className="col-span-2">Clock Out</div>
-                      <div className="col-span-2">Total Hours</div>
-                      <div className="col-span-1">Actions</div>
-                    </div>
-                  </div>
-
-                  {/* Sessions */}
-                  <div className="divide-y divide-gray-200">
-                    {organizeIntoSessions(selectedRecord).map((session, sessionIndex) => (
-                      <div key={session.id} className="px-6 py-4 hover:bg-gray-50 transition-colors">
-                        <div className="grid grid-cols-12 gap-4 items-center">
-                          {/* Session Number */}
-                          <div className="col-span-3">
+                  <table className="w-full table-fixed">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-min">Location</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Job</th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock In</th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock Out</th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Overtime</th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                          <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                            <span className="text-[10px] font-medium text-gray-900">M</span>
+                          </div>
+                        </th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                          <Flag className="w-4 h-4 inline text-gray-900" />
+                        </th>
+                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {organizeIntoSessions(selectedRecord).map((session, sessionIndex) => (
+                        <tr key={session.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="py-2 px-4 w-48">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-green-100 text-status-green flex items-center justify-center text-sm font-medium border border-green-200">
                                 {session.sessionNumber}
                               </div>
-                              <span className="text-sm font-medium text-gray-900">
-                                Work Session {session.sessionNumber}
-                              </span>
+                              <span className="text-sm text-gray-900">Work Session {session.sessionNumber}</span>
                             </div>
-                          </div>
-
-                          {/* Location */}
-                          <div className="col-span-2">
+                          </td>
+                          <td className="py-2 px-4 w-min">
                             <span className="text-sm text-gray-900">{session.location || '--'}</span>
-                          </div>
-
-                          {/* Clock In */}
-                          <div className="col-span-2">
+                          </td>
+                          <td className="py-2 px-4">
+                            <span className="text-sm text-gray-900">{"Hernandez's Residence"}</span>
+                          </td>
+                          <td className="py-2 px-2 w-24">
                             <span className="text-sm text-gray-900">{session.punches.find(p => p.type === 'in')?.timestamp || '--'}</span>
-                          </div>
-
-                          {/* Clock Out */}
-                          <div className="col-span-2">
+                          </td>
+                          <td className="py-2 px-2 w-24">
                             <span className="text-sm text-gray-900">{session.punches.find(p => p.type === 'out')?.timestamp || '--'}</span>
-                          </div>
-
-                          {/* Total Hours */}
-                          <div className="col-span-2">
-                            <span className="text-sm text-gray-900">{session.totalWorkHours.toFixed(2)}h</span>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="col-span-1">
+                          </td>
+                          <td className="py-2 px-2 w-24">
+                            <span className="text-sm font-medium text-gray-900">{session.totalWorkHours?.toFixed(2) || '0.00'}h</span>
+                          </td>
+                          <td className="py-2 px-2 w-24">
+                            {(() => {
+                              const totalHours = session.totalWorkHours || 0;
+                              const overtimeHours = Math.max(0, totalHours - 8);
+                              return overtimeHours > 0 ? (
+                                <span className="text-xs font-medium text-status-orange">
+                                  {overtimeHours.toFixed(1)}h
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-400">--</span>
+                              );
+                            })()}
+                          </td>
+                          <td className="py-2 px-2">
+                            <div className="flex items-center justify-start">
+                              {renderModifiedIcon(selectedRecord, `session-${session.id}`)}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2">
+                            <div className="flex items-center justify-start">
+                              {renderFlagIcon(selectedRecord, `session-${session.id}`)}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2">
                             <div className="flex items-center gap-1">
                               <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-                                <Eye className="w-4 h-4" />
+                                <MessageSquare className="w-4 h-4" />
                               </button>
                               <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
                                 <MoreVertical className="w-4 h-4" />
                               </button>
                             </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                    </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                     {/* Transfers */}
                     {selectedRecord.transfers.length > 0 && (
@@ -3348,70 +3369,80 @@ export default function TeamAttendance() {
                         </div>
                   
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    {/* Header */}
-                    <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
-                      <div className="grid grid-cols-12 gap-4 text-xs font-medium text-gray-900">
-                        <div className="col-span-3">Transfer</div>
-                        <div className="col-span-2">Route</div>
-                        <div className="col-span-2">Start Time</div>
-                        <div className="col-span-2">End Time</div>
-                        <div className="col-span-2">Duration</div>
-                        <div className="col-span-1">Actions</div>
-                      </div>
-                    </div>
-
-                    {/* Transfers */}
-                    <div className="divide-y divide-gray-200">
-                      {selectedRecord.transfers.map((transfer, transferIndex) => (
-                        <div key={transfer.id} className="px-6 py-4 hover:bg-gray-50 transition-colors">
-                          <div className="grid grid-cols-12 gap-4 items-center">
-                            {/* Transfer Number */}
-                            <div className="col-span-3">
+                    <table className="w-full table-fixed">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-min">Location A</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-min">Location B</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Start Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">End Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Overtime</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                            <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                              <span className="text-[10px] font-medium text-gray-900">M</span>
+                            </div>
+                          </th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                            <Flag className="w-4 h-4 inline text-gray-900" />
+                          </th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {selectedRecord.transfers.map((transfer, transferIndex) => (
+                          <tr key={transfer.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 w-48">
                               <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-medium border border-blue-200">
                                   {transferIndex + 1}
                                 </div>
-                                <span className="text-sm font-medium text-gray-900">
-                                  Transfer {transferIndex + 1}
-                                </span>
+                                <span className="text-sm text-gray-900">Transfer {transferIndex + 1}</span>
                               </div>
-                            </div>
-
-                            {/* Route */}
-                            <div className="col-span-2">
-                              <span className="text-sm text-gray-900">{transfer.fromLocation} → {transfer.toLocation}</span>
-                            </div>
-
-                            {/* Start Time */}
-                            <div className="col-span-2">
+                            </td>
+                            <td className="py-2 px-4 w-min">
+                              <span className="text-sm text-gray-900">{transfer.fromLocation}</span>
+                            </td>
+                            <td className="py-2 px-4 w-min">
+                              <span className="text-sm text-gray-900">{transfer.toLocation}</span>
+                            </td>
+                            <td className="py-2 px-2 w-24">
                               <span className="text-sm text-gray-900">{transfer.transferStart}</span>
-                            </div>
-
-                            {/* End Time */}
-                            <div className="col-span-2">
+                            </td>
+                            <td className="py-2 px-2 w-24">
                               <span className="text-sm text-gray-900">{transfer.transferEnd || '--'}</span>
-                            </div>
-
-                            {/* Duration */}
-                            <div className="col-span-2">
-                              <span className="text-sm text-gray-900">{(transfer.duration / 60).toFixed(2)}h</span>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="col-span-1">
+                            </td>
+                            <td className="py-2 px-2 w-24">
+                              <span className="text-sm font-medium text-gray-900">{(transfer.duration / 60).toFixed(2)}h</span>
+                            </td>
+                            <td className="py-2 px-2 w-24">
+                              <span className="text-xs text-gray-400">--</span>
+                            </td>
+                            <td className="py-2 px-2">
+                              <div className="flex items-center justify-start">
+                                {renderModifiedIcon(selectedRecord, `transfer-${transfer.id}`)}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2">
+                              <div className="flex items-center justify-start">
+                                {renderFlagIcon(selectedRecord, `transfer-${transfer.id}`)}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2">
                               <div className="flex items-center gap-1">
                                 <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-                                  <Eye className="w-4 h-4" />
+                                  <MessageSquare className="w-4 h-4" />
                                 </button>
                                 <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
                                   <MoreVertical className="w-4 h-4" />
                                 </button>
                               </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
