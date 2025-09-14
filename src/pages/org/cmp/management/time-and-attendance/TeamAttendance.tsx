@@ -635,8 +635,8 @@ export default function TeamAttendance() {
       notes: 'Vacation'
     },
     {
-      id: '7',
-      employeeId: '7',
+      id: '19',
+      employeeId: '19',
       employeeName: 'Robert Garcia',
       role: 'Sales Director',
       department: 'Sales',
@@ -653,8 +653,8 @@ export default function TeamAttendance() {
     },
     // EMPLOYEE CURRENTLY PRESENT (no clock out)
     {
-      id: '5',
-      employeeId: '5',
+      id: '17',
+      employeeId: '17',
       employeeName: 'Maria Garcia',
       role: 'Product Manager',
       department: 'Product',
@@ -691,8 +691,8 @@ export default function TeamAttendance() {
     },
     // EMPLOYEE ON BREAK (no break end time)
     {
-      id: '6',
-      employeeId: '6',
+      id: '18',
+      employeeId: '18',
       employeeName: 'James Wilson',
       role: 'UX Designer',
       department: 'Design',
@@ -784,8 +784,8 @@ export default function TeamAttendance() {
     },
     // More employees to test pagination
     {
-      id: '8',
-      employeeId: '8',
+      id: '9',
+      employeeId: '9',
       employeeName: 'David Brown',
       role: 'Software Engineer',
       department: 'Engineering',
@@ -823,8 +823,8 @@ export default function TeamAttendance() {
       originalClockOut: '17:15'
     },
     {
-      id: '9',
-      employeeId: '9',
+      id: '20',
+      employeeId: '20',
       employeeName: 'Amanda Taylor',
       role: 'Marketing Specialist',
       department: 'Marketing',
@@ -1439,7 +1439,6 @@ export default function TeamAttendance() {
         return 'var(--status-purple)';
       case 'absent':
         return 'var(--status-red)';
-      case 'not-present':
       default:
         return 'var(--status-gray)'; // #6b7280
     }
@@ -1474,15 +1473,15 @@ export default function TeamAttendance() {
     const hasClockOut = record.timeEntries.some(entry => entry.clockOut);
     
     if (hasClockIn && !hasClockOut) return 'present';
-    if (hasClockIn && hasClockOut) return 'not-present';
+    if (hasClockIn && hasClockOut) return null; // No status for completed work
     
     // Check if absent (was scheduled to work but didn't clock in)
     if (record.scheduledClockIn && record.scheduledLocation) {
       if (!hasClockIn) return 'absent';
     }
     
-    // Default to not present if no clock in and no schedule
-    return 'not-present';
+    // Default to no status if no clock in and no schedule
+    return null;
   };
 
   const getStatusBadge = (record: AttendanceRecord) => {
@@ -1493,12 +1492,6 @@ export default function TeamAttendance() {
         return (
           <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
             Present
-          </span>
-        );
-      case 'not-present':
-        return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">
-            Not Present
           </span>
         );
       case 'on-break':
@@ -1536,8 +1529,6 @@ export default function TeamAttendance() {
     switch (currentStatus) {
       case 'present':
         return <CheckCircle className="w-4 h-4 text-status-green" />;
-      case 'not-present':
-        return <XCircle className="w-4 h-4 text-status-gray" />;
       case 'on-break':
         return <ClockIcon className="w-4 h-4 text-status-yellow" />;
       case 'on-transfer':
@@ -1557,7 +1548,7 @@ export default function TeamAttendance() {
     const statusBadge = getStatusBadge(record);
     
     if (!statusBadge) {
-      // When no badge, show nothing (for not-present cases)
+      // When no badge, show nothing (for employees with no status)
       return null;
     }
     
@@ -1852,6 +1843,7 @@ export default function TeamAttendance() {
     setEditingSession(null);
     setEditClockIn('');
     setEditClockOut('');
+    setActiveFloatingMenu(null);
   };
 
   // Get display time (prioritize modified times)
@@ -1982,11 +1974,16 @@ export default function TeamAttendance() {
 
   const toggleFloatingMenu = (menuId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setActiveFloatingMenu(activeFloatingMenu === menuId ? null : menuId);
+    // Always close any open menu first, then open the new one if it's different
+    if (activeFloatingMenu === menuId) {
+      setActiveFloatingMenu(null);
+    } else {
+      setActiveFloatingMenu(menuId);
+    }
   };
 
   // Render floating menu component
-  const renderFloatingMenu = (menuId: string, sessionId?: string) => {
+  const renderFloatingMenu = (menuId: string, sessionId?: string, recordIndex?: number) => {
     if (activeFloatingMenu !== menuId) return null;
     
     // Extract recordId from menuId for action handling
@@ -1997,8 +1994,22 @@ export default function TeamAttendance() {
     // @ts-ignore - actualSessionId can be undefined, which is handled correctly by the function
     const isEditing = isRecordEditing(recordId, actualSessionId);
 
+    // Calculate smart alignment based on menu options count
+    const getMenuOptionsCount = () => {
+      if (isEditing) {
+        return 3; // Save, Save & Approve, Cancel
+      } else {
+        return 5; // Edit, Approve, Reject, Reject with Comment, Reset
+      }
+    };
+    
+    const menuOptionsCount = getMenuOptionsCount();
+    const recordsForBottomAlignment = Math.ceil(menuOptionsCount / 2);
+    const isLastRecords = recordIndex !== undefined && recordIndex >= paginatedRecords.length - recordsForBottomAlignment;
+    const menuAlignment = isLastRecords ? 'bottom-0' : 'top-0';
+
     return (
-      <div className="absolute right-full top-0 mr-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 min-w-48">
+      <div className={`absolute right-full ${menuAlignment} mr-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1 min-w-48`}>
         {isEditing ? (
           // Editing menu
           <>
@@ -2786,7 +2797,7 @@ export default function TeamAttendance() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {paginatedRecords.map((record) => {
+                {paginatedRecords.map((record, index) => {
                   const workSessionsCount = getWorkSessionsCount(record);
                   const hasMultipleSessions = workSessionsCount > 1;
                   const isExpanded = expandedRecords.has(record.id);
@@ -2828,8 +2839,8 @@ export default function TeamAttendance() {
                         <td className="py-2 pl-1 pr-6">
                           <div className="flex items-center gap-3">
                             <div className="relative">
-                              <div 
-                                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium"
+                            <div 
+                              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium"
                                 style={{ backgroundColor: generateAvatarColor(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '') }}
                               >
                                 {generateAvatarInitials(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '')}
@@ -2940,12 +2951,14 @@ export default function TeamAttendance() {
                           <div className="relative">
                           <button
                               onClick={(e) => toggleFloatingMenu(record.id, e)}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
+                            className={`p-1 hover:bg-gray-100 rounded transition-colors ${
+                              activeFloatingMenu === record.id ? 'border border-gray-300 bg-gray-50' : ''
+                            }`}
                             aria-label={`More options for ${record.employeeName}`}
                           >
                             <MoreVertical className="w-4 h-4" />
                           </button>
-                            {renderFloatingMenu(record.id)}
+                            {renderFloatingMenu(record.id, undefined, index)}
                           </div>
                         </div>
                       </td>
@@ -3031,12 +3044,14 @@ export default function TeamAttendance() {
                               <div className="relative">
                                 <button
                                   onClick={(e) => toggleFloatingMenu(`${record.id}-${session.id}`, e)}
-                                  className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                  className={`p-1 hover:bg-gray-100 rounded transition-colors ${
+                                    activeFloatingMenu === `${record.id}-${session.id}` ? 'border border-gray-300 bg-gray-50' : ''
+                                  }`}
                                   aria-label={`More options for ${record.employeeName} Work Session ${session.sessionNumber}`}
                                 >
                                   <MoreVertical className="w-4 h-4" />
                                 </button>
-                                {renderFloatingMenu(`${record.id}-${session.id}`, session.id)}
+                                {renderFloatingMenu(`${record.id}-${session.id}`, session.id, index)}
                               </div>
                               </div>
                             </td>
