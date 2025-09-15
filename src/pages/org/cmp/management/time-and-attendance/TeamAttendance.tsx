@@ -891,9 +891,9 @@ export default function TeamAttendance() {
           id: '3-b2',
           startTime: '15:00',
           endTime: '15:30',
-          breakType: 'personal',
+          breakType: 'coffee',
           duration: 30,
-          notes: 'Personal break'
+          notes: 'Coffee break'
         }
       ],
       transfers: [
@@ -976,9 +976,9 @@ export default function TeamAttendance() {
           id: '5-b1',
           startTime: '12:00',
           endTime: '14:00',
-          breakType: 'personal',
+          breakType: 'lunch',
           duration: 120,
-          notes: 'Doctor appointment'
+          notes: 'Extended lunch break'
         }
       ],
       transfers: [],
@@ -4158,6 +4158,7 @@ export default function TeamAttendance() {
                         <tr>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Type</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Description</th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Start Time</th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">End Time</th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
@@ -4185,7 +4186,14 @@ export default function TeamAttendance() {
                               </div>
                             </td>
                             <td className="py-2 px-4">
-                              <span className="text-sm text-gray-900 capitalize">{breakItem.breakType}</span>
+                              <span className="text-sm text-gray-900">
+                                {breakItem.breakType === 'coffee' ? 'Paid' : 'Non Paid'}
+                              </span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-sm text-gray-900 capitalize">
+                                {breakItem.breakType === 'coffee' ? 'Coffee' : 'Lunch'}
+                              </span>
                             </td>
                             <td className="py-2 px-2 w-24">
                               <span className="text-sm text-gray-900">{breakItem.startTime}</span>
