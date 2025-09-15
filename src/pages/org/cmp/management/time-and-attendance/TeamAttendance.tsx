@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
 import { router } from '../../../../../lib/router';
 import { 
@@ -28,7 +28,9 @@ import {
   Flag,
   Check,
   Minus,
-  MessageSquare
+  MessageSquare,
+  Plus,
+  Send
 } from 'lucide-react';
 
 // Function to generate avatar initials (100% reliable, works everywhere)
@@ -55,8 +57,8 @@ interface TimeEntry {
 
 interface BreakEntry {
   id: string;
-  breakStart: string;
-  breakEnd: string | null;
+  startTime: string;
+  endTime: string | null;
   breakType: 'lunch' | 'coffee' | 'personal' | 'meeting' | 'other';
   duration: number; // in minutes
   notes?: string;
@@ -64,8 +66,8 @@ interface BreakEntry {
 
 interface TransferEntry {
   id: string;
-  transferStart: string;
-  transferEnd: string | null;
+  startTime: string;
+  endTime: string | null;
   fromLocation: string;
   toLocation: string;
   transferType: 'branch' | 'site' | 'client' | 'other';
@@ -144,6 +146,19 @@ interface NewAttendanceRecord {
   avatar?: string;
 }
 
+interface Comment {
+  id: string;
+  recordId: string;
+  parentId?: string; // For replies
+  context: 'general' | 'clock-in' | 'clock-out' | 'work-session' | 'break' | 'transfer';
+  contextId?: string; // ID of specific session/break/transfer
+  eventId?: string; // ID of specific event (clock in/out, start/end time)
+  text: string;
+  author: string;
+  timestamp: string;
+  replies?: Comment[];
+}
+
 export default function TeamAttendance() {
   const { registerSubmodules } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
@@ -167,9 +182,402 @@ export default function TeamAttendance() {
   const [activeFloatingMenu, setActiveFloatingMenu] = useState<string | null>(null);
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
   const [editingSession, setEditingSession] = useState<string | null>(null);
+  const [commentingRecord, setCommentingRecord] = useState<string | null>(null);
+  const [commentingSession, setCommentingSession] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [newCommentText, setNewCommentText] = useState('');
+  const [selectedSession, setSelectedSession] = useState<string>('');
+  const [selectedEvent, setSelectedEvent] = useState<string>('');
+  const [showSessionDropdown, setShowSessionDropdown] = useState(false);
+  const [showEventDropdown, setShowEventDropdown] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [showCommentForm, setShowCommentForm] = useState(false);
   const [editClockIn, setEditClockIn] = useState('');
   const [editClockOut, setEditClockOut] = useState('');
   const [showOriginalTimes, setShowOriginalTimes] = useState<Set<string>>(new Set());
+
+  // Ref for auto-focus on comment input
+  const commentInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus on comment input when form is shown
+  useEffect(() => {
+    if (showCommentForm && commentInputRef.current) {
+      commentInputRef.current.focus();
+    }
+  }, [showCommentForm]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setShowSessionDropdown(false);
+        setShowEventDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Mock comments data
+  const mockComments: Comment[] = [
+    {
+      id: 'comment-1',
+      recordId: '1',
+      context: 'clock-in',
+      eventId: 'clock-in-1',
+      text: 'Traffic delay on highway, arrived 15 minutes late',
+      author: 'John Doe',
+      timestamp: '2024-01-16T09:15:00Z',
+      replies: [
+        {
+          id: 'reply-1',
+          recordId: '1',
+          parentId: 'comment-1',
+          context: 'clock-in',
+          eventId: 'clock-in-1',
+          text: 'No problem, thanks for letting us know',
+          author: 'Manager',
+          timestamp: '2024-01-16T09:20:00Z'
+        }
+      ]
+    },
+    {
+      id: 'comment-2',
+      recordId: '1',
+      context: 'general',
+      text: 'Approved attendance for today',
+      author: 'Manager',
+      timestamp: '2024-01-16T10:30:00Z'
+    },
+    {
+      id: 'comment-3',
+      recordId: '1',
+      context: 'work-session',
+      contextId: 'session-1',
+      text: 'Client meeting went well, discussed new requirements',
+      author: 'John Doe',
+      timestamp: '2024-01-16T11:00:00Z',
+      replies: [
+        {
+          id: 'reply-2',
+          recordId: '1',
+          parentId: 'comment-3',
+          context: 'work-session',
+          contextId: 'session-1',
+          text: 'Great job! Any follow-up needed?',
+          author: 'Manager',
+          timestamp: '2024-01-16T11:15:00Z'
+        },
+        {
+          id: 'reply-3',
+          recordId: '1',
+          parentId: 'comment-3',
+          context: 'work-session',
+          contextId: 'session-1',
+          text: 'Yes, they want a proposal by Friday',
+          author: 'John Doe',
+          timestamp: '2024-01-16T11:20:00Z'
+        }
+      ]
+    },
+    {
+      id: 'comment-4',
+      recordId: '1',
+      context: 'break',
+      contextId: 'break-1',
+      text: 'Lunch break extended due to client call',
+      author: 'John Doe',
+      timestamp: '2024-01-16T13:30:00Z'
+    },
+    // Comments for Alex Rodriguez (recordId: '3')
+    {
+      id: 'comment-5',
+      recordId: '3',
+      context: 'clock-in',
+      eventId: 'clock-in-3',
+      text: 'Had to drop off my daughter at school, running 10 minutes late',
+      author: 'Alex Rodriguez',
+      timestamp: '2024-01-16T08:40:00Z',
+      replies: [
+        {
+          id: 'reply-3',
+          recordId: '3',
+          parentId: 'comment-5',
+          context: 'clock-in',
+          eventId: 'clock-in-3',
+          text: 'No worries, family comes first. Just update your time when you arrive.',
+          author: 'Manager',
+          timestamp: '2024-01-16T08:45:00Z'
+        }
+      ]
+    },
+    {
+      id: 'comment-6',
+      recordId: '3',
+      context: 'work-session',
+      contextId: 'session-1',
+      text: 'Client meeting at downtown office went great. They approved the new design mockups.',
+      author: 'Alex Rodriguez',
+      timestamp: '2024-01-16T10:30:00Z',
+      replies: [
+        {
+          id: 'reply-4',
+          recordId: '3',
+          parentId: 'comment-6',
+          context: 'work-session',
+          contextId: 'session-1',
+          text: 'Excellent work! Can you send me the approved mockups?',
+          author: 'Manager',
+          timestamp: '2024-01-16T10:35:00Z'
+        },
+        {
+          id: 'reply-5',
+          recordId: '3',
+          parentId: 'comment-6',
+          context: 'work-session',
+          contextId: 'session-1',
+          text: 'Already sent them to your email. They loved the new color scheme!',
+          author: 'Alex Rodriguez',
+          timestamp: '2024-01-16T10:40:00Z'
+        }
+      ]
+    },
+    {
+      id: 'comment-7',
+      recordId: '3',
+      context: 'transfer',
+      contextId: 'transfer-1',
+      text: 'Transfer to client site took longer due to construction on Main St.',
+      author: 'Alex Rodriguez',
+      timestamp: '2024-01-16T11:15:00Z'
+    },
+    {
+      id: 'comment-8',
+      recordId: '3',
+      context: 'general',
+      text: 'Great day overall! Client was very happy with our presentation.',
+      author: 'Alex Rodriguez',
+      timestamp: '2024-01-16T17:00:00Z'
+    }
+  ];
+
+  // Mock activity log data
+  const mockActivityLog = [
+    {
+      id: 'log-1',
+      recordId: '3', // Alex Rodriguez
+      type: 'clock-in',
+      description: 'Clocked In (Session 1)',
+      timestamp: '2024-01-16T08:30:00Z',
+      details: 'Main Office',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-2',
+      recordId: '3',
+      type: 'comment',
+      description: 'Comment Added',
+      timestamp: '2024-01-16T08:40:00Z',
+      details: 'Had to drop off my daughter at school, running 10 minutes late',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-system-1',
+      recordId: '3',
+      type: 'system-auto',
+      description: 'System Notification',
+      timestamp: '2024-01-16T08:45:00Z',
+      details: 'Late arrival detected - 10 minutes past scheduled start time',
+      userId: 'system',
+      userName: 'System',
+      userInitials: 'S'
+    },
+    {
+      id: 'log-3',
+      recordId: '3',
+      type: 'break-start',
+      description: 'Clocked Break (Break 1)',
+      timestamp: '2024-01-16T10:00:00Z',
+      details: 'Coffee break',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-4',
+      recordId: '3',
+      type: 'break-end',
+      description: 'Clocked Out (Break 1)',
+      timestamp: '2024-01-16T10:15:00Z',
+      details: 'Coffee break ended',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-system-2',
+      recordId: '3',
+      type: 'system-auto',
+      description: 'Break Time Calculated',
+      timestamp: '2024-01-16T10:16:00Z',
+      details: 'System calculated break duration: 15 minutes',
+      userId: 'system',
+      userName: 'System',
+      userInitials: 'S'
+    },
+    {
+      id: 'log-5',
+      recordId: '3',
+      type: 'comment',
+      description: 'Comment Added',
+      timestamp: '2024-01-16T10:30:00Z',
+      details: 'Client meeting at downtown office went great. They approved the new design mockups.',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-6',
+      recordId: '3',
+      type: 'transfer-start',
+      description: 'Transfer Started',
+      timestamp: '2024-01-16T11:00:00Z',
+      details: 'From Main Office to Client Site',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-7',
+      recordId: '3',
+      type: 'comment',
+      description: 'Comment Added',
+      timestamp: '2024-01-16T11:15:00Z',
+      details: 'Transfer to client site took longer due to construction on Main St.',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-8',
+      recordId: '3',
+      type: 'transfer-end',
+      description: 'Transfer Completed',
+      timestamp: '2024-01-16T11:30:00Z',
+      details: 'Arrived at Client Site',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-system-3',
+      recordId: '3',
+      type: 'system-auto',
+      description: 'Transfer Time Calculated',
+      timestamp: '2024-01-16T11:31:00Z',
+      details: 'System calculated transfer duration: 30 minutes',
+      userId: 'system',
+      userName: 'System',
+      userInitials: 'S'
+    },
+    {
+      id: 'log-9',
+      recordId: '3',
+      type: 'time-edit',
+      description: 'Time Edited',
+      timestamp: '2024-01-16T12:00:00Z',
+      details: 'Clock in time modified from 08:45 to 08:30',
+      userId: '1',
+      userName: 'Sarah Johnson',
+      userInitials: 'SJ'
+    },
+    {
+      id: 'log-10',
+      recordId: '3',
+      type: 'break-start',
+      description: 'Clocked Break (Break 2)',
+      timestamp: '2024-01-16T12:30:00Z',
+      details: 'Lunch break',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-11',
+      recordId: '3',
+      type: 'break-end',
+      description: 'Clocked Out (Break 2)',
+      timestamp: '2024-01-16T13:30:00Z',
+      details: 'Lunch break ended',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-system-4',
+      recordId: '3',
+      type: 'system-auto',
+      description: 'Lunch Break Calculated',
+      timestamp: '2024-01-16T13:31:00Z',
+      details: 'System calculated lunch break duration: 60 minutes',
+      userId: 'system',
+      userName: 'System',
+      userInitials: 'S'
+    },
+    {
+      id: 'log-12',
+      recordId: '3',
+      type: 'clock-out',
+      description: 'Clocked Out (Session 1)',
+      timestamp: '2024-01-16T17:00:00Z',
+      details: 'Client Site',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-13',
+      recordId: '3',
+      type: 'comment',
+      description: 'Comment Added',
+      timestamp: '2024-01-16T17:00:00Z',
+      details: 'Great day overall! Client was very happy with our presentation.',
+      userId: '3',
+      userName: 'Alex Rodriguez',
+      userInitials: 'AR'
+    },
+    {
+      id: 'log-system-5',
+      recordId: '3',
+      type: 'system-auto',
+      description: 'Daily Summary Generated',
+      timestamp: '2024-01-16T17:02:00Z',
+      details: 'System generated daily attendance summary',
+      userId: 'system',
+      userName: 'System',
+      userInitials: 'S'
+    },
+    {
+      id: 'log-14',
+      recordId: '3',
+      type: 'system-auto',
+      description: 'Automatic Time Calculation',
+      timestamp: '2024-01-16T17:05:00Z',
+      details: 'System calculated total hours: 8.5h',
+      userId: 'system',
+      userName: 'System',
+      userInitials: 'S'
+    }
+  ];
 
   useEffect(() => {
     // Register submodule tabs for time and attendance
@@ -219,7 +627,7 @@ export default function TeamAttendance() {
             { id: 'p4', timestamp: '17:00', type: 'out', location: 'Main Office', activity: 'End work' }
           ],
           breaks: [
-            { id: 'b1', breakStart: '12:00', breakEnd: '13:00', breakType: 'lunch', duration: 60, notes: 'Lunch break' }
+            { id: 'b1', startTime: '12:00', endTime: '13:00', breakType: 'lunch', duration: 60, notes: 'Lunch break' }
           ],
           transfers: [],
           totalWorkHours: 8.0,
@@ -255,7 +663,7 @@ export default function TeamAttendance() {
           ],
           breaks: [],
           transfers: [
-            { id: 't1', transferStart: '12:00', transferEnd: '12:20', fromLocation: 'Main Office', toLocation: 'Client Site A', transferType: 'client', duration: 20, notes: 'Travel to client' }
+            { id: 't1', startTime: '12:00', endTime: '12:20', fromLocation: 'Main Office', toLocation: 'Client Site A', transferType: 'client', duration: 20, notes: 'Travel to client' }
           ],
           totalWorkHours: 2.5,
           totalBreakTime: 0,
@@ -274,7 +682,7 @@ export default function TeamAttendance() {
           ],
           breaks: [],
           transfers: [
-            { id: 't2', transferStart: '15:00', transferEnd: '15:30', fromLocation: 'Client Site A', toLocation: 'Branch Office B', transferType: 'branch', duration: 30, notes: 'Travel to branch' }
+            { id: 't2', startTime: '15:00', endTime: '15:30', fromLocation: 'Client Site A', toLocation: 'Branch Office B', transferType: 'branch', duration: 30, notes: 'Travel to branch' }
           ],
           totalWorkHours: 2.67,
           totalBreakTime: 0,
@@ -343,16 +751,16 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '1-b1',
-          breakStart: '12:00',
-          breakEnd: '13:00',
+          startTime: '12:00',
+          endTime: '13:00',
           breakType: 'lunch',
           duration: 60,
           notes: 'Lunch break'
         },
         {
           id: '1-b2',
-          breakStart: '15:30',
-          breakEnd: '15:45',
+          startTime: '15:30',
+          endTime: '15:45',
           breakType: 'coffee',
           duration: 15,
           notes: 'Coffee break'
@@ -361,8 +769,8 @@ export default function TeamAttendance() {
       transfers: [
         {
           id: '1-t1',
-          transferStart: '10:30',
-          transferEnd: '10:45',
+          startTime: '10:30',
+          endTime: '10:45',
           fromLocation: 'Main Office',
           toLocation: 'Client Site A',
           transferType: 'client',
@@ -413,8 +821,8 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '2-b1',
-          breakStart: '12:30',
-          breakEnd: '13:30',
+          startTime: '12:30',
+          endTime: '13:30',
           breakType: 'lunch',
           duration: 60,
           notes: 'Lunch break'
@@ -473,16 +881,16 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '3-b1',
-          breakStart: '12:00',
-          breakEnd: '13:00',
+          startTime: '12:00',
+          endTime: '13:00',
           breakType: 'lunch',
           duration: 60,
           notes: 'Lunch break'
         },
         {
           id: '3-b2',
-          breakStart: '15:00',
-          breakEnd: '15:30',
+          startTime: '15:00',
+          endTime: '15:30',
           breakType: 'personal',
           duration: 30,
           notes: 'Personal break'
@@ -491,8 +899,8 @@ export default function TeamAttendance() {
       transfers: [
         {
           id: '3-t1',
-          transferStart: '12:00',
-          transferEnd: '12:20',
+          startTime: '12:00',
+          endTime: '12:20',
           fromLocation: 'Main Office',
           toLocation: 'Client Site A',
           transferType: 'client',
@@ -501,8 +909,8 @@ export default function TeamAttendance() {
         },
         {
           id: '3-t2',
-          transferStart: '15:00',
-          transferEnd: '15:30',
+          startTime: '15:00',
+          endTime: '15:30',
           fromLocation: 'Client Site A',
           toLocation: 'Branch Office B',
           transferType: 'branch',
@@ -566,8 +974,8 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '5-b1',
-          breakStart: '12:00',
-          breakEnd: '14:00',
+          startTime: '12:00',
+          endTime: '14:00',
           breakType: 'personal',
           duration: 120,
           notes: 'Doctor appointment'
@@ -603,8 +1011,8 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '8-b1',
-          breakStart: '12:00',
-          breakEnd: null, // Currently on break
+          startTime: '12:00',
+          endTime: null, // Currently on break
           breakType: 'lunch',
           duration: 0, // Will be calculated when break ends
           notes: 'Lunch break - currently active'
@@ -675,8 +1083,8 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '5-b1',
-          breakStart: '10:30',
-          breakEnd: '10:45',
+          startTime: '10:30',
+          endTime: '10:45',
           duration: 15,
           breakType: 'coffee',
           notes: 'Coffee break'
@@ -713,15 +1121,15 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '6-b1',
-          breakStart: '10:00',
-          breakEnd: '10:15',
+          startTime: '10:00',
+          endTime: '10:15',
           duration: 15,
           breakType: 'coffee'
         },
         {
           id: '6-b2',
-          breakStart: '12:00',
-          breakEnd: '', // Currently on lunch break
+          startTime: '12:00',
+          endTime: '', // Currently on lunch break
           duration: 0,
           breakType: 'lunch',
           notes: 'Lunch break'
@@ -759,8 +1167,8 @@ export default function TeamAttendance() {
       transfers: [
         {
           id: '7-t1',
-          transferStart: '10:30',
-          transferEnd: '', // Currently in transfer
+          startTime: '10:30',
+          endTime: '', // Currently in transfer
           fromLocation: 'Main Office',
           toLocation: 'Client Site',
           duration: 0,
@@ -805,8 +1213,8 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '8-b1',
-          breakStart: '12:00',
-          breakEnd: '13:00',
+          startTime: '12:00',
+          endTime: '13:00',
           duration: 60,
           breakType: 'lunch'
         }
@@ -844,15 +1252,15 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '9-b1',
-          breakStart: '10:30',
-          breakEnd: '10:45',
+          startTime: '10:30',
+          endTime: '10:45',
           duration: 15,
           breakType: 'coffee'
         },
         {
           id: '9-b2',
-          breakStart: '12:30',
-          breakEnd: '13:30',
+          startTime: '12:30',
+          endTime: '13:30',
           duration: 60,
           breakType: 'lunch'
         }
@@ -903,8 +1311,8 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '11-b1',
-          breakStart: '14:00',
-          breakEnd: '', // Currently on break
+          startTime: '14:00',
+          endTime: '', // Currently on break
           duration: 0,
           breakType: 'coffee',
           notes: 'Afternoon break'
@@ -939,15 +1347,15 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '12-b1',
-          breakStart: '11:00',
-          breakEnd: '11:15',
+          startTime: '11:00',
+          endTime: '11:15',
           duration: 15,
           breakType: 'coffee'
         },
         {
           id: '12-b2',
-          breakStart: '12:30',
-          breakEnd: '13:30',
+          startTime: '12:30',
+          endTime: '13:30',
           duration: 60,
           breakType: 'lunch'
         }
@@ -955,8 +1363,8 @@ export default function TeamAttendance() {
       transfers: [
         {
           id: '12-t1',
-          transferStart: '14:00',
-          transferEnd: '14:20',
+          startTime: '14:00',
+          endTime: '14:20',
           fromLocation: 'Main Office',
           toLocation: 'Data Center',
           duration: 20,
@@ -993,8 +1401,8 @@ export default function TeamAttendance() {
       transfers: [
         {
           id: '13-t1',
-          transferStart: '11:00',
-          transferEnd: '11:30',
+          startTime: '11:00',
+          endTime: '11:30',
           fromLocation: 'Main Office',
           toLocation: 'Testing Lab',
           duration: 30,
@@ -1003,8 +1411,8 @@ export default function TeamAttendance() {
         },
         {
           id: '13-t2',
-          transferStart: '15:00',
-          transferEnd: '', // Currently in transfer
+          startTime: '15:00',
+          endTime: '', // Currently in transfer
           fromLocation: 'Testing Lab',
           toLocation: 'Main Office',
           duration: 0,
@@ -1040,22 +1448,22 @@ export default function TeamAttendance() {
       breaks: [
         {
           id: '14-b1',
-          breakStart: '10:15',
-          breakEnd: '10:30',
+          startTime: '10:15',
+          endTime: '10:30',
           duration: 15,
           breakType: 'coffee'
         },
         {
           id: '14-b2',
-          breakStart: '12:00',
-          breakEnd: '13:00',
+          startTime: '12:00',
+          endTime: '13:00',
           duration: 60,
           breakType: 'lunch'
         },
         {
           id: '14-b3',
-          breakStart: '15:30',
-          breakEnd: '15:45',
+          startTime: '15:30',
+          endTime: '15:45',
           duration: 15,
           breakType: 'coffee'
         }
@@ -1452,16 +1860,16 @@ export default function TeamAttendance() {
     
     // Check if currently on break
     const activeBreak = record.breaks.find(breakItem => {
-      if (!breakItem.breakEnd) return true; // Break without end time means currently on break
-      return breakItem.breakStart <= currentTime && currentTime <= breakItem.breakEnd;
+      if (!breakItem.endTime) return true; // Break without end time means currently on break
+      return breakItem.startTime <= currentTime && currentTime <= breakItem.endTime;
     });
     
     if (activeBreak) return 'on-break';
     
     // Check if currently on transfer
     const activeTransfer = record.transfers.find(transfer => {
-      if (!transfer.transferEnd) return true; // Transfer without end time means currently in transfer
-      return transfer.transferStart <= currentTime && currentTime <= transfer.transferEnd;
+      if (!transfer.endTime) return true; // Transfer without end time means currently in transfer
+      return transfer.startTime <= currentTime && currentTime <= transfer.endTime;
     });
     
     if (activeTransfer) return 'on-transfer';
@@ -1845,6 +2253,287 @@ export default function TeamAttendance() {
     setEditClockIn('');
     setEditClockOut('');
     setActiveFloatingMenu(null);
+  };
+
+
+
+  // Handle comment mode from MessageSquare button
+  const handleCommentModeFromButton = (recordId: string, sessionId?: string) => {
+    setActiveTab('comments');
+    setCommentingRecord(recordId);
+    setCommentingSession(sessionId || null);
+    setSelectedSession(sessionId || '');
+    setSelectedEvent('');
+  };
+
+  // Save new comment
+  const handleSaveNewComment = () => {
+    if (!newCommentText.trim() || !selectedRecord) return;
+    
+    // Determine context based on selected session and event
+    let context = 'general';
+    let contextId = undefined;
+    let eventId = undefined;
+    
+    if (selectedSession) {
+      if (selectedSession.startsWith('work-session-')) {
+        context = 'work-session';
+        contextId = selectedSession.replace('work-session-', '');
+      } else if (selectedSession.startsWith('break-')) {
+        context = 'break';
+        contextId = selectedSession.replace('break-', '');
+      } else if (selectedSession.startsWith('transfer-')) {
+        context = 'transfer';
+        contextId = selectedSession.replace('transfer-', '');
+      }
+      
+      // If event is selected, it overrides the session context
+      if (selectedEvent) {
+        if (selectedEvent.includes('clock-in')) {
+          context = 'clock-in';
+          eventId = selectedEvent;
+        } else if (selectedEvent.includes('clock-out')) {
+          context = 'clock-out';
+          eventId = selectedEvent;
+        } else if (selectedEvent.includes('start')) {
+          context = selectedSession.startsWith('break-') ? 'break-start' : 'transfer-start';
+          eventId = selectedEvent;
+        } else if (selectedEvent.includes('end')) {
+          context = selectedSession.startsWith('break-') ? 'break-end' : 'transfer-end';
+          eventId = selectedEvent;
+        }
+      }
+    }
+    
+    // Here you would typically save to backend
+    console.log('Saving new comment:', {
+      recordId: selectedRecord.id,
+      context,
+      contextId,
+      eventId,
+      text: newCommentText,
+      author: 'Current User', // This would come from auth context
+      timestamp: new Date().toISOString()
+    });
+    
+    // Reset form
+    setNewCommentText('');
+    setSelectedSession('');
+    setSelectedEvent('');
+  };
+
+  // Handle reply to comment
+  const handleReply = (parentCommentId: string) => {
+    setReplyingTo(parentCommentId);
+    setReplyText('');
+    
+    // Find parent comment to inherit context
+    const parentComment = mockComments.find(c => c.id === parentCommentId);
+    if (parentComment) {
+      // Set session context based on parent comment
+      if (parentComment.context === 'work-session' && parentComment.contextId) {
+        setSelectedSession(`work-session-${parentComment.contextId}`);
+      } else if (parentComment.context === 'break' && parentComment.contextId) {
+        setSelectedSession(`break-${parentComment.contextId}`);
+      } else if (parentComment.context === 'transfer' && parentComment.contextId) {
+        setSelectedSession(`transfer-${parentComment.contextId}`);
+      } else {
+        setSelectedSession('');
+      }
+      
+      // Set event context if parent has one
+      if (parentComment.eventId) {
+        setSelectedEvent(parentComment.eventId);
+      } else {
+        setSelectedEvent('');
+      }
+    }
+  };
+
+  // Save reply
+  const handleSaveReply = () => {
+    if (!replyText.trim() || !replyingTo || !selectedRecord) return;
+    
+    // Find parent comment to inherit context
+    const parentComment = mockComments.find(c => c.id === replyingTo);
+    if (!parentComment) return;
+    
+    // Here you would typically save to backend
+    console.log('Saving reply:', {
+      recordId: selectedRecord.id,
+      parentId: replyingTo,
+      context: parentComment.context,
+      contextId: parentComment.contextId,
+      eventId: parentComment.eventId,
+      text: replyText,
+      author: 'Current User', // This would come from auth context
+      timestamp: new Date().toISOString()
+    });
+    
+    // Reset form
+    setReplyText('');
+    setReplyingTo(null);
+  };
+
+  // Cancel reply
+  const handleCancelReply = () => {
+    setReplyText('');
+    setReplyingTo(null);
+    setSelectedSession('');
+    setSelectedEvent('');
+  };
+
+  // Get comments for current record
+  const getCommentsForRecord = (recordId: string) => {
+    return mockComments.filter(comment => comment.recordId === recordId);
+  };
+
+  // Get activity log for record
+  const getActivityLogForRecord = (recordId: string) => {
+    return mockActivityLog.filter(log => log.recordId === recordId);
+  };
+
+  // Get context label for display
+  const getContextLabel = (comment: Comment) => {
+    if (comment.context === 'general') return 'General';
+    
+    if (comment.context === 'work-session') {
+      return `Work Session ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'break') {
+      return `Break ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'transfer') {
+      return `Transfer ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'clock-in') {
+      return `Clock In - Work Session ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'clock-out') {
+      return `Clock Out - Work Session ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'break-start') {
+      return `Start - Break ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'break-end') {
+      return `End - Break ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'transfer-start') {
+      return `Start - Transfer ${comment.contextId}`;
+    }
+    
+    if (comment.context === 'transfer-end') {
+      return `End - Transfer ${comment.contextId}`;
+    }
+    
+    return comment.context;
+  };
+
+  // Get session options for comment dropdown
+  const getSessionOptions = () => {
+    if (!selectedRecord) return [];
+    
+    const options: { value: string; label: string }[] = [];
+
+    // Add work sessions
+    const sessions = organizeIntoSessions(selectedRecord);
+    sessions.forEach((session, index) => {
+      options.push({
+        value: `work-session-${session.id}`,
+        label: `Work Session ${session.sessionNumber}`
+      });
+    });
+
+    // Add transfers
+    selectedRecord.transfers.forEach((transfer, index) => {
+      options.push({
+        value: `transfer-${transfer.id}`,
+        label: `Transfer ${index + 1}`
+      });
+    });
+
+    // Add breaks
+    selectedRecord.breaks.forEach((breakItem, index) => {
+      options.push({
+        value: `break-${breakItem.id}`,
+        label: `Break ${index + 1}`
+      });
+    });
+
+    return options;
+  };
+
+  // Get event options for selected session
+  const getEventOptions = () => {
+    if (!selectedSession || !selectedRecord) return [];
+    
+    const options: { value: string; label: string }[] = [];
+
+    if (selectedSession.startsWith('work-session-')) {
+      const sessionId = selectedSession.replace('work-session-', '');
+      const sessions = organizeIntoSessions(selectedRecord);
+      const session = sessions.find(s => s.id === sessionId);
+      
+      if (session) {
+        if (session.startTime) {
+          options.push({
+            value: `clock-in-${session.id}`,
+            label: `Clock In (${session.startTime})`
+          });
+        }
+        if (session.endTime) {
+          options.push({
+            value: `clock-out-${session.id}`,
+            label: `Clock Out (${session.endTime})`
+          });
+        }
+      }
+    } else if (selectedSession.startsWith('break-')) {
+      const breakId = selectedSession.replace('break-', '');
+      const breakItem = selectedRecord.breaks.find(b => b.id === breakId);
+      
+      if (breakItem) {
+        if (breakItem.startTime) {
+          options.push({
+            value: `break-start-${breakItem.id}`,
+            label: `Start (${breakItem.startTime})`
+          });
+        }
+        if (breakItem.endTime) {
+          options.push({
+            value: `break-end-${breakItem.id}`,
+            label: `End (${breakItem.endTime})`
+          });
+        }
+      }
+    } else if (selectedSession.startsWith('transfer-')) {
+      const transferId = selectedSession.replace('transfer-', '');
+      const transfer = selectedRecord.transfers.find(t => t.id === transferId);
+      
+      if (transfer) {
+        if (transfer.startTime) {
+          options.push({
+            value: `transfer-start-${transfer.id}`,
+            label: `Start (${transfer.startTime})`
+          });
+        }
+        if (transfer.endTime) {
+          options.push({
+            value: `transfer-end-${transfer.id}`,
+            label: `End (${transfer.endTime})`
+          });
+        }
+      }
+    }
+
+    return options;
   };
 
   // Get display time (prioritize modified times)
@@ -2331,7 +3020,7 @@ export default function TeamAttendance() {
       record.transfers.forEach((transfer, index) => {
         if (index === 0) {
           // First session ends at transfer start
-          currentSession.endTime = transfer.transferStart;
+          currentSession.endTime = transfer.startTime;
           currentSession.transfers = [transfer];
           currentSession.totalTransferTime = transfer.duration;
         }
@@ -2341,12 +3030,12 @@ export default function TeamAttendance() {
           id: `session-${index + 2}`,
           sessionNumber: index + 2,
           location: transfer.toLocation,
-          startTime: transfer.transferEnd || transfer.transferStart,
-          endTime: index === record.transfers.length - 1 ? getLastClockOut(record.timeEntries) : record.transfers[index + 1]?.transferStart || null,
+          startTime: transfer.endTime || transfer.startTime,
+          endTime: index === record.transfers.length - 1 ? getLastClockOut(record.timeEntries) : record.transfers[index + 1]?.startTime || null,
           punches: [
             {
               id: `transfer-in-${index}`,
-              timestamp: transfer.transferEnd || transfer.transferStart,
+              timestamp: transfer.endTime || transfer.startTime,
               type: 'in' as const,
               activity: 'Transfer arrival'
             }
@@ -2402,9 +3091,9 @@ export default function TeamAttendance() {
       timeline.push({
         id: breakEntry.id,
         type: 'break',
-        startTime: breakEntry.breakStart,
-        endTime: breakEntry.breakEnd,
-        duration: breakEntry.breakEnd ? breakEntry.duration / 60 : 0, // Convert minutes to hours
+        startTime: breakEntry.startTime,
+        endTime: breakEntry.endTime,
+        duration: breakEntry.endTime ? breakEntry.duration / 60 : 0, // Convert minutes to hours
         label: 'Break',
         details: `${breakEntry.breakType.charAt(0).toUpperCase() + breakEntry.breakType.slice(1)} Break`,
         notes: breakEntry.notes,
@@ -2417,9 +3106,9 @@ export default function TeamAttendance() {
       timeline.push({
         id: transferEntry.id,
         type: 'transfer',
-        startTime: transferEntry.transferStart,
-        endTime: transferEntry.transferEnd,
-        duration: transferEntry.transferEnd ? transferEntry.duration / 60 : 0, // Convert minutes to hours
+        startTime: transferEntry.startTime,
+        endTime: transferEntry.endTime,
+        duration: transferEntry.endTime ? transferEntry.duration / 60 : 0, // Convert minutes to hours
         label: 'Transfer',
         details: `${transferEntry.fromLocation} → ${transferEntry.toLocation}`,
         notes: transferEntry.notes,
@@ -2717,7 +3406,7 @@ export default function TeamAttendance() {
             <table className="w-full table-fixed">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-center py-3 px-2 font-medium text-gray-900 text-xs w-14">
+                  <th className="text-center py-3 px-2 font-medium text-gray-900 text-xs w-16">
                     <div className="flex items-center justify-center h-full">
                       <input
                         type="checkbox"
@@ -2807,7 +3496,7 @@ export default function TeamAttendance() {
                   return (
                   <>
                     <tr key={record.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="py-2 px-2">
+                        <td className="py-2 px-2 w-16">
                           <div className="flex items-center justify-center h-full">
                             {hasMultipleSessions ? (
                             <div className="flex items-center gap-1">
@@ -2968,7 +3657,7 @@ export default function TeamAttendance() {
                       {/* Expanded Work Sessions */}
                       {hasMultipleSessions && isExpanded && workSessions.map((session: any) => session ? (
                         <tr key={session.id} className="bg-gray-25 hover:bg-gray-50 transition-colors border-l-2 border-l-primary/20">
-                          <td className="py-2 px-2">
+                          <td className="py-2 px-2 w-16">
                             {/* Empty space to align with expand arrow column */}
                           </td>
                            <td className="py-2 pl-1 pr-6 w-56">
@@ -2993,7 +3682,7 @@ export default function TeamAttendance() {
                             <td className="py-2 px-4">
                             <span className="text-sm text-gray-900">{session.location || '--'}</span>
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                               {isRecordEditing(record.id, session.id) ? (
                                 <SmartTimeInput
                                   value={editClockIn}
@@ -3003,7 +3692,7 @@ export default function TeamAttendance() {
                                 <span className="text-sm text-gray-900">{session.clockIn}</span>
                               )}
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                               {isRecordEditing(record.id, session.id) ? (
                                 <SmartTimeInput
                                   value={editClockOut}
@@ -3013,27 +3702,27 @@ export default function TeamAttendance() {
                                 <span className="text-sm text-gray-900">{session.clockOut}</span>
                               )}
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                             {/* Breaks column - empty for individual sessions */}
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                             {/* Transfers column - empty for individual sessions */}
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                             <span className="text-sm text-gray-900">{(session.totalHours || 0).toFixed(2)}h</span>
                             </td>
-                            <td className="py-2 px-4">
+                            <td className="py-2 px-2 w-24">
                             {/* Overtime - empty for individual sessions */}
                           </td>
-                          <td className="py-2 px-4">
+                          <td className="py-2 px-2 w-12">
                             {/* Modified - empty for individual sessions */}
                           </td>
-                          <td className="py-2 px-4">
+                          <td className="py-2 px-2 w-12">
                             <div className="flex items-center justify-start">
                               {renderFlagIcon(record, `${session.id}-${record.id}`)}
                             </div>
                           </td>
-                          <td className="py-2 px-4">
+                          <td className="py-2 px-2 w-24">
                             <div className="flex items-center">
                                   <button
                                 className="p-1 rounded transition-colors invisible"
@@ -3153,7 +3842,7 @@ export default function TeamAttendance() {
       {/* Details Modal */}
       {isModalOpen && selectedRecord && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-hidden">
+          <div className="relative bg-white rounded-lg shadow-xl max-w-7xl w-full h-[85vh] overflow-hidden">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <div className="flex items-center gap-3">
@@ -3163,7 +3852,7 @@ export default function TeamAttendance() {
                     style={{ backgroundColor: generateAvatarColor(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '') }}
                   >
                     {generateAvatarInitials(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '')}
-    </div>
+                  </div>
                   <div 
                     className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
                     style={{ backgroundColor: getStatusDotColor(selectedRecord) }}
@@ -3186,48 +3875,13 @@ export default function TeamAttendance() {
                   <p className="text-sm text-gray-600">{selectedRecord.role} • {selectedRecord.department}</p>
                 </div>
               </div>
-              <button
-                onClick={closeDetailsModal}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="overflow-y-auto max-h-[calc(90vh-120px)]">
-              {/* Summary Cards */}
-              <div className="p-6 pb-0">
-                <div className="grid grid-cols-4 gap-4 mb-4">
-                  <div className="bg-white border border-gray-200 p-3 rounded">
-                    <div className="text-lg font-semibold text-gray-900">{selectedRecord.totalHours}h</div>
-                    <div className="text-xs text-gray-600">Total Hours</div>
-                  </div>
-                  <div className="bg-white border border-gray-200 p-3 rounded">
-                    <div className="text-lg font-semibold text-gray-900">{Math.round(selectedRecord.totalBreakTime / 60 * 10) / 10}h</div>
-                    <div className="text-xs text-gray-600">Break Time</div>
-                  </div>
-                  <div className="bg-white border border-gray-200 p-3 rounded">
-                    <div className="text-lg font-semibold text-gray-900">{Math.round(selectedRecord.totalTransferTime / 60 * 10) / 10}h</div>
-                    <div className="text-xs text-gray-600">Transfer Time</div>
-                  </div>
-                  <div className="bg-white border border-gray-200 p-3 rounded">
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(selectedRecord)}
-                      {getStatusBadge(selectedRecord)}
-                    </div>
-                    <div className="text-xs text-gray-600 mt-1">Current Status</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tabs Navigation */}
-              <div className="border-b border-gray-200 px-6">
-                <nav className="flex space-x-8">
+              
+              <div className="flex items-center gap-6">
+                {/* Tabs Navigation */}
+                <div className="flex space-x-6">
                   <button
                     onClick={() => setActiveTab('sessions')}
-                    className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                       activeTab === 'sessions'
                         ? 'border-primary text-primary'
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -3237,7 +3891,7 @@ export default function TeamAttendance() {
                   </button>
                   <button
                     onClick={() => setActiveTab('comments')}
-                    className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                       activeTab === 'comments'
                         ? 'border-primary text-primary'
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -3247,7 +3901,7 @@ export default function TeamAttendance() {
                   </button>
                   <button
                     onClick={() => setActiveTab('log')}
-                    className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                       activeTab === 'log'
                         ? 'border-primary text-primary'
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -3255,23 +3909,43 @@ export default function TeamAttendance() {
                   >
                     Log
                   </button>
-                </nav>
-              </div>
-
-              {/* Tab Content */}
-              <div className="p-6">
-                {activeTab === 'sessions' && (
-                  <div className="space-y-6">
-
-                    {/* Work Sessions Content */}
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-semibold text-gray-900">Work Sessions</h3>
-                      <span className="text-xs text-gray-500">
-                        {organizeIntoSessions(selectedRecord).length} session{organizeIntoSessions(selectedRecord).length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
+                </div>
                 
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <button
+                  onClick={closeDetailsModal}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  aria-label="Close modal"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="relative flex flex-col h-[calc(85vh-120px)]">
+              {/* Tab Content */}
+              <div className={`overflow-y-auto p-6 ${activeTab === 'comments' || activeTab === 'sessions' ? 'pb-0 h-[calc(100%-88px)] flex flex-col' : 'flex-1'}`} style={{ paddingRight: activeTab === 'sessions' ? '26px' : '24px' }}>
+                {activeTab === 'sessions' && (
+                  <div className="flex flex-col h-full">
+                    {/* Work Sessions Content */}
+                    <div className="flex-1 overflow-y-auto min-h-0 pb-8" style={{ scrollbarGutter: 'stable' }}>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-semibold text-gray-900">Work Sessions</h3>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>
+                            {(() => {
+                              const sessions = organizeIntoSessions(selectedRecord);
+                              return `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+                            })()}
+                          </span>
+                          <span className="text-gray-900 font-medium">
+                            Total Time: {selectedRecord.totalHours}h
+                          </span>
+                        </div>
+                      </div>
+                
+                      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                   <table className="w-full table-fixed">
                     <thead className="bg-gray-50">
                       <tr>
@@ -3296,62 +3970,67 @@ export default function TeamAttendance() {
                     <tbody className="divide-y divide-gray-200">
                       {organizeIntoSessions(selectedRecord).map((session, sessionIndex) => (
                         <tr key={session.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="py-2 px-4 w-48">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-green-100 text-status-green flex items-center justify-center text-sm font-medium border border-green-200">
-                                {session.sessionNumber}
-                              </div>
-                              <span className="text-sm text-gray-900">Work Session {session.sessionNumber}</span>
-                            </div>
-                          </td>
-                          <td className="py-2 px-4 w-min">
-                            <span className="text-sm text-gray-900">{session.location || '--'}</span>
-                          </td>
-                          <td className="py-2 px-4">
-                            <span className="text-sm text-gray-900">{"Hernandez's Residence"}</span>
-                          </td>
-                          <td className="py-2 px-2 w-24">
-                            <span className="text-sm text-gray-900">{session.punches.find(p => p.type === 'in')?.timestamp || '--'}</span>
-                          </td>
-                          <td className="py-2 px-2 w-24">
-                            <span className="text-sm text-gray-900">{session.punches.find(p => p.type === 'out')?.timestamp || '--'}</span>
-                          </td>
-                          <td className="py-2 px-2 w-24">
-                            <span className="text-sm font-medium text-gray-900">{session.totalWorkHours?.toFixed(2) || '0.00'}h</span>
-                          </td>
-                          <td className="py-2 px-2 w-24">
-                            {(() => {
-                              const totalHours = session.totalWorkHours || 0;
-                              const overtimeHours = Math.max(0, totalHours - 8);
-                              return overtimeHours > 0 ? (
-                                <span className="text-xs font-medium text-status-orange">
-                                  {overtimeHours.toFixed(1)}h
-                                </span>
-                              ) : (
-                                <span className="text-xs text-gray-400">--</span>
-                              );
-                            })()}
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="flex items-center justify-start">
-                              {renderModifiedIcon(selectedRecord, `session-${session.id}`)}
-                            </div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="flex items-center justify-start">
-                              {renderFlagIcon(selectedRecord, `session-${session.id}`)}
-                            </div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <div className="flex items-center gap-1">
-                              <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-                                <MessageSquare className="w-4 h-4" />
-                              </button>
-                              <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-                                <MoreVertical className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                          {/* Normal session row */}
+                              <td className="py-2 px-4 w-48">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-green-100 text-status-green flex items-center justify-center text-sm font-medium border border-green-200">
+                                    {session.sessionNumber}
+                                  </div>
+                                  <span className="text-sm text-gray-900">Work Session {session.sessionNumber}</span>
+                                </div>
+                              </td>
+                              <td className="py-2 px-4 w-min">
+                                <span className="text-sm text-gray-900">{session.location || '--'}</span>
+                              </td>
+                              <td className="py-2 px-4">
+                                <span className="text-sm text-gray-900">{"Hernandez's Residence"}</span>
+                              </td>
+                              <td className="py-2 px-2 w-24">
+                                <span className="text-sm text-gray-900">{session.punches.find(p => p.type === 'in')?.timestamp || '--'}</span>
+                              </td>
+                              <td className="py-2 px-2 w-24">
+                                <span className="text-sm text-gray-900">{session.punches.find(p => p.type === 'out')?.timestamp || '--'}</span>
+                              </td>
+                              <td className="py-2 px-2 w-24">
+                                <span className="text-sm font-medium text-gray-900">{session.totalWorkHours?.toFixed(2) || '0.00'}h</span>
+                              </td>
+                              <td className="py-2 px-2 w-24">
+                                {(() => {
+                                  const totalHours = session.totalWorkHours || 0;
+                                  const overtimeHours = Math.max(0, totalHours - 8);
+                                  return overtimeHours > 0 ? (
+                                    <span className="text-xs font-medium text-status-orange">
+                                      {overtimeHours.toFixed(1)}h
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">--</span>
+                                  );
+                                })()}
+                              </td>
+                              <td className="py-2 px-2 w-12">
+                                <div className="flex items-center justify-start">
+                                  {renderModifiedIcon(selectedRecord, `session-${session.id}`)}
+                                </div>
+                              </td>
+                              <td className="py-2 px-2 w-12">
+                                <div className="flex items-center justify-start">
+                                  {renderFlagIcon(selectedRecord, `session-${session.id}`)}
+                                </div>
+                              </td>
+                              <td className="py-2 px-2 w-20">
+                                <div className="flex items-center gap-1">
+                                  <button 
+                                    onClick={() => handleCommentModeFromButton(selectedRecord.id, session.id)}
+                                    className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                                    title="Add comment"
+                                  >
+                                    <MessageSquare className="w-4 h-4" />
+                                  </button>
+                                  <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
+                                    <MoreVertical className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
                         </tr>
                       ))}
                     </tbody>
@@ -3360,12 +4039,20 @@ export default function TeamAttendance() {
 
                     {/* Transfers */}
                     {selectedRecord.transfers.length > 0 && (
-                      <div className="space-y-6">
-                        <div className="flex items-center justify-between">
+                      <div className="mt-8">
+                        <div className="flex items-center justify-between mb-3">
                           <h3 className="text-lg font-semibold text-gray-900">Transfers</h3>
-                          <span className="text-xs text-gray-500">
-                            {selectedRecord.transfers.length} transfer{selectedRecord.transfers.length !== 1 ? 's' : ''}
-                          </span>
+                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                            <span>
+                              {selectedRecord.transfers.length} transfer{selectedRecord.transfers.length !== 1 ? 's' : ''}
+                            </span>
+                            <span className="text-gray-900 font-medium">
+                              Total Time: {(() => {
+                                const totalTransferTime = selectedRecord.transfers.reduce((sum, transfer) => sum + (transfer.duration / 60), 0);
+                                return totalTransferTime.toFixed(2);
+                              })()}h
+                            </span>
+                          </div>
                         </div>
                   
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -3378,7 +4065,7 @@ export default function TeamAttendance() {
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Start Time</th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">End Time</th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Overtime</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24"></th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
                             <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
                               <span className="text-[10px] font-medium text-gray-900">M</span>
@@ -3408,16 +4095,16 @@ export default function TeamAttendance() {
                               <span className="text-sm text-gray-900">{transfer.toLocation}</span>
                             </td>
                             <td className="py-2 px-2 w-24">
-                              <span className="text-sm text-gray-900">{transfer.transferStart}</span>
+                              <span className="text-sm text-gray-900">{transfer.startTime}</span>
                             </td>
                             <td className="py-2 px-2 w-24">
-                              <span className="text-sm text-gray-900">{transfer.transferEnd || '--'}</span>
+                              <span className="text-sm text-gray-900">{transfer.endTime || '--'}</span>
                             </td>
                             <td className="py-2 px-2 w-24">
                               <span className="text-sm font-medium text-gray-900">{(transfer.duration / 60).toFixed(2)}h</span>
                             </td>
                             <td className="py-2 px-2 w-24">
-                              <span className="text-xs text-gray-400">--</span>
+                              {/* Empty column for alignment */}
                             </td>
                             <td className="py-2 px-2">
                               <div className="flex items-center justify-start">
@@ -3443,172 +4130,437 @@ export default function TeamAttendance() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                </div>
-              )}
+                      </div>
+                    </div>
+                )}
 
               {/* Breaks */}
               {selectedRecord.breaks.length > 0 && (
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
+                <div className="mt-8">
+                  <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-semibold text-gray-900">Breaks</h3>
-                    <span className="text-xs text-gray-500">
-                      {selectedRecord.breaks.length} break{selectedRecord.breaks.length !== 1 ? 's' : ''}
-                    </span>
+                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                      <span>
+                        {selectedRecord.breaks.length} break{selectedRecord.breaks.length !== 1 ? 's' : ''}
+                      </span>
+                      <span className="text-gray-900 font-medium">
+                        Total Time: {(() => {
+                          const totalBreakTime = selectedRecord.breaks.reduce((sum, breakItem) => sum + (breakItem.duration / 60), 0);
+                          return totalBreakTime.toFixed(2);
+                        })()}h
+                      </span>
+                    </div>
                   </div>
                   
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    {/* Header */}
-                    <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
-                      <div className="grid grid-cols-12 gap-4 text-xs font-medium text-gray-900">
-                        <div className="col-span-3">Break</div>
-                        <div className="col-span-2">Type</div>
-                        <div className="col-span-2">Start Time</div>
-                        <div className="col-span-2">End Time</div>
-                        <div className="col-span-2">Duration</div>
-                        <div className="col-span-1">Actions</div>
-                      </div>
-                    </div>
-
-                    {/* Breaks */}
-                    <div className="divide-y divide-gray-200">
-                      {selectedRecord.breaks.map((breakItem, breakIndex) => (
-                        <div key={breakItem.id} className="px-6 py-4 hover:bg-gray-50 transition-colors">
-                          <div className="grid grid-cols-12 gap-4 items-center">
-                            {/* Break Number */}
-                            <div className="col-span-3">
+                    <table className="w-full table-fixed">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Type</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Start Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">End Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24"></th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                            <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                              <span className="text-[10px] font-medium text-gray-900">M</span>
+                            </div>
+                          </th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                            <Flag className="w-4 h-4 inline text-gray-900" />
+                          </th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {selectedRecord.breaks.map((breakItem, breakIndex) => (
+                          <tr key={breakItem.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 w-48">
                               <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-full bg-orange-100 text-status-orange flex items-center justify-center text-sm font-medium border border-orange-200">
                                   {breakIndex + 1}
                                 </div>
-                                <span className="text-sm font-medium text-gray-900">
-                                  Break {breakIndex + 1}
-                                </span>
+                                <span className="text-sm text-gray-900">Break {breakIndex + 1}</span>
                               </div>
-                            </div>
-
-                            {/* Type */}
-                            <div className="col-span-2">
+                            </td>
+                            <td className="py-2 px-4">
                               <span className="text-sm text-gray-900 capitalize">{breakItem.breakType}</span>
-                            </div>
-
-                            {/* Start Time */}
-                            <div className="col-span-2">
-                              <span className="text-sm text-gray-900">{breakItem.breakStart}</span>
-                            </div>
-
-                            {/* End Time */}
-                            <div className="col-span-2">
-                              <span className="text-sm text-gray-900">{breakItem.breakEnd || '--'}</span>
-                            </div>
-
-                            {/* Duration */}
-                            <div className="col-span-2">
-                              <span className="text-sm text-gray-900">{(breakItem.duration / 60).toFixed(2)}h</span>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="col-span-1">
+                            </td>
+                            <td className="py-2 px-2 w-24">
+                              <span className="text-sm text-gray-900">{breakItem.startTime}</span>
+                            </td>
+                            <td className="py-2 px-2 w-24">
+                              <span className="text-sm text-gray-900">{breakItem.endTime || '--'}</span>
+                            </td>
+                            <td className="py-2 px-2 w-24">
+                              <span className="text-sm font-medium text-gray-900">{(breakItem.duration / 60).toFixed(2)}h</span>
+                            </td>
+                            <td className="py-2 px-2 w-24">
+                              {/* Empty column for alignment */}
+                            </td>
+                            <td className="py-2 px-2 w-12">
+                              <div className="flex items-center justify-start">
+                                {renderModifiedIcon(selectedRecord, `break-${breakItem.id}`)}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2 w-12">
+                              <div className="flex items-center justify-start">
+                                {renderFlagIcon(selectedRecord, `break-${breakItem.id}`)}
+                              </div>
+                            </td>
+                            <td className="py-2 px-2 w-20">
                               <div className="flex items-center gap-1">
                                 <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-                                  <Eye className="w-4 h-4" />
+                                  <MessageSquare className="w-4 h-4" />
                                 </button>
                                 <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
                                   <MoreVertical className="w-4 h-4" />
                                 </button>
                               </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                       </div>
                     )}
+                    </div>
                   </div>
                 )}
 
                 {activeTab === 'comments' && (
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
+                  <div className="flex flex-col h-full">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-6">
                       <h3 className="text-lg font-semibold text-gray-900">Comments</h3>
-                      <button className="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/90 transition-colors">
-                        Add Comment
-                      </button>
                     </div>
                     
-                    <div className="bg-white border border-gray-200 rounded-lg p-6">
-                      <div className="text-center text-gray-500 py-8">
-                        <div className="w-12 h-12 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                          <span className="text-gray-400 text-xl">💬</span>
+                        {/* Comments Thread - Direct display without border */}
+                        <div className="flex-1 overflow-y-auto min-h-0 pb-8">
+                        {selectedRecord && getCommentsForRecord(selectedRecord.id).length > 0 ? (
+                          <div className="space-y-6 ml-4">
+                            {getCommentsForRecord(selectedRecord.id).map((comment) => (
+                              <div key={comment.id} className="border-b border-gray-100 pb-6 last:border-b-0">
+                                {/* Main Comment */}
+                                <div className="flex items-start gap-3">
+                                  <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
+                                    {comment.author.charAt(0)}
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="text-sm font-medium text-gray-900">
+                                        {comment.author}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {new Date(comment.timestamp).toLocaleString()}
+                                      </span>
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        {getContextLabel(comment)}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm text-gray-700 mb-3">{comment.text}</p>
+                                    
+                                    {/* Reply Button */}
+                                    <button
+                                      onClick={() => handleReply(comment.id)}
+                                      className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                    >
+                                      Reply
+                                    </button>
+                                    
+                                    {/* Replies */}
+                                    {comment.replies && comment.replies.length > 0 && (
+                                      <div className="mt-4 ml-4 border-l-2 border-gray-200 pl-4 space-y-4">
+                                        {comment.replies.map((reply) => (
+                                          <div key={reply.id} className="flex items-start gap-3">
+                                            <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white text-xs font-medium">
+                                              {reply.author.charAt(0)}
+                                            </div>
+                                            <div className="flex-1">
+                                              <div className="flex items-center gap-2 mb-1">
+                                                <span className="text-xs font-medium text-gray-900">
+                                                  {reply.author}
+                                                </span>
+                                                <span className="text-xs text-gray-500">
+                                                  {new Date(reply.timestamp).toLocaleString()}
+                                                </span>
+                                              </div>
+                                              <p className="text-xs text-gray-700">{reply.text}</p>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                            ) : (
+                              <div className="text-center text-gray-500 py-8">
+                                <MessageSquare className="mx-auto h-8 w-8 text-gray-400 mb-4" />
+                                <p className="text-sm">No comments yet</p>
+                                <p className="text-xs text-gray-400 mt-1">Start a conversation below</p>
+                              </div>
+                            )}
                         </div>
-                        <p className="text-sm">No comments yet</p>
-                        <p className="text-xs text-gray-400 mt-1">Add comments for work sessions, breaks, or transfers</p>
+
+                    {/* Reply Input - Fixed at Bottom */}
+                    {replyingTo && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
+                        <div className="text-xs text-gray-600 mb-2">
+                          Replying to: <span className="font-medium">{getCommentsForRecord(selectedRecord?.id || '').find(c => c.id === replyingTo)?.author}</span>
+                        </div>
+                        <div className="flex items-end gap-3">
+                          <div className="flex-1">
+                            <textarea
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              placeholder="Write a reply..."
+                              rows={2}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleCancelReply}
+                              className="px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => {
+                                handleSaveReply();
+                              }}
+                              disabled={!replyText.trim()}
+                              className="px-2 py-1 bg-primary text-white rounded text-xs hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+
                   </div>
                 )}
 
                 {activeTab === 'log' && (
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
+                  <div className="flex flex-col h-full">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-6">
                       <h3 className="text-lg font-semibold text-gray-900">Activity Log</h3>
-                      <span className="text-xs text-gray-500">Chronological timeline</span>
                     </div>
                     
-                    <div className="bg-white border border-gray-200 rounded-lg p-6">
-                      <div className="space-y-4">
-                        {/* Sample log entries */}
-                        <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
-                          <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">First clock-in</div>
-                            <div className="text-xs text-gray-600">08:30 AM • Main Office • Device: iPhone 14 • GPS: 40.7128, -74.0060</div>
-                            <div className="text-xs text-gray-500 mt-1">User: john.smith@company.com</div>
+                        {/* Activity Log Thread - Direct display without border */}
+                        <div className="flex-1 overflow-y-auto min-h-0">
+                        {selectedRecord && getActivityLogForRecord(selectedRecord.id).length > 0 ? (
+                          <div className="space-y-6 ml-4">
+                            {getActivityLogForRecord(selectedRecord.id).map((logEntry) => (
+                              <div key={logEntry.id} className="border-b border-gray-100 pb-6 last:border-b-0">
+                                {/* Log Entry */}
+                                <div className="flex items-start gap-3">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                                    logEntry.userId === 'system' 
+                                      ? 'bg-gray-300 text-black' 
+                                      : 'bg-primary text-white'
+                                  }`}>
+                                    {logEntry.userInitials || 'U'}
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="text-sm font-medium text-gray-900">
+                                        {logEntry.description}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {new Date(logEntry.timestamp).toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm text-gray-700">{logEntry.details}</p>
+                                    {logEntry.userName && (
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        by {logEntry.userName}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        </div>
-                        
-                        <div className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg">
-                          <div className="w-2 h-2 bg-status-orange rounded-full mt-2"></div>
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">Break started</div>
-                            <div className="text-xs text-gray-600">10:15 AM • Lunch break • Duration: 30 min</div>
-                            <div className="text-xs text-gray-500 mt-1">Auto-detected break</div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-full text-gray-500 ml-4">
+                            <MessageSquare className="w-12 h-12 mb-4 text-gray-300" />
+                            <p className="text-sm">No activity logged yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Activity will appear here as it happens</p>
                           </div>
+                        )}
                         </div>
-                        
-                        <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
-                          <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">Break ended</div>
-                            <div className="text-xs text-gray-600">10:45 AM • Returned to work</div>
-                            <div className="text-xs text-gray-500 mt-1">Auto-detected return</div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-start gap-3 p-3 bg-indigo-50 rounded-lg">
-                          <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2"></div>
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">Transfer initiated</div>
-                            <div className="text-xs text-gray-600">12:00 PM • From: Main Office • To: Branch A</div>
-                            <div className="text-xs text-gray-500 mt-1">Approved by: manager@company.com</div>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                          <div className="w-2 h-2 bg-gray-500 rounded-full mt-2"></div>
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">Clock-out</div>
-                            <div className="text-xs text-gray-600">17:00 PM • Branch A • Total hours: 8.5h</div>
-                            <div className="text-xs text-gray-500 mt-1">End of workday</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>
+
+
+
             </div>
+
+            {/* Summary Cards Footer for Sessions */}
+            {activeTab === 'sessions' && (
+              <div className="absolute bottom-0 left-0 right-0 border-t border-gray-200 px-6 pt-6 pb-6" style={{ backgroundColor: 'var(--gray-200)' }}>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="text-lg font-semibold text-gray-900">{selectedRecord.totalHours}h</div>
+                    <div className="text-xs text-gray-600">Total Hours</div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="text-lg font-semibold text-gray-900">{Math.round(selectedRecord.totalBreakTime / 60 * 10) / 10}h</div>
+                    <div className="text-xs text-gray-600">Break Time</div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="text-lg font-semibold text-gray-900">{Math.round(selectedRecord.totalTransferTime / 60 * 10) / 10}h</div>
+                    <div className="text-xs text-gray-600">Transfer Time</div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="text-lg font-semibold text-gray-900">
+                      {getOvertimeHours(selectedRecord.totalHours) > 0 ? `${getOvertimeHours(selectedRecord.totalHours).toFixed(1)}h` : '0h'}
+                    </div>
+                    <div className="text-xs text-gray-600">Overtime</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Summary Cards Footer for Comments */}
+            {activeTab === 'comments' && (
+              <div className="absolute bottom-0 left-0 right-0 border-t border-gray-200 px-6 pt-6 pb-6" style={{ backgroundColor: 'var(--gray-200)' }}>
+                <div className="bg-white border border-gray-200 rounded-lg p-4 w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
+                      JR
+                    </div>
+                    <div className="flex-1">
+                      <input
+                        ref={commentInputRef}
+                        type="text"
+                        value={newCommentText}
+                        onChange={(e) => setNewCommentText(e.target.value)}
+                        placeholder="Reply in thread"
+                        className="w-full h-8 px-3 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Session Selector */}
+                      <div className="relative dropdown-container">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSessionDropdown(!showSessionDropdown);
+                            setShowEventDropdown(false);
+                          }}
+                          className="w-48 h-8 appearance-none bg-white border border-gray-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-left flex items-center justify-between"
+                          title="Select session"
+                        >
+                          <span className={selectedSession ? 'text-gray-900' : 'text-gray-500'}>
+                            {selectedSession ? getSessionOptions().find(opt => opt.value === selectedSession)?.label || 'Session' : 'Session'}
+                          </span>
+                          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSessionDropdown ? 'rotate-180' : ''}`} />
+                        </button>
+                        
+                        {showSessionDropdown && (
+                          <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-gray-300 rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                            <div
+                              className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 cursor-pointer"
+                              onClick={() => {
+                                setSelectedSession('');
+                                setSelectedEvent('');
+                                setShowSessionDropdown(false);
+                              }}
+                            >
+                              Session
+                            </div>
+                            {getSessionOptions().map((option) => (
+                              <div
+                                key={option.value}
+                                className="px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 cursor-pointer"
+                                onClick={() => {
+                                  setSelectedSession(option.value);
+                                  setSelectedEvent('');
+                                  setShowSessionDropdown(false);
+                                }}
+                              >
+                                {option.label}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Event Selector */}
+                      <div className="relative dropdown-container">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowEventDropdown(!showEventDropdown);
+                            setShowSessionDropdown(false);
+                          }}
+                          className="w-48 h-8 appearance-none bg-white border border-gray-300 rounded-md px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-left flex items-center justify-between"
+                          title="Select event"
+                        >
+                          <span className={selectedEvent ? 'text-gray-900' : 'text-gray-500'}>
+                            {selectedEvent ? getEventOptions().find(opt => opt.value === selectedEvent)?.label || 'Event' : 'Event'}
+                          </span>
+                          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showEventDropdown ? 'rotate-180' : ''}`} />
+                        </button>
+                        
+                        {showEventDropdown && (
+                          <div className="absolute bottom-full left-0 right-0 mb-1 bg-white border border-gray-300 rounded-md shadow-lg z-50 max-h-48 overflow-y-auto">
+                            <div
+                              className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 cursor-pointer"
+                              onClick={() => {
+                                setSelectedEvent('');
+                                setShowEventDropdown(false);
+                              }}
+                            >
+                              Event
+                            </div>
+                            {getEventOptions().map((option) => (
+                              <div
+                                key={option.value}
+                                className="px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 cursor-pointer"
+                                onClick={() => {
+                                  setSelectedEvent(option.value);
+                                  setShowEventDropdown(false);
+                                }}
+                              >
+                                {option.label}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Send Button */}
+                      <button
+                        onClick={() => {
+                          handleSaveNewComment();
+                        }}
+                        disabled={!newCommentText.trim()}
+                        className="flex items-center gap-2 h-8 px-2 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ backgroundColor: 'var(--teal-brand-hex)' }}
+                        title="Send message"
+                      >
+                        <Send className="w-4 h-4" />
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
           </div>
         </div>
       )}

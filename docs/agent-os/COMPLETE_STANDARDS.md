@@ -13,7 +13,15 @@ This document consolidates all design system standards for the RHEMO frontend ap
 7. [Status Pills Standards](#status-pills-standards)
 8. [Icon Standards](#icon-standards)
 9. [Button Standards](#button-standards)
-10. [Implementation Checklist](#implementation-checklist)
+10. [Input Field Standards](#input-field-standards)
+11. [Implementation Checklist](#implementation-checklist)
+
+## Related Documentation
+- [Button Standards](./BUTTON_STANDARDS.md) - Complete button design system
+- [Input Field Standards](./INPUT_STANDARDS.md) - Input fields, dropdowns, and form elements
+- [Search Card Standards](./SEARCH_CARD_STANDARDS.md) - Search and filter components
+- [Pagination Standards](./PAGINATION_STANDARDS.md) - Pagination components
+- [Tooltip Standards](./TOOLTIP_STANDARDS.md) - Tooltip components
 
 ---
 
@@ -291,21 +299,64 @@ const getStatusIcon = (status) => {
 
 ## Button Standards
 
-### Primary Buttons
-- **Background**: `bg-status-blue` (Blue 500)
-- **Text**: `text-white`
-- **Hover**: `hover:bg-blue-600`
+**📋 Complete Button Standards**: See [BUTTON_STANDARDS.md](./BUTTON_STANDARDS.md) for the complete button design system.
 
-### Danger Buttons
-- **Background**: `bg-status-red` (Red 700)
-- **Text**: `text-white`
-- **Hover**: `hover:bg-red-800`
+### Quick Reference
+- **Primary Actions**: `px-2 py-1` with `var(--teal-brand-hex)` background
+- **Secondary Actions**: `px-2 py-1` with `bg-gray-200 text-gray-700`
+- **Icon Buttons**: `p-1` with `text-gray-400 hover:text-gray-600`
+- **Icon Size**: `14px x 14px` for primary buttons, `16px x 16px` for icon-only
+- **Font Size**: `text-sm` for primary actions, `text-xs` for small actions
 
-### Secondary Buttons
-- **Background**: `bg-white`
-- **Text**: `text-gray-700`
-- **Border**: `border border-gray-300`
-- **Hover**: `hover:bg-gray-50`
+---
+
+## Input Field Standards
+
+### Standard Height
+All input fields, dropdowns, and buttons must use the same height for perfect alignment:
+
+```css
+/* Standard height for all form elements */
+.form-element-standard {
+  @apply py-1 px-3 text-sm;
+  /* Results in approximately 32px total height */
+}
+```
+
+### Input Field Specifications
+```tsx
+<input
+  type="text"
+  className="w-full px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+  placeholder="Enter text..."
+/>
+```
+
+### Dropdown Specifications
+```tsx
+<select className="w-48 px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+  <option value="">Select option...</option>
+</select>
+```
+
+### Button Specifications
+```tsx
+<button className="px-2 py-1 bg-primary text-white rounded text-sm">
+  Button Text
+</button>
+```
+
+### Key Requirements
+- **Height Consistency**: All form elements use `py-1` for identical heights
+- **Focus States**: `focus:ring-2 focus:ring-primary focus:border-transparent`
+- **Border Radius**: `rounded-md` for all elements
+- **Text Size**: `text-sm` for consistency
+- **Alignment**: Perfect vertical alignment across all elements
+
+### Implementation Examples
+- **Search Cards**: Input + dropdown + button alignment
+- **Comment Forms**: Input + dropdowns + send button alignment
+- **Filter Forms**: Multiple inputs and dropdowns in perfect alignment
 
 ---
 
@@ -354,6 +405,13 @@ const getStatusIcon = (status) => {
 - [ ] Primary: `bg-status-blue`
 - [ ] Danger: `bg-status-red`
 - [ ] Secondary: `bg-white border border-gray-300`
+
+#### ✅ Input Fields
+- [ ] Standard height: `py-1` (matches button height)
+- [ ] Consistent styling: `px-3 py-1 border border-gray-300 rounded-md text-sm`
+- [ ] Focus states: `focus:ring-2 focus:ring-primary focus:border-transparent`
+- [ ] Dropdowns match input height
+- [ ] All form elements aligned perfectly
 
 ### Code Review Checklist
 - [ ] No hardcoded colors found
