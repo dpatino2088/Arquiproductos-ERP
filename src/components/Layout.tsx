@@ -118,7 +118,7 @@ NavigationItem.displayName = 'NavigationItem';
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
   { name: 'Recruitment', href: '/org/cmp/management/recruitment/job-openings', icon: Briefcase },
-  { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Clock },
+  { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/whos-working', icon: Clock },
   { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: CalendarCheck },
   { name: 'Company Knowledge', href: '/org/cmp/management/company-knowledge/about-the-company', icon: BookMarked },
   { name: 'Performance', href: '/org/cmp/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },

@@ -110,6 +110,11 @@ const OrganizationalChart = lazy(() => {
   return import('./pages/org/cmp/management/employees/OrganizationalChart');
 });
 
+const WhosWorking = lazy(() => {
+  logger.debug('Loading Whos Working component');
+  return import('./pages/org/cmp/management/time-and-attendance/WhosWorking');
+});
+
 const TeamPlanner = lazy(() => {
   logger.debug('Loading Team Planner component');
   return import('./pages/org/cmp/management/time-and-attendance/TeamPlanner');
@@ -120,15 +125,12 @@ const TeamAttendance = lazy(() => {
   return import('./pages/org/cmp/management/time-and-attendance/TeamAttendance');
 });
 
+
 const EmployeeAttendance = lazy(() => {
   logger.debug('Loading Employee Attendance component');
   return import('./pages/org/cmp/management/time-and-attendance/EmployeeAttendance');
 });
 
-const TeamGeolocation = lazy(() => {
-  logger.debug('Loading Team Geolocation component');
-  return import('./pages/org/cmp/management/time-and-attendance/TeamGeolocation');
-});
 
 const TeamLeaveCalendar = lazy(() => {
   logger.debug('Loading Team Leave Calendar component');
@@ -566,11 +568,11 @@ function App() {
       router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));
       
       // Time & Attendance routes
+      router.addRoute('/org/cmp/management/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
       router.addRoute('/org/cmp/management/time-and-attendance/employee-attendance/:slug', () => setCurrentPage('employee-attendance'));
       router.addRoute('/org/cmp/management/time-and-attendance/employee-attendance', () => setCurrentPage('employee-attendance'));
-      router.addRoute('/org/cmp/management/time-and-attendance/team-geolocation', () => setCurrentPage('team-geolocation'));
       
       // PTO & Leaves routes
       router.addRoute('/org/cmp/management/pto-and-leaves/team-leave-calendar', () => setCurrentPage('team-leave-calendar'));
@@ -770,14 +772,14 @@ function App() {
 
       case 'reports':
         return <CompanyReports />;
+      case 'whos-working':
+        return <WhosWorking />;
       case 'team-planner':
         return <TeamPlanner />;
       case 'team-attendance':
         return <TeamAttendance />;
       case 'employee-attendance':
         return <EmployeeAttendance />;
-      case 'team-geolocation':
-        return <TeamGeolocation />;
       case 'team-leave-calendar':
         return <TeamLeaveCalendar />;
       case 'team-leave-requests':

@@ -48,6 +48,20 @@ const generateAvatarColor = (firstName: string, lastName: string) => {
   return '#008383'; // Primary Teal 700
 };
 
+// Function to get proportional dot size based on avatar size
+const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
+  switch (avatarSize) {
+    case 'sm': // w-8 h-8 (32px)
+      return 'w-2.5 h-2.5'; // 10px
+    case 'md': // w-10 h-10 (40px)
+      return 'w-3.5 h-3.5'; // 14px
+    case 'lg': // w-12 h-12 (48px)
+      return 'w-4 h-4'; // 16px
+    default:
+      return 'w-2.5 h-2.5';
+  }
+};
+
 export default function Directory() {
   const { registerSubmodules } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,10 +71,18 @@ export default function Directory() {
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [sortBy, setSortBy] = useState<'firstName' | 'jobTitle' | 'department' | 'startDate'>('firstName');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
-  const [selectedEmploymentType, setSelectedEmploymentType] = useState<string>('');
-  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [selectedDepartment, setSelectedDepartment] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
+  const [selectedEmploymentType, setSelectedEmploymentType] = useState<string[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<string[]>([]);
+  const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [showEmploymentTypeDropdown, setShowEmploymentTypeDropdown] = useState(false);
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [departmentSearchTerm, setDepartmentSearchTerm] = useState('');
+  const [statusSearchTerm, setStatusSearchTerm] = useState('');
+  const [employmentTypeSearchTerm, setEmploymentTypeSearchTerm] = useState('');
+  const [locationSearchTerm, setLocationSearchTerm] = useState('');
 
   useEffect(() => {
     // Register submodule tabs for management employees section
@@ -69,6 +91,29 @@ export default function Directory() {
       { id: 'org-chart', label: 'Organizational Chart', href: '/org/cmp/management/employees/organizational-chart', icon: GitBranch }
     ]);
   }, [registerSubmodules]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setShowDepartmentDropdown(false);
+        setShowStatusDropdown(false);
+        setShowEmploymentTypeDropdown(false);
+        setShowLocationDropdown(false);
+        // Clear search terms when closing dropdowns
+        setDepartmentSearchTerm('');
+        setStatusSearchTerm('');
+        setEmploymentTypeSearchTerm('');
+        setLocationSearchTerm('');
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const employees: Employee[] = [
     {
@@ -380,16 +425,16 @@ export default function Directory() {
       );
 
       // Department filter
-      const matchesDepartment = !selectedDepartment || employee.department === selectedDepartment;
+      const matchesDepartment = selectedDepartment.length === 0 || selectedDepartment.includes(employee.department);
 
       // Status filter
-      const matchesStatus = !selectedStatus || employee.status === selectedStatus;
+      const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(employee.status);
 
       // Employment type filter (assuming all employees are full-time for now)
-      const matchesEmploymentType = !selectedEmploymentType || selectedEmploymentType === 'Full-time';
+      const matchesEmploymentType = selectedEmploymentType.length === 0 || selectedEmploymentType.includes('Full-time');
 
       // Location filter
-      const matchesLocation = !selectedLocation || employee.location === selectedLocation;
+      const matchesLocation = selectedLocation.length === 0 || selectedLocation.includes(employee.location);
 
       return matchesSearch && matchesDepartment && matchesStatus && matchesEmploymentType && matchesLocation;
     });
@@ -457,11 +502,81 @@ export default function Directory() {
 
   // Clear all filters
   const clearAllFilters = () => {
-    setSelectedDepartment('');
-    setSelectedStatus('');
-    setSelectedEmploymentType('');
-    setSelectedLocation('');
+    setSelectedDepartment([]);
+    setSelectedStatus([]);
+    setSelectedEmploymentType([]);
+    setSelectedLocation([]);
     setSearchTerm('');
+    setDepartmentSearchTerm('');
+    setStatusSearchTerm('');
+    setEmploymentTypeSearchTerm('');
+    setLocationSearchTerm('');
+  };
+
+  // Helper functions for multi-select
+  const handleDepartmentToggle = (department: string) => {
+    setSelectedDepartment(prev => 
+      prev.includes(department) 
+        ? prev.filter(d => d !== department)
+        : [...prev, department]
+    );
+  };
+
+  const handleStatusToggle = (status: string) => {
+    setSelectedStatus(prev => 
+      prev.includes(status) 
+        ? prev.filter(s => s !== status)
+        : [...prev, status]
+    );
+  };
+
+  const handleEmploymentTypeToggle = (employmentType: string) => {
+    setSelectedEmploymentType(prev => 
+      prev.includes(employmentType) 
+        ? prev.filter(e => e !== employmentType)
+        : [...prev, employmentType]
+    );
+  };
+
+  const handleLocationToggle = (location: string) => {
+    setSelectedLocation(prev => 
+      prev.includes(location) 
+        ? prev.filter(l => l !== location)
+        : [...prev, location]
+    );
+  };
+
+  // Filter options based on search terms
+  const getFilteredDepartmentOptions = () => {
+    const departmentOptions = ['Executive', 'Engineering', 'Human Resources', 'Product', 'Marketing', 'Sales'];
+    if (!departmentSearchTerm) return departmentOptions;
+    return departmentOptions.filter(dept => 
+      dept.toLowerCase().includes(departmentSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredStatusOptions = () => {
+    const statusOptions = ['Active', 'Onboarding', 'On Leave', 'Suspended'];
+    if (!statusSearchTerm) return statusOptions;
+    return statusOptions.filter(status => 
+      status.toLowerCase().includes(statusSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredEmploymentTypeOptions = () => {
+    const employmentTypeOptions = ['Full-time', 'Part-time', 'Contract', 'Intern'];
+    if (!employmentTypeSearchTerm) return employmentTypeOptions;
+    return employmentTypeOptions.filter(type => 
+      type.toLowerCase().includes(employmentTypeSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredLocationOptions = () => {
+    const locationOptions = ['San Francisco, CA', 'Seattle, WA', 'Portland, OR', 'Austin, TX', 'New York, NY'];
+    if (!locationSearchTerm) return locationOptions;
+    return locationOptions.filter(location => 
+      location.toLowerCase().includes(locationSearchTerm.toLowerCase())
+    );
   };
 
   // Navigate to employee info page
@@ -497,7 +612,7 @@ export default function Directory() {
         );
       case 'On Leave':
         return (
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-status-orange">
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-status-purple">
             On Leave
           </span>
         );
@@ -604,64 +719,221 @@ export default function Directory() {
         {showFilters && (
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <select 
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by department"
-                id="department-filter"
-              >
-                <option value="">All Departments</option>
-                <option value="Executive">Executive</option>
-                <option value="Engineering">Engineering</option>
-                <option value="Human Resources">Human Resources</option>
-                <option value="Product">Product</option>
-                <option value="Marketing">Marketing</option>
-                <option value="Sales">Sales</option>
-              </select>
+              {/* Department Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedDepartment.length === 0 ? 'All Departments' : 
+                     selectedDepartment.length === 1 ? selectedDepartment[0] :
+                     `${selectedDepartment.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showDepartmentDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search departments..."
+                          value={departmentSearchTerm}
+                          onChange={(e) => setDepartmentSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedDepartment.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDepartment([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedDepartment.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredDepartmentOptions().map((department) => (
+                      <div key={department} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleDepartmentToggle(department)}>
+                        <input type="checkbox" checked={selectedDepartment.includes(department)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{department}</span>
+                      </div>
+                    ))}
+                    {getFilteredDepartmentOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No departments found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by status"
-                id="status-filter"
-              >
-                <option value="">All Statuses</option>
-                <option value="Active">Active</option>
-                <option value="Onboarding">Onboarding</option>
-                <option value="On Leave">On Leave</option>
-                <option value="Suspended">Suspended</option>
-              </select>
+              {/* Status Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowStatusDropdown(!showStatusDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedStatus.length === 0 ? 'All Statuses' : 
+                     selectedStatus.length === 1 ? selectedStatus[0] :
+                     `${selectedStatus.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showStatusDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search statuses..."
+                          value={statusSearchTerm}
+                          onChange={(e) => setStatusSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedStatus.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedStatus([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedStatus.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredStatusOptions().map((status) => (
+                      <div key={status} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleStatusToggle(status)}>
+                        <input type="checkbox" checked={selectedStatus.includes(status)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{status}</span>
+                      </div>
+                    ))}
+                    {getFilteredStatusOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No statuses found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <select 
-                value={selectedEmploymentType}
-                onChange={(e) => setSelectedEmploymentType(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by employment type"
-                id="employment-type-filter"
-              >
-                <option value="">All Employment Types</option>
-                <option value="Full-time">Full-time</option>
-                <option value="Part-time">Part-time</option>
-                <option value="Contract">Contract</option>
-                <option value="Intern">Intern</option>
-              </select>
+              {/* Employment Type Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowEmploymentTypeDropdown(!showEmploymentTypeDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedEmploymentType.length === 0 ? 'All Employment Types' : 
+                     selectedEmploymentType.length === 1 ? selectedEmploymentType[0] :
+                     `${selectedEmploymentType.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showEmploymentTypeDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search employment types..."
+                          value={employmentTypeSearchTerm}
+                          onChange={(e) => setEmploymentTypeSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedEmploymentType.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedEmploymentType([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedEmploymentType.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredEmploymentTypeOptions().map((employmentType) => (
+                      <div key={employmentType} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleEmploymentTypeToggle(employmentType)}>
+                        <input type="checkbox" checked={selectedEmploymentType.includes(employmentType)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{employmentType}</span>
+                      </div>
+                    ))}
+                    {getFilteredEmploymentTypeOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No employment types found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <select 
-                value={selectedLocation}
-                onChange={(e) => setSelectedLocation(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by location"
-                id="location-filter"
-              >
-                <option value="">All Locations</option>
-                <option value="San Francisco, CA">San Francisco, CA</option>
-                <option value="Seattle, WA">Seattle, WA</option>
-                <option value="Portland, OR">Portland, OR</option>
-                <option value="Austin, TX">Austin, TX</option>
-                <option value="New York, NY">New York, NY</option>
-              </select>
+              {/* Location Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowLocationDropdown(!showLocationDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedLocation.length === 0 ? 'All Locations' : 
+                     selectedLocation.length === 1 ? selectedLocation[0] :
+                     `${selectedLocation.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showLocationDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search locations..."
+                          value={locationSearchTerm}
+                          onChange={(e) => setLocationSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedLocation.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedLocation([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedLocation.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredLocationOptions().map((location) => (
+                      <div key={location} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleLocationToggle(location)}>
+                        <input type="checkbox" checked={selectedLocation.includes(location)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{location}</span>
+                      </div>
+                    ))}
+                    {getFilteredLocationOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No locations found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
       </div>
 
             <div className="flex justify-between items-center">
@@ -751,7 +1023,7 @@ export default function Directory() {
                     {sortBy === 'startDate' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
+                <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -767,14 +1039,14 @@ export default function Directory() {
                           {generateAvatarInitials(employee.firstName, employee.lastName)}
                         </div>
                         <div 
-                          className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
+                          className={`absolute -bottom-0.5 -right-0.5 ${getDotSize('sm')} rounded-full border border-white`}
                           style={{
                             backgroundColor: 
-                              employee.status === 'Active' ? 'var(--status-green)' :
-                              employee.status === 'On Leave' ? 'var(--status-orange)' :
-                              employee.status === 'Onboarding' ? 'var(--status-blue)' :
-                              employee.status === 'Suspended' ? 'var(--status-red)' :
-                              'var(--status-gray)'
+                              employee.status === 'Active' ? 'var(--avatar-status-green)' :
+                              employee.status === 'On Leave' ? 'var(--avatar-status-orange)' :
+                              employee.status === 'Onboarding' ? 'var(--avatar-status-blue)' :
+                              employee.status === 'Suspended' ? 'var(--avatar-status-red)' :
+                              'var(--avatar-status-gray)'
                           }}>
                         </div>
                       </div>
@@ -791,18 +1063,18 @@ export default function Directory() {
                   <td className="py-4 px-4">{getStatusBadge(employee.status)}</td>
                   <td className="py-4 px-4 text-gray-600 text-sm">{employee.location}</td>
                   <td className="py-4 px-4 text-gray-600 text-sm">{employee.startDate}</td>
-                  <td className="py-4 px-4">
-                    <div className="flex items-center gap-2">
+                  <td className="py-2 px-2 w-24">
+                    <div className="flex items-center">
                       <button 
                         onClick={() => handleEditEmployee(employee)}
-                        className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                        className="p-1 hover:bg-gray-100 rounded transition-colors"
                         aria-label={`Edit ${employee.firstName} ${employee.lastName}`}
                         title={`Edit ${employee.firstName} ${employee.lastName}`}
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button 
-                        className="p-1 text-gray-400 hover:text-status-red transition-colors"
+                        className="p-1 hover:bg-gray-100 rounded transition-colors"
                         aria-label={`Delete ${employee.firstName} ${employee.lastName}`}
                         title={`Delete ${employee.firstName} ${employee.lastName}`}
                       >
@@ -836,14 +1108,14 @@ export default function Directory() {
                     {generateAvatarInitials(employee.firstName, employee.lastName)}
                   </div>
                   <div 
-                    className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
+                    className={`absolute -bottom-1 -right-1 ${getDotSize('lg')} rounded-full border-2 border-white`}
                     style={{
                       backgroundColor: 
-                        employee.status === 'Active' ? 'var(--status-green)' :
-                        employee.status === 'On Leave' ? 'var(--status-orange)' :
-                        employee.status === 'Onboarding' ? 'var(--status-blue)' :
-                        employee.status === 'Suspended' ? 'var(--status-red)' :
-                        '#6b7280'
+                        employee.status === 'Active' ? 'var(--avatar-status-green)' :
+                        employee.status === 'On Leave' ? 'var(--avatar-status-orange)' :
+                        employee.status === 'Onboarding' ? 'var(--avatar-status-blue)' :
+                        employee.status === 'Suspended' ? 'var(--avatar-status-red)' :
+                        'var(--avatar-status-gray)'
                     }}>
                   </div>
                 </div>

@@ -173,8 +173,12 @@ export default function TeamLeaveCalendar() {
   const { registerSubmodules } = useSubmoduleNav();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
-  const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [selectedDepartment, setSelectedDepartment] = useState<string[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<string[]>([]);
+  const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [departmentSearchTerm, setDepartmentSearchTerm] = useState('');
+  const [locationSearchTerm, setLocationSearchTerm] = useState('');
   const [showConflicts, setShowConflicts] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -186,6 +190,25 @@ export default function TeamLeaveCalendar() {
       { id: 'calendar', label: 'Team Leave Calendar', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: Calendar }
     ]);
   }, [registerSubmodules]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setShowDepartmentDropdown(false);
+        setShowLocationDropdown(false);
+        // Clear search terms when closing dropdowns
+        setDepartmentSearchTerm('');
+        setLocationSearchTerm('');
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Mock data for leave requests
   const leaveRequests: LeaveRequest[] = [
@@ -375,15 +398,46 @@ export default function TeamLeaveCalendar() {
         request.department.toLowerCase().includes(searchTerm.toLowerCase()) ||
         request.location.toLowerCase().includes(searchTerm.toLowerCase());
       
-      const matchesDepartment = !selectedDepartment || request.department === selectedDepartment;
-      const matchesLocation = !selectedLocation || request.location === selectedLocation;
+      const matchesDepartment = selectedDepartment.length === 0 || selectedDepartment.includes(request.department);
+      const matchesLocation = selectedLocation.length === 0 || selectedLocation.includes(request.location);
       
       return matchesSearch && matchesDepartment && matchesLocation;
     });
   }, [leaveRequests, searchTerm, selectedDepartment, selectedLocation]);
 
-  const departments = [...new Set(leaveRequests.map(request => request.department))];
-  const locations = [...new Set(leaveRequests.map(request => request.location))];
+  // Helper functions for multi-select
+  const handleDepartmentToggle = (department: string) => {
+    setSelectedDepartment(prev => 
+      prev.includes(department) 
+        ? prev.filter(d => d !== department)
+        : [...prev, department]
+    );
+  };
+
+  const handleLocationToggle = (location: string) => {
+    setSelectedLocation(prev => 
+      prev.includes(location) 
+        ? prev.filter(l => l !== location)
+        : [...prev, location]
+    );
+  };
+
+  // Filter options based on search terms
+  const getFilteredDepartmentOptions = () => {
+    const departments = [...new Set(leaveRequests.map(request => request.department))];
+    if (!departmentSearchTerm) return departments;
+    return departments.filter(dept => 
+      dept.toLowerCase().includes(departmentSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredLocationOptions = () => {
+    const locations = [...new Set(leaveRequests.map(request => request.location))];
+    if (!locationSearchTerm) return locations;
+    return locations.filter(location => 
+      location.toLowerCase().includes(locationSearchTerm.toLowerCase())
+    );
+  };
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentDate(prev => {
@@ -503,28 +557,113 @@ export default function TeamLeaveCalendar() {
               aria-label="Search leave requests"
             />
           </div>
-          <select
-            value={selectedDepartment}
-            onChange={(e) => setSelectedDepartment(e.target.value)}
-            className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-            aria-label="Filter by department"
-          >
-            <option value="">All Departments</option>
-            {departments.map(dept => (
-              <option key={dept} value={dept}>{dept}</option>
-            ))}
-          </select>
-          <select
-            value={selectedLocation}
-            onChange={(e) => setSelectedLocation(e.target.value)}
-            className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-            aria-label="Filter by location"
-          >
-            <option value="">All Locations</option>
-            {locations.map(location => (
-              <option key={location} value={location}>{location}</option>
-            ))}
-          </select>
+          {/* Department Multi-Select */}
+          <div className="relative dropdown-container">
+            <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                 onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}>
+              <span className="text-gray-700">
+                {selectedDepartment.length === 0 ? 'All Departments' : 
+                 selectedDepartment.length === 1 ? selectedDepartment[0] :
+                 `${selectedDepartment.length} selected`}
+              </span>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            {showDepartmentDropdown && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search departments..."
+                          value={departmentSearchTerm}
+                          onChange={(e) => setDepartmentSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedDepartment.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDepartment([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedDepartment.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                {getFilteredDepartmentOptions().map((department) => (
+                  <div key={department} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                       onClick={() => handleDepartmentToggle(department)}>
+                    <input type="checkbox" checked={selectedDepartment.includes(department)} readOnly className="w-4 h-4" />
+                    <span className="text-sm text-gray-700">{department}</span>
+                  </div>
+                ))}
+                {getFilteredDepartmentOptions().length === 0 && (
+                  <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                    No departments found
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Location Multi-Select */}
+          <div className="relative dropdown-container">
+            <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                 onClick={() => setShowLocationDropdown(!showLocationDropdown)}>
+              <span className="text-gray-700">
+                {selectedLocation.length === 0 ? 'All Locations' : 
+                 selectedLocation.length === 1 ? selectedLocation[0] :
+                 `${selectedLocation.length} selected`}
+              </span>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            {showLocationDropdown && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search locations..."
+                          value={locationSearchTerm}
+                          onChange={(e) => setLocationSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedLocation.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedLocation([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedLocation.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                {getFilteredLocationOptions().map((location) => (
+                  <div key={location} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                       onClick={() => handleLocationToggle(location)}>
+                    <input type="checkbox" checked={selectedLocation.includes(location)} readOnly className="w-4 h-4" />
+                    <span className="text-sm text-gray-700">{location}</span>
+                  </div>
+                ))}
+                {getFilteredLocationOptions().length === 0 && (
+                  <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                    No locations found
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowConflicts(!showConflicts)}
             className={`px-3 py-1 border rounded text-sm transition-colors ${

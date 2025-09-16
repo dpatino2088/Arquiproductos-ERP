@@ -8,13 +8,15 @@ This document consolidates all design system standards for the RHEMO frontend ap
 2. [Status Colors](#status-colors)
 3. [Avatar Standards](#avatar-standards)
 4. [Search Card Standards](#search-card-standards)
-5. [Pagination Standards](#pagination-standards)
-6. [Tooltip Standards](#tooltip-standards)
-7. [Status Pills Standards](#status-pills-standards)
-8. [Icon Standards](#icon-standards)
-9. [Button Standards](#button-standards)
-10. [Input Field Standards](#input-field-standards)
-11. [Implementation Checklist](#implementation-checklist)
+5. [Search Bar Standard](#search-bar-standard)
+6. [Multi-Select Filter Standards](#multi-select-filter-standards)
+7. [Pagination Standards](#pagination-standards)
+8. [Tooltip Standards](#tooltip-standards)
+9. [Status Pills Standards](#status-pills-standards)
+10. [Icon Standards](#icon-standards)
+11. [Button Standards](#button-standards)
+12. [Input Field Standards](#input-field-standards)
+13. [Implementation Checklist](#implementation-checklist)
 
 ## Related Documentation
 - [Button Standards](./BUTTON_STANDARDS.md) - Complete button design system
@@ -153,6 +155,141 @@ className={`px-2 py-1 border border-gray-300 rounded transition-colors ${
 - View mode toggle (List/Grid) when applicable
 - Sort options
 - Clear filters button
+
+---
+
+## Search Bar Standard
+
+### Overview
+The standard search bar pattern provides a consistent layout for search inputs, clear filters functionality, and action buttons across all pages.
+
+### Standard Structure
+```typescript
+{/* Search Bar Container */}
+<div className="flex items-center gap-4">
+  {/* Search Input */}
+  <div className="flex-1 relative">
+    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+    <input
+      type="text"
+      placeholder="Search employees, roles, or departments..."
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+      className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+      aria-label="Search records"
+    />
+  </div>
+  
+  {/* Action Buttons */}
+  <div className="flex items-center gap-2">
+    {/* Clear Filters Button - Only show when filters are active */}
+    {(selectedStatus.length > 0 || selectedDepartment.length > 0 || selectedLocation.length > 0) && (
+      <button
+        onClick={clearAllFilters}
+        className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm bg-white text-gray-700 hover:bg-gray-50"
+        title="Clear all active filters"
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+        Clear filters
+      </button>
+    )}
+
+    {/* Filters Button */}
+    <button
+      onClick={() => setShowFilters(!showFilters)}
+      className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+        showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
+      }`}
+    >
+      <Filter className="w-4 h-4" />
+      Filters
+    </button>
+    
+    {/* Additional Action Buttons (Date, Export, etc.) */}
+  </div>
+</div>
+```
+
+### Visual Standards
+- **Container**: `flex items-center gap-4`
+- **Search Input**: `flex-1` with search icon and proper padding
+- **Action Buttons**: `flex items-center gap-2`
+- **Clear Filters Button**: 
+  - **Background**: `bg-white`
+  - **Text Color**: `text-gray-700`
+  - **Border**: `border-gray-300`
+  - **Hover**: `hover:bg-gray-50`
+  - **Icon**: X icon (`w-3 h-3`)
+  - **Position**: **BEFORE** the Filters button
+  - **Conditional Display**: Only shows when any filter arrays have length > 0
+
+### Required Elements
+- [ ] Search input with search icon
+- [ ] Clear filters button (conditional)
+- [ ] Filters button
+- [ ] Additional action buttons as needed
+- [ ] Proper spacing and alignment
+- [ ] Consistent styling across all pages
+
+**📋 Complete Documentation**: See [SEARCH_CARD_STANDARDS.md](./SEARCH_CARD_STANDARDS.md) for the complete search bar implementation guide.
+
+---
+
+## Multi-Select Filter Standards
+
+### Overview
+The new standard for multi-select filters with integrated search functionality provides superior user experience for filtering large datasets with multiple criteria.
+
+### Key Features
+- **Multi-Select**: Choose multiple options simultaneously
+- **Integrated Search**: Search within dropdown options
+- **Consistent Styling**: Matches standard form element heights
+- **Responsive Design**: Adapts to all screen sizes
+- **Accessibility**: Full keyboard navigation support
+
+### Implementation Pattern
+```typescript
+// State Management
+const [selectedItems, setSelectedItems] = useState<string[]>([]);
+const [showDropdown, setShowDropdown] = useState(false);
+const [searchTerm, setSearchTerm] = useState('');
+
+// Toggle Function
+const handleToggle = (item: string) => {
+  setSelectedItems(prev => 
+    prev.includes(item) 
+      ? prev.filter(i => i !== item)  // Remove
+      : [...prev, item]               // Add
+  );
+};
+
+// Filtering Function
+const getFilteredOptions = () => {
+  if (!searchTerm) return allOptions;
+  return allOptions.filter(option => 
+    option.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+};
+```
+
+### Visual Standards
+- **Height**: `min-h-[32px]` (matches standard inputs)
+- **Padding**: `px-3 py-1` (consistent spacing)
+- **Border**: `border border-gray-200 rounded`
+- **Search Input**: `text-xs` with `px-2 py-1`
+- **Checkboxes**: `w-4 h-4` with `gap-2` spacing
+
+### Required Elements
+- [ ] Multi-select dropdown with search
+- [ ] Checkbox selection interface
+- [ ] Search input within dropdown
+- [ ] "No items found" state
+- [ ] Click outside to close
+- [ ] Clear all filters functionality
+
+**📋 Complete Documentation**: See [SEARCH_CARD_STANDARDS.md](./SEARCH_CARD_STANDARDS.md) for the complete multi-select filter implementation guide.
 
 ---
 
@@ -379,6 +516,24 @@ All input fields, dropdowns, and buttons must use the same height for perfect al
 - [ ] Filter button always present
 - [ ] View mode toggle when applicable
 
+#### ✅ Search Bar Standard
+- [ ] Search input with search icon
+- [ ] Clear filters button (conditional display)
+- [ ] Filters button positioned after clear filters
+- [ ] Additional action buttons as needed
+- [ ] Proper spacing and alignment (`gap-4` for container, `gap-2` for buttons)
+- [ ] Consistent styling across all pages
+
+#### ✅ Multi-Select Filters
+- [ ] Multi-select dropdown with search functionality
+- [ ] Checkbox selection interface
+- [ ] Search input within dropdown
+- [ ] "No items found" state
+- [ ] Click outside to close behavior
+- [ ] Clear all filters functionality
+- [ ] Consistent height with form elements (`min-h-[32px]`)
+- [ ] Proper state management with arrays
+
 #### ✅ Pagination
 - [ ] Current page uses `bg-gray-300 text-black`
 - [ ] Previous/Next buttons with text
@@ -420,11 +575,17 @@ All input fields, dropdowns, and buttons must use the same height for perfect al
 - [ ] Avatars use Teal 700
 - [ ] Active states use gray-300
 - [ ] Icons match their context colors
+- [ ] Search bar follows standard structure
+- [ ] Clear filters button positioned correctly
+- [ ] Multi-select filters use array-based state
+- [ ] Search functionality within dropdowns
+- [ ] Proper click-outside behavior
+- [ ] Consistent filter styling
 
 ---
 
 ## Related Documents
-- [Search Card Standards](./SEARCH_CARD_STANDARDS.md)
+- [Search Card Standards](./SEARCH_CARD_STANDARDS.md) - **Includes new Multi-Select Filter Standards**
 - [Pagination Standards](./PAGINATION_STANDARDS.md)
 - [Tooltip Standards](./TOOLTIP_STANDARDS.md)
 - [Security Implementation](./SECURITY_IMPLEMENTATION.md)
@@ -436,6 +597,8 @@ All input fields, dropdowns, and buttons must use the same height for perfect al
 - **v1.1** - Added status color system
 - **v1.2** - Added avatar and tooltip standards
 - **v1.3** - Added complete implementation checklist
+- **v1.4** - Added Multi-Select Filter Standards with integrated search functionality
+- **v1.5** - Added Search Bar Standard with clear filters button and consistent layout
 
 ---
 

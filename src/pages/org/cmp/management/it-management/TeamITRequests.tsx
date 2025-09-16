@@ -219,9 +219,15 @@ export default function TeamITRequests() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [sortBy, setSortBy] = useState<'title' | 'requestType' | 'requestedBy' | 'status' | 'requestDate'>('requestDate');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedRequestType, setSelectedRequestType] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
+  const [selectedRequestType, setSelectedRequestType] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState<string[]>([]);
+  const [showRequestTypeDropdown, setShowRequestTypeDropdown] = useState(false);
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
+  const [requestTypeSearchTerm, setRequestTypeSearchTerm] = useState('');
+  const [statusSearchTerm, setStatusSearchTerm] = useState('');
+  const [departmentSearchTerm, setDepartmentSearchTerm] = useState('');
 
   useEffect(() => {
     // Register submodule tabs for IT Management section
@@ -231,6 +237,27 @@ export default function TeamITRequests() {
       { id: 'team-it-requests', label: 'Team IT Requests', href: '/org/cmp/management/it-management/team-it-requests', icon: MessageSquare }
     ]);
   }, [registerSubmodules]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setShowRequestTypeDropdown(false);
+        setShowStatusDropdown(false);
+        setShowDepartmentDropdown(false);
+        // Clear search terms when closing dropdowns
+        setRequestTypeSearchTerm('');
+        setStatusSearchTerm('');
+        setDepartmentSearchTerm('');
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const itRequests: ITRequest[] = [
     {
@@ -473,9 +500,9 @@ export default function TeamITRequests() {
         request.requestedByJobTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
         request.requestedByDepartment.toLowerCase().includes(searchTerm.toLowerCase());
       
-      const matchesRequestType = !selectedRequestType || request.requestType === selectedRequestType;
-      const matchesStatus = !selectedStatus || request.status === selectedStatus;
-      const matchesDepartment = !selectedDepartment || request.requestedByDepartment === selectedDepartment;
+      const matchesRequestType = selectedRequestType.length === 0 || selectedRequestType.includes(request.requestType);
+      const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(request.status);
+      const matchesDepartment = selectedDepartment.length === 0 || selectedDepartment.includes(request.requestedByDepartment);
       
       return matchesSearch && matchesRequestType && matchesStatus && matchesDepartment;
     });
@@ -539,14 +566,63 @@ export default function TeamITRequests() {
 
   const clearFilters = () => {
     setSearchTerm('');
-    setSelectedRequestType('');
-    setSelectedStatus('');
-    setSelectedDepartment('');
+    setSelectedRequestType([]);
+    setSelectedStatus([]);
+    setSelectedDepartment([]);
+    setRequestTypeSearchTerm('');
+    setStatusSearchTerm('');
+    setDepartmentSearchTerm('');
   };
 
-  const requestTypes = [...new Set(itRequests.map(request => request.requestType))];
-  const statuses = [...new Set(itRequests.map(request => request.status))];
-  const departments = [...new Set(itRequests.map(request => request.requestedByDepartment))];
+  // Helper functions for multi-select
+  const handleRequestTypeToggle = (requestType: string) => {
+    setSelectedRequestType(prev => 
+      prev.includes(requestType) 
+        ? prev.filter(r => r !== requestType)
+        : [...prev, requestType]
+    );
+  };
+
+  const handleStatusToggle = (status: string) => {
+    setSelectedStatus(prev => 
+      prev.includes(status) 
+        ? prev.filter(s => s !== status)
+        : [...prev, status]
+    );
+  };
+
+  const handleDepartmentToggle = (department: string) => {
+    setSelectedDepartment(prev => 
+      prev.includes(department) 
+        ? prev.filter(d => d !== department)
+        : [...prev, department]
+    );
+  };
+
+  // Filter options based on search terms
+  const getFilteredRequestTypeOptions = () => {
+    const requestTypes = [...new Set(itRequests.map(request => request.requestType))];
+    if (!requestTypeSearchTerm) return requestTypes;
+    return requestTypes.filter(type => 
+      type.toLowerCase().includes(requestTypeSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredStatusOptions = () => {
+    const statuses = [...new Set(itRequests.map(request => request.status))];
+    if (!statusSearchTerm) return statuses;
+    return statuses.filter(status => 
+      status.toLowerCase().includes(statusSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredDepartmentOptions = () => {
+    const departments = [...new Set(itRequests.map(request => request.requestedByDepartment))];
+    if (!departmentSearchTerm) return departments;
+    return departments.filter(dept => 
+      dept.toLowerCase().includes(departmentSearchTerm.toLowerCase())
+    );
+  };
 
   return (
     <div className="p-6">
@@ -631,42 +707,167 @@ export default function TeamITRequests() {
         {showFilters && (
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-              <select
-                value={selectedRequestType}
-                onChange={(e) => setSelectedRequestType(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by request type"
-                id="request-type-filter"
-              >
-                <option value="">All Request Types</option>
-                {requestTypes.map(type => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
-              <select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by status"
-                id="status-filter"
-              >
-                <option value="">All Statuses</option>
-                {statuses.map(status => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-              <select
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by department"
-                id="department-filter"
-              >
-                <option value="">All Departments</option>
-                {departments.map(dept => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
+              {/* Request Type Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowRequestTypeDropdown(!showRequestTypeDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedRequestType.length === 0 ? 'All Request Types' : 
+                     selectedRequestType.length === 1 ? selectedRequestType[0] :
+                     `${selectedRequestType.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showRequestTypeDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search request types..."
+                          value={requestTypeSearchTerm}
+                          onChange={(e) => setRequestTypeSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedRequestType.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedRequestType([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedRequestType.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredRequestTypeOptions().map((requestType) => (
+                      <div key={requestType} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleRequestTypeToggle(requestType)}>
+                        <input type="checkbox" checked={selectedRequestType.includes(requestType)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{requestType}</span>
+                      </div>
+                    ))}
+                    {getFilteredRequestTypeOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No request types found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Status Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowStatusDropdown(!showStatusDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedStatus.length === 0 ? 'All Statuses' : 
+                     selectedStatus.length === 1 ? selectedStatus[0] :
+                     `${selectedStatus.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showStatusDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search statuses..."
+                          value={statusSearchTerm}
+                          onChange={(e) => setStatusSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedStatus.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedStatus([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedStatus.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredStatusOptions().map((status) => (
+                      <div key={status} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleStatusToggle(status)}>
+                        <input type="checkbox" checked={selectedStatus.includes(status)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{status}</span>
+                      </div>
+                    ))}
+                    {getFilteredStatusOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No statuses found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Department Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedDepartment.length === 0 ? 'All Departments' : 
+                     selectedDepartment.length === 1 ? selectedDepartment[0] :
+                     `${selectedDepartment.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showDepartmentDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search departments..."
+                          value={departmentSearchTerm}
+                          onChange={(e) => setDepartmentSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedDepartment.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDepartment([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedDepartment.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredDepartmentOptions().map((department) => (
+                      <div key={department} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleDepartmentToggle(department)}>
+                        <input type="checkbox" checked={selectedDepartment.includes(department)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{department}</span>
+                      </div>
+                    ))}
+                    {getFilteredDepartmentOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No departments found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex justify-between items-center">
               <button
@@ -785,7 +986,7 @@ export default function TeamITRequests() {
                 <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                   Cost
                 </th>
-                <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
                   Actions
                 </th>
               </tr>
@@ -849,8 +1050,8 @@ export default function TeamITRequests() {
                         {request.estimatedCost ? `${request.currency} ${request.estimatedCost.toFixed(2)}` : 'N/A'}
                       </span>
                     </td>
-                    <td className="py-2 px-4">
-                      <div className="flex items-center gap-2">
+                    <td className="py-2 px-2 w-24">
+                      <div className="flex items-center">
                         <button
                           className="p-1 hover:bg-gray-100 rounded transition-colors"
                           aria-label={`View details for ${request.title}`}

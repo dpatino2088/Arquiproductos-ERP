@@ -148,6 +148,15 @@
 --status-yellow: #a16207;              /* Yellow status - Yellow 700 for better contrast */
 --status-orange: #c2410c;              /* Orange status - Orange 700 for better contrast */
 --status-gray: #6b7280;                /* Gray status - Gray 500 for neutral/inactive states */
+
+/* Avatar status dots - Brighter colors for better visibility */
+--avatar-status-green: #16a34a;        /* Green 600 - Brighter for avatar dots */
+--avatar-status-red: #dc2626;          /* Red 600 - Brighter for avatar dots */
+--avatar-status-yellow: #eab308;       /* Yellow 500 - Brighter for avatar dots */
+--avatar-status-purple: #9333ea;       /* Purple 600 - Brighter for avatar dots */
+--avatar-status-blue: #2563eb;         /* Blue 600 - Brighter for avatar dots */
+--avatar-status-orange: #ea580c;       /* Orange 600 - Brighter for avatar dots */
+--avatar-status-gray: #d1d5db;         /* Gray 300 - Brighter for avatar dots */
     
     /* Utility colors */
     --focus-ring: var(--brand-primary);     /* Focus indicator - primary teal */
@@ -217,6 +226,15 @@
 .bg-status-yellow { background-color: var(--status-yellow); }
 .bg-status-orange { background-color: var(--status-orange); }
 .bg-status-gray { background-color: var(--status-gray); }
+
+/* Avatar status dot backgrounds - Brighter colors */
+.bg-avatar-status-green { background-color: var(--avatar-status-green); }
+.bg-avatar-status-red { background-color: var(--avatar-status-red); }
+.bg-avatar-status-yellow { background-color: var(--avatar-status-yellow); }
+.bg-avatar-status-purple { background-color: var(--avatar-status-purple); }
+.bg-avatar-status-blue { background-color: var(--avatar-status-blue); }
+.bg-avatar-status-orange { background-color: var(--avatar-status-orange); }
+.bg-avatar-status-gray { background-color: var(--avatar-status-gray); }
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
   .bg-row-highlight { background-color: var(--row-highlight); }

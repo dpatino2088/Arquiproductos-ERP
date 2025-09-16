@@ -5,6 +5,7 @@ import {
   Clock, 
   Calendar, 
   MapPin, 
+  Users,
   Search, 
   Filter, 
   ChevronLeft, 
@@ -30,7 +31,9 @@ import {
   Minus,
   MessageSquare,
   Plus,
-  Send
+  Send,
+  Coffee,
+  Timer
 } from 'lucide-react';
 
 // Function to generate avatar initials (100% reliable, works everywhere)
@@ -42,6 +45,20 @@ const generateAvatarInitials = (firstName: string, lastName: string) => {
 // Using primary Teal 700 for all avatars for consistency
 const generateAvatarColor = (firstName: string, lastName: string) => {
   return '#008383'; // Primary Teal 700
+};
+
+// Function to get proportional dot size based on avatar size
+const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
+  switch (avatarSize) {
+    case 'sm': // w-8 h-8 (32px)
+      return 'w-2.5 h-2.5'; // 10px
+    case 'md': // w-10 h-10 (40px)
+      return 'w-3.5 h-3.5'; // 14px
+    case 'lg': // w-12 h-12 (48px)
+      return 'w-4 h-4'; // 16px
+    default:
+      return 'w-2.5 h-2.5';
+  }
 };
 
 interface TimeEntry {
@@ -166,12 +183,20 @@ export default function TeamAttendance() {
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [sortBy, setSortBy] = useState<'employeeName' | 'department' | 'clockIn' | 'totalHours' | 'status' | 'location'>('employeeName');
+  const [sortBy, setSortBy] = useState<'employeeName' | 'department' | 'clockIn' | 'totalHours' | 'location'>('employeeName');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
-  const [selectedLocation, setSelectedLocation] = useState<string>('');
-  const [selectedFlags, setSelectedFlags] = useState<string>('');
+  const [selectedDepartment, setSelectedDepartment] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<string[]>([]);
+  const [selectedFlags, setSelectedFlags] = useState<string[]>([]);
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [showDepartmentDropdown, setShowDepartmentDropdown] = useState(false);
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [showFlagsDropdown, setShowFlagsDropdown] = useState(false);
+  const [statusSearchTerm, setStatusSearchTerm] = useState('');
+  const [departmentSearchTerm, setDepartmentSearchTerm] = useState('');
+  const [locationSearchTerm, setLocationSearchTerm] = useState('');
+  const [flagsSearchTerm, setFlagsSearchTerm] = useState('');
   const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set());
@@ -214,6 +239,15 @@ export default function TeamAttendance() {
       if (!target.closest('.dropdown-container')) {
         setShowSessionDropdown(false);
         setShowEventDropdown(false);
+        setShowStatusDropdown(false);
+        setShowDepartmentDropdown(false);
+        setShowLocationDropdown(false);
+        setShowFlagsDropdown(false);
+        // Clear search terms when closing dropdowns
+        setStatusSearchTerm('');
+        setDepartmentSearchTerm('');
+        setLocationSearchTerm('');
+        setFlagsSearchTerm('');
       }
     };
 
@@ -582,9 +616,9 @@ export default function TeamAttendance() {
   useEffect(() => {
     // Register submodule tabs for time and attendance
     registerSubmodules('Time & Attendance', [
-      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
+      { id: 'whos-working', label: "Who's Working", href: '/org/cmp/management/time-and-attendance/whos-working', icon: Users },
       { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
-      { id: 'team-geolocation', label: 'Team Geolocation', href: '/org/cmp/management/time-and-attendance/team-geolocation', icon: MapPin }
+      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar }
     ]);
   }, [registerSubmodules]);
 
@@ -1592,38 +1626,81 @@ export default function TeamAttendance() {
   };
 
   // Helper function to get flags for incidents
-  const getRecordFlags = (record: AttendanceRecord): { type: 'incident' | 'resolved' | 'rejected' | 'acknowledged', message: string }[] => {
-    const flags: { type: 'incident' | 'resolved' | 'rejected' | 'acknowledged', message: string }[] = [];
+  const getRecordFlags = (record: AttendanceRecord): { type: string, message: string }[] => {
+    const flags: { type: string, message: string }[] = [];
     
-    // Check for overtime
+    // Time-based flags
     const overtimeHours = getOvertimeHours(record.totalHours);
     if (overtimeHours > 0) {
-      flags.push({ type: 'incident', message: `Overtime: ${overtimeHours.toFixed(2)} hours` });
+      flags.push({ type: 'Late Exit / Overtime', message: `Overtime: ${overtimeHours.toFixed(2)} hours` });
     }
     
     // Check for late arrival
     if (record.scheduledClockIn && record.timeEntries[0]?.clockIn && record.timeEntries[0].clockIn > record.scheduledClockIn) {
-      flags.push({ type: 'incident', message: 'Late arrival' });
+      flags.push({ type: 'Late Entry', message: 'Late arrival' });
     }
     
     // Check for early departure
     if (record.scheduledClockOut && record.timeEntries[0]?.clockOut && record.timeEntries[0].clockOut < record.scheduledClockOut) {
-      flags.push({ type: 'incident', message: 'Early departure' });
+      flags.push({ type: 'Early Exit', message: 'Early departure' });
     }
     
-    // Check for wrong location
-    if (record.scheduledLocation && record.location !== record.scheduledLocation) {
-      flags.push({ type: 'incident', message: 'Wrong location' });
+    // Check for early entry
+    if (record.scheduledClockIn && record.timeEntries[0]?.clockIn && record.timeEntries[0].clockIn < record.scheduledClockIn) {
+      flags.push({ type: 'Early Entry', message: 'Early arrival' });
     }
     
-    // Check for missing clock out (if clock in exists but no clock out)
+    // Absence-related flags
+    if (record.status === 'absent') {
+      flags.push({ type: 'Absence / No-show', message: 'Scheduled but did not attend' });
+    }
+    
+    // Event integrity flags
     if (record.timeEntries[0]?.clockIn && !record.timeEntries[0]?.clockOut) {
-      flags.push({ type: 'incident', message: 'Missing clock out' });
+      flags.push({ type: 'Missing Clock-out', message: 'Missing clock out' });
     }
     
-    // Check for missing clock in (if scheduled but no clock in)
     if (record.scheduledClockIn && !record.timeEntries[0]?.clockIn) {
-      flags.push({ type: 'incident', message: 'Missing clock in' });
+      flags.push({ type: 'Missing Clock-in', message: 'Missing clock in' });
+    }
+    
+    // Check for duplicate entries
+    if (record.timeEntries.length > 1) {
+      flags.push({ type: 'Duplicate Entries', message: 'Duplicate entries' });
+    }
+    
+    // Check for inconsistent pair (clock-out before clock-in)
+    if (record.timeEntries[0]?.clockIn && record.timeEntries[0]?.clockOut && 
+        record.timeEntries[0].clockOut < record.timeEntries[0].clockIn) {
+      flags.push({ type: 'Inconsistent Pair', message: 'Clock-out before clock-in' });
+    }
+    
+    // Break-related flags
+    const totalBreakDuration = record.breaks.reduce((sum, breakItem) => sum + (breakItem.duration || 0), 0);
+    if (totalBreakDuration > 60) { // More than 1 hour
+      flags.push({ type: 'Extended Break', message: 'Extended break' });
+    }
+    
+    if (totalBreakDuration < 15 && totalBreakDuration > 0) { // Less than 15 minutes
+      flags.push({ type: 'Short Break', message: 'Short break' });
+    }
+    
+    if (record.timeEntries.length > 2) {
+      flags.push({ type: 'Unscheduled Break', message: 'Unscheduled break' });
+    }
+    
+    // Schedule deviations
+    if (record.scheduledLocation && record.location !== record.scheduledLocation) {
+      flags.push({ type: 'Wrong Location', message: 'Wrong location' });
+    }
+    
+    if (record.scheduledClockIn && record.timeEntries[0]?.clockIn) {
+      const scheduledTime = new Date(record.scheduledClockIn).getTime();
+      const actualTime = new Date(record.timeEntries[0].clockIn).getTime();
+      const timeDifferenceMinutes = Math.abs(actualTime - scheduledTime) / (1000 * 60);
+      if (timeDifferenceMinutes > 30) {
+        flags.push({ type: 'Schedule Deviation', message: 'Schedule deviation' });
+      }
     }
     
     // Add some resolved, rejected, and acknowledged flags for demo (in real app, this would come from backend)
@@ -1653,6 +1730,12 @@ export default function TeamAttendance() {
   // Helper function to check if record has any flags
   const hasFlags = (record: AttendanceRecord): boolean => {
     return getRecordFlags(record).length > 0;
+  };
+
+  // Helper function to check if record has a specific flag type
+  const hasSpecificFlag = (record: AttendanceRecord, flagType: string): boolean => {
+    const flags = getRecordFlags(record);
+    return flags.some(flag => flag.type === flagType);
   };
 
   // Helper function to check if record was manually modified
@@ -1716,7 +1799,9 @@ export default function TeamAttendance() {
       return null; // No flag if no incidents
     }
 
-    const hasIncidents = flags.some(flag => flag.type === 'incident');
+    const hasIncidents = flags.some(flag => 
+      !['resolved', 'rejected', 'acknowledged'].includes(flag.type)
+    );
     const hasResolved = flags.some(flag => flag.type === 'resolved');
     const hasRejected = flags.some(flag => flag.type === 'rejected');
     const hasAcknowledged = flags.some(flag => flag.type === 'acknowledged');
@@ -1758,7 +1843,7 @@ export default function TeamAttendance() {
             <div className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-white text-xs rounded whitespace-nowrap z-50 ${bgColor}`}>
               <div className="space-y-1">
                 {flags.map((flag, index) => (
-                  <div key={index}>{flag.message}</div>
+                  <div key={index}>{flag.type}</div>
                 ))}
               </div>
               <div className={`absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent ${
@@ -1793,10 +1878,15 @@ export default function TeamAttendance() {
         record.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
         record.department.toLowerCase().includes(searchTerm.toLowerCase());
       
-      const matchesDepartment = !selectedDepartment || record.department === selectedDepartment;
-      const matchesStatus = !selectedStatus || record.status === selectedStatus;
-      const matchesLocation = !selectedLocation || record.location === selectedLocation;
-      const matchesFlags = !selectedFlags || (selectedFlags === 'flagged' ? hasFlags(record) : !hasFlags(record));
+      const matchesDepartment = selectedDepartment.length === 0 || selectedDepartment.includes(record.department);
+      const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(record.status);
+      const matchesLocation = selectedLocation.length === 0 || selectedLocation.includes(record.location);
+      const matchesFlags = selectedFlags.length === 0 || selectedFlags.some(flag => {
+        if (flag === 'flagged') return hasFlags(record);
+        if (flag === 'clean') return !hasFlags(record);
+        // For specific flag types, check if the record has that specific flag
+        return hasSpecificFlag(record, flag);
+      });
       
       return matchesSearch && matchesDepartment && matchesStatus && matchesLocation && matchesFlags;
     });
@@ -1833,23 +1923,23 @@ export default function TeamAttendance() {
     }
   }, [currentPage, validCurrentPage]);
 
-  // Function to get status dot color for avatars
+  // Function to get status dot color for avatars - Using brighter colors for better visibility
   const getStatusDotColor = (record: AttendanceRecord) => {
     const currentStatus = getCurrentStatus(record);
     
     switch (currentStatus) {
       case 'present':
-        return 'var(--status-green)';
+        return 'var(--avatar-status-green)'; // Green 600 - Brighter for avatar dots
       case 'on-break':
-        return 'var(--status-yellow)';
+        return 'var(--avatar-status-yellow)'; // Yellow 500 - Brighter for avatar dots
       case 'on-transfer':
-        return 'var(--status-blue)';
+        return 'var(--avatar-status-blue)'; // Blue 600 - Brighter for avatar dots
       case 'on-leave':
-        return 'var(--status-purple)';
+        return 'var(--avatar-status-purple)'; // Purple 600 - Brighter for avatar dots
       case 'absent':
-        return 'var(--status-red)';
+        return 'var(--avatar-status-red)'; // Red 600 - Brighter for avatar dots
       default:
-        return 'var(--status-gray)'; // #6b7280
+        return 'var(--avatar-status-gray)'; // Gray 300 - Brighter for avatar dots
     }
   };
 
@@ -2101,11 +2191,160 @@ export default function TeamAttendance() {
   };
 
   const clearFilters = () => {
-    setSelectedDepartment('');
-    setSelectedStatus('');
-    setSelectedLocation('');
-    setSelectedFlags('');
+    setSelectedDepartment([]);
+    setSelectedStatus([]);
+    setSelectedLocation([]);
+    setSelectedFlags([]);
     setSearchTerm('');
+    setStatusSearchTerm('');
+    setDepartmentSearchTerm('');
+    setLocationSearchTerm('');
+    setFlagsSearchTerm('');
+  };
+
+  // Helper functions for multi-select
+  const handleStatusToggle = (status: string) => {
+    setSelectedStatus(prev => 
+      prev.includes(status) 
+        ? prev.filter(s => s !== status)
+        : [...prev, status]
+    );
+  };
+
+  const handleDepartmentToggle = (department: string) => {
+    setSelectedDepartment(prev => 
+      prev.includes(department) 
+        ? prev.filter(d => d !== department)
+        : [...prev, department]
+    );
+  };
+
+  const handleLocationToggle = (location: string) => {
+    setSelectedLocation(prev => 
+      prev.includes(location) 
+        ? prev.filter(l => l !== location)
+        : [...prev, location]
+    );
+  };
+
+  const handleFlagsToggle = (flag: string) => {
+    setSelectedFlags(prev => 
+      prev.includes(flag) 
+        ? prev.filter(f => f !== flag)
+        : [...prev, flag]
+    );
+  };
+
+  // Summary card click handlers
+  const handleSummaryCardClick = (cardType: string) => {
+    // Check if this card is currently active
+    const isCurrentlyActive = isSummaryCardActive(cardType);
+    
+    if (isCurrentlyActive) {
+      // If active, clear all filters (toggle off)
+      setSelectedStatus([]);
+      setSelectedDepartment([]);
+      setSelectedLocation([]);
+      setSelectedFlags([]);
+    } else {
+      // If not active, clear other filters and set this card's flags
+      setSelectedStatus([]);
+      setSelectedDepartment([]);
+      setSelectedLocation([]);
+      
+      // Set flags based on card type
+      switch (cardType) {
+        case 'time-related':
+          setSelectedFlags(['Early Entry', 'Late Entry', 'Early Exit']);
+          break;
+        case 'event-integrity':
+          setSelectedFlags(['Missing Clock-in', 'Missing Clock-out', 'Duplicate Entries', 'Inconsistent Pair']);
+          break;
+        case 'schedule-deviation':
+          setSelectedFlags(['Schedule Deviation', 'Wrong Location']);
+          break;
+        case 'break-related':
+          setSelectedFlags(['Extended Break', 'Short Break', 'Unscheduled Break']);
+          break;
+        case 'overtime':
+          setSelectedFlags(['Late Exit / Overtime']);
+          break;
+        default:
+          setSelectedFlags([]);
+      }
+    }
+  };
+
+  const isSummaryCardActive = (cardType: string) => {
+    const expectedFlags = (() => {
+      switch (cardType) {
+        case 'time-related':
+          return ['Early Entry', 'Late Entry', 'Early Exit'];
+        case 'event-integrity':
+          return ['Missing Clock-in', 'Missing Clock-out', 'Duplicate Entries', 'Inconsistent Pair'];
+        case 'schedule-deviation':
+          return ['Schedule Deviation', 'Wrong Location'];
+        case 'break-related':
+          return ['Extended Break', 'Short Break', 'Unscheduled Break'];
+        case 'overtime':
+          return ['Late Exit / Overtime'];
+        default:
+          return [];
+      }
+    })();
+    
+    // Check if only the expected flags are selected and no other filters are active
+    return selectedFlags.length === expectedFlags.length && 
+           expectedFlags.every(flag => selectedFlags.includes(flag)) &&
+           selectedStatus.length === 0 && 
+           selectedDepartment.length === 0 && 
+           selectedLocation.length === 0;
+  };
+
+  // Filter options based on search terms
+  const getFilteredStatusOptions = () => {
+    const statusOptions = ['present', 'absent', 'late', 'partial', 'on-break', 'on-leave'];
+    if (!statusSearchTerm) return statusOptions;
+    return statusOptions.filter(status => 
+      status.replace('-', ' ').toLowerCase().includes(statusSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredDepartmentOptions = () => {
+    const departmentOptions = ['Engineering', 'Design', 'Management', 'Marketing', 'Product', 'Human Resources', 'Sales'];
+    if (!departmentSearchTerm) return departmentOptions;
+    return departmentOptions.filter(dept => 
+      dept.toLowerCase().includes(departmentSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredLocationOptions = () => {
+    const locationOptions = ['Office', 'Remote'];
+    if (!locationSearchTerm) return locationOptions;
+    return locationOptions.filter(location => 
+      location.toLowerCase().includes(locationSearchTerm.toLowerCase())
+    );
+  };
+
+  const getFilteredFlagsOptions = () => {
+    const flagsOptions = [
+      // General flags
+      'flagged', 'clean',
+      // Time-based flags
+      'Early Entry', 'Late Entry', 'Early Exit', 'Late Exit / Overtime',
+      // Absence-related flags
+      'Absence / No-show', 'Partial Absence',
+      // Event integrity flags
+      'Missing Clock-in', 'Missing Clock-out', 'Duplicate Entries', 'Inconsistent Pair',
+      // Break-related flags
+      'Extended Break', 'Short Break', 'Unscheduled Break',
+      // Schedule deviations
+      'Schedule Deviation', 'Wrong Location'
+    ];
+    if (!flagsSearchTerm) return flagsOptions;
+    return flagsOptions.filter(flag => 
+      flag.toLowerCase().includes(flagsSearchTerm.toLowerCase())
+    );
   };
 
   const openDetailsModal = (record: AttendanceRecord) => {
@@ -3157,61 +3396,135 @@ export default function TeamAttendance() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <button 
+          onClick={() => handleSummaryCardClick('time-related')}
+          className={`bg-white border rounded-lg p-4 transition-all duration-200 hover:shadow-md cursor-pointer ${
+            isSummaryCardActive('time-related')
+              ? 'border-primary shadow-md'
+              : 'border-gray-200 hover:border-gray-300'
+          }`}
+          title="Filter by Time Related flags"
+        >
           <div className="flex items-center gap-3">
-            <CheckCircle className="h-5 w-5 text-status-green" />
-            <div>
-              <div className="text-2xl font-bold">
-                {attendanceRecords.filter(r => r.status === 'present').length}
-              </div>
-              <div className="text-sm text-muted-foreground">Present</div>
+            <Flag className={`h-5 w-5 ${
+              attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Early Entry', 'Late Entry', 'Early Exit'].includes(flag.type));
+              }).length === 0 ? 'text-status-green' : 'text-status-red'
+            }`} />
+            <div className="text-2xl font-bold text-gray-900">
+              {attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Early Entry', 'Late Entry', 'Early Exit'].includes(flag.type));
+              }).length}
             </div>
+            <div className="text-sm text-muted-foreground">Time Related</div>
           </div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        </button>
+        
+        <button 
+          onClick={() => handleSummaryCardClick('event-integrity')}
+          className={`bg-white border rounded-lg p-4 transition-all duration-200 hover:shadow-md cursor-pointer ${
+            isSummaryCardActive('event-integrity')
+              ? 'border-primary shadow-md'
+              : 'border-gray-200 hover:border-gray-300'
+          }`}
+          title="Filter by Event Integrity flags"
+        >
           <div className="flex items-center gap-3">
-            <XCircle className="h-5 w-5 text-status-red" />
-            <div>
-              <div className="text-2xl font-bold">
-                {attendanceRecords.filter(r => r.status === 'absent').length}
-              </div>
-              <div className="text-sm text-muted-foreground">Absent</div>
+            <Flag className={`h-5 w-5 ${
+              attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Missing Clock-in', 'Missing Clock-out', 'Duplicate Entries', 'Inconsistent Pair'].includes(flag.type));
+              }).length === 0 ? 'text-status-green' : 'text-status-red'
+            }`} />
+            <div className="text-2xl font-bold text-gray-900">
+              {attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Missing Clock-in', 'Missing Clock-out', 'Duplicate Entries', 'Inconsistent Pair'].includes(flag.type));
+              }).length}
             </div>
+            <div className="text-sm text-muted-foreground">Event Integrity</div>
           </div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        </button>
+        
+        <button 
+          onClick={() => handleSummaryCardClick('schedule-deviation')}
+          className={`bg-white border rounded-lg p-4 transition-all duration-200 hover:shadow-md cursor-pointer ${
+            isSummaryCardActive('schedule-deviation')
+              ? 'border-primary shadow-md'
+              : 'border-gray-200 hover:border-gray-300'
+          }`}
+          title="Filter by Schedule Deviation flags"
+        >
           <div className="flex items-center gap-3">
-            <AlertTriangle className="h-5 w-5 text-status-orange" />
-            <div>
-              <div className="text-2xl font-bold">
-                {attendanceRecords.filter(r => r.status === 'late').length}
-              </div>
-              <div className="text-sm text-muted-foreground">Late</div>
+            <Flag className={`h-5 w-5 ${
+              attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Schedule Deviation', 'Wrong Location'].includes(flag.type));
+              }).length === 0 ? 'text-status-green' : 'text-status-red'
+            }`} />
+            <div className="text-2xl font-bold text-gray-900">
+              {attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Schedule Deviation', 'Wrong Location'].includes(flag.type));
+              }).length}
             </div>
+            <div className="text-sm text-muted-foreground">Schedule Deviation</div>
           </div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        </button>
+        
+        <button 
+          onClick={() => handleSummaryCardClick('break-related')}
+          className={`bg-white border rounded-lg p-4 transition-all duration-200 hover:shadow-md cursor-pointer ${
+            isSummaryCardActive('break-related')
+              ? 'border-primary shadow-md'
+              : 'border-gray-200 hover:border-gray-300'
+          }`}
+          title="Filter by Break Related flags"
+        >
           <div className="flex items-center gap-3">
-            <ClockIcon className="h-5 w-5 text-status-purple" />
-            <div>
-              <div className="text-2xl font-bold">
-                {attendanceRecords.filter(r => r.status === 'on-break').length}
-              </div>
-              <div className="text-sm text-muted-foreground">On Break</div>
+            <Flag className={`h-5 w-5 ${
+              attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Extended Break', 'Short Break', 'Unscheduled Break'].includes(flag.type));
+              }).length === 0 ? 'text-status-green' : 'text-status-red'
+            }`} />
+            <div className="text-2xl font-bold text-gray-900">
+              {attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => ['Extended Break', 'Short Break', 'Unscheduled Break'].includes(flag.type));
+              }).length}
             </div>
+            <div className="text-sm text-muted-foreground">Break Related</div>
           </div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        </button>
+        
+        <button 
+          onClick={() => handleSummaryCardClick('overtime')}
+          className={`bg-white border rounded-lg p-4 transition-all duration-200 hover:shadow-md cursor-pointer ${
+            isSummaryCardActive('overtime')
+              ? 'border-primary shadow-md'
+              : 'border-gray-200 hover:border-gray-300'
+          }`}
+          title="Filter by Overtime flags"
+        >
           <div className="flex items-center gap-3">
-            <ClockIcon className="h-5 w-5 text-primary" />
-            <div>
-              <div className="text-2xl font-bold">
-                {attendanceRecords.filter(r => r.status === 'on-leave').length}
-              </div>
-              <div className="text-sm text-muted-foreground">PTO & Leave</div>
+            <Flag className={`h-5 w-5 ${
+              attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => flag.type === 'Late Exit / Overtime');
+              }).length === 0 ? 'text-status-green' : 'text-status-red'
+            }`} />
+            <div className="text-2xl font-bold text-gray-900">
+              {attendanceRecords.filter(r => {
+                const flags = getRecordFlags(r);
+                return flags.some(flag => flag.type === 'Late Exit / Overtime');
+              }).length}
             </div>
+            <div className="text-sm text-muted-foreground">Overtime</div>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Search and Filters */}
@@ -3232,13 +3545,20 @@ export default function TeamAttendance() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Select date"
-              />
+              {/* Clear Filters Button - Only show when filters are active */}
+              {(selectedStatus.length > 0 || selectedDepartment.length > 0 || selectedLocation.length > 0 || selectedFlags.length > 0) && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm bg-white text-gray-700 hover:bg-gray-50"
+                  title="Clear all active filters"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Clear filters
+                </button>
+              )}
+
               <button
                 className={`px-3 py-1 border rounded text-sm transition-colors ${
                   showFilters
@@ -3251,6 +3571,13 @@ export default function TeamAttendance() {
                 <Filter className="w-4 h-4 inline mr-1" />
                 Filters
               </button>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Select date"
+              />
             </div>
           </div>
         </div>
@@ -3258,62 +3585,235 @@ export default function TeamAttendance() {
         {showFilters && (
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <select 
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by status"
-                id="status-filter"
-              >
-                <option value="">All Statuses</option>
-                <option value="present">Present</option>
-                <option value="absent">Absent</option>
-                <option value="late">Late</option>
-                <option value="partial">Partial</option>
-                <option value="on-break">On Break</option>
-                <option value="on-leave">On Leave</option>
-              </select>
+              {/* Status Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowStatusDropdown(!showStatusDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedStatus.length === 0 ? 'All Statuses' : 
+                     selectedStatus.length === 1 ? selectedStatus[0]?.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) :
+                     `${selectedStatus.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showStatusDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search statuses..."
+                          value={statusSearchTerm}
+                          onChange={(e) => setStatusSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedStatus.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedStatus([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedStatus.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredStatusOptions().map((status) => (
+                      <div key={status} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleStatusToggle(status)}>
+                        <input type="checkbox" checked={selectedStatus.includes(status)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">
+                          {status === 'present' ? 'Present' :
+                           status === 'absent' ? 'Absent' :
+                           status === 'late' ? 'Late' :
+                           status === 'partial' ? 'Partial' :
+                           status === 'on-break' ? 'On Break' :
+                           status === 'on-leave' ? 'On Leave' :
+                           status}
+                        </span>
+                      </div>
+                    ))}
+                    {getFilteredStatusOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No statuses found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <select 
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by department"
-                id="department-filter"
-              >
-                <option value="">All Departments</option>
-                <option value="Engineering">Engineering</option>
-                <option value="Design">Design</option>
-                <option value="Management">Management</option>
-                <option value="Marketing">Marketing</option>
-                <option value="Product">Product</option>
-                <option value="Human Resources">Human Resources</option>
-                <option value="Sales">Sales</option>
-              </select>
+              {/* Department Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowDepartmentDropdown(!showDepartmentDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedDepartment.length === 0 ? 'All Departments' : 
+                     selectedDepartment.length === 1 ? selectedDepartment[0] :
+                     `${selectedDepartment.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showDepartmentDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search departments..."
+                          value={departmentSearchTerm}
+                          onChange={(e) => setDepartmentSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedDepartment.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDepartment([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedDepartment.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredDepartmentOptions().map((department) => (
+                      <div key={department} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleDepartmentToggle(department)}>
+                        <input type="checkbox" checked={selectedDepartment.includes(department)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{department}</span>
+                      </div>
+                    ))}
+                    {getFilteredDepartmentOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No departments found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <select 
-                value={selectedLocation}
-                onChange={(e) => setSelectedLocation(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by location"
-                id="location-filter"
-              >
-                <option value="">All Locations</option>
-                <option value="Office">Office</option>
-                <option value="Remote">Remote</option>
-              </select>
+              {/* Location Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowLocationDropdown(!showLocationDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedLocation.length === 0 ? 'All Locations' : 
+                     selectedLocation.length === 1 ? selectedLocation[0] :
+                     `${selectedLocation.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showLocationDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search locations..."
+                          value={locationSearchTerm}
+                          onChange={(e) => setLocationSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedLocation.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedLocation([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedLocation.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredLocationOptions().map((location) => (
+                      <div key={location} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleLocationToggle(location)}>
+                        <input type="checkbox" checked={selectedLocation.includes(location)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">{location}</span>
+                      </div>
+                    ))}
+                    {getFilteredLocationOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No locations found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              <select 
-                value={selectedFlags}
-                onChange={(e) => setSelectedFlags(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Filter by flags"
-                id="flags-filter"
-              >
-                <option value="">All Records</option>
-                <option value="flagged">Flagged Only</option>
-                <option value="clean">Clean Only</option>
-              </select>
+              {/* Flags Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowFlagsDropdown(!showFlagsDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedFlags.length === 0 ? 'All Records' : 
+                     selectedFlags.length === 1 ? (selectedFlags[0] === 'flagged' ? 'Flagged Only' : 
+                                                   selectedFlags[0] === 'clean' ? 'Clean Only' : 
+                                                   selectedFlags[0]) :
+                     `${selectedFlags.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showFlagsDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search flags..."
+                          value={flagsSearchTerm}
+                          onChange={(e) => setFlagsSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedFlags.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedFlags([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedFlags.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredFlagsOptions().map((flag) => (
+                      <div key={flag} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleFlagsToggle(flag)}>
+                        <input type="checkbox" checked={selectedFlags.includes(flag)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700">
+                          {flag === 'flagged' ? 'Flagged Only' : 
+                           flag === 'clean' ? 'Clean Only' : 
+                           flag}
+                        </span>
+                      </div>
+                    ))}
+                    {getFilteredFlagsOptions().length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                        No flags found
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex justify-between items-center">
@@ -3429,15 +3929,6 @@ export default function TeamAttendance() {
                       </button>
                     </div>
                   </th>
-                  <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">
-                    <button
-                      onClick={() => handleSort('status')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Status
-                      {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('location')}
@@ -3536,7 +4027,7 @@ export default function TeamAttendance() {
                                 {generateAvatarInitials(record.employeeName.split(' ')[0] || '', record.employeeName.split(' ')[1] || '')}
                               </div>
                               <div 
-                                className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white"
+                                className={`absolute -bottom-0.5 -right-0.5 ${getDotSize('sm')} rounded-full border border-white`}
                                 style={{ backgroundColor: getStatusDotColor(record) }}
                               >
                               </div>
@@ -3552,9 +4043,6 @@ export default function TeamAttendance() {
                               <div className="text-xs" style={{ color: '#6B7280' }}>{record.role}</div>
                             </div>
                           </div>
-                        </td>
-                      <td className="py-2 px-2 w-24">
-                        {formatStatusWithIcon(record)}
                       </td>
                       <td className="py-2 px-4">
                         {formatLocationVsScheduled(record)}
@@ -3854,7 +4342,7 @@ export default function TeamAttendance() {
                     {generateAvatarInitials(selectedRecord.employeeName.split(' ')[0] || '', selectedRecord.employeeName.split(' ')[1] || '')}
                   </div>
                   <div 
-                    className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white"
+                    className={`absolute -bottom-1 -right-1 ${getDotSize('md')} rounded-full border-2 border-white`}
                     style={{ backgroundColor: getStatusDotColor(selectedRecord) }}
                   >
                   </div>
@@ -3947,26 +4435,26 @@ export default function TeamAttendance() {
                 
                       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                   <table className="w-full table-fixed">
-                    <thead className="bg-gray-50">
-                      <tr>
+                      <thead className="bg-gray-50">
+                        <tr>
                         <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
                         <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-min">Location</th>
                         <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Job</th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock In</th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock Out</th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Overtime</th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
-                          <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
-                            <span className="text-[10px] font-medium text-gray-900">M</span>
-                          </div>
-                        </th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
-                          <Flag className="w-4 h-4 inline text-gray-900" />
-                        </th>
-                        <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
-                      </tr>
-                    </thead>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock In</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Clock Out</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Overtime</th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                            <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                              <span className="text-[10px] font-medium text-gray-900">M</span>
+                            </div>
+                          </th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                            <Flag className="w-4 h-4 inline text-gray-900" />
+                          </th>
+                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
+                        </tr>
+                      </thead>
                     <tbody className="divide-y divide-gray-200">
                       {organizeIntoSessions(selectedRecord).map((session, sessionIndex) => (
                         <tr key={session.id} className="hover:bg-gray-50 transition-colors">
@@ -4057,26 +4545,26 @@ export default function TeamAttendance() {
                   
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full table-fixed">
-                      <thead className="bg-gray-50">
-                        <tr>
+                        <thead className="bg-gray-50">
+                          <tr>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-min">Location A</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-min">Location B</th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Start Time</th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">End Time</th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24"></th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
-                            <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
-                              <span className="text-[10px] font-medium text-gray-900">M</span>
-                            </div>
-                          </th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
-                            <Flag className="w-4 h-4 inline text-gray-900" />
-                          </th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
-                        </tr>
-                      </thead>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Start Time</th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">End Time</th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24"></th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                              <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                                <span className="text-[10px] font-medium text-gray-900">M</span>
+                              </div>
+                            </th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
+                              <Flag className="w-4 h-4 inline text-gray-900" />
+                            </th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
+                          </tr>
+                        </thead>
                       <tbody className="divide-y divide-gray-200">
                         {selectedRecord.transfers.map((transfer, transferIndex) => (
                           <tr key={transfer.id} className="hover:bg-gray-50 transition-colors">
@@ -4154,8 +4642,8 @@ export default function TeamAttendance() {
                   
                   <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full table-fixed">
-                      <thead className="bg-gray-50">
-                        <tr>
+                        <thead className="bg-gray-50">
+                          <tr>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-48">Session</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Type</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Description</th>
@@ -4164,16 +4652,16 @@ export default function TeamAttendance() {
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24">Total Time</th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-24"></th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
-                            <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
-                              <span className="text-[10px] font-medium text-gray-900">M</span>
-                            </div>
-                          </th>
+                              <div className="w-4 h-4 rounded-full border border-gray-900 flex items-center justify-center">
+                                <span className="text-[10px] font-medium text-gray-900">M</span>
+                              </div>
+                            </th>
                           <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-12">
-                            <Flag className="w-4 h-4 inline text-gray-900" />
-                          </th>
-                          <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
-                        </tr>
-                      </thead>
+                              <Flag className="w-4 h-4 inline text-gray-900" />
+                            </th>
+                            <th className="text-left py-3 px-2 font-medium text-gray-900 text-xs w-20">Actions</th>
+                          </tr>
+                        </thead>
                       <tbody className="divide-y divide-gray-200">
                         {selectedRecord.breaks.map((breakItem, breakIndex) => (
                           <tr key={breakItem.id} className="hover:bg-gray-50 transition-colors">
