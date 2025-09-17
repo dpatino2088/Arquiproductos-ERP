@@ -125,10 +125,15 @@ const TeamAttendance = lazy(() => {
   return import('./pages/org/cmp/management/time-and-attendance/TeamAttendance');
 });
 
+const AttendanceFlags = lazy(() => {
+  logger.debug('Loading Attendance Flags component');
+  return import('./pages/org/cmp/management/time-and-attendance/AttendanceFlags');
+});
 
-const EmployeeAttendance = lazy(() => {
-  logger.debug('Loading Employee Attendance component');
-  return import('./pages/org/cmp/management/time-and-attendance/EmployeeAttendance');
+
+const EmployeeTimesheet = lazy(() => {
+  logger.debug('Loading Employee Timesheet component');
+  return import('./pages/org/cmp/management/time-and-attendance/EmployeeTimesheet');
 });
 
 
@@ -571,8 +576,9 @@ function App() {
       router.addRoute('/org/cmp/management/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
-      router.addRoute('/org/cmp/management/time-and-attendance/employee-attendance/:slug', () => setCurrentPage('employee-attendance'));
-      router.addRoute('/org/cmp/management/time-and-attendance/employee-attendance', () => setCurrentPage('employee-attendance'));
+      router.addRoute('/org/cmp/management/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
+      router.addRoute('/org/cmp/management/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
+      router.addRoute('/org/cmp/management/time-and-attendance/employee-timesheet', () => setCurrentPage('employee-timesheet'));
       
       // PTO & Leaves routes
       router.addRoute('/org/cmp/management/pto-and-leaves/team-leave-calendar', () => setCurrentPage('team-leave-calendar'));
@@ -778,8 +784,10 @@ function App() {
         return <TeamPlanner />;
       case 'team-attendance':
         return <TeamAttendance />;
-      case 'employee-attendance':
-        return <EmployeeAttendance />;
+      case 'attendance-flags':
+        return <AttendanceFlags />;
+      case 'employee-timesheet':
+        return <EmployeeTimesheet />;
       case 'team-leave-calendar':
         return <TeamLeaveCalendar />;
       case 'team-leave-requests':

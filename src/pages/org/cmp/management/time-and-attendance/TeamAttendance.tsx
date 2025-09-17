@@ -180,6 +180,23 @@ export default function TeamAttendance() {
   const { registerSubmodules } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Date navigation functions
+  const goToPreviousDay = () => {
+    const currentDate = new Date(selectedDate || new Date());
+    currentDate.setDate(currentDate.getDate() - 1);
+    setSelectedDate(currentDate.toISOString().split('T')[0]);
+  };
+
+  const goToNextDay = () => {
+    const currentDate = new Date(selectedDate || new Date());
+    currentDate.setDate(currentDate.getDate() + 1);
+    setSelectedDate(currentDate.toISOString().split('T')[0]);
+  };
+
+  const goToToday = () => {
+    setSelectedDate(new Date().toISOString().split('T')[0]);
+  };
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -231,6 +248,20 @@ export default function TeamAttendance() {
       commentInputRef.current.focus();
     }
   }, [showCommentForm]);
+
+  // Prevent body scroll when modal is open
+  useEffect(() => {
+    if (isModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+
+    // Cleanup function to restore scroll when component unmounts
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isModalOpen]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -617,8 +648,9 @@ export default function TeamAttendance() {
     // Register submodule tabs for time and attendance
     registerSubmodules('Time & Attendance', [
       { id: 'whos-working', label: "Who's Working", href: '/org/cmp/management/time-and-attendance/whos-working', icon: Users },
+      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
       { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
-      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar }
+      { id: 'attendance-flags', label: 'Attendance Flags', href: '/org/cmp/management/time-and-attendance/attendance-flags', icon: Flag }
     ]);
   }, [registerSubmodules]);
 
@@ -2235,6 +2267,27 @@ export default function TeamAttendance() {
     );
   };
 
+  // Select All functions for each filter
+  const handleStatusSelectAll = () => {
+    const allStatuses = getFilteredStatusOptions();
+    setSelectedStatus(allStatuses);
+  };
+
+  const handleDepartmentSelectAll = () => {
+    const allDepartments = getFilteredDepartmentOptions();
+    setSelectedDepartment(allDepartments);
+  };
+
+  const handleLocationSelectAll = () => {
+    const allLocations = getFilteredLocationOptions();
+    setSelectedLocation(allLocations);
+  };
+
+  const handleFlagsSelectAll = () => {
+    const allFlags = getFilteredFlagsOptions();
+    setSelectedFlags(allFlags);
+  };
+
   // Summary card click handlers
   const handleSummaryCardClick = (cardType: string) => {
     // Check if this card is currently active
@@ -3105,6 +3158,20 @@ export default function TeamAttendance() {
     const scheduledLocation = record.scheduledLocation;
     const tooltipId = `location-${record.id}`;
 
+    // Check if record has multiple work sessions (sub rows)
+    const workSessionsCount = getWorkSessionsCount(record);
+    const hasMultipleSessions = workSessionsCount > 1;
+    
+    // If record has multiple work sessions, show "Multiple Locations"
+    if (hasMultipleSessions) {
+      return (
+        <div className="flex items-center">
+          <ScheduleIcon className="w-3 h-3 invisible -ml-4 mr-1" />
+          <span className="text-sm text-gray-900">Multiple Locations</span>
+        </div>
+      );
+    }
+
     if (!scheduledLocation) {
       return (
         <div className="flex items-center">
@@ -3381,7 +3448,7 @@ export default function TeamAttendance() {
     
     // Navigate to employee attendance page with slug
     const slug = record.employeeName.toLowerCase().replace(/\s+/g, '-');
-    const url = `/org/cmp/management/time-and-attendance/employee-attendance/${slug}`;
+    const url = `/org/cmp/management/time-and-attendance/employee-timesheet/${slug}`;
     console.log('Navigating to:', url);
     router.navigate(url);
   };
@@ -3390,8 +3457,39 @@ export default function TeamAttendance() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
+        <div className="flex items-center justify-between">
+          <div>
         <h1 className="text-xl font-semibold text-foreground mb-1">Team Attendance</h1>
         <p className="text-xs text-muted-foreground">Track and manage team attendance records</p>
+          </div>
+          
+          {/* Date Navigation */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={goToPreviousDay}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+              title="Previous day"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="w-40 px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+              aria-label="Select date"
+            />
+            
+            <button
+              onClick={goToNextDay}
+              className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+              title="Next day"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -3417,9 +3515,9 @@ export default function TeamAttendance() {
                 const flags = getRecordFlags(r);
                 return flags.some(flag => ['Early Entry', 'Late Entry', 'Early Exit'].includes(flag.type));
               }).length}
-            </div>
+              </div>
             <div className="text-sm text-muted-foreground">Time Related</div>
-          </div>
+            </div>
         </button>
         
         <button 
@@ -3443,9 +3541,9 @@ export default function TeamAttendance() {
                 const flags = getRecordFlags(r);
                 return flags.some(flag => ['Missing Clock-in', 'Missing Clock-out', 'Duplicate Entries', 'Inconsistent Pair'].includes(flag.type));
               }).length}
-            </div>
+              </div>
             <div className="text-sm text-muted-foreground">Event Integrity</div>
-          </div>
+            </div>
         </button>
         
         <button 
@@ -3469,9 +3567,9 @@ export default function TeamAttendance() {
                 const flags = getRecordFlags(r);
                 return flags.some(flag => ['Schedule Deviation', 'Wrong Location'].includes(flag.type));
               }).length}
-            </div>
+              </div>
             <div className="text-sm text-muted-foreground">Schedule Deviation</div>
-          </div>
+            </div>
         </button>
         
         <button 
@@ -3495,9 +3593,9 @@ export default function TeamAttendance() {
                 const flags = getRecordFlags(r);
                 return flags.some(flag => ['Extended Break', 'Short Break', 'Unscheduled Break'].includes(flag.type));
               }).length}
-            </div>
+              </div>
             <div className="text-sm text-muted-foreground">Break Related</div>
-          </div>
+            </div>
         </button>
         
         <button 
@@ -3521,9 +3619,9 @@ export default function TeamAttendance() {
                 const flags = getRecordFlags(r);
                 return flags.some(flag => flag.type === 'Late Exit / Overtime');
               }).length}
-            </div>
+              </div>
             <div className="text-sm text-muted-foreground">Overtime</div>
-          </div>
+            </div>
         </button>
       </div>
 
@@ -3571,13 +3669,6 @@ export default function TeamAttendance() {
                 <Filter className="w-4 h-4 inline mr-1" />
                 Filters
               </button>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Select date"
-              />
             </div>
           </div>
         </div>
@@ -3610,17 +3701,28 @@ export default function TeamAttendance() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedStatus.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedStatus([]);
+                              handleStatusSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedStatus.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedStatus.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedStatus([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedStatus.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredStatusOptions().map((status) => (
@@ -3672,17 +3774,28 @@ export default function TeamAttendance() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedDepartment.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedDepartment([]);
+                              handleDepartmentSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedDepartment.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedDepartment.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDepartment([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedDepartment.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredDepartmentOptions().map((department) => (
@@ -3726,17 +3839,28 @@ export default function TeamAttendance() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedLocation.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedLocation([]);
+                              handleLocationSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedLocation.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedLocation.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLocation([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedLocation.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredLocationOptions().map((location) => (
@@ -3782,17 +3906,28 @@ export default function TeamAttendance() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedFlags.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedFlags([]);
+                              handleFlagsSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedFlags.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedFlags.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedFlags([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedFlags.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredFlagsOptions().map((flag) => (
@@ -4163,9 +4298,6 @@ export default function TeamAttendance() {
                                  Work Session {session.sessionNumber}
                                </span>
                               </div>
-                            </td>
-                            <td className="py-2 px-2 w-24">
-                            {/* Status column - empty for sessions */}
                             </td>
                             <td className="py-2 px-4">
                             <span className="text-sm text-gray-900">{session.location || '--'}</span>

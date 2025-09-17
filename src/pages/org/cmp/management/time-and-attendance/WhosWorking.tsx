@@ -26,7 +26,8 @@ import {
   AlertTriangle,
   CalendarCheck,
   Clock as ClockIcon,
-  MapPin as MapPinIcon
+  MapPin as MapPinIcon,
+  Flag
 } from 'lucide-react';
 
 interface Employee {
@@ -113,8 +114,9 @@ export default function WhosWorking() {
     // Register submodule tabs for time and attendance section
     registerSubmodules('Time & Attendance', [
       { id: 'whos-working', label: "Who's Working", href: '/org/cmp/management/time-and-attendance/whos-working', icon: Users },
+      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
       { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
-      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar }
+      { id: 'attendance-flags', label: 'Attendance Flags', href: '/org/cmp/management/time-and-attendance/attendance-flags', icon: Flag }
     ]);
   }, [registerSubmodules]);
 
@@ -429,6 +431,22 @@ export default function WhosWorking() {
         ? prev.filter(l => l !== location)
         : [...prev, location]
     );
+  };
+
+  // Select All functions for each filter
+  const handleStatusSelectAll = () => {
+    const allStatuses = getFilteredStatusOptions();
+    setSelectedStatus(allStatuses);
+  };
+
+  const handleDepartmentSelectAll = () => {
+    const allDepartments = getFilteredDepartmentOptions();
+    setSelectedDepartment(allDepartments);
+  };
+
+  const handleLocationSelectAll = () => {
+    const allLocations = getFilteredLocationOptions();
+    setSelectedLocation(allLocations);
   };
 
   // Filter options based on search terms
@@ -770,17 +788,28 @@ export default function WhosWorking() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedStatus.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedStatus([]);
+                              handleStatusSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedStatus.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedStatus.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedStatus([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedStatus.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredStatusOptions().map((status) => (
@@ -830,17 +859,28 @@ export default function WhosWorking() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedDepartment.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedDepartment([]);
+                              handleDepartmentSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedDepartment.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedDepartment.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDepartment([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedDepartment.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredDepartmentOptions().map((department) => (
@@ -884,17 +924,28 @@ export default function WhosWorking() {
                           className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
                           onClick={(e) => e.stopPropagation()}
                         />
-                        {selectedLocation.length > 0 && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedLocation([]);
+                              handleLocationSelectAll();
                             }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
                           >
-                            Clear ({selectedLocation.length})
+                            Select All
                           </button>
-                        )}
+                          {selectedLocation.length > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLocation([]);
+                              }}
+                              className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                            >
+                              Clear ({selectedLocation.length})
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {getFilteredLocationOptions().map((location) => (
