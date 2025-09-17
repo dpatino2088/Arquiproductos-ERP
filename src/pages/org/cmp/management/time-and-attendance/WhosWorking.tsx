@@ -8,7 +8,7 @@ import {
   Plus,
   Upload,
   Eye,
-  MoreHorizontal,
+  MoreVertical,
   ChevronLeft,
   ChevronRight,
   List,
@@ -1108,7 +1108,7 @@ export default function WhosWorking() {
                           aria-label={`More options for ${employee.firstName} ${employee.lastName}`}
                           title={`More options for ${employee.firstName} ${employee.lastName}`}
                         >
-                          <MoreHorizontal className="w-4 h-4" />
+                          <MoreVertical className="w-4 h-4" />
                         </button>
                       </div>
                     </td>

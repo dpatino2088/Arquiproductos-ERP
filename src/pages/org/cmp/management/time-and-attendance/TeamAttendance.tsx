@@ -33,7 +33,8 @@ import {
   Plus,
   Send,
   Coffee,
-  Timer
+  Timer,
+  Map
 } from 'lucide-react';
 
 // Function to generate avatar initials (100% reliable, works everywhere)
@@ -219,7 +220,7 @@ export default function TeamAttendance() {
   const [selectedRecords, setSelectedRecords] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'sessions' | 'comments' | 'log'>('sessions');
+  const [activeTab, setActiveTab] = useState<'sessions' | 'map' | 'comments' | 'log'>('sessions');
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const [activeFloatingMenu, setActiveFloatingMenu] = useState<string | null>(null);
   const [editingRecord, setEditingRecord] = useState<string | null>(null);
@@ -4510,6 +4511,16 @@ export default function TeamAttendance() {
                     Sessions
                   </button>
                   <button
+                    onClick={() => setActiveTab('map')}
+                    className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+                      activeTab === 'map'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Map
+                  </button>
+                  <button
                     onClick={() => setActiveTab('comments')}
                     className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
                       activeTab === 'comments'
@@ -4544,7 +4555,7 @@ export default function TeamAttendance() {
             {/* Modal Content */}
             <div className="relative flex flex-col h-[calc(85vh-120px)]">
               {/* Tab Content */}
-              <div className={`overflow-y-auto p-6 ${activeTab === 'comments' || activeTab === 'sessions' ? 'pb-0 h-[calc(100%-88px)] flex flex-col' : 'flex-1'}`} style={{ paddingRight: activeTab === 'sessions' ? '26px' : '24px' }}>
+              <div className={`overflow-y-auto p-6 ${activeTab === 'comments' || activeTab === 'sessions' || activeTab === 'map' ? 'pb-0 h-[calc(100%-88px)] flex flex-col' : 'flex-1'}`} style={{ paddingRight: activeTab === 'sessions' || activeTab === 'map' ? '26px' : '24px' }}>
                 {activeTab === 'sessions' && (
                   <div className="flex flex-col h-full">
                     {/* Work Sessions Content */}
@@ -4858,6 +4869,58 @@ export default function TeamAttendance() {
                   </div>
                 )}
 
+                {activeTab === 'map' && (
+                  <div className="flex flex-col h-full">
+                    {/* Map Content */}
+                    <div className="flex-1 overflow-y-auto min-h-0 pb-8" style={{ scrollbarGutter: 'stable' }}>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-semibold text-gray-900">Location Map</h3>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>
+                            {(() => {
+                              const sessions = organizeIntoSessions(selectedRecord);
+                              return `${sessions.length} location${sessions.length !== 1 ? 's' : ''}`;
+                            })()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Map Container */}
+                      <div className="bg-gray-100 border border-gray-200 rounded-lg h-96 flex items-center justify-center">
+                        <div className="text-center">
+                          <Map className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                          <h4 className="text-lg font-medium text-gray-600 mb-2">Google Maps Integration</h4>
+                          <p className="text-sm text-gray-500 mb-4">
+                            Map showing check-in/check-out locations for {selectedRecord?.employeeName} on {selectedDate}
+                          </p>
+                          <div className="text-xs text-gray-400">
+                            {/* Mock location data */}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                <span>Check-in: Main Office (9:00 AM)</span>
+                              </div>
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                                <span>Transfer: Warehouse (11:30 AM)</span>
+                              </div>
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                                <span>Break: Break Room (1:00 PM)</span>
+                              </div>
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                                <span>Check-out: Main Office (5:00 PM)</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activeTab === 'comments' && (
                   <div className="flex flex-col h-full">
                     {/* Header */}
@@ -5039,22 +5102,72 @@ export default function TeamAttendance() {
               <div className="absolute bottom-0 left-0 right-0 border-t border-gray-200 px-6 pt-6 pb-6" style={{ backgroundColor: 'var(--gray-200)' }}>
                 <div className="grid grid-cols-4 gap-4">
                   <div className="bg-white border border-gray-200 p-2.5 rounded">
-                    <div className="text-lg font-semibold text-gray-900">{selectedRecord.totalHours}h</div>
-                    <div className="text-xs text-gray-600">Total Hours</div>
-                  </div>
-                  <div className="bg-white border border-gray-200 p-2.5 rounded">
-                    <div className="text-lg font-semibold text-gray-900">{Math.round(selectedRecord.totalBreakTime / 60 * 10) / 10}h</div>
-                    <div className="text-xs text-gray-600">Break Time</div>
-                  </div>
-                  <div className="bg-white border border-gray-200 p-2.5 rounded">
-                    <div className="text-lg font-semibold text-gray-900">{Math.round(selectedRecord.totalTransferTime / 60 * 10) / 10}h</div>
-                    <div className="text-xs text-gray-600">Transfer Time</div>
-                  </div>
-                  <div className="bg-white border border-gray-200 p-2.5 rounded">
-                    <div className="text-lg font-semibold text-gray-900">
-                      {getOvertimeHours(selectedRecord.totalHours) > 0 ? `${getOvertimeHours(selectedRecord.totalHours).toFixed(1)}h` : '0h'}
+                    <div className="flex items-center gap-3">
+                      <Timer className="h-5 w-5 text-primary" />
+                      <div className="text-2xl font-bold text-gray-900">{selectedRecord.totalHours}h</div>
+                      <div className="text-sm text-gray-600">Work</div>
                     </div>
-                    <div className="text-xs text-gray-600">Overtime</div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <MapPin className="h-5 w-5 text-status-blue" />
+                      <div className="text-2xl font-bold text-gray-900">{Math.round(selectedRecord.totalTransferTime / 60 * 10) / 10}h</div>
+                      <div className="text-sm text-gray-600">Transfers</div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <Coffee className="h-5 w-5 text-status-yellow" />
+                      <div className="text-2xl font-bold text-gray-900">{Math.round(selectedRecord.totalBreakTime / 60 * 10) / 10}h</div>
+                      <div className="text-sm text-gray-600">Breaks</div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <Clock className="h-5 w-5 text-status-orange" />
+                      <div className="text-2xl font-bold text-gray-900">
+                        {getOvertimeHours(selectedRecord.totalHours) > 0 ? `${getOvertimeHours(selectedRecord.totalHours).toFixed(1)}h` : '0h'}
+                      </div>
+                      <div className="text-sm text-gray-600">Overtime</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Summary Cards Footer for Map */}
+            {activeTab === 'map' && (
+              <div className="absolute bottom-0 left-0 right-0 border-t border-gray-200 px-6 pt-6 pb-6" style={{ backgroundColor: 'var(--gray-200)' }}>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <Timer className="h-5 w-5 text-primary" />
+                      <div className="text-2xl font-bold text-gray-900">{selectedRecord.totalHours}h</div>
+                      <div className="text-sm text-gray-600">Work</div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <MapPin className="h-5 w-5 text-status-blue" />
+                      <div className="text-2xl font-bold text-gray-900">{Math.round(selectedRecord.totalTransferTime / 60 * 10) / 10}h</div>
+                      <div className="text-sm text-gray-600">Transfers</div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <Coffee className="h-5 w-5 text-status-yellow" />
+                      <div className="text-2xl font-bold text-gray-900">{Math.round(selectedRecord.totalBreakTime / 60 * 10) / 10}h</div>
+                      <div className="text-sm text-gray-600">Breaks</div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 p-2.5 rounded">
+                    <div className="flex items-center gap-3">
+                      <Clock className="h-5 w-5 text-status-orange" />
+                      <div className="text-2xl font-bold text-gray-900">
+                        {getOvertimeHours(selectedRecord.totalHours) > 0 ? `${getOvertimeHours(selectedRecord.totalHours).toFixed(1)}h` : '0h'}
+                      </div>
+                      <div className="text-sm text-gray-600">Overtime</div>
+                    </div>
                   </div>
                 </div>
               </div>

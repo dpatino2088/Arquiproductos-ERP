@@ -21,9 +21,7 @@ import {
   Eye,
   Flag,
   SortAsc,
-  SortDesc,
-  List,
-  Map
+  SortDesc
 } from 'lucide-react';
 
 // Function to generate avatar initials
@@ -127,9 +125,6 @@ export default function TeamPlanner() {
   // Sorting states
   const [sortBy, setSortBy] = useState<'name' | 'department' | 'role'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  
-  // Display mode state
-  const [displayMode, setDisplayMode] = useState<'table' | 'map'>('table');
 
   useEffect(() => {
     // Register submodule tabs for time and attendance
@@ -716,7 +711,7 @@ export default function TeamPlanner() {
   const filteredEmployees = useMemo(() => {
     const filtered = employees.filter(employee => {
       const matchesSearch = employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           employee.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      employee.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            employee.department.toLowerCase().includes(searchTerm.toLowerCase());
       
       const matchesDepartment = selectedDepartment.length === 0 || selectedDepartment.includes(employee.department);
@@ -825,30 +820,30 @@ export default function TeamPlanner() {
           <div className="flex items-center gap-3">
             <Users className="h-5 w-5 text-teal-600" />
             <div className="text-2xl font-bold text-gray-900">{employees.length}</div>
-            <div className="text-sm text-muted-foreground">Total Employees</div>
+              <div className="text-sm text-muted-foreground">Total Employees</div>
           </div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
             <Calendar className="h-5 w-5 text-blue-600" />
             <div className="text-2xl font-bold text-gray-900">{shifts.length}</div>
-            <div className="text-sm text-muted-foreground">Scheduled Shifts</div>
+              <div className="text-sm text-muted-foreground">Scheduled Shifts</div>
           </div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
             <CheckCircle className="h-5 w-5 text-green-600" />
             <div className="text-2xl font-bold text-gray-900">
-              {shifts.filter(s => s.status === 'confirmed').length}
-            </div>
-            <div className="text-sm text-muted-foreground">Confirmed</div>
+                {shifts.filter(s => s.status === 'confirmed').length}
+              </div>
+              <div className="text-sm text-muted-foreground">Confirmed</div>
           </div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-red-600" />
             <div className="text-2xl font-bold text-gray-900">0</div>
-            <div className="text-sm text-muted-foreground">Conflicts</div>
+              <div className="text-sm text-muted-foreground">Conflicts</div>
           </div>
         </div>
       </div>
@@ -876,7 +871,7 @@ export default function TeamPlanner() {
             <div className="flex items-center gap-2">
               {/* Clear Filters Button - Only show when filters are active */}
               {(selectedDepartment.length > 0 || selectedRole.length > 0 || selectedStatus.length > 0) && (
-                <button
+              <button
                   onClick={clearAllFilters}
                   className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm bg-white text-gray-700 hover:bg-gray-50"
                   title="Clear all active filters"
@@ -899,37 +894,10 @@ export default function TeamPlanner() {
                 Filters
               </button>
 
-              {/* View Mode Toggle */}
-              <div className="flex border border-gray-200 rounded overflow-hidden">
-                <button
-                  onClick={() => setDisplayMode('table')}
-                  className={`p-1.5 transition-colors ${
-                    displayMode === 'table'
-                      ? 'bg-gray-300 text-black'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                  aria-label="Switch to list view"
-                  title="Switch to list view"
-                >
-                  <List className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setDisplayMode('map')}
-                  className={`p-1.5 transition-colors ${
-                    displayMode === 'map'
-                      ? 'bg-gray-300 text-black'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                  aria-label="Switch to map view"
-                  title="Switch to map view"
-                >
-                  <Map className="w-4 h-4" />
-                </button>
-              </div>
             </div>
           </div>
         </div>
-
+        
         {/* Advanced Filters */}
         {showFilters && (
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
@@ -946,7 +914,7 @@ export default function TeamPlanner() {
                   <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
-                </div>
+              </div>
                 {showDepartmentDropdown && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
                     <div className="p-2 border-b border-gray-100">
@@ -979,8 +947,8 @@ export default function TeamPlanner() {
                             Clear ({selectedDepartment.length})
                           </button>
                         )}
-                      </div>
-                    </div>
+              </div>
+              </div>
                     <div className="py-1">
                       {getFilteredDepartmentOptions().map((department) => (
                         <label key={department} className="flex items-center px-3 py-1 hover:bg-gray-50 cursor-pointer">
@@ -993,10 +961,10 @@ export default function TeamPlanner() {
                           <span className="text-sm text-gray-700">{department}</span>
                         </label>
                       ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
               {/* Role Multi-Select */}
               <div className="relative dropdown-container">
@@ -1191,16 +1159,16 @@ export default function TeamPlanner() {
             >
               <ChevronRight className="w-5 h-5" />
             </button>
-            <button
+          <button
               onClick={goToCurrentWeek}
               className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              aria-label="Go to current week"
-            >
+            aria-label="Go to current week"
+          >
               This Week
-            </button>
+          </button>
           </div>
         </div>
-      </div>
+        </div>
 
       {/* Calendar */}
       <div className="bg-white border border-gray-200 rounded-lg mb-4 overflow-hidden">
@@ -1209,36 +1177,42 @@ export default function TeamPlanner() {
           <div>
             {/* Header Row */}
             <div className="flex">
-              {/* Employee Column Header */}
-              <div className="w-64 p-3 border-r border-gray-200 bg-gray-50">
+            {/* Employee Column Header */}
+              <div className="w-64 p-3 pl-6 border-r border-gray-200 bg-gray-50">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8"></div>
-                  <span className="text-sm font-medium text-gray-700">Employee</span>
+              <span className="text-sm font-medium text-gray-700">Employee</span>
                 </div>
-              </div>
-              
-              {/* Day Headers */}
-              {weekDates.map((date, index) => (
+            </div>
+            
+            {/* Day Headers */}
+            {weekDates.map((date, index) => (
                 <div key={index} className={`flex-1 p-3 bg-gray-50 flex items-center justify-center ${index < weekDates.length - 1 ? 'border-r border-gray-200' : ''}`}>
                   <div className="flex items-center justify-center gap-1">
-                    <div className="text-sm font-medium text-gray-700">
-                      {date.toLocaleDateString('en-US', { weekday: 'short' })}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {date.getDate()}
-                    </div>
-                  </div>
+                <div className="text-sm font-medium text-gray-700">
+                  {date.toLocaleDateString('en-US', { weekday: 'short' })}
                 </div>
-              ))}
+                    <div className="text-sm text-gray-500">
+                  {date.getDate()}
+                    </div>
+                </div>
+              </div>
+            ))}
             </div>
             
             {/* Employee Rows */}
             {paginatedEmployees.map((employee, employeeIndex) => (
               <div key={employee.id} className="flex">
                 {/* Employee Info */}
-                <div className={`w-64 p-3 border-r border-gray-200 flex items-center gap-3 ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
-                  <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
-                    {employee.name.split(' ').map(n => n[0]).join('')}
+                <div className={`w-64 p-3 pl-6 border-r border-gray-200 flex items-center gap-3 ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
+                  <div className="relative">
+                    <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
+                      {generateAvatarInitials(employee.name.split(' ')[0], employee.name.split(' ')[1] || '')}
+                    </div>
+                    <div 
+                      className={`absolute -bottom-0.5 -right-0.5 ${getDotSize('sm')} rounded-full border border-white`}
+                      style={{ backgroundColor: getStatusDotColor(employee.status) }}>
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-gray-900 truncate">
@@ -1253,18 +1227,31 @@ export default function TeamPlanner() {
                 {/* Day Cells */}
                 {weekDates.map((date, dayIndex) => {
                   const dayShifts = getShiftsForDate(date).filter(shift => shift.employeeId === employee.id);
-                    return (
-                      <div key={dayIndex} className={`flex-1 p-2 min-h-[60px] ${dayIndex < weekDates.length - 1 ? 'border-r border-gray-200' : ''} ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
-                      {dayShifts.map((shift) => (
-                        <div
-                          key={shift.id}
-                          className={`p-2 rounded text-xs mb-1 cursor-pointer hover:shadow-sm transition-shadow ${getStatusColor(shift.status)}`}
-                          onClick={() => setSelectedEmployee(employee.id)}
+                  return (
+                      <div key={dayIndex} className={`flex-1 p-2 min-h-[60px] flex flex-col items-center justify-center ${dayIndex < weekDates.length - 1 ? 'border-r border-gray-200' : ''} ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
+                      {dayShifts.length > 0 ? (
+                        dayShifts.map((shift) => (
+                          <div
+                            key={shift.id}
+                            className={`p-2 rounded text-xs mb-1 cursor-pointer hover:shadow-sm transition-shadow ${getStatusColor(shift.status)}`}
+                            onClick={() => setSelectedEmployee(employee.id)}
+                          >
+                            <div className="font-medium">{shift.startTime} - {shift.endTime}</div>
+                            <div className="text-xs opacity-75">{shift.role}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <button 
+                          className="w-6 h-6 border border-gray-200 rounded flex items-center justify-center hover:bg-gray-50 transition-colors"
+                          onClick={() => {
+                            // TODO: Add shift functionality
+                            console.log('Add shift for', employee.name, 'on', date.toDateString());
+                          }}
+                          aria-label={`Add shift for ${employee.name}`}
                         >
-                          <div className="font-medium">{shift.startTime} - {shift.endTime}</div>
-                          <div className="text-xs opacity-75">{shift.role}</div>
-                        </div>
-                      ))}
+                          <Plus className="w-3 h-3 text-gray-400" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -1276,9 +1263,9 @@ export default function TeamPlanner() {
 
       {/* Pagination */}
       <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
-        <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between">
           {/* Items Per Page Selector */}
-          <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3">
             <span className="text-xs text-gray-600">Show:</span>
             <select 
               value={itemsPerPage}
@@ -1297,13 +1284,13 @@ export default function TeamPlanner() {
             <span className="text-xs text-gray-600">
               Showing {((currentPage - 1) * itemsPerPage) + 1}-{Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems}
             </span>
-          </div>
+                  </div>
           
           {/* Page Navigation */}
           {totalPages > 1 && (
             <div className="flex items-center gap-3">
               {/* Previous Button */}
-              <button
+                  <button
                 onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
                 className={`flex items-center gap-1 px-2 py-1 border rounded text-xs transition-colors ${
@@ -1315,7 +1302,7 @@ export default function TeamPlanner() {
               >
                 <ChevronLeft className="w-3 h-3" />
                 Previous
-              </button>
+                  </button>
 
               {/* Page Numbers */}
               <div className="flex items-center gap-1">
@@ -1332,7 +1319,7 @@ export default function TeamPlanner() {
                   }
 
                   return (
-                    <button
+                  <button
                       key={pageNum}
                       onClick={() => setCurrentPage(pageNum)}
                       className={`w-6 h-6 text-xs rounded transition-colors flex items-center justify-center ${
@@ -1343,13 +1330,13 @@ export default function TeamPlanner() {
                       aria-label={`Go to page ${pageNum}`}
                     >
                       {pageNum}
-                    </button>
+                  </button>
                   );
                 })}
               </div>
 
               {/* Next Button */}
-              <button
+                  <button
                 onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
                 className={`flex items-center gap-1 px-2 py-1 border rounded text-xs transition-colors ${
@@ -1361,11 +1348,11 @@ export default function TeamPlanner() {
               >
                 Next
                 <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
+                  </button>
+                </div>
           )}
-        </div>
-      </div>
+              </div>
+            </div>
 
     </div>
   );
