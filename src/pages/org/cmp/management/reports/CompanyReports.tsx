@@ -1,30 +1,159 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSubmoduleNav } from '../../../../../hooks/useSubmoduleNav';
-import { Printer } from 'lucide-react';
+import { 
+  Printer, 
+  Users, 
+  Clock, 
+  Calendar, 
+  BookOpen, 
+  TrendingUp, 
+  Heart, 
+  Receipt, 
+  CreditCard, 
+  Monitor,
+  FileText,
+  Download,
+  Filter,
+  Search
+} from 'lucide-react';
+
+interface ReportModule {
+  id: string;
+  label: string;
+  icon: any;
+  description: string;
+}
+
+const reportModules: ReportModule[] = [
+  {
+    id: 'recruitment',
+    label: 'Recruitment',
+    icon: Users,
+    description: 'Hiring reports, candidate analytics, and recruitment metrics'
+  },
+  {
+    id: 'time-attendance',
+    label: 'Time & Attendance',
+    icon: Clock,
+    description: 'Attendance reports, time tracking, and workforce analytics'
+  },
+  {
+    id: 'pto-leaves',
+    label: 'PTO & Leaves',
+    icon: Calendar,
+    description: 'Leave reports, PTO balances, and absence analytics'
+  },
+  {
+    id: 'company-knowledge',
+    label: 'Company Knowledge',
+    icon: BookOpen,
+    description: 'Knowledge base reports, training progress, and documentation analytics'
+  },
+  {
+    id: 'performance',
+    label: 'Performance',
+    icon: TrendingUp,
+    description: 'Performance reviews, goals tracking, and employee development reports'
+  },
+  {
+    id: 'benefits',
+    label: 'Benefits',
+    icon: Heart,
+    description: 'Benefits enrollment, usage reports, and cost analytics'
+  },
+  {
+    id: 'expenses',
+    label: 'Expenses',
+    icon: Receipt,
+    description: 'Expense reports, reimbursement tracking, and cost management'
+  },
+  {
+    id: 'payroll',
+    label: 'Payroll',
+    icon: CreditCard,
+    description: 'Payroll reports, salary analytics, and compensation tracking'
+  },
+  {
+    id: 'it-management',
+    label: 'IT Management',
+    icon: Monitor,
+    description: 'IT asset reports, system usage, and technology analytics'
+  }
+];
 
 export default function CompanyReports() {
   const { registerSubmodules } = useSubmoduleNav();
+  const [activeModule, setActiveModule] = useState<string>('recruitment');
 
   useEffect(() => {
-    // Register submodule tabs for Reports
-    registerSubmodules('Reports', [
-      { id: 'company-reports', label: 'Company Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }
-    ]);
+    // Clear any existing submodules to hide the secondary navbar
+    registerSubmodules('Reports', []);
   }, [registerSubmodules]);
 
+  const activeModuleData = reportModules.find(module => module.id === activeModule);
+
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Company Reports</h1>
-        <p className="text-xs text-muted-foreground">Generate and manage company-wide reports and analytics</p>
+    <div className="flex h-[calc(100vh-48px)]">
+      {/* Secondary Sidebar */}
+       <div className="w-56 bg-white border-r border-gray-200 flex-shrink-0">
+         {/* Sidebar Header */}
+         <div className="px-6 border-b border-gray-200 flex items-center" style={{ height: '48px' }}>
+           <h2 className="text-sm font-semibold text-gray-900">Report Modules</h2>
+         </div>
+
+        {/* Module Navigation */}
+        <nav className="px-4 py-4">
+          <ul className="space-y-1">
+            {reportModules.map((module) => {
+              const Icon = module.icon;
+              const isActive = activeModule === module.id;
+              
+              return (
+                 <li key={module.id}>
+                     <button
+                       onClick={() => setActiveModule(module.id)}
+                       className={`w-full flex items-center px-3 py-2 text-sm rounded transition-colors ${
+                         isActive
+                           ? 'bg-primary text-white'
+                           : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                       }`}
+                     >
+                     <span className="font-medium">{module.label}</span>
+                   </button>
+                 </li>
+              );
+            })}
+          </ul>
+        </nav>
       </div>
 
-      {/* Content */}
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <h2 className="text-2xl font-semibold text-muted-foreground mb-2">Coming Soon</h2>
-          <p className="text-muted-foreground">This feature is under development</p>
+       {/* Main Content Area */}
+       <div className="flex-1 flex flex-col min-w-0">
+         {/* Secondary Navbar for Report Tabs */}
+         <div className="border-b border-gray-200 bg-white flex items-center" style={{ height: '48px' }}>
+           {/* Report Tabs will go here */}
+         </div>
+
+        {/* Content Body */}
+        <div className="flex-1 bg-gray-50 overflow-y-auto">
+          <div>
+            {/* Coming Soon Content */}
+            <div className="flex items-center justify-center min-h-[400px]">
+              <div className="text-center">
+                <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <h2 className="text-2xl font-semibold text-gray-600 mb-2">
+                  {activeModuleData?.label} Reports
+                </h2>
+                <p className="text-gray-500 mb-6">
+                  {activeModuleData?.description}
+                </p>
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg">
+                  <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
+                  <span className="text-sm text-gray-600">Coming Soon</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -942,7 +942,7 @@ function Layout({ children }: LayoutProps) {
           style={{
             marginLeft: mainMarginLeft,
             paddingTop: mainPaddingTop,
-            padding: `${mainPaddingTop} 1.5rem 1.5rem`,
+            padding: `${mainPaddingTop} 0 0`,
             backgroundColor: 'var(--gray-200)'
           }}
           role="main"
