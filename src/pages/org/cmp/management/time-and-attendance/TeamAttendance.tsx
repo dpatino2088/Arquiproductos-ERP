@@ -649,7 +649,7 @@ export default function TeamAttendance() {
     // Register submodule tabs for time and attendance
     registerSubmodules('Time & Attendance', [
       { id: 'whos-working', label: "Who's Working", href: '/org/cmp/management/time-and-attendance/whos-working', icon: Users },
-      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
+      { id: 'team-schedule', label: 'Team Schedule', href: '/org/cmp/management/time-and-attendance/team-schedule', icon: Calendar },
       { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
       { id: 'attendance-flags', label: 'Attendance Flags', href: '/org/cmp/management/time-and-attendance/attendance-flags', icon: Flag }
     ]);
@@ -4862,12 +4862,12 @@ export default function TeamAttendance() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
+                      </div>
+                    )}
                   </div>
                       </div>
                     )}
-                    </div>
-                  </div>
-                )}
 
                 {activeTab === 'map' && (
                   <div className="flex flex-col h-full">
@@ -5126,8 +5126,8 @@ export default function TeamAttendance() {
                     <div className="flex items-center gap-3">
                       <Clock className="h-5 w-5 text-status-orange" />
                       <div className="text-2xl font-bold text-gray-900">
-                        {getOvertimeHours(selectedRecord.totalHours) > 0 ? `${getOvertimeHours(selectedRecord.totalHours).toFixed(1)}h` : '0h'}
-                      </div>
+                      {getOvertimeHours(selectedRecord.totalHours) > 0 ? `${getOvertimeHours(selectedRecord.totalHours).toFixed(1)}h` : '0h'}
+                    </div>
                       <div className="text-sm text-gray-600">Overtime</div>
                     </div>
                   </div>

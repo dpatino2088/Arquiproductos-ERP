@@ -185,9 +185,9 @@ export default function TeamLeaveCalendar() {
   useEffect(() => {
     // Register submodule tabs for PTO and Leaves section
     registerSubmodules('PTO & Leaves', [
+      { id: 'calendar', label: 'Team Leave Calendar', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: Calendar },
       { id: 'team-balances', label: 'Team Balances', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: Users },
-      { id: 'requests', label: 'Team Leave Requests', href: '/org/cmp/management/pto-and-leaves/team-leave-requests', icon: Clock },
-      { id: 'calendar', label: 'Team Leave Calendar', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: Calendar }
+      { id: 'requests', label: 'Team Leave Requests', href: '/org/cmp/management/pto-and-leaves/team-leave-requests', icon: Clock }
     ]);
   }, [registerSubmodules]);
 
@@ -438,6 +438,10 @@ export default function TeamLeaveCalendar() {
       location.toLowerCase().includes(locationSearchTerm.toLowerCase())
     );
   };
+
+  // Summary data for cards
+  const departments = [...new Set(leaveRequests.map(request => request.department))];
+  const locations = [...new Set(leaveRequests.map(request => request.location))];
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     setCurrentDate(prev => {

@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { router } from '../lib/router';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
+import { usePreviousPage } from '../hooks/usePreviousPage';
 import { RhemoLogo } from './RhemoLogo';
 import { 
   getSidebarStyles, 
@@ -119,7 +120,7 @@ const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
   { name: 'Recruitment', href: '/org/cmp/management/recruitment/job-openings', icon: Briefcase },
   { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/whos-working', icon: Clock },
-  { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: CalendarCheck },
+  { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: CalendarCheck },
   { name: 'Company Knowledge', href: '/org/cmp/management/company-knowledge/about-the-company', icon: BookMarked },
   { name: 'Performance', href: '/org/cmp/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
   { name: 'Benefits', href: '/org/cmp/management/benefits/team-benefits', icon: WalletCards },
@@ -145,6 +146,7 @@ function Layout({ children }: LayoutProps) {
   const { logout, user } = useAuth();
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
+  const { saveCurrentPageBeforeSettings } = usePreviousPage();
   
   // Use UI store for sidebar and view mode state
   const { 
@@ -353,6 +355,11 @@ function Layout({ children }: LayoutProps) {
   }, [viewMode]);
 
   const handleNavigation = useCallback((path: string) => {
+    // Save current page before navigating to settings
+    if (path.includes('/settings/company-settings')) {
+      saveCurrentPageBeforeSettings();
+    }
+    
     // Handle dynamic navigation based on view mode
     if (path === '/dashboard') {
       const actualPath = getDashboardUrl(viewMode);
@@ -368,7 +375,7 @@ function Layout({ children }: LayoutProps) {
       router.navigate(path);
       setCurrentRoute(path);
     }
-  }, [viewMode]);
+  }, [viewMode, saveCurrentPageBeforeSettings]);
 
   // Memoized sidebar width calculations
   const sidebarWidth = useMemo(() => 

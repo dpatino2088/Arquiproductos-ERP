@@ -157,9 +157,9 @@ export default function TeamLeaveRequests() {
   useEffect(() => {
     // Register submodule tabs for PTO and Leaves section
     registerSubmodules('PTO & Leaves', [
+      { id: 'calendar', label: 'Team Leave Calendar', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: Calendar },
       { id: 'team-balances', label: 'Team Balances', href: '/org/cmp/management/pto-and-leaves/team-balances', icon: Users },
-      { id: 'requests', label: 'Team Leave Requests', href: '/org/cmp/management/pto-and-leaves/team-leave-requests', icon: Clock },
-      { id: 'calendar', label: 'Team Leave Calendar', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: Calendar }
+      { id: 'requests', label: 'Team Leave Requests', href: '/org/cmp/management/pto-and-leaves/team-leave-requests', icon: Clock }
     ]);
   }, [registerSubmodules]);
 
@@ -477,7 +477,7 @@ export default function TeamLeaveRequests() {
 
   // Filter options based on search terms
   const getFilteredDepartmentOptions = () => {
-    const departments = [...new Set(leaveRequests.map(request => request.department))];
+  const departments = [...new Set(leaveRequests.map(request => request.department))];
     if (!departmentSearchTerm) return departments;
     return departments.filter(dept => 
       dept.toLowerCase().includes(departmentSearchTerm.toLowerCase())
@@ -485,7 +485,7 @@ export default function TeamLeaveRequests() {
   };
 
   const getFilteredStatusOptions = () => {
-    const statuses = [...new Set(leaveRequests.map(request => request.status))];
+  const statuses = [...new Set(leaveRequests.map(request => request.status))];
     if (!statusSearchTerm) return statuses;
     return statuses.filter(status => 
       status.toLowerCase().includes(statusSearchTerm.toLowerCase())
@@ -493,7 +493,7 @@ export default function TeamLeaveRequests() {
   };
 
   const getFilteredLeaveTypeOptions = () => {
-    const leaveTypes = [...new Set(leaveRequests.map(request => request.leaveType))];
+  const leaveTypes = [...new Set(leaveRequests.map(request => request.leaveType))];
     if (!leaveTypeSearchTerm) return leaveTypes;
     return leaveTypes.filter(type => 
       type.toLowerCase().includes(leaveTypeSearchTerm.toLowerCase())

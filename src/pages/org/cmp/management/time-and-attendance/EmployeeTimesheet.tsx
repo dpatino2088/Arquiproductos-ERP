@@ -598,7 +598,7 @@ export default function EmployeeTimesheet() {
             </button>
             <button
               onClick={goToCurrentWeek}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"
               aria-label="Go to current week"
             >
               This Week

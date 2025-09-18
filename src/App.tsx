@@ -115,9 +115,9 @@ const WhosWorking = lazy(() => {
   return import('./pages/org/cmp/management/time-and-attendance/WhosWorking');
 });
 
-const TeamPlanner = lazy(() => {
-  logger.debug('Loading Team Planner component');
-  return import('./pages/org/cmp/management/time-and-attendance/TeamPlanner');
+const TeamSchedule = lazy(() => {
+  logger.debug('Loading Team Schedule component');
+  return import('./pages/org/cmp/management/time-and-attendance/TeamSchedule');
 });
 
 const TeamAttendance = lazy(() => {
@@ -574,7 +574,7 @@ function App() {
       
       // Time & Attendance routes
       router.addRoute('/org/cmp/management/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
-      router.addRoute('/org/cmp/management/time-and-attendance/team-planner', () => setCurrentPage('team-planner'));
+      router.addRoute('/org/cmp/management/time-and-attendance/team-schedule', () => setCurrentPage('team-schedule'));
       router.addRoute('/org/cmp/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
       router.addRoute('/org/cmp/management/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
       router.addRoute('/org/cmp/management/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
@@ -780,8 +780,8 @@ function App() {
         return <CompanyReports />;
       case 'whos-working':
         return <WhosWorking />;
-      case 'team-planner':
-        return <TeamPlanner />;
+      case 'team-schedule':
+        return <TeamSchedule />;
       case 'team-attendance':
         return <TeamAttendance />;
       case 'attendance-flags':
@@ -886,6 +886,19 @@ function App() {
           </div>
         ) : currentPage === 'not-found' ? (
           <NotFound />
+        ) : currentPage === 'company-settings' ? (
+          <ErrorBoundary>
+            <Suspense fallback={
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <p className="text-sm text-muted-foreground">Loading...</p>
+                </div>
+              </div>
+            }>
+              <CompanySettings />
+            </Suspense>
+          </ErrorBoundary>
         ) : (
           <SubmoduleNavProvider>
             <Layout>

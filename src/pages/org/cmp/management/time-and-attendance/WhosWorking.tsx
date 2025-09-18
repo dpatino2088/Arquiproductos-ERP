@@ -114,7 +114,7 @@ export default function WhosWorking() {
     // Register submodule tabs for time and attendance section
     registerSubmodules('Time & Attendance', [
       { id: 'whos-working', label: "Who's Working", href: '/org/cmp/management/time-and-attendance/whos-working', icon: Users },
-      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
+      { id: 'team-schedule', label: 'Team Schedule', href: '/org/cmp/management/time-and-attendance/team-schedule', icon: Calendar },
       { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
       { id: 'attendance-flags', label: 'Attendance Flags', href: '/org/cmp/management/time-and-attendance/attendance-flags', icon: Flag }
     ]);

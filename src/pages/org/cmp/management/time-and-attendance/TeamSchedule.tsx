@@ -10,6 +10,20 @@ import {
   Search, 
   ChevronLeft, 
   ChevronRight,
+  ChevronDown,
+  Bell,
+  Copy,
+  Wand2,
+  Minus,
+  EyeOff,
+  UserX,
+  Download,
+  Upload,
+  Share2,
+  Menu,
+  Printer,
+  FileSpreadsheet,
+  CalendarX,
   Settings,
   AlertTriangle,
   CheckCircle,
@@ -17,7 +31,6 @@ import {
   MoreVertical,
   Edit,
   Trash2,
-  Copy,
   Eye,
   Flag,
   SortAsc,
@@ -94,7 +107,7 @@ interface Shift {
   notes?: string;
 }
 
-export default function TeamPlanner() {
+export default function TeamSchedule() {
   const { registerSubmodules } = useSubmoduleNav();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
@@ -115,6 +128,10 @@ export default function TeamPlanner() {
   
   // Search terms within dropdowns
   const [departmentSearchTerm, setDepartmentSearchTerm] = useState('');
+  
+  // Action buttons states
+  const [showActionsDropdown, setShowActionsDropdown] = useState(false);
+  const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [roleSearchTerm, setRoleSearchTerm] = useState('');
   const [statusSearchTerm, setStatusSearchTerm] = useState('');
   
@@ -130,11 +147,27 @@ export default function TeamPlanner() {
     // Register submodule tabs for time and attendance
     registerSubmodules('Time & Attendance', [
       { id: 'whos-working', label: "Who's Working", href: '/org/cmp/management/time-and-attendance/whos-working', icon: Users },
-      { id: 'team-planner', label: 'Team Planner', href: '/org/cmp/management/time-and-attendance/team-planner', icon: Calendar },
+      { id: 'team-schedule', label: 'Team Schedule', href: '/org/cmp/management/time-and-attendance/team-schedule', icon: Calendar },
       { id: 'team-attendance', label: 'Team Attendance', href: '/org/cmp/management/time-and-attendance/team-attendance', icon: Clock },
       { id: 'attendance-flags', label: 'Attendance Flags', href: '/org/cmp/management/time-and-attendance/attendance-flags', icon: Flag }
     ]);
   }, [registerSubmodules]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setShowActionsDropdown(false);
+        setShowAddDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Mock data
   const employees: Employee[] = [
@@ -333,6 +366,7 @@ export default function TeamPlanner() {
       name: 'Amanda Davis',
       role: 'Marketing Manager',
       department: 'Marketing',
+      status: 'present',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -351,6 +385,7 @@ export default function TeamPlanner() {
       name: 'Kevin Martinez',
       role: 'Sales Representative',
       department: 'Sales',
+      status: 'on-break',
       availability: {
         monday: ['08:00', '17:00'],
         tuesday: ['08:00', '17:00'],
@@ -369,6 +404,7 @@ export default function TeamPlanner() {
       name: 'Rachel Green',
       role: 'Content Writer',
       department: 'Marketing',
+      status: 'on-transfer',
       availability: {
         monday: ['10:00', '19:00'],
         tuesday: ['10:00', '19:00'],
@@ -387,6 +423,7 @@ export default function TeamPlanner() {
       name: 'Thomas Anderson',
       role: 'Data Analyst',
       department: 'Analytics',
+      status: 'present',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -405,6 +442,7 @@ export default function TeamPlanner() {
       name: 'Nicole White',
       role: 'HR Specialist',
       department: 'Human Resources',
+      status: 'absent',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -423,6 +461,7 @@ export default function TeamPlanner() {
       name: 'Daniel Clark',
       role: 'Mobile Developer',
       department: 'Engineering',
+      status: 'on-leave',
       availability: {
         monday: ['10:00', '19:00'],
         tuesday: ['10:00', '19:00'],
@@ -441,6 +480,7 @@ export default function TeamPlanner() {
       name: 'Samantha Turner',
       role: 'Graphic Designer',
       department: 'Design',
+      status: 'present',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -459,6 +499,7 @@ export default function TeamPlanner() {
       name: 'Mark Johnson',
       role: 'System Administrator',
       department: 'IT',
+      status: 'on-break',
       availability: {
         monday: ['08:00', '17:00'],
         tuesday: ['08:00', '17:00'],
@@ -477,6 +518,7 @@ export default function TeamPlanner() {
       name: 'Laura Miller',
       role: 'Business Analyst',
       department: 'Analytics',
+      status: 'present',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -495,6 +537,7 @@ export default function TeamPlanner() {
       name: 'Alex Thompson',
       role: 'Customer Success Manager',
       department: 'Customer Success',
+      status: 'on-transfer',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -513,6 +556,7 @@ export default function TeamPlanner() {
       name: 'Jessica Adams',
       role: 'Financial Analyst',
       department: 'Finance',
+      status: 'present',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -531,6 +575,7 @@ export default function TeamPlanner() {
       name: 'Ryan Cooper',
       role: 'Security Engineer',
       department: 'IT',
+      status: 'absent',
       availability: {
         monday: ['10:00', '19:00'],
         tuesday: ['10:00', '19:00'],
@@ -549,6 +594,7 @@ export default function TeamPlanner() {
       name: 'Michelle Lewis',
       role: 'Operations Manager',
       department: 'Operations',
+      status: 'on-leave',
       availability: {
         monday: ['08:00', '17:00'],
         tuesday: ['08:00', '17:00'],
@@ -567,6 +613,7 @@ export default function TeamPlanner() {
       name: 'Brandon Wright',
       role: 'Technical Writer',
       department: 'Engineering',
+      status: 'present',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -585,6 +632,7 @@ export default function TeamPlanner() {
       name: 'Stephanie Hall',
       role: 'Training Coordinator',
       department: 'Human Resources',
+      status: 'on-break',
       availability: {
         monday: ['09:00', '18:00'],
         tuesday: ['09:00', '18:00'],
@@ -597,29 +645,772 @@ export default function TeamPlanner() {
       qualifications: ['Training Development', 'LMS', 'Employee Onboarding'],
       hourlyRate: 50,
       maxHoursPerWeek: 40
+    },
+    {
+      id: '26',
+      name: 'Elena Rodriguez',
+      role: 'Senior UX Designer',
+      department: 'Design',
+      status: 'present',
+      availability: {
+        monday: ['09:00', '18:00'],
+        tuesday: ['09:00', '18:00'],
+        wednesday: ['09:00', '18:00'],
+        thursday: ['09:00', '18:00'],
+        friday: ['09:00', '18:00'],
+        saturday: [],
+        sunday: []
+      },
+      qualifications: ['User Research', 'Prototyping', 'Design Systems'],
+      hourlyRate: 75,
+      maxHoursPerWeek: 40
+    },
+    {
+      id: '27',
+      name: 'Marcus Thompson',
+      role: 'DevOps Lead',
+      department: 'Engineering',
+      status: 'on-break',
+      availability: {
+        monday: ['08:00', '17:00'],
+        tuesday: ['08:00', '17:00'],
+        wednesday: ['08:00', '17:00'],
+        thursday: ['08:00', '17:00'],
+        friday: ['08:00', '17:00'],
+        saturday: [],
+        sunday: []
+      },
+      qualifications: ['AWS', 'Terraform', 'CI/CD'],
+      hourlyRate: 100,
+      maxHoursPerWeek: 40
+    },
+    {
+      id: '28',
+      name: 'Sophie Chen',
+      role: 'Product Designer',
+      department: 'Design',
+      status: 'on-transfer',
+      availability: {
+        monday: ['10:00', '19:00'],
+        tuesday: ['10:00', '19:00'],
+        wednesday: ['10:00', '19:00'],
+        thursday: ['10:00', '19:00'],
+        friday: ['10:00', '19:00'],
+        saturday: [],
+        sunday: []
+      },
+      qualifications: ['Figma', 'Design Thinking', 'User Testing'],
+      hourlyRate: 70,
+      maxHoursPerWeek: 40
+    },
+    {
+      id: '29',
+      name: 'Carlos Mendez',
+      role: 'Senior Backend Developer',
+      department: 'Engineering',
+      status: 'absent',
+      availability: {
+        monday: ['09:00', '18:00'],
+        tuesday: ['09:00', '18:00'],
+        wednesday: ['09:00', '18:00'],
+        thursday: ['09:00', '18:00'],
+        friday: ['09:00', '18:00'],
+        saturday: [],
+        sunday: []
+      },
+      qualifications: ['Java', 'Spring Boot', 'Microservices'],
+      hourlyRate: 90,
+      maxHoursPerWeek: 40
+    },
+    {
+      id: '30',
+      name: 'Isabella Foster',
+      role: 'Content Marketing Manager',
+      department: 'Marketing',
+      status: 'on-leave',
+      availability: {
+        monday: ['09:00', '18:00'],
+        tuesday: ['09:00', '18:00'],
+        wednesday: ['09:00', '18:00'],
+        thursday: ['09:00', '18:00'],
+        friday: ['09:00', '18:00'],
+        saturday: [],
+        sunday: []
+      },
+      qualifications: ['Content Strategy', 'SEO', 'Social Media'],
+      hourlyRate: 65,
+      maxHoursPerWeek: 40
     }
   ];
 
+  // Get current week dates for shift data
+  const getCurrentWeekDates = () => {
+    const today = new Date();
+    const start = new Date(today);
+    const day = start.getDay();
+    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+    start.setDate(diff);
+    
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      week.push(day.toISOString().split('T')[0]);
+    }
+    return week;
+  };
+
+  const currentWeekDates = getCurrentWeekDates();
+
   const shifts: Shift[] = [
+    // Monday shifts
     {
       id: '1',
       employeeId: '1',
-      date: '2025-01-20',
+      date: currentWeekDates[0], // Monday
       startTime: '09:00',
       endTime: '17:00',
       role: 'Senior Developer',
-      location: 'Office',
+      location: 'Main Office',
       status: 'scheduled'
     },
     {
       id: '2',
       employeeId: '2',
-      date: '2025-01-20',
+      date: currentWeekDates[0], // Monday
       startTime: '08:00',
       endTime: '16:00',
       role: 'UX Designer',
-      location: 'Office',
+      location: 'Main Office',
       status: 'confirmed'
+    },
+    {
+      id: '3',
+      employeeId: '3',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Project Manager',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '4',
+      employeeId: '4',
+      date: currentWeekDates[0], // Monday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Frontend Developer',
+      location: 'Remote',
+      status: 'cancelled'
+    },
+    {
+      id: '5',
+      employeeId: '5',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Backend Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '6',
+      employeeId: '6',
+      date: currentWeekDates[0], // Monday
+      startTime: '08:00',
+      endTime: '17:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'confirmed'
+    },
+    {
+      id: '7',
+      employeeId: '7',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'UI Designer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '8',
+      employeeId: '8',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Product Manager',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '9',
+      employeeId: '9',
+      date: currentWeekDates[0], // Monday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'QA Engineer',
+      location: 'Testing Lab',
+      status: 'scheduled'
+    },
+    {
+      id: '10',
+      employeeId: '10',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Full Stack Developer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    // Additional Monday shifts for more variety
+    {
+      id: '56',
+      employeeId: '11',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '13:00',
+      role: 'Marketing Manager',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '56b',
+      employeeId: '11',
+      date: currentWeekDates[0], // Monday
+      startTime: '14:00',
+      endTime: '18:00',
+      role: 'Marketing Manager',
+      location: 'Client Site',
+      status: 'confirmed'
+    },
+    {
+      id: '57',
+      employeeId: '12',
+      date: currentWeekDates[0], // Monday
+      startTime: '08:00',
+      endTime: '17:00',
+      role: 'Sales Representative',
+      location: 'Remote',
+      status: 'confirmed'
+    },
+    {
+      id: '58',
+      employeeId: '14',
+      date: currentWeekDates[0], // Monday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Data Analyst',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '59',
+      employeeId: '17',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Graphic Designer',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '60',
+      employeeId: '21',
+      date: currentWeekDates[0], // Monday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Financial Analyst',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    // Tuesday shifts
+    {
+      id: '11',
+      employeeId: '1',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '17:00',
+      role: 'Senior Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '12',
+      employeeId: '2',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '08:00',
+      endTime: '16:00',
+      role: 'UX Designer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    {
+      id: '13',
+      employeeId: '3',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Project Manager',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '14',
+      employeeId: '4',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Frontend Developer',
+      location: 'Remote',
+      status: 'cancelled'
+    },
+    {
+      id: '15',
+      employeeId: '5',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Backend Developer',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '16',
+      employeeId: '6',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '08:00',
+      endTime: '17:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'scheduled'
+    },
+    {
+      id: '17',
+      employeeId: '7',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'UI Designer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    {
+      id: '18',
+      employeeId: '8',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Product Manager',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '19',
+      employeeId: '9',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'QA Engineer',
+      location: 'Testing Lab',
+      status: 'completed'
+    },
+    {
+      id: '20',
+      employeeId: '10',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Full Stack Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    // Additional Tuesday shifts
+    {
+      id: '61',
+      employeeId: '13',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Content Writer',
+      location: 'Remote',
+      status: 'confirmed'
+    },
+    {
+      id: '62',
+      employeeId: '15',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'HR Specialist',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '63',
+      employeeId: '19',
+      date: currentWeekDates[1], // Tuesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Business Analyst',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    // Wednesday shifts
+    {
+      id: '21',
+      employeeId: '1',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '09:00',
+      endTime: '17:00',
+      role: 'Senior Developer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    {
+      id: '22',
+      employeeId: '2',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '08:00',
+      endTime: '16:00',
+      role: 'UX Designer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '23',
+      employeeId: '3',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Project Manager',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '24',
+      employeeId: '4',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Frontend Developer',
+      location: 'Remote',
+      status: 'scheduled'
+    },
+    {
+      id: '25',
+      employeeId: '5',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Backend Developer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    {
+      id: '26',
+      employeeId: '6',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '08:00',
+      endTime: '17:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'cancelled'
+    },
+    {
+      id: '27',
+      employeeId: '7',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'UI Designer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '28',
+      employeeId: '8',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Product Manager',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '29',
+      employeeId: '9',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'QA Engineer',
+      location: 'Testing Lab',
+      status: 'scheduled'
+    },
+    {
+      id: '30',
+      employeeId: '10',
+      date: currentWeekDates[2], // Wednesday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Full Stack Developer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    // Thursday shifts
+    {
+      id: '31',
+      employeeId: '1',
+      date: currentWeekDates[3], // Thursday
+      startTime: '09:00',
+      endTime: '17:00',
+      role: 'Senior Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '32',
+      employeeId: '2',
+      date: currentWeekDates[3], // Thursday
+      startTime: '08:00',
+      endTime: '16:00',
+      role: 'UX Designer',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '33',
+      employeeId: '3',
+      date: currentWeekDates[3], // Thursday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Project Manager',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '34',
+      employeeId: '4',
+      date: currentWeekDates[3], // Thursday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Frontend Developer',
+      location: 'Remote',
+      status: 'confirmed'
+    },
+    {
+      id: '35',
+      employeeId: '5',
+      date: currentWeekDates[3], // Thursday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Backend Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '36',
+      employeeId: '6',
+      date: currentWeekDates[3], // Thursday
+      startTime: '08:00',
+      endTime: '17:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'completed'
+    },
+    {
+      id: '37',
+      employeeId: '7',
+      date: currentWeekDates[3], // Thursday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'UI Designer',
+      location: 'Main Office',
+      status: 'cancelled'
+    },
+    {
+      id: '38',
+      employeeId: '8',
+      date: currentWeekDates[3], // Thursday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Product Manager',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '39',
+      employeeId: '9',
+      date: currentWeekDates[3], // Thursday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'QA Engineer',
+      location: 'Testing Lab',
+      status: 'confirmed'
+    },
+    {
+      id: '40',
+      employeeId: '10',
+      date: currentWeekDates[3], // Thursday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Full Stack Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    // Friday shifts
+    {
+      id: '41',
+      employeeId: '1',
+      date: currentWeekDates[4], // Friday
+      startTime: '09:00',
+      endTime: '17:00',
+      role: 'Senior Developer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    {
+      id: '42',
+      employeeId: '2',
+      date: currentWeekDates[4], // Friday
+      startTime: '08:00',
+      endTime: '16:00',
+      role: 'UX Designer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '43',
+      employeeId: '3',
+      date: currentWeekDates[4], // Friday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Project Manager',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '44',
+      employeeId: '4',
+      date: currentWeekDates[4], // Friday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'Frontend Developer',
+      location: 'Remote',
+      status: 'scheduled'
+    },
+    {
+      id: '45',
+      employeeId: '5',
+      date: currentWeekDates[4], // Friday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Backend Developer',
+      location: 'Main Office',
+      status: 'confirmed'
+    },
+    {
+      id: '46',
+      employeeId: '6',
+      date: currentWeekDates[4], // Friday
+      startTime: '08:00',
+      endTime: '17:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'scheduled'
+    },
+    {
+      id: '47',
+      employeeId: '7',
+      date: currentWeekDates[4], // Friday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'UI Designer',
+      location: 'Main Office',
+      status: 'completed'
+    },
+    {
+      id: '48',
+      employeeId: '8',
+      date: currentWeekDates[4], // Friday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Product Manager',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    {
+      id: '49',
+      employeeId: '9',
+      date: currentWeekDates[4], // Friday
+      startTime: '10:00',
+      endTime: '19:00',
+      role: 'QA Engineer',
+      location: 'Testing Lab',
+      status: 'confirmed'
+    },
+    {
+      id: '50',
+      employeeId: '10',
+      date: currentWeekDates[4], // Friday
+      startTime: '09:00',
+      endTime: '18:00',
+      role: 'Full Stack Developer',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    // Saturday shifts (some employees work weekends)
+    {
+      id: '51',
+      employeeId: '1',
+      date: currentWeekDates[5], // Saturday
+      startTime: '10:00',
+      endTime: '16:00',
+      role: 'Senior Developer',
+      location: 'Remote',
+      status: 'scheduled'
+    },
+    {
+      id: '52',
+      employeeId: '6',
+      date: currentWeekDates[5], // Saturday
+      startTime: '09:00',
+      endTime: '15:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'confirmed'
+    },
+    {
+      id: '53',
+      employeeId: '18',
+      date: currentWeekDates[5], // Saturday
+      startTime: '08:00',
+      endTime: '14:00',
+      role: 'System Administrator',
+      location: 'Main Office',
+      status: 'scheduled'
+    },
+    // Sunday shifts
+    {
+      id: '54',
+      employeeId: '6',
+      date: currentWeekDates[6], // Sunday
+      startTime: '10:00',
+      endTime: '16:00',
+      role: 'DevOps Engineer',
+      location: 'Data Center',
+      status: 'confirmed'
+    },
+    {
+      id: '55',
+      employeeId: '22',
+      date: currentWeekDates[6], // Sunday
+      startTime: '09:00',
+      endTime: '15:00',
+      role: 'Security Engineer',
+      location: 'Main Office',
+      status: 'scheduled'
     }
   ];
 
@@ -809,7 +1600,7 @@ export default function TeamPlanner() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Team Planner</h1>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Team Schedule</h1>
           <p className="text-xs text-muted-foreground">Schedule and manage team shifts efficiently</p>
         </div>
       </div>
@@ -1161,11 +1952,158 @@ export default function TeamPlanner() {
             </button>
           <button
               onClick={goToCurrentWeek}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"
             aria-label="Go to current week"
           >
               This Week
           </button>
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 pr-2">
+            {/* Actions Dropdown */}
+            <div className="relative dropdown-container">
+              <button
+                onClick={() => {
+                  setShowActionsDropdown(!showActionsDropdown);
+                  setShowAddDropdown(false); // Close Add dropdown when opening Actions
+                }}
+                className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded text-sm bg-white text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Actions
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              {showActionsDropdown && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded shadow-lg z-10">
+                  <div className="py-1">
+                    {/* Week actions */}
+                    <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      Week actions
+                    </div>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Copy className="w-4 h-4" />
+                      Copy previous week
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Wand2 className="w-4 h-4" />
+                      Auto assign week
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Minus className="w-4 h-4" />
+                      Clear week
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <EyeOff className="w-4 h-4" />
+                      Unpublish week
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <UserX className="w-4 h-4" />
+                      Unassign week
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Download className="w-4 h-4" />
+                      Export week
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Printer className="w-4 h-4" />
+                      Print week
+                    </button>
+                    
+                    {/* Divider */}
+                    <div className="border-t border-gray-100 my-1"></div>
+                    
+                    {/* Templates */}
+                    <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      Templates
+                    </div>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Download className="w-4 h-4" />
+                      Save week as template
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Upload className="w-4 h-4" />
+                      Load week template
+                    </button>
+                    
+                    {/* Divider */}
+                    <div className="border-t border-gray-100 my-1"></div>
+                    
+                    {/* Shareable links */}
+                    <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      Shareable links
+                    </div>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Share2 className="w-4 h-4" />
+                      Share schedule
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Menu className="w-4 h-4" />
+                      Manage shared links
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Add Dropdown */}
+            <div className="relative dropdown-container">
+              <button
+                onClick={() => {
+                  setShowAddDropdown(!showAddDropdown);
+                  setShowActionsDropdown(false); // Close Actions dropdown when opening Add
+                }}
+                className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded text-sm bg-white text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Add
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              {showAddDropdown && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded shadow-lg z-10">
+                  <div className="py-1">
+                    {/* Shifts section */}
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Plus className="w-4 h-4" />
+                      Add single shift
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Plus className="w-4 h-4" />
+                      Add multiple shifts
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <FileSpreadsheet className="w-4 h-4" />
+                      Import shifts from Excel
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <Copy className="w-4 h-4" />
+                      Add from shift templates
+                    </button>
+                    
+                    {/* Divider */}
+                    <div className="border-t border-gray-100 my-1"></div>
+                    
+                    {/* Time off section */}
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <CalendarX className="w-4 h-4" />
+                      Add unavailability
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <CalendarX className="w-4 h-4" />
+                      Add time off
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Publish Button */}
+            <button
+              className="flex items-center gap-2 px-2 py-1 rounded text-sm text-white transition-colors"
+              style={{ backgroundColor: 'var(--teal-brand-hex)' }}
+            >
+              <span>Publish (4)</span>
+              <div className="w-px h-4 bg-white/30"></div>
+              <Bell className="w-4 h-4" />
+            </button>
           </div>
         </div>
         </div>
@@ -1176,7 +2114,7 @@ export default function TeamPlanner() {
         {viewMode === 'week' && (
           <div>
             {/* Header Row */}
-            <div className="flex">
+            <div className="flex border-b border-gray-200">
             {/* Employee Column Header */}
               <div className="w-64 p-3 pl-6 border-r border-gray-200 bg-gray-50">
                 <div className="flex items-center gap-3">
@@ -1228,29 +2166,62 @@ export default function TeamPlanner() {
                 {weekDates.map((date, dayIndex) => {
                   const dayShifts = getShiftsForDate(date).filter(shift => shift.employeeId === employee.id);
                   return (
-                      <div key={dayIndex} className={`flex-1 p-2 min-h-[60px] flex flex-col items-center justify-center ${dayIndex < weekDates.length - 1 ? 'border-r border-gray-200' : ''} ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
+                      <div key={dayIndex} className={`group flex-1 min-h-[60px] relative ${dayIndex < weekDates.length - 1 ? 'border-r border-gray-200' : ''} ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
                       {dayShifts.length > 0 ? (
-                        dayShifts.map((shift) => (
-                          <div
-                            key={shift.id}
-                            className={`p-2 rounded text-xs mb-1 cursor-pointer hover:shadow-sm transition-shadow ${getStatusColor(shift.status)}`}
-                            onClick={() => setSelectedEmployee(employee.id)}
+                        <>
+                          {dayShifts.map((shift, shiftIndex) => (
+                              <div
+                                key={shift.id}
+                                className={`absolute text-xs cursor-pointer transition-all duration-200 flex flex-col justify-center group-hover:left-6 ${getStatusColor(shift.status)} ${
+                                  dayShifts.length > 1 
+                                    ? shiftIndex === 0 
+                                      ? 'top-0 bottom-1/2 border-b border-gray-300 left-0 right-0' 
+                                      : 'top-1/2 bottom-0 left-0 right-0'
+                                    : 'inset-0'
+                                }`}
+                                onClick={() => setSelectedEmployee(employee.id)}
+                              style={{ 
+                                borderLeft: '3px solid',
+                                borderLeftColor: shift.status === 'scheduled' ? 'var(--status-blue)' : 
+                                                shift.status === 'confirmed' ? 'var(--status-green)' : 
+                                                shift.status === 'completed' ? 'var(--status-green)' : 
+                                                shift.status === 'cancelled' ? 'var(--status-red)' : 'var(--status-gray)'
+                              }}
+                            >
+                              <div className="px-2">
+                                <div className="font-medium text-xs leading-tight truncate">{shift.role}</div>
+                                <div className="text-xs opacity-75 leading-tight flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {shift.startTime} – {shift.endTime}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {/* Add button that appears on hover */}
+                          <button 
+                            className="absolute top-1/2 left-1 transform -translate-y-1/2 w-4 h-4 bg-white border border-gray-200 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-gray-50"
+                            onClick={() => {
+                              // TODO: Add shift functionality
+                              console.log('Add shift for', employee.name, 'on', date.toDateString());
+                            }}
+                            aria-label={`Add shift for ${employee.name}`}
                           >
-                            <div className="font-medium">{shift.startTime} - {shift.endTime}</div>
-                            <div className="text-xs opacity-75">{shift.role}</div>
-                          </div>
-                        ))
+                            <Plus className="w-2.5 h-2.5 text-gray-400" />
+                          </button>
+                        </>
                       ) : (
-                        <button 
-                          className="w-6 h-6 border border-gray-200 rounded flex items-center justify-center hover:bg-gray-50 transition-colors"
-                          onClick={() => {
-                            // TODO: Add shift functionality
-                            console.log('Add shift for', employee.name, 'on', date.toDateString());
-                          }}
-                          aria-label={`Add shift for ${employee.name}`}
-                        >
-                          <Plus className="w-3 h-3 text-gray-400" />
-                        </button>
+                        <div className="w-full h-full flex items-center justify-center">
+                          <button 
+                            className="opacity-0 group-hover:opacity-100 w-6 h-6 border border-gray-200 rounded flex items-center justify-center hover:bg-gray-50 transition-all duration-200"
+                            onClick={() => {
+                              // TODO: Add shift functionality
+                              console.log('Add shift for', employee.name, 'on', date.toDateString());
+                            }}
+                            aria-label={`Add shift for ${employee.name}`}
+                          >
+                            <Plus className="w-3 h-3 text-gray-400" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   );

@@ -8,8 +8,8 @@ import {
   Filter,
   Plus,
   Upload,
-  Edit,
-  Trash2,
+  Eye,
+  MoreVertical,
   ChevronLeft,
   ChevronRight,
   List,
@@ -1068,17 +1068,17 @@ export default function Directory() {
                       <button 
                         onClick={() => handleEditEmployee(employee)}
                         className="p-1 hover:bg-gray-100 rounded transition-colors"
-                        aria-label={`Edit ${employee.firstName} ${employee.lastName}`}
-                        title={`Edit ${employee.firstName} ${employee.lastName}`}
+                        aria-label={`View ${employee.firstName} ${employee.lastName}`}
+                        title={`View ${employee.firstName} ${employee.lastName}`}
                       >
-                        <Edit className="w-4 h-4" />
+                        <Eye className="w-4 h-4" />
                       </button>
                       <button 
                         className="p-1 hover:bg-gray-100 rounded transition-colors"
-                        aria-label={`Delete ${employee.firstName} ${employee.lastName}`}
-                        title={`Delete ${employee.firstName} ${employee.lastName}`}
+                        aria-label={`More options for ${employee.firstName} ${employee.lastName}`}
+                        title={`More options for ${employee.firstName} ${employee.lastName}`}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <MoreVertical className="w-4 h-4" />
                       </button>
                   </div>
                   </td>
