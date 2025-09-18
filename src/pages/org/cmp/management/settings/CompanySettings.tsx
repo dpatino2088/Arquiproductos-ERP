@@ -368,7 +368,7 @@ export default function CompanySettings() {
         <div className="flex items-center h-12 px-6">
           <div className="flex items-center gap-3">
             <SettingsIcon className="text-gray-900" style={{ width: '20px', height: '20px' }} />
-            <h1 className="text-lg font-semibold text-gray-900">Company Settings</h1>
+            <h1 className="text-lg font-semibold text-gray-900">Settings</h1>
           </div>
 
           <div className="h-6 w-px bg-gray-200 ml-6 mr-6"></div>
@@ -391,10 +391,10 @@ export default function CompanySettings() {
       </header>
 
       {/* Settings Layout */}
-      <div className="flex h-[calc(100vh-49px)]">
+      <div className="flex h-[calc(100vh-48px)]">
         {/* Settings Sidebar */}
         <div className="bg-white border-r border-gray-200 flex-shrink-0" style={{ width: '240px' }}>
-          <div className="px-6 border-b border-gray-200 flex items-center" style={{ height: '49px' }}>
+          <div className="px-6 border-b border-gray-200 flex items-center" style={{ height: '48px' }}>
             <p className="text-xs text-gray-500">Manage your system settings and content</p>
           </div>
 
@@ -406,7 +406,7 @@ export default function CompanySettings() {
                   <li key={item.id}>
                     <button
                       onClick={() => handleSectionChange(item.id)}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-left rounded-lg transition-colors ${
+                      className={`w-full flex items-center justify-between px-4 py-2 text-left rounded transition-colors ${
                         isActive
                           ? 'bg-primary text-white shadow-sm'
                           : 'text-gray-700 hover:bg-gray-50'
@@ -431,8 +431,8 @@ export default function CompanySettings() {
         <div className="flex-1 flex flex-col">
           {/* Secondary Navigation */}
           {currentTabs.length > 0 && (
-            <div className="bg-gray-50 border-b border-gray-200 flex-shrink-0 px-6">
-              <div className="flex items-center h-12">
+            <div className="bg-gray-50 border-b border-gray-200 flex-shrink-0 px-6" style={{ height: '48px' }}>
+              <div className="flex items-center" style={{ height: '48px' }}>
                 <div className="flex items-stretch h-full -mx-2">
                   {currentTabs.map((tab) => (
                     <button
@@ -445,7 +445,7 @@ export default function CompanySettings() {
                       }`}
                       style={{
                         fontSize: '14px',
-                        height: '100%',
+                        height: '46px',
                         minWidth: '140px'
                       }}
                     >

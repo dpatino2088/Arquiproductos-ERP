@@ -93,7 +93,7 @@ export default function CompanyReports() {
   const activeModuleData = reportModules.find(module => module.id === activeModule);
 
   return (
-    <div className="flex h-[calc(100vh-48px)]">
+    <div className="flex h-[calc(100vh-48px)] -ml-6 -mr-6">
       {/* Secondary Sidebar */}
        <div className="w-56 bg-white border-r border-gray-200 flex-shrink-0">
          {/* Sidebar Header */}
