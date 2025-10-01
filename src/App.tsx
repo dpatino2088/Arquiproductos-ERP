@@ -85,9 +85,61 @@ const Inbox = lazy(() => {
   return import('./pages/org/cmp/Inbox');
 });
 
+// Auth pages
+const Login = lazy(() => {
+  logger.debug('Loading Login component');
+  return import('./pages/auth/Login');
+});
+
+const ResetPassword = lazy(() => {
+  logger.debug('Loading ResetPassword component');
+  return import('./pages/auth/ResetPassword');
+});
+
+const NewPassword = lazy(() => {
+  logger.debug('Loading NewPassword component');
+  return import('./pages/auth/NewPassword');
+});
+
+// Error pages
+const BadRequest = lazy(() => {
+  logger.debug('Loading BadRequest component');
+  return import('./pages/error-pages/BadRequest');
+});
+
+const Unauthorized = lazy(() => {
+  logger.debug('Loading Unauthorized component');
+  return import('./pages/error-pages/Unauthorized');
+});
+
+const Forbidden = lazy(() => {
+  logger.debug('Loading Forbidden component');
+  return import('./pages/error-pages/Forbidden');
+});
+
 const NotFound = lazy(() => {
   logger.debug('Loading NotFound component');
-  return import('./pages/NotFound');
+  return import('./pages/error-pages/NotFound');
+});
+
+const InternalServerError = lazy(() => {
+  logger.debug('Loading InternalServerError component');
+  return import('./pages/error-pages/InternalServerError');
+});
+
+const BadGateway = lazy(() => {
+  logger.debug('Loading BadGateway component');
+  return import('./pages/error-pages/BadGateway');
+});
+
+const ServiceUnavailable = lazy(() => {
+  logger.debug('Loading ServiceUnavailable component');
+  return import('./pages/error-pages/ServiceUnavailable');
+});
+
+const GatewayTimeout = lazy(() => {
+  logger.debug('Loading GatewayTimeout component');
+  return import('./pages/error-pages/GatewayTimeout');
 });
 
 const MyInfo = lazy(() => {
@@ -528,6 +580,21 @@ function App() {
       // Set up routes - default route goes to employee dashboard
       router.addRoute('/', () => setCurrentPage('employee-dashboard'));
       
+      // Auth routes
+      router.addRoute('/login', () => setCurrentPage('login'));
+      router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
+      router.addRoute('/new-password', () => setCurrentPage('new-password'));
+      
+      // Error routes
+      router.addRoute('/400', () => setCurrentPage('bad-request'));
+      router.addRoute('/401', () => setCurrentPage('unauthorized'));
+      router.addRoute('/403', () => setCurrentPage('forbidden'));
+      router.addRoute('/404', () => setCurrentPage('not-found'));
+      router.addRoute('/500', () => setCurrentPage('internal-server-error'));
+      router.addRoute('/502', () => setCurrentPage('bad-gateway'));
+      router.addRoute('/503', () => setCurrentPage('service-unavailable'));
+      router.addRoute('/504', () => setCurrentPage('gateway-timeout'));
+      
       // 404 route handler for unknown routes
       router.addRoute('*', () => setCurrentPage('not-found'));
       // Specific inbox routes for each view mode
@@ -735,6 +802,33 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
+      // Auth pages
+      case 'login':
+        return <Login />;
+      case 'reset-password':
+        return <ResetPassword />;
+      case 'new-password':
+        return <NewPassword />;
+      
+      // Error pages
+      case 'bad-request':
+        return <BadRequest />;
+      case 'unauthorized':
+        return <Unauthorized />;
+      case 'forbidden':
+        return <Forbidden />;
+      case 'not-found':
+        return <NotFound />;
+      case 'internal-server-error':
+        return <InternalServerError />;
+      case 'bad-gateway':
+        return <BadGateway />;
+      case 'service-unavailable':
+        return <ServiceUnavailable />;
+      case 'gateway-timeout':
+        return <GatewayTimeout />;
+      
+      // Dashboard pages
       case 'employee-dashboard':
         return <EmployeeDashboard />;
       case 'management-dashboard':
@@ -877,6 +971,13 @@ function App() {
     }
   };
 
+  // Check if current page is auth or error page
+  const isAuthOrErrorPage = [
+    'login', 'reset-password', 'new-password',
+    'bad-request', 'unauthorized', 'forbidden', 'not-found',
+    'internal-server-error', 'bad-gateway', 'service-unavailable', 'gateway-timeout'
+  ].includes(currentPage);
+
   return (
     <ErrorBoundary>
       <div className="min-h-dvh bg-background">
@@ -884,8 +985,20 @@ function App() {
           <div className="min-h-dvh flex items-center justify-center p-6">
             <AuthForms />
           </div>
-        ) : currentPage === 'not-found' ? (
-          <NotFound />
+        ) : isAuthOrErrorPage ? (
+          // Auth and error pages without layout
+          <ErrorBoundary>
+            <Suspense fallback={
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <p className="text-sm text-muted-foreground">Loading...</p>
+                </div>
+              </div>
+            }>
+              {renderPage()}
+            </Suspense>
+          </ErrorBoundary>
         ) : currentPage === 'company-settings' ? (
           <ErrorBoundary>
             <Suspense fallback={
@@ -900,6 +1013,7 @@ function App() {
             </Suspense>
           </ErrorBoundary>
         ) : (
+          // Regular pages with layout
           <SubmoduleNavProvider>
             <Layout>
               <ErrorBoundary>

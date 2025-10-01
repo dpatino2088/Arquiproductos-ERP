@@ -29,7 +29,7 @@ export default function NotFound() {
         <div className="mb-8">
           <button
             onClick={handleGoBack}
-            className="w-full bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+            className="w-full bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
             aria-label="Go back to previous page"
           >
             <ArrowLeft className="w-4 h-4" />
