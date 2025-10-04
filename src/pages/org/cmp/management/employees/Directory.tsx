@@ -20,7 +20,8 @@ import {
   Mail,
   Phone,
   MapPin,
-  Calendar
+  Calendar,
+  Edit
 } from 'lucide-react';
 
 interface Employee {
