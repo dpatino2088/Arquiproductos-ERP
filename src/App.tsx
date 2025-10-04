@@ -1,6 +1,5 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useAuth } from './hooks/useAuth';
-import { SecureForm } from './components/ui/SecureForm';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { router } from './lib/router';
@@ -99,6 +98,11 @@ const ResetPassword = lazy(() => {
 const NewPassword = lazy(() => {
   logger.debug('Loading NewPassword component');
   return import('./pages/auth/NewPassword');
+});
+
+const SetupCompany = lazy(() => {
+  logger.debug('Loading SetupCompany component');
+  return import('./pages/auth/SetupCompany');
 });
 
 // Error pages
@@ -423,124 +427,7 @@ function ThemeToggle() {
   );
 }
 
-function AuthForms() {
-  const [isLogin, setIsLogin] = useState(true);
-  const { login, register, isLoading, error, clearError } = useAuth();
 
-  const handleSubmit = (data: { email: string; password: string; name?: string; confirmPassword?: string }) => {
-    if (import.meta.env.DEV) {
-    console.log('Form submitted:', data);
-    }
-    if (isLogin) {
-      login({ email: data.email, password: data.password });
-    } else {
-      register({
-        email: data.email,
-        password: data.password,
-        name: data.name || '',
-        confirmPassword: data.confirmPassword || ''
-      });
-    }
-  };
-
-  return (
-    <div className="w-full max-w-md mx-auto">
-      <div className="mb-6 text-center">
-        <h2 className="text-2xl font-bold text-foreground mb-2">
-          {isLogin ? 'Welcome Back' : 'Create Account'}
-        </h2>
-        <p className="text-muted-foreground">
-          {isLogin ? 'Sign in to your secure account' : 'Get started with your secure account'}
-        </p>
-      </div>
-
-      <SecureForm
-        type={isLogin ? 'login' : 'register'}
-        onSubmit={handleSubmit}
-        isLoading={isLoading}
-        error={error}
-        onClearError={clearError}
-      />
-
-      <div className="mt-6 text-center">
-        <button
-          type="button"
-          onClick={() => setIsLogin(!isLogin)}
-          className="text-primary hover:underline text-sm"
-        >
-          {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function _UserDashboard() {
-  const { user, logout } = useAuth();
-
-  return (
-    <div className="w-full max-w-4xl mx-auto">
-      <div className="bg-card border border-border rounded-lg p-6 shadow-card">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-foreground">Welcome, {user?.name}!</h2>
-            <p className="text-muted-foreground">Your secure dashboard</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <ThemeToggle />
-            <button
-              onClick={logout}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="bg-muted p-4 rounded-lg">
-            <h3 className="font-semibold text-foreground mb-2">Account Information</h3>
-            <div className="space-y-2 text-sm">
-              <p><span className="text-muted-foreground">Email:</span> {user?.email}</p>
-              <p><span className="text-muted-foreground">Role:</span> {user?.role}</p>
-              <p><span className="text-muted-foreground">User ID:</span> {user?.id}</p>
-            </div>
-          </div>
-
-          <div className="bg-muted p-4 rounded-lg">
-            <h3 className="font-semibold text-foreground mb-2">Security Status</h3>
-            <div className="space-y-2 text-sm">
-              <p className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                Authentication: Active
-              </p>
-              <p className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                Session: Valid
-              </p>
-              <p className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                CSRF Protection: Enabled
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="font-semibold text-blue-900 mb-2">Security Features Implemented</h3>
-          <ul className="text-sm text-blue-800 space-y-1">
-            <li>• Input validation and sanitization</li>
-            <li>• CSRF token protection</li>
-            <li>• Secure password requirements</li>
-            <li>• Rate limiting capabilities</li>
-            <li>• Content Security Policy (CSP)</li>
-            <li>• XSS protection headers</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function App() {
   const { isAuthenticated, user, isLoading } = useAuth();
@@ -584,6 +471,7 @@ function App() {
       router.addRoute('/login', () => setCurrentPage('login'));
       router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
       router.addRoute('/new-password', () => setCurrentPage('new-password'));
+      router.addRoute('/setup-company', () => setCurrentPage('setup-company'));
       
       // Error routes
       router.addRoute('/400', () => setCurrentPage('bad-request'));
@@ -809,6 +697,8 @@ function App() {
         return <ResetPassword />;
       case 'new-password':
         return <NewPassword />;
+      case 'setup-company':
+        return <SetupCompany />;
       
       // Error pages
       case 'bad-request':
@@ -973,17 +863,27 @@ function App() {
 
   // Check if current page is auth or error page
   const isAuthOrErrorPage = [
-    'login', 'reset-password', 'new-password',
+    'login', 'reset-password', 'new-password', 'setup-company',
     'bad-request', 'unauthorized', 'forbidden', 'not-found',
     'internal-server-error', 'bad-gateway', 'service-unavailable', 'gateway-timeout'
   ].includes(currentPage);
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated && !isLoading) {
+      window.location.href = '/login';
+    }
+  }, [isAuthenticated, isLoading]);
 
   return (
     <ErrorBoundary>
       <div className="min-h-dvh bg-background">
         {!isAuthenticated ? (
           <div className="min-h-dvh flex items-center justify-center p-6">
-            <AuthForms />
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Redirecting to login...</p>
+            </div>
           </div>
         ) : isAuthOrErrorPage ? (
           // Auth and error pages without layout

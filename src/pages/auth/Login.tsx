@@ -269,9 +269,16 @@ export default function Login() {
           {/* Footer */}
           <div className="text-center mt-6">
             <p className="text-sm text-muted-foreground">
-              Don't have an account?{' '}
+              Don't have a user account?{' '}
               <button className="text-primary hover:text-primary/80 transition-colors">
                 Contact your administrator
+              </button>
+              {' '}or{' '}
+              <button 
+                onClick={() => window.location.href = '/setup-company'}
+                className="text-primary hover:text-primary/80 transition-colors"
+              >
+                set up a company account
               </button>
             </p>
           </div>
