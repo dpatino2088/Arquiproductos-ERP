@@ -2,10 +2,10 @@
 export class Router {
   private routes: Map<string, () => void> = new Map();
   private currentRoute: string = '/';
-  private viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp' = 'employee';
+  private viewMode: 'employee' | 'manager' | 'group' = 'employee';
   private listeners: Set<() => void> = new Set();
   private unauthorizedRedirectHandler?: () => void;
-  private viewModeChangeHandler?: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => void;
+  private viewModeChangeHandler?: (viewMode: 'employee' | 'manager' | 'group') => void;
 
   constructor() {
     // Handle browser back/forward buttons
@@ -39,24 +39,22 @@ export class Router {
     }
   }
 
-  setViewMode(mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') {
+  setViewMode(mode: 'employee' | 'manager' | 'group') {
     this.viewMode = mode;
   }
 
-  getViewMode(): 'employee' | 'manager' | 'group' | 'vap' | 'rp' {
+  getViewMode(): 'employee' | 'manager' | 'group' {
     return this.viewMode;
   }
 
   // Set handler for view mode changes (to sync with UI store)
-  setViewModeChangeHandler(handler: (viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => void) {
+  setViewModeChangeHandler(handler: (viewMode: 'employee' | 'manager' | 'group') => void) {
     this.viewModeChangeHandler = handler;
   }
 
   // Infer view mode from URL path
-  private inferViewModeFromPath(path: string): 'employee' | 'manager' | 'group' | 'vap' | 'rp' {
+  private inferViewModeFromPath(path: string): 'employee' | 'manager' | 'group' {
     if (path.includes('/org/grp/')) return 'group';
-    if (path.includes('/org/vap/')) return 'vap';
-    if (path.includes('/org/rp/')) return 'rp';
     if (path.includes('/org/cmp/management/')) return 'manager';
     if (path.includes('/org/cmp/employee/')) return 'employee';
     
@@ -85,8 +83,8 @@ export class Router {
       return true; // Public routes are always accessible
     }
     
-    // Protected routes require manager, group, vap, or rp view mode
-    return this.viewMode === 'manager' || this.viewMode === 'group' || this.viewMode === 'vap' || this.viewMode === 'rp';
+    // Protected routes require manager or group view mode
+    return this.viewMode === 'manager' || this.viewMode === 'group';
   }
 
   navigate(path: string, pushState: boolean = true) {

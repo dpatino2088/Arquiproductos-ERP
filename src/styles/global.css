@@ -80,8 +80,17 @@
     --blue-50: #eff6ff;
     
     --navy-950: #08141b;
-    --navy-900: #0b2230;
-    --navy-800: #0f2f3f;
+    --navy-900: #0a1621;   /* casi negro azulado */
+    --navy-800: #0d2233;
+    --navy-700: #003153;   /* tono principal solicitado */
+    --navy-650: #003c68;   /* deep navy (sidebar base recomendado) */
+    --navy-600: #004a7f;
+    --navy-500: #0A66C2;   /* azul vibrante tipo LinkedIn */
+    --navy-400: #3b84cf;
+    --navy-300: #66a2db;
+    --navy-200: #99c2e8;
+    --navy-100: #cce0f4;
+    --navy-50: #f0f6fc;    /* muy claro, fondos suaves */
     
     --green-950: #052e16;
     --green-900: #14532d;
@@ -211,6 +220,19 @@
   .text-muted { color: var(--gray-500); }
   .text-primary-contrast { color: var(--teal-800); } /* Higher contrast version of primary for WCAG compliance */
   
+  /* Navy text utilities */
+  .text-navy-900 { color: var(--navy-900); }
+  .text-navy-800 { color: var(--navy-800); }
+  .text-navy-700 { color: var(--navy-700); }
+  .text-navy-650 { color: var(--navy-650); }
+  .text-navy-600 { color: var(--navy-600); }
+  .text-navy-500 { color: var(--navy-500); }
+  .text-navy-400 { color: var(--navy-400); }
+  .text-navy-300 { color: var(--navy-300); }
+  .text-navy-200 { color: var(--navy-200); }
+  .text-navy-100 { color: var(--navy-100); }
+  .text-navy-50 { color: var(--navy-50); }
+  
   /* Light background variants for badges using design system palette - WCAG 2.2 AA compliant */
   .bg-status-green-light { background-color: var(--green-100); }
   .bg-status-red-light { background-color: var(--red-100); }
@@ -238,6 +260,19 @@
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
   .bg-row-highlight { background-color: var(--row-highlight); }
+  
+  /* Navy background utilities */
+  .bg-navy-900 { background-color: var(--navy-900); }
+  .bg-navy-800 { background-color: var(--navy-800); }
+  .bg-navy-700 { background-color: var(--navy-700); }
+  .bg-navy-650 { background-color: var(--navy-650); }
+  .bg-navy-600 { background-color: var(--navy-600); }
+  .bg-navy-500 { background-color: var(--navy-500); }
+  .bg-navy-400 { background-color: var(--navy-400); }
+  .bg-navy-300 { background-color: var(--navy-300); }
+  .bg-navy-200 { background-color: var(--navy-200); }
+  .bg-navy-100 { background-color: var(--navy-100); }
+  .bg-navy-50 { background-color: var(--navy-50); }
 
 /* Border colors for tooltip arrows */
 .border-t-status-green { border-top-color: var(--status-green); }
@@ -251,6 +286,19 @@
   /* Borders using Tailwind v3 */
   .border-subtle { border-color: var(--gray-200); }
   .border-strong { border-color: var(--gray-300); }
+  
+  /* Navy border utilities */
+  .border-navy-900 { border-color: var(--navy-900); }
+  .border-navy-800 { border-color: var(--navy-800); }
+  .border-navy-700 { border-color: var(--navy-700); }
+  .border-navy-650 { border-color: var(--navy-650); }
+  .border-navy-600 { border-color: var(--navy-600); }
+  .border-navy-500 { border-color: var(--navy-500); }
+  .border-navy-400 { border-color: var(--navy-400); }
+  .border-navy-300 { border-color: var(--navy-300); }
+  .border-navy-200 { border-color: var(--navy-200); }
+  .border-navy-100 { border-color: var(--navy-100); }
+  .border-navy-50 { border-color: var(--navy-50); }
 
   /* Enhanced Focus Management for WCAG 2.2 AA Compliance */
   .focus-ring { 

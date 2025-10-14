@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { useAuthStore } from '../stores/auth-store';
 import { generateCSRFToken } from '../lib/security';
 import { logger } from '../lib/logger';
-import { LoginFormData, RegistrationFormData } from '../lib/validation';
 
 export const useAuth = () => {
   const {
@@ -15,15 +14,6 @@ export const useAuth = () => {
     updateUser,
   } = useAuthStore();
 
-  const login = useCallback(async (credentials: LoginFormData) => {
-    // No-op function since authentication is bypassed
-    logger.info('Login bypassed - already authenticated', { email: credentials.email });
-  }, []);
-
-  const register = useCallback(async (credentials: RegistrationFormData) => {
-    // No-op function since authentication is bypassed
-    logger.info('Registration bypassed - already authenticated', { email: credentials.email });
-  }, []);
 
   const logout = useCallback(() => {
     // No-op function since authentication is bypassed
@@ -43,8 +33,6 @@ export const useAuth = () => {
     isAuthenticated,
     isLoading,
     error,
-    login,
-    register,
     logout,
     clearError,
     updateUser,

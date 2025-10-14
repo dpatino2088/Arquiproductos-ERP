@@ -38,45 +38,6 @@ const GroupSettings = lazy(() => {
   return import('./pages/org/grp/Settings');
 });
 
-const VapDashboard = lazy(() => {
-  logger.debug('Loading VapDashboard component');
-  return import('./pages/org/vap/Dashboard');
-});
-
-const VapCompanies = lazy(() => {
-  logger.debug('Loading VapCompanies component');
-  return import('./pages/org/vap/Companies');
-});
-
-const VapReports = lazy(() => {
-  logger.debug('Loading VapReports component');
-  return import('./pages/org/vap/Reports');
-});
-
-const VapSettings = lazy(() => {
-  logger.debug('Loading VapSettings component');
-  return import('./pages/org/vap/Settings');
-});
-
-const RpDashboard = lazy(() => {
-  logger.debug('Loading RpDashboard component');
-  return import('./pages/org/rp/Dashboard');
-});
-
-const RpCompanies = lazy(() => {
-  logger.debug('Loading RpCompanies component');
-  return import('./pages/org/rp/Companies');
-});
-
-const RpReports = lazy(() => {
-  logger.debug('Loading RpReports component');
-  return import('./pages/org/rp/Reports');
-});
-
-const RpSettings = lazy(() => {
-  logger.debug('Loading RpSettings component');
-  return import('./pages/org/rp/Settings');
-});
 
 
 const Inbox = lazy(() => {
@@ -84,26 +45,6 @@ const Inbox = lazy(() => {
   return import('./pages/org/cmp/Inbox');
 });
 
-// Auth pages
-const Login = lazy(() => {
-  logger.debug('Loading Login component');
-  return import('./pages/auth/Login');
-});
-
-const ResetPassword = lazy(() => {
-  logger.debug('Loading ResetPassword component');
-  return import('./pages/auth/ResetPassword');
-});
-
-const NewPassword = lazy(() => {
-  logger.debug('Loading NewPassword component');
-  return import('./pages/auth/NewPassword');
-});
-
-const SetupCompany = lazy(() => {
-  logger.debug('Loading SetupCompany component');
-  return import('./pages/auth/SetupCompany');
-});
 
 // Error pages
 const BadRequest = lazy(() => {
@@ -467,11 +408,6 @@ function App() {
       // Set up routes - default route goes to employee dashboard
       router.addRoute('/', () => setCurrentPage('employee-dashboard'));
       
-      // Auth routes
-      router.addRoute('/login', () => setCurrentPage('login'));
-      router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
-      router.addRoute('/new-password', () => setCurrentPage('new-password'));
-      router.addRoute('/setup-company', () => setCurrentPage('setup-company'));
       
       // Error routes
       router.addRoute('/400', () => setCurrentPage('bad-request'));
@@ -511,17 +447,6 @@ function App() {
       router.addRoute('/org/grp/reports', () => setCurrentPage('group-reports'));
       router.addRoute('/org/grp/settings', () => setCurrentPage('group-settings'));
 
-      // VAP view routes (viewMode auto-inferred from URL)
-      router.addRoute('/org/vap/dashboard', () => setCurrentPage('vap-dashboard'));
-      router.addRoute('/org/vap/companies', () => setCurrentPage('vap-companies'));
-      router.addRoute('/org/vap/reports', () => setCurrentPage('vap-reports'));
-      router.addRoute('/org/vap/settings', () => setCurrentPage('vap-settings'));
-
-      // RP view routes (viewMode auto-inferred from URL)
-      router.addRoute('/org/rp/dashboard', () => setCurrentPage('rp-dashboard'));
-      router.addRoute('/org/rp/companies', () => setCurrentPage('rp-companies'));
-      router.addRoute('/org/rp/reports', () => setCurrentPage('rp-reports'));
-      router.addRoute('/org/rp/settings', () => setCurrentPage('rp-settings'));
 
       
       // Management routes
@@ -690,15 +615,6 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
-      // Auth pages
-      case 'login':
-        return <Login />;
-      case 'reset-password':
-        return <ResetPassword />;
-      case 'new-password':
-        return <NewPassword />;
-      case 'setup-company':
-        return <SetupCompany />;
       
       // Error pages
       case 'bad-request':
@@ -731,22 +647,6 @@ function App() {
         return <GroupReports />;
       case 'group-settings':
         return <GroupSettings />;
-      case 'vap-dashboard':
-        return <VapDashboard />;
-      case 'vap-companies':
-        return <VapCompanies />;
-      case 'vap-reports':
-        return <VapReports />;
-      case 'vap-settings':
-        return <VapSettings />;
-      case 'rp-dashboard':
-        return <RpDashboard />;
-      case 'rp-companies':
-        return <RpCompanies />;
-      case 'rp-reports':
-        return <RpReports />;
-      case 'rp-settings':
-        return <RpSettings />;
       case 'inbox':
         return <Inbox />;
       case 'my-info':
@@ -861,17 +761,16 @@ function App() {
     }
   };
 
-  // Check if current page is auth or error page
-  const isAuthOrErrorPage = [
-    'login', 'reset-password', 'new-password', 'setup-company',
+  // Check if current page is error page
+  const isErrorPage = [
     'bad-request', 'unauthorized', 'forbidden', 'not-found',
     'internal-server-error', 'bad-gateway', 'service-unavailable', 'gateway-timeout'
   ].includes(currentPage);
 
-  // Redirect to login if not authenticated
+  // Redirect to employee dashboard if not authenticated
   useEffect(() => {
     if (!isAuthenticated && !isLoading) {
-      window.location.href = '/login';
+      window.location.href = '/org/cmp/employee/dashboard';
     }
   }, [isAuthenticated, isLoading]);
 
@@ -882,11 +781,11 @@ function App() {
           <div className="min-h-dvh flex items-center justify-center p-6">
             <div className="text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-              <p className="text-muted-foreground">Redirecting to login...</p>
+              <p className="text-muted-foreground">Redirecting to dashboard...</p>
             </div>
           </div>
-        ) : isAuthOrErrorPage ? (
-          // Auth and error pages without layout
+        ) : isErrorPage ? (
+          // Error pages without layout
           <ErrorBoundary>
             <Suspense fallback={
               <div className="flex items-center justify-center min-h-[400px]">

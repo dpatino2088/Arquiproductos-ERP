@@ -62,7 +62,7 @@ const NavigationItem = memo(({
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
-  viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp';
+  viewMode: 'employee' | 'manager' | 'group';
 }) => {
   const buttonStyles = getButtonStyles(viewMode, isActive);
   const textStyles = getTextStyles(viewMode, isActive);
@@ -266,21 +266,7 @@ function Layout({ children }: LayoutProps) {
     const dashboardItem = baseNavigation[0]; // Dashboard
     const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
-    if (viewMode === 'rp') {
-      // RP view navigation - Home, Companies, Reports, Settings
-      const homeItem = { name: 'Home', href: '/org/rp/dashboard', icon: Home };
-      const companiesItem = { name: 'Companies', href: '/org/rp/companies', icon: Building2 };
-      const reportsItem = { name: 'Reports', href: '/org/rp/reports', icon: Printer };
-      const settingsItem = { name: 'Settings', href: '/org/rp/settings', icon: Settings };
-      return [homeItem, companiesItem, reportsItem, settingsItem];
-    } else if (viewMode === 'vap') {
-      // VAP view navigation - Home, Companies, Reports, Settings
-      const homeItem = { name: 'Home', href: '/org/vap/dashboard', icon: Home };
-      const companiesItem = { name: 'Companies', href: '/org/vap/companies', icon: Building2 };
-      const reportsItem = { name: 'Reports', href: '/org/vap/reports', icon: Printer };
-      const settingsItem = { name: 'Settings', href: '/org/vap/settings', icon: Settings };
-      return [homeItem, companiesItem, reportsItem, settingsItem];
-    } else if (viewMode === 'group') {
+    if (viewMode === 'group') {
       // Group view navigation - Home, Companies, Reports, Settings
       const homeItem = { name: 'Home', href: '/org/grp/dashboard', icon: Home };
       const companiesItem = { name: 'Companies', href: '/org/grp/companies', icon: Building2 };
@@ -328,7 +314,7 @@ function Layout({ children }: LayoutProps) {
     navigation.filter(item => 
       item?.name !== 'Dashboard' && 
       item?.name !== 'Home' && 
-      !((viewMode === 'vap' || viewMode === 'group' || viewMode === 'rp') && item?.name === 'Settings') // Exclude Settings in vap, group, and rp view since it's rendered separately
+      !(viewMode === 'group' && item?.name === 'Settings') // Exclude Settings in group view since it's rendered separately
     ), [navigation, viewMode]
   );
 
@@ -565,7 +551,7 @@ function Layout({ children }: LayoutProps) {
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
-              {/* Settings Button - Only show in manager, group, and vap views */}
+              {/* Settings Button - Only show in manager and group views */}
               {viewMode !== 'employee' && (() => {
                 const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
                 return (
@@ -707,18 +693,6 @@ function Layout({ children }: LayoutProps) {
                         My Account
                       </button>
                       
-                      <button
-                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          // Add navigation to change password if needed
-                        }}
-                        role="menuitem"
-                        aria-label="Change my password"
-                      >
-                        <Settings style={{ width: '16px', height: '16px' }} aria-hidden="true" />
-                        Change Password
-                      </button>
 
                       {/* View Mode Toggle */}
                       <div className="border-t border-gray-100 mt-1 pt-1">
@@ -797,52 +771,6 @@ function Layout({ children }: LayoutProps) {
                               Employee View {viewMode === 'employee' && '✓'}
                             </button>
                             
-                            
-                            {/* VAP View Button */}
-                            <button
-                              onClick={() => {
-                                if (viewMode !== 'vap') {
-                                  setViewMode('vap');
-                                  router.setViewMode('vap');
-                                  router.navigate('/org/vap/dashboard');
-                                  setCurrentRoute('/org/vap/dashboard');
-                                  setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'vap' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'vap' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="vap-view-btn"
-                              disabled={viewMode === 'vap'}
-                            >
-                              VAP View {viewMode === 'vap' && '✓'}
-                            </button>
-                            
-                            {/* RP View Button */}
-                          <button
-                            onClick={() => {
-                                if (viewMode !== 'rp') {
-                                  setViewMode('rp');
-                                  router.setViewMode('rp');
-                                  router.navigate('/org/rp/dashboard');
-                                  setCurrentRoute('/org/rp/dashboard');
-                              setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'rp' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'rp' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="rp-view-btn"
-                              disabled={viewMode === 'rp'}
-                            >
-                              RP View {viewMode === 'rp' && '✓'}
-                          </button>
                           </div>
                         </div>
                       </div>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { ViewMode } from '../stores/ui-store';
+
+export type ViewMode = 'employee' | 'manager' | 'group';
 
 // View mode color constants
 export const VIEW_MODE_COLORS = {
@@ -26,14 +27,14 @@ export const VIEW_MODE_COLORS = {
   },
   manager: {
     sidebar: {
-      background: 'var(--gray-950)',
-      border: 'var(--gray-800)',
+      background: 'var(--navy-700)',
+      border: 'var(--navy-600)',
       textPrimary: 'var(--gray-300)',
       textSecondary: 'var(--gray-100)'
     },
     buttons: {
       active: {
-        background: 'var(--gray-800)',
+        background: 'var(--navy-800)',
         color: 'var(--teal-500)',
         border: 'var(--teal-500)'
       },
@@ -41,7 +42,7 @@ export const VIEW_MODE_COLORS = {
         color: 'var(--gray-300)'
       },
       hover: {
-        background: 'var(--gray-800)'
+        background: 'var(--navy-800)'
       }
     }
   },
@@ -66,48 +67,6 @@ export const VIEW_MODE_COLORS = {
       }
     }
   },
-  vap: {
-    sidebar: {
-      background: 'var(--navy-800)', // Navy-800
-      border: 'var(--navy-800)',
-      textPrimary: '#FFFFFF',
-      textSecondary: 'var(--gray-100)'
-    },
-    buttons: {
-      active: {
-        background: 'var(--navy-900)', // Navy-900
-        color: 'var(--teal-500)',
-        border: 'var(--teal-500)'
-      },
-      inactive: {
-        color: '#FFFFFF'
-      },
-      hover: {
-        background: 'var(--navy-900)'
-      }
-    }
-  },
-  rp: {
-    sidebar: {
-      background: 'var(--navy-800)', // Navy-800 (same as VAP View)
-      border: 'var(--navy-800)',
-      textPrimary: '#FFFFFF',
-      textSecondary: 'var(--gray-100)'
-    },
-    buttons: {
-      active: {
-        background: 'var(--navy-900)', // Navy-900 (same as VAP View)
-        color: 'var(--teal-500)',
-        border: 'var(--teal-500)'
-      },
-      inactive: {
-        color: '#FFFFFF'
-      },
-      hover: {
-        background: 'var(--navy-900)'
-      }
-    }
-  }
 } as const;
 
 // Utility functions for getting view mode styles
@@ -168,7 +127,7 @@ export const getLogoTextColor = (viewMode: ViewMode) => {
 };
 
 // View mode cycling utility
-const VIEW_MODE_CYCLE: ViewMode[] = ['employee', 'manager', 'group', 'vap', 'rp'];
+const VIEW_MODE_CYCLE: ViewMode[] = ['employee', 'manager', 'group'];
 
 export const getNextViewMode = (currentMode: ViewMode): ViewMode => {
   const currentIndex = VIEW_MODE_CYCLE.indexOf(currentMode);
@@ -181,8 +140,6 @@ const SETTINGS_URLS: Record<ViewMode, string> = {
   employee: '/org/cmp/employee/settings', // This might not be used, but for completeness
   manager: '/org/cmp/management/settings/company-settings',
   group: '/org/grp/settings',
-  vap: '/org/vap/settings',
-  rp: '/org/rp/settings',
 };
 
 export const getSettingsUrl = (viewMode: ViewMode): string => {
@@ -194,8 +151,6 @@ const DASHBOARD_URLS: Record<ViewMode, string> = {
   employee: '/org/cmp/employee/dashboard',
   manager: '/org/cmp/management/dashboard',
   group: '/org/grp/dashboard',
-  vap: '/org/vap/dashboard',
-  rp: '/org/rp/dashboard',
 };
 
 export const getDashboardUrl = (viewMode: ViewMode): string => {
@@ -207,8 +162,6 @@ const VIEW_MODE_LABELS: Record<ViewMode, string> = {
   employee: 'Employee View',
   manager: 'Management View',
   group: 'Group View',
-  vap: 'VAP View',
-  rp: 'RP View',
 };
 
 export const getViewModeLabel = (viewMode: ViewMode): string => {

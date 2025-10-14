@@ -11,22 +11,6 @@ export const passwordSchema = z.string()
   .regex(/[0-9]/, 'Password must contain at least one number')
   .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character');
 
-// Login form schema
-export const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1, 'Password is required'),
-});
-
-// Registration form schema
-export const registrationSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: emailSchema,
-  password: passwordSchema,
-  confirmPassword: z.string(),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
-});
 
 // User profile schema
 export const userProfileSchema = z.object({
@@ -44,7 +28,5 @@ export const searchSchema = z.object({
 });
 
 // Export type definitions
-export type LoginFormData = z.infer<typeof loginSchema>;
-export type RegistrationFormData = z.infer<typeof registrationSchema>;
 export type UserProfileData = z.infer<typeof userProfileSchema>;
 export type SearchData = z.infer<typeof searchSchema>;

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { logger } from '../lib/logger';
+import { ViewMode } from '../utils/viewModeStyles';
 
 interface Notification {
   id: string;
@@ -24,7 +25,7 @@ interface UIState {
   theme: 'light' | 'dark' | 'system';
 
   // View mode state
-  viewMode: 'employee' | 'manager' | 'group' | 'vap' | 'rp';
+  viewMode: ViewMode;
 
   // Notifications
   notifications: Notification[];
@@ -44,7 +45,7 @@ interface UIState {
   
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   
-  setViewMode: (mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => void;
+  setViewMode: (mode: ViewMode) => void;
   
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
   markNotificationRead: (id: string) => void;
@@ -107,7 +108,7 @@ export const useUIStore = create<UIState>()(
       },
 
       // View mode actions
-      setViewMode: (mode: 'employee' | 'manager' | 'group' | 'vap' | 'rp') => {
+      setViewMode: (mode: ViewMode) => {
         logger.info('View mode changed', { viewMode: mode });
         set({ viewMode: mode });
       },
