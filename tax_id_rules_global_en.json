@@ -1,0 +1,2119 @@
+{
+  "version": "2.0.0-global-en",
+  "generated_at_utc": "2025-10-04T17:03:25.465551Z",
+  "coverage": "Global (Americas + Europe + Middle East + Africa + APAC, English-only notes)",
+  "fields": [
+    "country_code",
+    "tax_id_name",
+    "regex",
+    "example",
+    "entity_type",
+    "notes"
+  ],
+  "rules": [
+    {
+      "country_code": "AD",
+      "tax_id_name": "NRT",
+      "regex": "^[A-Z]-\\d{6}$",
+      "example": "F-123456",
+      "entity_type": "company",
+      "notes": "Andorra Tax Registration Number."
+    },
+    {
+      "country_code": "AE",
+      "tax_id_name": "TRN (VAT)",
+      "regex": "^\\d{15}$",
+      "example": "100123456700003",
+      "entity_type": "company",
+      "notes": "Tax Registration Number (UAE)."
+    },
+    {
+      "country_code": "AE",
+      "tax_id_name": "TRN (VAT)",
+      "regex": "^\\d{15}$",
+      "example": "100123456700003",
+      "entity_type": "company",
+      "notes": "United Arab Emirates Tax Registration Number."
+    },
+    {
+      "country_code": "AF",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,10}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Afghanistan TIN."
+    },
+    {
+      "country_code": "AG",
+      "tax_id_name": "ABN/TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Antigua & Barbuda Business Number / TIN; request ABST/IRD letter."
+    },
+    {
+      "country_code": "AI",
+      "tax_id_name": "TIN/BTI",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Anguilla TIN/Business Taxpayer Identifier; verify with Inland Revenue."
+    },
+    {
+      "country_code": "AL",
+      "tax_id_name": "NUIS",
+      "regex": "^[JKL]\\d{8}[A-Z]$",
+      "example": "J12345678L",
+      "entity_type": "company",
+      "notes": "Albania business ID (NUIS)."
+    },
+    {
+      "country_code": "AM",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Armenia Tax Identification Number."
+    },
+    {
+      "country_code": "AO",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10}$",
+      "example": "5001234567",
+      "entity_type": "company",
+      "notes": "Angola NIF (10 digits)."
+    },
+    {
+      "country_code": "AR",
+      "tax_id_name": "CUIT",
+      "regex": "^\\d{11}$",
+      "example": "20329642330",
+      "entity_type": "company",
+      "notes": "Argentina CUIT 11 dígitos (incluye DV)."
+    },
+    {
+      "country_code": "AS",
+      "tax_id_name": "EIN (US)",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "66-1234567",
+      "entity_type": "company",
+      "notes": "American Samoa uses U.S. EIN for entities."
+    },
+    {
+      "country_code": "AT",
+      "tax_id_name": "UID (VAT)",
+      "regex": "^ATU\\d{8}$",
+      "example": "ATU12345678",
+      "entity_type": "company",
+      "notes": "Austria VAT."
+    },
+    {
+      "country_code": "AT",
+      "tax_id_name": "UID (VAT)",
+      "regex": "^ATU\\d{8}$",
+      "example": "ATU12345678",
+      "entity_type": "company",
+      "notes": "Austria VAT number."
+    },
+    {
+      "country_code": "AU",
+      "tax_id_name": "ABN",
+      "regex": "^\\d{11}$",
+      "example": "51824753556",
+      "entity_type": "company",
+      "notes": "Australian Business Number (checksum mod 89)."
+    },
+    {
+      "country_code": "AU",
+      "tax_id_name": "ABN",
+      "regex": "^\\d{11}$",
+      "example": "51824753556",
+      "entity_type": "company",
+      "notes": "Australia Business Number (11 digits; checksum)."
+    },
+    {
+      "country_code": "AW",
+      "tax_id_name": "CRIB",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Aruba CRIB (Taxpayer number)."
+    },
+    {
+      "country_code": "AZ",
+      "tax_id_name": "VOEN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Azerbaijan Taxpayer Identification (VOEN) for entities."
+    },
+    {
+      "country_code": "AZ",
+      "tax_id_name": "VOEN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Azerbaijan VOEN (entities)."
+    },
+    {
+      "country_code": "BA",
+      "tax_id_name": "JMB/JIB",
+      "regex": "^\\d{13}$",
+      "example": "1234567890123",
+      "entity_type": "company",
+      "notes": "Bosnia and Herzegovina company ID (JIB)."
+    },
+    {
+      "country_code": "BB",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Barbados TIN/BRN via BRA; verify with certificate."
+    },
+    {
+      "country_code": "BD",
+      "tax_id_name": "BIN",
+      "regex": "^\\d{9,12}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Bangladesh Business Identification Number."
+    },
+    {
+      "country_code": "BE",
+      "tax_id_name": "BTW/TVA (VAT)",
+      "regex": "^BE0?\\d{9}$",
+      "example": "BE0123456789",
+      "entity_type": "company",
+      "notes": "9 dígitos, a veces con 0 inicial."
+    },
+    {
+      "country_code": "BE",
+      "tax_id_name": "BTW/TVA (VAT)",
+      "regex": "^BE0?\\d{9}$",
+      "example": "BE0123456789",
+      "entity_type": "company",
+      "notes": "Belgium VAT number (often with leading 0)."
+    },
+    {
+      "country_code": "BF",
+      "tax_id_name": "IFU",
+      "regex": "^\\d{13}$",
+      "example": "0000000000000",
+      "entity_type": "company",
+      "notes": "Burkina Faso IFU (13 digits)."
+    },
+    {
+      "country_code": "BG",
+      "tax_id_name": "BULSTAT / VAT",
+      "regex": "^\\d{9,13}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Bulgaria; VAT BG + dígitos."
+    },
+    {
+      "country_code": "BG",
+      "tax_id_name": "BULSTAT / VAT",
+      "regex": "^\\d{9,13}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Bulgaria business register / VAT."
+    },
+    {
+      "country_code": "BH",
+      "tax_id_name": "CR / VAT",
+      "regex": "^\\d{8,10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Bahrain Commercial Registration / VAT number."
+    },
+    {
+      "country_code": "BI",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Burundi Tax ID."
+    },
+    {
+      "country_code": "BJ",
+      "tax_id_name": "IFU",
+      "regex": "^\\d{13}$",
+      "example": "3202012345678",
+      "entity_type": "company",
+      "notes": "Benin Identifiant Fiscal Unique (13 digits)."
+    },
+    {
+      "country_code": "BL",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "Saint Barthélemy (FR) uses French identifiers."
+    },
+    {
+      "country_code": "BM",
+      "tax_id_name": "Taxpayer No.",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Bermuda does not have a public VAT/EIN; use Taxpayer/Business Registration No. from Office of the Tax Commissioner."
+    },
+    {
+      "country_code": "BN",
+      "tax_id_name": "UEN",
+      "regex": "^[A-Z]{2}\\d{6}$",
+      "example": "RC123456",
+      "entity_type": "company",
+      "notes": "Brunei business UEN-style code."
+    },
+    {
+      "country_code": "BO",
+      "tax_id_name": "NIT",
+      "regex": "^\\d{7,12}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Bolivia NIT (longitud variable)."
+    },
+    {
+      "country_code": "BQ",
+      "tax_id_name": "CRIB/TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Caribbean Netherlands (Bonaire, Saba, St. Eustatius) use Dutch/Belastingdienst BES identifiers; collect CRIB/TIN."
+    },
+    {
+      "country_code": "BR",
+      "tax_id_name": "CNPJ",
+      "regex": "^\\d{14}$",
+      "example": "12345678000195",
+      "entity_type": "company",
+      "notes": "Brasil CNPJ 14 dígitos."
+    },
+    {
+      "country_code": "BS",
+      "tax_id_name": "TIN (VAT)",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Bahamas TIN used for VAT; 9 digits commonly used."
+    },
+    {
+      "country_code": "BT",
+      "tax_id_name": "CIT / TPN",
+      "regex": "^\\d{7,11}$",
+      "example": "100123456",
+      "entity_type": "company",
+      "notes": "Bhutan Corporate Income Tax / Tax Payer Number."
+    },
+    {
+      "country_code": "BW",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,12}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Botswana Tax ID."
+    },
+    {
+      "country_code": "BY",
+      "tax_id_name": "UNP",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Belarus business ID (UNP)."
+    },
+    {
+      "country_code": "BZ",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{6,9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Belize TIN used for GST/Income Tax."
+    },
+    {
+      "country_code": "CA",
+      "tax_id_name": "BN (GST/HST)",
+      "regex": "^\\d{9}RT\\d{4}$",
+      "example": "123456789RT0001",
+      "entity_type": "company",
+      "notes": "Canada Business Number + GST/HST program."
+    },
+    {
+      "country_code": "CD",
+      "tax_id_name": "NAT / RCCM",
+      "regex": "^\\d{7,15}$",
+      "example": "A1234567",
+      "entity_type": "company",
+      "notes": "DR Congo tax/account numbers (various formats)."
+    },
+    {
+      "country_code": "CF",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10,15}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Central African Republic NIF."
+    },
+    {
+      "country_code": "CH",
+      "tax_id_name": "UID / CHE",
+      "regex": "^CHE\\d{9}(?:TVA|MWST|IVA)?$",
+      "example": "CHE123456789",
+      "entity_type": "company",
+      "notes": "UID suizo; sufijos de IVA opcionales."
+    },
+    {
+      "country_code": "CH",
+      "tax_id_name": "UID / CHE",
+      "regex": "^CHE\\d{9}(?:TVA|MWST|IVA)?$",
+      "example": "CHE123456789",
+      "entity_type": "company",
+      "notes": "Switzerland UID; VAT suffixes optional."
+    },
+    {
+      "country_code": "CI",
+      "tax_id_name": "NCC / IFU",
+      "regex": "^[A-Z]{2}\\d{8}$",
+      "example": "AB12345678",
+      "entity_type": "company",
+      "notes": "Côte d’Ivoire company code (NCC) / IFU."
+    },
+    {
+      "country_code": "CL",
+      "tax_id_name": "RUT",
+      "regex": "^\\d{7,8}-[\\dkK]$",
+      "example": "76123456-9",
+      "entity_type": "company",
+      "notes": "Chile RUT con dígito verificador."
+    },
+    {
+      "country_code": "CM",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{14,19}$",
+      "example": "00000000000000",
+      "entity_type": "company",
+      "notes": "Cameroon TIN (length varies)."
+    },
+    {
+      "country_code": "CN",
+      "tax_id_name": "USCC",
+      "regex": "^[0-9A-Z]{18}$",
+      "example": "9131000073251455XU",
+      "entity_type": "company",
+      "notes": "China Unified Social Credit Code (18 chars)."
+    },
+    {
+      "country_code": "CN",
+      "tax_id_name": "USCC (Unified Social Credit Code)",
+      "regex": "^[0-9A-Z]{18}$",
+      "example": "9131000073251455XU",
+      "entity_type": "company",
+      "notes": "Unified Social Credit Identifier (China)."
+    },
+    {
+      "country_code": "CO",
+      "tax_id_name": "NIT",
+      "regex": "^\\d{9,10}-?\\d?$",
+      "example": "900123456-7",
+      "entity_type": "company",
+      "notes": "Colombia NIT con dígito de verificación."
+    },
+    {
+      "country_code": "CR",
+      "tax_id_name": "Cedula Jurídica",
+      "regex": "^\\d{10}$",
+      "example": "3101234567",
+      "entity_type": "company",
+      "notes": "Costa Rica; también cédula física para personas."
+    },
+    {
+      "country_code": "CR",
+      "tax_id_name": "Cédula Jurídica",
+      "regex": "^\\d{10}$",
+      "example": "3101234567",
+      "entity_type": "company",
+      "notes": "Costa Rica legal entity ID (10 digits)."
+    },
+    {
+      "country_code": "CU",
+      "tax_id_name": "NIT",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Cuba Número de Identificación Tributaria; collect ONAT certificate."
+    },
+    {
+      "country_code": "CV",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{8,10}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Cabo Verde NIF."
+    },
+    {
+      "country_code": "CW",
+      "tax_id_name": "CRIB",
+      "regex": "^\\d{8,9}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Curaçao CRIB number."
+    },
+    {
+      "country_code": "CW",
+      "tax_id_name": "OB/CRIB",
+      "regex": "^\\d{8,9}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Curaçao CRIB/OB number (added alias)."
+    },
+    {
+      "country_code": "CY",
+      "tax_id_name": "VAT",
+      "regex": "^CY\\d{8}[A-Z]$",
+      "example": "CY12345678L",
+      "entity_type": "company",
+      "notes": "Cyprus VAT number."
+    },
+    {
+      "country_code": "CZ",
+      "tax_id_name": "DIČ (VAT)",
+      "regex": "^CZ\\d{8,10}$",
+      "example": "CZ12345678",
+      "entity_type": "company",
+      "notes": "DIČ para VAT; IČO para registro (8 dígitos)."
+    },
+    {
+      "country_code": "CZ",
+      "tax_id_name": "DIČ (VAT)",
+      "regex": "^CZ\\d{8,10}$",
+      "example": "CZ12345678",
+      "entity_type": "company",
+      "notes": "Czech VAT ID (DIČ)."
+    },
+    {
+      "country_code": "DE",
+      "tax_id_name": "USt-IdNr (VAT)",
+      "regex": "^DE\\d{9}$",
+      "example": "DE123456789",
+      "entity_type": "company",
+      "notes": "VAT UE; además existe Steuernummer local."
+    },
+    {
+      "country_code": "DE",
+      "tax_id_name": "USt-IdNr (VAT)",
+      "regex": "^DE\\d{9}$",
+      "example": "DE123456789",
+      "entity_type": "company",
+      "notes": "Germany VAT number."
+    },
+    {
+      "country_code": "DJ",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10,15}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Djibouti NIF."
+    },
+    {
+      "country_code": "DK",
+      "tax_id_name": "CVR / VAT",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "CVR 8 dígitos; VAT DK + 8 dígitos."
+    },
+    {
+      "country_code": "DK",
+      "tax_id_name": "CVR / VAT",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Denmark CVR (8 digits). VAT is DK + 8 digits."
+    },
+    {
+      "country_code": "DM",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Dominica TIN; confirm with IRD doc."
+    },
+    {
+      "country_code": "DO",
+      "tax_id_name": "RNC",
+      "regex": "^\\d{9}$",
+      "example": "101234567",
+      "entity_type": "company",
+      "notes": "Dominican Republic Registro Nacional de Contribuyentes."
+    },
+    {
+      "country_code": "DZ",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{15}$",
+      "example": "000000000000000",
+      "entity_type": "company",
+      "notes": "Algeria Numéro d’Identification Fiscale (15 digits)."
+    },
+    {
+      "country_code": "EC",
+      "tax_id_name": "RUC",
+      "regex": "^\\d{13}$",
+      "example": "1790012345001",
+      "entity_type": "company",
+      "notes": "Ecuador RUC 13 dígitos."
+    },
+    {
+      "country_code": "EE",
+      "tax_id_name": "KMKR (VAT)",
+      "regex": "^EE\\d{9}$",
+      "example": "EE123456789",
+      "entity_type": "company",
+      "notes": "Estonia VAT."
+    },
+    {
+      "country_code": "EE",
+      "tax_id_name": "KMKR (VAT)",
+      "regex": "^EE\\d{9}$",
+      "example": "EE123456789",
+      "entity_type": "company",
+      "notes": "Estonia VAT number."
+    },
+    {
+      "country_code": "EG",
+      "tax_id_name": "Tax ID",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Egipto número tributario."
+    },
+    {
+      "country_code": "EG",
+      "tax_id_name": "Tax ID",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Egypt Tax ID (9 digits)."
+    },
+    {
+      "country_code": "ER",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,10}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Eritrea tax number."
+    },
+    {
+      "country_code": "ES",
+      "tax_id_name": "CIF/NIF",
+      "regex": "^[A-Z0-9]{9}$",
+      "example": "B12345678",
+      "entity_type": "company",
+      "notes": "CIF empresas; control por letra/dígito."
+    },
+    {
+      "country_code": "ES",
+      "tax_id_name": "CIF/NIF",
+      "regex": "^[A-Z0-9]{9}$",
+      "example": "B12345678",
+      "entity_type": "company",
+      "notes": "Spain CIF/NIF (companies)."
+    },
+    {
+      "country_code": "ET",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Ethiopia TIN (10 digits)."
+    },
+    {
+      "country_code": "FI",
+      "tax_id_name": "Y-tunnus / VAT",
+      "regex": "^\\d{7}-\\d$",
+      "example": "1234567-8",
+      "entity_type": "company",
+      "notes": "Y-tunnus; VAT FI + 8 dígitos."
+    },
+    {
+      "country_code": "FI",
+      "tax_id_name": "Y-tunnus / VAT",
+      "regex": "^\\d{7}-\\d$",
+      "example": "1234567-8",
+      "entity_type": "company",
+      "notes": "Finland Business ID; VAT is FI + 8 digits."
+    },
+    {
+      "country_code": "FJ",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Fiji TIN (9 digits)."
+    },
+    {
+      "country_code": "FK",
+      "tax_id_name": "Company/TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Falkland Islands tax identifiers vary; collect company number or TIN."
+    },
+    {
+      "country_code": "FR",
+      "tax_id_name": "SIREN/SIRET",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "SIRET = SIREN(9)+NIC(5)."
+    },
+    {
+      "country_code": "FR",
+      "tax_id_name": "SIREN/SIRET",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "France company IDs (SIRET = SIREN + 5-digit NIC)."
+    },
+    {
+      "country_code": "GA",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{6,9}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Gabon NIF."
+    },
+    {
+      "country_code": "GB",
+      "tax_id_name": "UTR / VAT",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "UTR 10 dígitos; VAT GB999999973 (no UE)."
+    },
+    {
+      "country_code": "GB",
+      "tax_id_name": "UTR / VAT",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "United Kingdom UTR (10 digits). VAT is GB + 9 digits."
+    },
+    {
+      "country_code": "GD",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Grenada TIN; confirm with IRD/Tax letter."
+    },
+    {
+      "country_code": "GE",
+      "tax_id_name": "Tax ID",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Georgia Tax ID (entities)."
+    },
+    {
+      "country_code": "GF",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "French Guiana (FR) uses French identifiers."
+    },
+    {
+      "country_code": "GH",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Z0-9]{9,11}$",
+      "example": "P000123456",
+      "entity_type": "company",
+      "notes": "Ghana TIN/BIN (alphanumeric)."
+    },
+    {
+      "country_code": "GI",
+      "tax_id_name": "Business Number",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Gibraltar business number (format varies)."
+    },
+    {
+      "country_code": "GL",
+      "tax_id_name": "CVR/GLN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Greenland uses Danish systems for some registrations; request official document."
+    },
+    {
+      "country_code": "GM",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Gambia TIN."
+    },
+    {
+      "country_code": "GN",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Guinea NIF."
+    },
+    {
+      "country_code": "GP",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "Guadeloupe (FR) uses French identifiers."
+    },
+    {
+      "country_code": "GQ",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10,15}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Equatorial Guinea NIF."
+    },
+    {
+      "country_code": "GR",
+      "tax_id_name": "AFM / VAT",
+      "regex": "^\\d{9}$",
+      "example": "094259216",
+      "entity_type": "company",
+      "notes": "AFM 9 dígitos; VAT EL + 9 dígitos."
+    },
+    {
+      "country_code": "GR",
+      "tax_id_name": "AFM / VAT",
+      "regex": "^\\d{9}$",
+      "example": "094259216",
+      "entity_type": "company",
+      "notes": "Greece Tax/VAT number (AFM)."
+    },
+    {
+      "country_code": "GT",
+      "tax_id_name": "NIT",
+      "regex": "^\\d{7,9}(-\\d)?$",
+      "example": "1234567-3",
+      "entity_type": "company",
+      "notes": "Guatemala NIT; may include check digit."
+    },
+    {
+      "country_code": "GU",
+      "tax_id_name": "EIN (US)",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "66-1234567",
+      "entity_type": "company",
+      "notes": "Guam uses U.S. EIN for entities."
+    },
+    {
+      "country_code": "GW",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Guinea-Bissau NIF."
+    },
+    {
+      "country_code": "GY",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Guyana TIN 9 dígitos."
+    },
+    {
+      "country_code": "HK",
+      "tax_id_name": "BRN / IRD",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Hong Kong Business Registration Number."
+    },
+    {
+      "country_code": "HK",
+      "tax_id_name": "BRN / IRD",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Hong Kong Business Registration Number (8 digits)."
+    },
+    {
+      "country_code": "HN",
+      "tax_id_name": "RTN",
+      "regex": "^\\d{14}$",
+      "example": "08011985123456",
+      "entity_type": "company",
+      "notes": "Honduras Registro Tributario Nacional."
+    },
+    {
+      "country_code": "HR",
+      "tax_id_name": "OIB",
+      "regex": "^\\d{11}$",
+      "example": "12345678901",
+      "entity_type": "company",
+      "notes": "Croacia OIB 11 dígitos."
+    },
+    {
+      "country_code": "HR",
+      "tax_id_name": "OIB",
+      "regex": "^\\d{11}$",
+      "example": "12345678901",
+      "entity_type": "company",
+      "notes": "Croatia Personal/Company ID (OIB)."
+    },
+    {
+      "country_code": "HT",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10}$",
+      "example": "0001234567",
+      "entity_type": "company",
+      "notes": "Haiti Numéro d’Identification Fiscale (10 digits)."
+    },
+    {
+      "country_code": "HU",
+      "tax_id_name": "Adószám (VAT)",
+      "regex": "^\\d{8}-\\d-\\d{2}$",
+      "example": "12345678-1-42",
+      "entity_type": "company",
+      "notes": "Estructura 8-1-2."
+    },
+    {
+      "country_code": "HU",
+      "tax_id_name": "Adószám (VAT)",
+      "regex": "^\\d{8}-\\d-\\d{2}$",
+      "example": "12345678-1-42",
+      "entity_type": "company",
+      "notes": "Hungary VAT, structured as 8-1-2."
+    },
+    {
+      "country_code": "ID",
+      "tax_id_name": "NPWP",
+      "regex": "^\\d{15}$",
+      "example": "123456789012345",
+      "entity_type": "company",
+      "notes": "Nomor Pokok Wajib Pajak (Indonesia)."
+    },
+    {
+      "country_code": "ID",
+      "tax_id_name": "NPWP",
+      "regex": "^\\d{15}$",
+      "example": "123456789012345",
+      "entity_type": "company",
+      "notes": "Indonesia NPWP (15 digits)."
+    },
+    {
+      "country_code": "IE",
+      "tax_id_name": "VAT",
+      "regex": "^IE\\d{7}[A-Z]{1,2}$",
+      "example": "IE1234567A",
+      "entity_type": "company",
+      "notes": "Irlanda; varios formatos legacy."
+    },
+    {
+      "country_code": "IE",
+      "tax_id_name": "VAT",
+      "regex": "^IE\\d{7}[A-Z]{1,2}$",
+      "example": "IE1234567A",
+      "entity_type": "company",
+      "notes": "Ireland VAT (legacy variations exist)."
+    },
+    {
+      "country_code": "IL",
+      "tax_id_name": "Company No. / VAT",
+      "regex": "^\\d{8,9}$",
+      "example": "512345670",
+      "entity_type": "company",
+      "notes": "Israel company number / VAT."
+    },
+    {
+      "country_code": "IL",
+      "tax_id_name": "ח.פ / VAT",
+      "regex": "^\\d{8,9}$",
+      "example": "512345670",
+      "entity_type": "company",
+      "notes": "Mispar Osek / Hevra Baam."
+    },
+    {
+      "country_code": "IN",
+      "tax_id_name": "PAN / GSTIN",
+      "regex": "^[A-Z]{5}\\d{4}[A-Z]$",
+      "example": "ABCDE1234F",
+      "entity_type": "company",
+      "notes": "PAN; GSTIN = 15 chars (state+PAN+check)."
+    },
+    {
+      "country_code": "IN",
+      "tax_id_name": "PAN / GSTIN",
+      "regex": "^[A-Z]{5}\\d{4}[A-Z]$",
+      "example": "ABCDE1234F",
+      "entity_type": "company",
+      "notes": "India PAN; GSTIN is 15 characters (state+PAN+check)."
+    },
+    {
+      "country_code": "IQ",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,11}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Iraq Tax ID (length varies)."
+    },
+    {
+      "country_code": "IR",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{11}$",
+      "example": "12345678901",
+      "entity_type": "company",
+      "notes": "Iran Tax Identification Number (11 digits)."
+    },
+    {
+      "country_code": "IS",
+      "tax_id_name": "VSK / ID",
+      "regex": "^\\d{5,10}$",
+      "example": "12345",
+      "entity_type": "company",
+      "notes": "Iceland VAT/ID (length varies)."
+    },
+    {
+      "country_code": "IT",
+      "tax_id_name": "Partita IVA",
+      "regex": "^\\d{11}$",
+      "example": "12345678901",
+      "entity_type": "company",
+      "notes": "VAT Italy (P.IVA)."
+    },
+    {
+      "country_code": "IT",
+      "tax_id_name": "Partita IVA",
+      "regex": "^\\d{11}$",
+      "example": "12345678901",
+      "entity_type": "company",
+      "notes": "Italy VAT number (P.IVA)."
+    },
+    {
+      "country_code": "JM",
+      "tax_id_name": "TRN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Jamaica Taxpayer Registration Number (9 digits)."
+    },
+    {
+      "country_code": "JO",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Jordan tax number."
+    },
+    {
+      "country_code": "JP",
+      "tax_id_name": "Corporate Number",
+      "regex": "^\\d{13}$",
+      "example": "1234567890123",
+      "entity_type": "company",
+      "notes": "Houjin Bangou (Japan)."
+    },
+    {
+      "country_code": "JP",
+      "tax_id_name": "Corporate Number",
+      "regex": "^\\d{13}$",
+      "example": "1234567890123",
+      "entity_type": "company",
+      "notes": "Japan Corporate Number (13 digits)."
+    },
+    {
+      "country_code": "KE",
+      "tax_id_name": "PIN",
+      "regex": "^[A-Z]\\d{9}[A-Z]$",
+      "example": "P051234567Q",
+      "entity_type": "company",
+      "notes": "Kenya KRA PIN."
+    },
+    {
+      "country_code": "KE",
+      "tax_id_name": "PIN",
+      "regex": "^[A-Z]\\d{9}[A-Z]$",
+      "example": "P051234567Q",
+      "entity_type": "company",
+      "notes": "Kenya KRA PIN (alphanumeric edges)."
+    },
+    {
+      "country_code": "KH",
+      "tax_id_name": "VAT / TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Cambodia VAT/TIN (9 digits)."
+    },
+    {
+      "country_code": "KM",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10,12}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Comoros NIF."
+    },
+    {
+      "country_code": "KN",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "St. Kitts & Nevis TIN; verify with Inland Revenue doc."
+    },
+    {
+      "country_code": "KR",
+      "tax_id_name": "Business Registration No.",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "South Korea BRN (10 dígitos)."
+    },
+    {
+      "country_code": "KR",
+      "tax_id_name": "Business Registration No.",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "South Korea BRN (10 digits)."
+    },
+    {
+      "country_code": "KW",
+      "tax_id_name": "CIVIL ID / CR",
+      "regex": "^\\d{8,12}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Kuwait Civil ID for tax; use CR for entities (varying formats)."
+    },
+    {
+      "country_code": "KY",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Cayman Islands TIN for AEOI; format varies; use TIN or Company Registration No."
+    },
+    {
+      "country_code": "KZ",
+      "tax_id_name": "BIN",
+      "regex": "^\\d{12}$",
+      "example": "070940004982",
+      "entity_type": "company",
+      "notes": "Kazakhstan Business Identification Number (BIN)."
+    },
+    {
+      "country_code": "LA",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Laos TIN (9 digits)."
+    },
+    {
+      "country_code": "LB",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{8,10}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Lebanon tax number."
+    },
+    {
+      "country_code": "LC",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Saint Lucia TIN / VRN; confirm with IRD doc."
+    },
+    {
+      "country_code": "LI",
+      "tax_id_name": "UID",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Liechtenstein company number."
+    },
+    {
+      "country_code": "LK",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Sri Lanka TIN (9 digits)."
+    },
+    {
+      "country_code": "LR",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,10}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Liberia Tax ID."
+    },
+    {
+      "country_code": "LS",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,11}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Lesotho Tax ID."
+    },
+    {
+      "country_code": "LT",
+      "tax_id_name": "PVM (VAT)",
+      "regex": "^LT\\d{9,12}$",
+      "example": "LT123456789",
+      "entity_type": "company",
+      "notes": "Lituania VAT."
+    },
+    {
+      "country_code": "LT",
+      "tax_id_name": "PVM (VAT)",
+      "regex": "^LT\\d{9,12}$",
+      "example": "LT123456789",
+      "entity_type": "company",
+      "notes": "Lithuania VAT number."
+    },
+    {
+      "country_code": "LU",
+      "tax_id_name": "TVA (VAT)",
+      "regex": "^LU\\d{8}$",
+      "example": "LU12345678",
+      "entity_type": "company",
+      "notes": "Luxembourg VAT number."
+    },
+    {
+      "country_code": "LV",
+      "tax_id_name": "PVN (VAT)",
+      "regex": "^LV\\d{11}$",
+      "example": "LV12345678901",
+      "entity_type": "company",
+      "notes": "Letonia VAT."
+    },
+    {
+      "country_code": "LV",
+      "tax_id_name": "PVN (VAT)",
+      "regex": "^LV\\d{11}$",
+      "example": "LV12345678901",
+      "entity_type": "company",
+      "notes": "Latvia VAT number."
+    },
+    {
+      "country_code": "LY",
+      "tax_id_name": "CR / VAT",
+      "regex": "^\\d{9,12}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Libya commercial/VAT numbers."
+    },
+    {
+      "country_code": "MA",
+      "tax_id_name": "IF / ICE",
+      "regex": "^\\d{8,15}$",
+      "example": "001234567",
+      "entity_type": "company",
+      "notes": "Identifiant Fiscal / ICE (Marruecos)."
+    },
+    {
+      "country_code": "MA",
+      "tax_id_name": "IF / ICE",
+      "regex": "^\\d{8,15}$",
+      "example": "001234567",
+      "entity_type": "company",
+      "notes": "Morocco IF/ICE (varies)."
+    },
+    {
+      "country_code": "MC",
+      "tax_id_name": "SIREN (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "Monaco uses SIREN/SIRET formats akin to France."
+    },
+    {
+      "country_code": "MD",
+      "tax_id_name": "IDNO",
+      "regex": "^\\d{13}$",
+      "example": "1002600012345",
+      "entity_type": "company",
+      "notes": "Moldova company ID (IDNO)."
+    },
+    {
+      "country_code": "ME",
+      "tax_id_name": "PIB",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Montenegro PIB (Tax ID)."
+    },
+    {
+      "country_code": "MF",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "Saint Martin (FR) uses French identifiers."
+    },
+    {
+      "country_code": "MG",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10}$",
+      "example": "1001234567",
+      "entity_type": "company",
+      "notes": "Madagascar NIF (10 digits)."
+    },
+    {
+      "country_code": "MK",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{13}$",
+      "example": "1234567890123",
+      "entity_type": "company",
+      "notes": "North Macedonia company tax number."
+    },
+    {
+      "country_code": "ML",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{14}$",
+      "example": "12345678901234",
+      "entity_type": "company",
+      "notes": "Mali NIF (14 digits)."
+    },
+    {
+      "country_code": "MM",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Myanmar TIN (9 digits)."
+    },
+    {
+      "country_code": "MN",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{7,10}$",
+      "example": "1234567",
+      "entity_type": "company",
+      "notes": "Mongolia tax number."
+    },
+    {
+      "country_code": "MO",
+      "tax_id_name": "BRN",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Macao Business Registration Number."
+    },
+    {
+      "country_code": "MP",
+      "tax_id_name": "EIN (US)",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "66-1234567",
+      "entity_type": "company",
+      "notes": "Northern Mariana Islands use U.S. EIN."
+    },
+    {
+      "country_code": "MQ",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "Martinique (FR) uses French identifiers."
+    },
+    {
+      "country_code": "MR",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Mauritania NIF."
+    },
+    {
+      "country_code": "MS",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Montserrat TIN; confirm with Inland Revenue."
+    },
+    {
+      "country_code": "MT",
+      "tax_id_name": "VAT",
+      "regex": "^MT\\d{8}$",
+      "example": "MT12345678",
+      "entity_type": "company",
+      "notes": "Malta VAT number."
+    },
+    {
+      "country_code": "MU",
+      "tax_id_name": "BRN / VAT",
+      "regex": "^\\d{8}$",
+      "example": "C07012345",
+      "entity_type": "company",
+      "notes": "Mauritius Business Registration Number; VAT separate."
+    },
+    {
+      "country_code": "MV",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Maldives TIN (9 digits)."
+    },
+    {
+      "country_code": "MW",
+      "tax_id_name": "TPIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Malawi Taxpayer Identification Number."
+    },
+    {
+      "country_code": "MX",
+      "tax_id_name": "RFC",
+      "regex": "^[A-Z&Ñ]{3,4}\\d{6}[A-Z0-9]{3}$",
+      "example": "ABCD901231XXX",
+      "entity_type": "company",
+      "notes": "Registro Federal de Contribuyentes (personas morales)."
+    },
+    {
+      "country_code": "MY",
+      "tax_id_name": "SSM / GST No.",
+      "regex": "^\\d{2}-\\d{6}-[A-Z]$",
+      "example": "12-345678-A",
+      "entity_type": "company",
+      "notes": "Formatos varían; GST suspendido 2018."
+    },
+    {
+      "country_code": "MY",
+      "tax_id_name": "SSM / Tax No.",
+      "regex": "^\\d{2}-\\d{6}-[A-Z]$",
+      "example": "12-345678-A",
+      "entity_type": "company",
+      "notes": "Malaysia formats vary; GST suspended since 2018."
+    },
+    {
+      "country_code": "MZ",
+      "tax_id_name": "NUIT",
+      "regex": "^\\d{9}$",
+      "example": "400123456",
+      "entity_type": "company",
+      "notes": "Mozambique NUIT (9 digits)."
+    },
+    {
+      "country_code": "NA",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Namibia Tax ID (10 digits)."
+    },
+    {
+      "country_code": "NC",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "New Caledonia uses French SIREN/SIRET."
+    },
+    {
+      "country_code": "NE",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Niger NIF."
+    },
+    {
+      "country_code": "NG",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Z0-9]{8,10}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Nigeria TIN; varios formatos."
+    },
+    {
+      "country_code": "NG",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Z0-9]{8,10}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Nigeria TIN (alphanumeric)."
+    },
+    {
+      "country_code": "NI",
+      "tax_id_name": "RUC",
+      "regex": "^\\d{14}$",
+      "example": "20112345678901",
+      "entity_type": "company",
+      "notes": "Nicaragua Registro Único de Contribuyentes."
+    },
+    {
+      "country_code": "NL",
+      "tax_id_name": "VAT (BTW)",
+      "regex": "^NL[0-9A-Z]{12}$",
+      "example": "NL123456789B01",
+      "entity_type": "company",
+      "notes": "BTW-nummer; nuevo formato con 12 chars."
+    },
+    {
+      "country_code": "NL",
+      "tax_id_name": "VAT (BTW)",
+      "regex": "^NL[0-9A-Z]{12}$",
+      "example": "NL123456789B01",
+      "entity_type": "company",
+      "notes": "Netherlands VAT (new format)."
+    },
+    {
+      "country_code": "NO",
+      "tax_id_name": "Org.nr / MVA",
+      "regex": "^\\d{9}MVA?$",
+      "example": "123456789MVA",
+      "entity_type": "company",
+      "notes": "Organisasjonsnummer; MVA para VAT."
+    },
+    {
+      "country_code": "NO",
+      "tax_id_name": "Org.nr / MVA",
+      "regex": "^\\d{9}(?:MVA)?$",
+      "example": "123456789MVA",
+      "entity_type": "company",
+      "notes": "Norway org number; 'MVA' for VAT."
+    },
+    {
+      "country_code": "NP",
+      "tax_id_name": "PAN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Nepal PAN (9 digits)."
+    },
+    {
+      "country_code": "NZ",
+      "tax_id_name": "NZBN / GST",
+      "regex": "^\\d{9}$",
+      "example": "102345678",
+      "entity_type": "company",
+      "notes": "NZBN 13 dígitos (separado); GST 9 dígitos."
+    },
+    {
+      "country_code": "NZ",
+      "tax_id_name": "NZBN / GST",
+      "regex": "^\\d{9}$",
+      "example": "102345678",
+      "entity_type": "company",
+      "notes": "New Zealand GST (9 digits). NZBN is 13 digits (separate)."
+    },
+    {
+      "country_code": "OM",
+      "tax_id_name": "VAT / CR",
+      "regex": "^\\d{10,12}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Oman VAT/CR numbers (various)."
+    },
+    {
+      "country_code": "PA",
+      "tax_id_name": "RUC + DV",
+      "regex": "^[0-9\\-]{7,20}$",
+      "example": "1552034-1-123456",
+      "entity_type": "company",
+      "notes": "Panamá RUC con DV; formatos varían por tipo de contribuyente."
+    },
+    {
+      "country_code": "PE",
+      "tax_id_name": "RUC",
+      "regex": "^\\d{11}$",
+      "example": "20123456789",
+      "entity_type": "company",
+      "notes": "Perú RUC 11 dígitos."
+    },
+    {
+      "country_code": "PF",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "French Polynesia uses French SIREN/SIRET."
+    },
+    {
+      "country_code": "PG",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Papua New Guinea TIN."
+    },
+    {
+      "country_code": "PH",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{3}-\\d{3}-\\d{3}-\\d{3}$",
+      "example": "123-456-789-000",
+      "entity_type": "company",
+      "notes": "BIR TIN (Philippines)."
+    },
+    {
+      "country_code": "PH",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{3}-\\d{3}-\\d{3}-\\d{3}$",
+      "example": "123-456-789-000",
+      "entity_type": "company",
+      "notes": "Philippines TIN (BIR)."
+    },
+    {
+      "country_code": "PK",
+      "tax_id_name": "NTN",
+      "regex": "^\\d{7,9}$",
+      "example": "1234567",
+      "entity_type": "company",
+      "notes": "Pakistan National Tax Number."
+    },
+    {
+      "country_code": "PL",
+      "tax_id_name": "NIP",
+      "regex": "^\\d{10}$",
+      "example": "1234563218",
+      "entity_type": "company",
+      "notes": "Numer Identyfikacji Podatkowej (Polonia)."
+    },
+    {
+      "country_code": "PL",
+      "tax_id_name": "NIP",
+      "regex": "^\\d{10}$",
+      "example": "1234563218",
+      "entity_type": "company",
+      "notes": "Poland NIP (10 digits)."
+    },
+    {
+      "country_code": "PM",
+      "tax_id_name": "SIREN/SIRET (FR)",
+      "regex": "^\\d{9}$",
+      "example": "732829320",
+      "entity_type": "company",
+      "notes": "Saint Pierre and Miquelon uses French identifiers (SIREN/SIRET) for businesses."
+    },
+    {
+      "country_code": "PR",
+      "tax_id_name": "EIN (US)",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "66-1234567",
+      "entity_type": "company",
+      "notes": "Puerto Rico businesses typically use EIN; many start with 66."
+    },
+    {
+      "country_code": "PR",
+      "tax_id_name": "EIN/PR ID",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "66-1234567",
+      "entity_type": "company",
+      "notes": "Empresas en Puerto Rico usan EIN; prefijo 66 frecuente."
+    },
+    {
+      "country_code": "PT",
+      "tax_id_name": "NIPC",
+      "regex": "^\\d{9}$",
+      "example": "509123456",
+      "entity_type": "company",
+      "notes": "Número de Identificação de Pessoa Coletiva (Portugal)."
+    },
+    {
+      "country_code": "PT",
+      "tax_id_name": "NIPC",
+      "regex": "^\\d{9}$",
+      "example": "509123456",
+      "entity_type": "company",
+      "notes": "Portugal corporate tax number (NIPC)."
+    },
+    {
+      "country_code": "PY",
+      "tax_id_name": "RUC",
+      "regex": "^\\d{6,9}-\\d$",
+      "example": "80012345-6",
+      "entity_type": "company",
+      "notes": "Paraguay RUC con DV."
+    },
+    {
+      "country_code": "QA",
+      "tax_id_name": "CR / VAT",
+      "regex": "^\\d{6,8}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Qatar Commercial Registration / VAT."
+    },
+    {
+      "country_code": "RO",
+      "tax_id_name": "CIF (CUI)",
+      "regex": "^\\d{2,10}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Romania tax ID companies."
+    },
+    {
+      "country_code": "RO",
+      "tax_id_name": "CIF (CUI)",
+      "regex": "^\\d{2,10}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Romania tax ID (companies)."
+    },
+    {
+      "country_code": "RS",
+      "tax_id_name": "PIB",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Serbia Tax ID (PIB)."
+    },
+    {
+      "country_code": "RU",
+      "tax_id_name": "INN",
+      "regex": "^\\d{10}$",
+      "example": "7707083893",
+      "entity_type": "company",
+      "notes": "Russia Taxpayer Identification Number (company INN)."
+    },
+    {
+      "country_code": "RW",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Rwanda TIN."
+    },
+    {
+      "country_code": "SA",
+      "tax_id_name": "VAT",
+      "regex": "^\\d{15}$",
+      "example": "310123456700003",
+      "entity_type": "company",
+      "notes": "KSA VAT 15 dígitos."
+    },
+    {
+      "country_code": "SA",
+      "tax_id_name": "VAT",
+      "regex": "^\\d{15}$",
+      "example": "310123456700003",
+      "entity_type": "company",
+      "notes": "Saudi Arabia VAT (15 digits)."
+    },
+    {
+      "country_code": "SB",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Solomon Islands TIN (9 digits)."
+    },
+    {
+      "country_code": "SC",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Seychelles TIN."
+    },
+    {
+      "country_code": "SD",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,11}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Sudan TIN."
+    },
+    {
+      "country_code": "SE",
+      "tax_id_name": "VAT (MOMS)",
+      "regex": "^SE\\d{12}$",
+      "example": "SE123456789012",
+      "entity_type": "company",
+      "notes": "Suecia VAT 12 dígitos."
+    },
+    {
+      "country_code": "SE",
+      "tax_id_name": "VAT (MOMS)",
+      "regex": "^SE\\d{12}$",
+      "example": "SE123456789012",
+      "entity_type": "company",
+      "notes": "Sweden VAT number."
+    },
+    {
+      "country_code": "SG",
+      "tax_id_name": "UEN",
+      "regex": "^[0-9A-Z]{9,10}$",
+      "example": "201312345K",
+      "entity_type": "company",
+      "notes": "Unique Entity Number (Singapore)."
+    },
+    {
+      "country_code": "SG",
+      "tax_id_name": "UEN",
+      "regex": "^[0-9A-Z]{9,10}$",
+      "example": "201312345K",
+      "entity_type": "company",
+      "notes": "Singapore Unique Entity Number."
+    },
+    {
+      "country_code": "SI",
+      "tax_id_name": "DDV (VAT)",
+      "regex": "^SI\\d{8}$",
+      "example": "SI12345678",
+      "entity_type": "company",
+      "notes": "Slovenia VAT."
+    },
+    {
+      "country_code": "SI",
+      "tax_id_name": "DDV (VAT)",
+      "regex": "^SI\\d{8}$",
+      "example": "SI12345678",
+      "entity_type": "company",
+      "notes": "Slovenia VAT number."
+    },
+    {
+      "country_code": "SK",
+      "tax_id_name": "IČ DPH (VAT)",
+      "regex": "^SK\\d{10}$",
+      "example": "SK1234567890",
+      "entity_type": "company",
+      "notes": "VAT Eslovaquia."
+    },
+    {
+      "country_code": "SK",
+      "tax_id_name": "IČ DPH (VAT)",
+      "regex": "^SK\\d{10}$",
+      "example": "SK1234567890",
+      "entity_type": "company",
+      "notes": "Slovakia VAT number."
+    },
+    {
+      "country_code": "SL",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Sierra Leone TIN."
+    },
+    {
+      "country_code": "SM",
+      "tax_id_name": "COE / VAT",
+      "regex": "^\\d{5}$",
+      "example": "12345",
+      "entity_type": "company",
+      "notes": "San Marino company code (VAT separate)."
+    },
+    {
+      "country_code": "SN",
+      "tax_id_name": "NINEA",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Senegal business ID (NINEA)."
+    },
+    {
+      "country_code": "SO",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9,11}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Somalia TIN (varies)."
+    },
+    {
+      "country_code": "SR",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Suriname TIN/CRN; verificación documental requerida."
+    },
+    {
+      "country_code": "SS",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{10,12}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "South Sudan TIN (varies)."
+    },
+    {
+      "country_code": "ST",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "São Tomé and Príncipe TIN."
+    },
+    {
+      "country_code": "SV",
+      "tax_id_name": "NIT",
+      "regex": "^\\d{14}$",
+      "example": "0614-290786-102-3",
+      "entity_type": "company",
+      "notes": "El Salvador NIT (often shown with dashes)."
+    },
+    {
+      "country_code": "SX",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Sint Maarten TIN for business; formats vary, verify via chamber/Tax Admin."
+    },
+    {
+      "country_code": "TC",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "Turks & Caicos TIN; confirm with Revenue Department."
+    },
+    {
+      "country_code": "TD",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{11,14}$",
+      "example": "12345678901",
+      "entity_type": "company",
+      "notes": "Chad tax number."
+    },
+    {
+      "country_code": "TG",
+      "tax_id_name": "NIF",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Togo NIF."
+    },
+    {
+      "country_code": "TH",
+      "tax_id_name": "Tax ID",
+      "regex": "^\\d{13}$",
+      "example": "1234567890123",
+      "entity_type": "company",
+      "notes": "Thailand juristic person ID."
+    },
+    {
+      "country_code": "TH",
+      "tax_id_name": "Tax ID",
+      "regex": "^\\d{13}$",
+      "example": "1234567890123",
+      "entity_type": "company",
+      "notes": "Thailand juristic person ID (13 digits)."
+    },
+    {
+      "country_code": "TN",
+      "tax_id_name": "MAT / MF",
+      "regex": "^\\d{7,9}$",
+      "example": "1234567",
+      "entity_type": "company",
+      "notes": "Tunisia tax ID (MAT/MF)."
+    },
+    {
+      "country_code": "TO",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Tonga TIN (9 digits)."
+    },
+    {
+      "country_code": "TR",
+      "tax_id_name": "VKN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Vergi Kimlik Numarası (Turquía)."
+    },
+    {
+      "country_code": "TR",
+      "tax_id_name": "VKN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Turkey tax number (VKN) for entities."
+    },
+    {
+      "country_code": "TT",
+      "tax_id_name": "BIR",
+      "regex": "^\\d{6,9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Trinidad & Tobago Board of Inland Revenue number."
+    },
+    {
+      "country_code": "TV",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Tuvalu TIN (9 digits)."
+    },
+    {
+      "country_code": "TW",
+      "tax_id_name": "GUI No.",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Taiwan Business Administration (GUI number)."
+    },
+    {
+      "country_code": "TZ",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Tanzania TIN."
+    },
+    {
+      "country_code": "UA",
+      "tax_id_name": "EDRPOU",
+      "regex": "^\\d{8}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Ukraine Unified State Register code (EDRPOU)."
+    },
+    {
+      "country_code": "UG",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{10}$",
+      "example": "1234567890",
+      "entity_type": "company",
+      "notes": "Uganda TIN."
+    },
+    {
+      "country_code": "US",
+      "tax_id_name": "EIN",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "12-3456789",
+      "entity_type": "company",
+      "notes": "IRS Employer Identification Number for entities."
+    },
+    {
+      "country_code": "UY",
+      "tax_id_name": "RUT",
+      "regex": "^\\d{12}$",
+      "example": "214567890012",
+      "entity_type": "company",
+      "notes": "Uruguay RUT 12 dígitos."
+    },
+    {
+      "country_code": "VC",
+      "tax_id_name": "TIN",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "St. Vincent & the Grenadines TIN/VRN; confirm with IRD letter."
+    },
+    {
+      "country_code": "VE",
+      "tax_id_name": "RIF",
+      "regex": "^[JGVEP]-\\d{8}-\\d$",
+      "example": "J-12345678-9",
+      "entity_type": "company",
+      "notes": "Venezuela Registro de Información Fiscal."
+    },
+    {
+      "country_code": "VG",
+      "tax_id_name": "TAX ID",
+      "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+      "example": "123456",
+      "entity_type": "company",
+      "notes": "British Virgin Islands Taxpayer ID; companies also have BVI Company Number (VIRRGIN)."
+    },
+    {
+      "country_code": "VI",
+      "tax_id_name": "EIN (US)",
+      "regex": "^\\d{2}-\\d{7}$",
+      "example": "66-1234567",
+      "entity_type": "company",
+      "notes": "U.S. Virgin Islands use EIN; request DOR letter."
+    },
+    {
+      "country_code": "VN",
+      "tax_id_name": "MST",
+      "regex": "^\\d{10}(-\\d{3})?$",
+      "example": "0101234567",
+      "entity_type": "company",
+      "notes": "Vietnam tax code; sucursal añade -XXX."
+    },
+    {
+      "country_code": "VN",
+      "tax_id_name": "MST",
+      "regex": "^\\d{10}(-\\d{3})?$",
+      "example": "0101234567",
+      "entity_type": "company",
+      "notes": "Vietnam tax code; branch adds -XXX."
+    },
+    {
+      "country_code": "VU",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Vanuatu TIN (9 digits)."
+    },
+    {
+      "country_code": "WS",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Samoa TIN (9 digits)."
+    },
+    {
+      "country_code": "XK",
+      "tax_id_name": "Fiscal Number",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Kosovo business/fiscal number."
+    },
+    {
+      "country_code": "YE",
+      "tax_id_name": "TIN",
+      "regex": "^\\d{8,12}$",
+      "example": "12345678",
+      "entity_type": "company",
+      "notes": "Yemen Tax ID (varies)."
+    },
+    {
+      "country_code": "ZA",
+      "tax_id_name": "VAT",
+      "regex": "^\\d{10}$",
+      "example": "4012345678",
+      "entity_type": "company",
+      "notes": "South Africa VAT (10 digits)."
+    },
+    {
+      "country_code": "ZA",
+      "tax_id_name": "VAT / CIPC reg",
+      "regex": "^\\d{10}$",
+      "example": "4012345678",
+      "entity_type": "company",
+      "notes": "South Africa VAT (10 dígitos) / Company reg separado."
+    },
+    {
+      "country_code": "ZM",
+      "tax_id_name": "TPIN",
+      "regex": "^\\d{9}$",
+      "example": "123456789",
+      "entity_type": "company",
+      "notes": "Zambia TPIN."
+    },
+    {
+      "country_code": "ZW",
+      "tax_id_name": "BP Number",
+      "regex": "^\\d{8,10}$",
+      "example": "020123456",
+      "entity_type": "company",
+      "notes": "Zimbabwe Business Partner number."
+    }
+  ],
+  "fallback": {
+    "country_code": "ZZ",
+    "tax_id_name": "TIN (Generic)",
+    "regex": "^[A-Za-z0-9\\-\\./]{5,20}$",
+    "example": "A1234567",
+    "entity_type": "company",
+    "notes": "Fallback when a country-specific rule is unavailable; require official document + OCR verification."
+  }
+}

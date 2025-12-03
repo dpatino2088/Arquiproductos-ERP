@@ -1,63 +1,21 @@
 import React from 'react';
 
-export type ViewMode = 'employee' | 'manager' | 'group';
+export type ViewMode = 'manager';
 
 // View mode color constants
 export const VIEW_MODE_COLORS = {
-  employee: {
-    sidebar: {
-      background: 'var(--gray-250)',
-      border: 'var(--gray-300)',
-      textPrimary: 'var(--graphite-black-hex)',
-      textSecondary: 'var(--gray-950)'
-    },
-    buttons: {
-      active: {
-        background: 'white',
-        color: 'var(--teal-700)',
-        border: 'var(--teal-700)'
-      },
-      inactive: {
-        color: 'var(--graphite-black-hex)'
-      },
-      hover: {
-        background: 'white'
-      }
-    }
-  },
   manager: {
     sidebar: {
-      background: 'var(--navy-700)',
-      border: 'var(--navy-600)',
-      textPrimary: 'var(--gray-300)',
-      textSecondary: 'var(--gray-100)'
-    },
-    buttons: {
-      active: {
-        background: 'var(--navy-800)',
-        color: 'var(--teal-500)',
-        border: 'var(--teal-500)'
-      },
-      inactive: {
-        color: 'var(--gray-300)'
-      },
-      hover: {
-        background: 'var(--navy-800)'
-      }
-    }
-  },
-  group: {
-    sidebar: {
       background: 'var(--gray-950)',
-      border: 'var(--gray-800)',
+      border: 'var(--gray-950)',
       textPrimary: 'var(--gray-300)',
       textSecondary: 'var(--gray-100)'
     },
     buttons: {
       active: {
         background: 'var(--gray-800)',
-        color: 'var(--teal-500)',
-        border: 'var(--teal-500)'
+        color: 'var(--primary-brand-hex)',
+        border: 'var(--primary-brand-hex)'
       },
       inactive: {
         color: 'var(--gray-300)'
@@ -71,7 +29,9 @@ export const VIEW_MODE_COLORS = {
 
 // Utility functions for getting view mode styles
 export const getViewModeColors = (viewMode: ViewMode) => {
-  return VIEW_MODE_COLORS[viewMode];
+  const colors = VIEW_MODE_COLORS[viewMode];
+  // Fallback to manager if viewMode is invalid
+  return colors || VIEW_MODE_COLORS.manager;
 };
 
 export const getSidebarStyles = (viewMode: ViewMode) => {
@@ -126,20 +86,14 @@ export const getLogoTextColor = (viewMode: ViewMode) => {
   return colors.sidebar.textSecondary;
 };
 
-// View mode cycling utility
-const VIEW_MODE_CYCLE: ViewMode[] = ['employee', 'manager', 'group'];
-
+// View mode cycling utility (no longer needed, but kept for compatibility)
 export const getNextViewMode = (currentMode: ViewMode): ViewMode => {
-  const currentIndex = VIEW_MODE_CYCLE.indexOf(currentMode);
-  const nextIndex = (currentIndex + 1) % VIEW_MODE_CYCLE.length;
-  return VIEW_MODE_CYCLE[nextIndex];
+  return 'manager'; // Always return manager since it's the only view mode
 };
 
 // Settings URL mapping
 const SETTINGS_URLS: Record<ViewMode, string> = {
-  employee: '/org/cmp/employee/settings', // This might not be used, but for completeness
-  manager: '/org/cmp/management/settings/company-settings',
-  group: '/org/grp/settings',
+  manager: '/settings/company-settings',
 };
 
 export const getSettingsUrl = (viewMode: ViewMode): string => {
@@ -148,9 +102,7 @@ export const getSettingsUrl = (viewMode: ViewMode): string => {
 
 // Dashboard URL mapping
 const DASHBOARD_URLS: Record<ViewMode, string> = {
-  employee: '/org/cmp/employee/dashboard',
-  manager: '/org/cmp/management/dashboard',
-  group: '/org/grp/dashboard',
+  manager: '/dashboard',
 };
 
 export const getDashboardUrl = (viewMode: ViewMode): string => {
@@ -159,9 +111,7 @@ export const getDashboardUrl = (viewMode: ViewMode): string => {
 
 // View mode display names
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
-  employee: 'Employee View',
   manager: 'Management View',
-  group: 'Group View',
 };
 
 export const getViewModeLabel = (viewMode: ViewMode): string => {

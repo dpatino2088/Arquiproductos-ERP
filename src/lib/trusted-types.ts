@@ -52,7 +52,7 @@ class TrustedTypesManager {
     if (!this.isSupported || !window.trustedTypes) return;
 
     try {
-      this.policy = window.trustedTypes.createPolicy('rhemo-policy', {
+      this.policy = window.trustedTypes.createPolicy('PROLOGIX-policy', {
         createHTML: (input: string) => this.sanitizeHTML(input),
         createScript: (input: string) => this.sanitizeScript(input),
         createScriptURL: (input: string) => this.sanitizeURL(input),

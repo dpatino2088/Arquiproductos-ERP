@@ -4,14 +4,12 @@ import { router } from '../lib/router';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
-import { RhemoLogo } from './RhemoLogo';
 import { 
   getSidebarStyles, 
   getButtonStyles, 
   getHoverStyles, 
   getTextStyles, 
   getLogoTextColor,
-  getNextViewMode,
   getSettingsUrl,
   getDashboardUrl,
   getViewModeLabel,
@@ -34,16 +32,9 @@ import {
   ChevronRight, 
   Building, 
   Building2,
-  Receipt,
   Printer,
-  HandCoins,
-  Briefcase,
-  Cpu,
-  ChartNoAxesCombined,
-  HeartPulse,
   CalendarCheck,
-  BookMarked,
-  WalletCards
+  Box
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -62,7 +53,7 @@ const NavigationItem = memo(({
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
-  viewMode: 'employee' | 'manager' | 'group';
+  viewMode: 'manager';
 }) => {
   const buttonStyles = getButtonStyles(viewMode, isActive);
   const textStyles = getTextStyles(viewMode, isActive);
@@ -118,25 +109,7 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'Recruitment', href: '/org/cmp/management/recruitment/job-openings', icon: Briefcase },
-  { name: 'Time & Attendance', href: '/org/cmp/management/time-and-attendance/whos-working', icon: Clock },
-  { name: 'PTO & Leave', href: '/org/cmp/management/pto-and-leaves/team-leave-calendar', icon: CalendarCheck },
-  { name: 'Company Knowledge', href: '/org/cmp/management/company-knowledge/about-the-company', icon: BookMarked },
-  { name: 'Performance', href: '/org/cmp/management/performance/team-goals-and-performance', icon: ChartNoAxesCombined },
-  { name: 'Benefits', href: '/org/cmp/management/benefits/team-benefits', icon: WalletCards },
-];
-
-const employeeOnlyNavigation = [
-  { name: 'Wellness', href: '/wellness', icon: HeartPulse },
-  { name: 'Expenses', href: '/org/cmp/employee/expenses/my-expenses', icon: Receipt },
-];
-
-const managementExpenses = [
-  { name: 'Expenses', href: '/org/cmp/management/expenses/team-expenses', icon: Receipt },
-];
-
-const sharedManagementNavigation = [
-  { name: 'IT Management', href: '/org/cmp/management/it-management/team-devices', icon: Cpu },
+  { name: 'Time & Attendance', href: '/time-and-attendance/whos-working', icon: Clock },
 ];
 
 
@@ -151,10 +124,13 @@ function Layout({ children }: LayoutProps) {
   // Use UI store for sidebar and view mode state
   const { 
     sidebarCollapsed: isCollapsed, 
-    viewMode, 
+    viewMode: storeViewMode, 
     toggleSidebarCollapsed, 
     setViewMode 
   } = useUIStore();
+  
+  // Ensure viewMode is always valid, default to 'manager'
+  const viewMode = storeViewMode || 'manager';
 
   // Scroll to top when route changes
   useEffect(() => {
@@ -210,11 +186,8 @@ function Layout({ children }: LayoutProps) {
   const isNavItemActive = useCallback((itemName: string, itemHref: string) => {
     switch (itemName) {
       case 'Dashboard':
-        // Dashboard is active if we're on any dashboard route or inbox
-        return currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
-      case 'Recruitment':
-        // Recruitment is active if we're on any recruitment route
-        return currentRoute.includes('/recruitment');
+        // Dashboard is active if we're on root, dashboard route, or inbox
+        return currentRoute === '/' || currentRoute === '/dashboard' || currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
       case 'Employees':
         // Employees is active if we're on any employees route
         return currentRoute.includes('/employees');
@@ -224,30 +197,6 @@ function Layout({ children }: LayoutProps) {
       case 'Time & Attendance':
         // Time & Attendance is active if we're on any time-and-attendance route
         return currentRoute.includes('/time-and-attendance');
-      case 'PTO & Leave':
-        // PTO & Leave is active if we're on any pto-and-leaves route
-        return currentRoute.includes('/pto-and-leaves');
-      case 'Performance':
-        // Performance is active if we're on any performance route
-        return currentRoute.includes('/performance');
-      case 'Company Knowledge':
-        // Company Knowledge is active if we're on any company-knowledge route or cmp/about-the-company
-        return currentRoute.includes('/company-knowledge') || currentRoute.includes('/cmp/about-the-company');
-      case 'Benefits':
-        // Benefits is active if we're on any benefits route
-        return currentRoute.includes('/benefits');
-      case 'Expenses':
-        // Expenses is active if we're on any expenses route
-        return currentRoute.includes('/expenses');
-      case 'IT Management':
-        // IT Management is active if we're on any it-management route
-        return currentRoute.includes('/it-management');
-      case 'Wellness':
-        // Wellness is active if we're on any wellness route
-        return currentRoute.includes('/wellness');
-      case 'Payroll':
-        // Payroll is active if we're on any payroll route
-        return currentRoute.includes('/payroll');
       case 'Reports':
         // Reports is active if we're on any reports route
         return currentRoute.includes('/reports');
@@ -260,51 +209,15 @@ function Layout({ children }: LayoutProps) {
     }
   }, [currentRoute]);
 
-  // Memoized navigation items based on view mode
+  // Memoized navigation items for management view
   const navigation = useMemo(() => {
-    // Create base navigation with People/My Info inserted after Dashboard
+    // Create base navigation with Employees inserted after Dashboard
     const dashboardItem = baseNavigation[0]; // Dashboard
     const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
-    if (viewMode === 'group') {
-      // Group view navigation - Home, Companies, Reports, Settings
-      const homeItem = { name: 'Home', href: '/org/grp/dashboard', icon: Home };
-      const companiesItem = { name: 'Companies', href: '/org/grp/companies', icon: Building2 };
-      const reportsItem = { name: 'Reports', href: '/org/grp/reports', icon: Printer };
-      const settingsItem = { name: 'Settings', href: '/org/grp/settings', icon: Settings };
-      return [homeItem, companiesItem, reportsItem, settingsItem];
-    } else if (viewMode === 'manager') {
-      const employeesItem = { name: 'Employees', href: '/employees', icon: Users };
-      // Insert People after Recruiting (index 1) and before Time & Attendance (index 2)
-      const recruitingItem = restOfBase[0]; // Recruitment
-      const remainingItems = restOfBase.slice(1); // Everything after Recruiting
-      return [dashboardItem, recruitingItem, employeesItem, ...remainingItems, ...managementExpenses, { name: 'Payroll', href: '/org/cmp/management/payroll/payroll-wizards', icon: HandCoins }, ...sharedManagementNavigation, { name: 'Reports', href: '/org/cmp/management/reports/company-reports', icon: Printer }];
-    } else {
-      // Employee view navigation in specific order
-      const myInfoItem = { name: 'My Info', href: '/org/cmp/employee/my-info', icon: User };
-      const timeAttendanceItem = { name: 'Time & Attendance', href: '/org/cmp/employee/time-and-attendance/my-clock', icon: Clock };
-      const ptoLeaveItem = { name: 'PTO & Leaves', href: '/org/cmp/employee/pto-and-leaves/my-balance', icon: CalendarCheck };
-      const companyKnowledgeItem = { name: 'Company Knowledge', href: '/org/cmp/employee/company-knowledge/about-the-company', icon: BookMarked };
-      const performanceItem = { name: 'Performance', href: '/org/cmp/employee/performance/my-performance', icon: ChartNoAxesCombined };
-      const benefitsItem = { name: 'Benefits', href: '/org/cmp/employee/benefits/my-benefits', icon: WalletCards };
-      const wellnessItem = { name: 'Wellness', href: '/org/cmp/employee/wellness/fitness', icon: HeartPulse };
-      const expensesItem = { name: 'Expenses', href: '/org/cmp/employee/expenses/my-expenses', icon: Receipt };
-      const itManagementItem = { name: 'IT Management', href: '/org/cmp/employee/it-management/my-devices', icon: Cpu };
-      
-      return [
-        dashboardItem, 
-        myInfoItem, 
-        timeAttendanceItem, 
-        ptoLeaveItem, 
-        companyKnowledgeItem, 
-        performanceItem, 
-        benefitsItem, 
-        wellnessItem,
-        expensesItem, 
-        itManagementItem
-      ];
-    }
-  }, [viewMode]);
+    const employeesItem = { name: 'Employees', href: '/employees', icon: Users };
+    return [dashboardItem, employeesItem, ...restOfBase, { name: 'Reports', href: '/reports/company-reports', icon: Printer }];
+  }, []);
 
   const dashboardItem = useMemo(() => 
     navigation.find(item => item?.name === 'Dashboard' || item?.name === 'Home'), [navigation]
@@ -314,8 +227,8 @@ function Layout({ children }: LayoutProps) {
     navigation.filter(item => 
       item?.name !== 'Dashboard' && 
       item?.name !== 'Home' && 
-      !(viewMode === 'group' && item?.name === 'Settings') // Exclude Settings in group view since it's rendered separately
-    ), [navigation, viewMode]
+      item?.name !== 'Settings' // Exclude Settings since it's rendered separately
+    ), [navigation]
   );
 
   // Memoized handlers
@@ -329,39 +242,26 @@ function Layout({ children }: LayoutProps) {
     }
   }, []);
 
-  const handleViewToggle = useCallback(() => {
-    const newMode = getNextViewMode(viewMode);
-    setViewMode(newMode);
-    router.setViewMode(newMode);
-    
-    // Navigate to appropriate dashboard based on view mode
-    const newPath = getDashboardUrl(newMode);
-    router.navigate(newPath);
-    setCurrentRoute(newPath);
-  }, [viewMode]);
-
   const handleNavigation = useCallback((path: string) => {
     // Save current page before navigating to settings
     if (path.includes('/settings/company-settings')) {
       saveCurrentPageBeforeSettings();
     }
     
-    // Handle dynamic navigation based on view mode
+    // Handle dynamic navigation
     if (path === '/dashboard') {
-      const actualPath = getDashboardUrl(viewMode);
+      const actualPath = '/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/employees') {
-      const actualPath = viewMode === 'employee' 
-        ? '/org/cmp/employee/my-info' 
-        : '/org/cmp/management/employees/directory';
+      const actualPath = '/employees/directory';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
       router.navigate(path);
       setCurrentRoute(path);
     }
-  }, [viewMode, saveCurrentPageBeforeSettings]);
+  }, [saveCurrentPageBeforeSettings]);
 
   // Memoized sidebar width calculations
   const sidebarWidth = useMemo(() => 
@@ -477,7 +377,7 @@ function Layout({ children }: LayoutProps) {
               }}
             >
               <div className="flex items-center justify-center" style={{ width: '27px', height: '27px', flexShrink: 0 }}>
-                <RhemoLogo width={27} height={27} viewMode={viewMode} />
+                <Box size={27} style={{ color: 'var(--primary-brand-hex)' }} />
               </div>
                           <span
               className="absolute transition-opacity duration-300 whitespace-nowrap font-normal"
@@ -489,7 +389,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '16px'
               }}
             >
-              <span style={{ fontWeight: '700' }}>RH</span><span style={{ fontWeight: '200' }}>EMO</span>
+              PROLOGIX
             </span>
             </div>
           </div>
@@ -551,8 +451,8 @@ function Layout({ children }: LayoutProps) {
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
-              {/* Settings Button - Only show in manager and group views */}
-              {viewMode !== 'employee' && (() => {
+              {/* Settings Button */}
+              {(() => {
                 const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
                 return (
               <button
@@ -595,13 +495,9 @@ function Layout({ children }: LayoutProps) {
           <div className="flex items-center justify-between h-full px-6">
             {/* Left side - Company name */}
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
-                      {viewMode === 'employee' ? (
-          <User style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
-        ) : (
-          <Building style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
-        )}
+              <Building style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
               <div className="flex items-center font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                <span>Secure Corp</span>
+                <span>PROLOGIX</span>
               </div>
             </div>
 
@@ -651,7 +547,7 @@ function Layout({ children }: LayoutProps) {
                   style={{ 
                     width: '28px', 
                     height: '28px',
-                                         backgroundColor: 'var(--teal-brand-hex)'
+                                         backgroundColor: 'var(--primary-brand-hex)'
                   }}
                   aria-label={`My Account${isUserMenuOpen ? ' (menu open)' : ' (menu closed)'}`}
                   aria-expanded={isUserMenuOpen}
@@ -694,86 +590,6 @@ function Layout({ children }: LayoutProps) {
                       </button>
                       
 
-                      {/* View Mode Toggle */}
-                      <div className="border-t border-gray-100 mt-1 pt-1">
-                        <div className="px-4 py-2">
-                          <div className="text-xs text-gray-500 mb-2" role="group" aria-label="View mode selection">View Mode</div>
-                          <div className="space-y-1">
-                            {/* Group View Button */}
-                            <button
-                              onClick={() => {
-                                if (viewMode !== 'group') {
-                                  setViewMode('group');
-                                  router.setViewMode('group');
-                                  router.navigate('/org/grp/dashboard');
-                                  setCurrentRoute('/org/grp/dashboard');
-                                  setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'group' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'group' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="group-view-btn"
-                              disabled={viewMode === 'group'}
-                              role="menuitemradio"
-                              aria-checked={viewMode === 'group'}
-                              aria-label={`Switch to Group View${viewMode === 'group' ? ' (currently selected)' : ''}`}
-                            >
-                              Group View {viewMode === 'group' && '✓'}
-                            </button>
-                            
-                            {/* Management View Button */}
-                            <button
-                              onClick={() => {
-                                if (viewMode !== 'manager') {
-                                  setViewMode('manager');
-                                  router.setViewMode('manager');
-                                  router.navigate('/org/cmp/management/dashboard');
-                                  setCurrentRoute('/org/cmp/management/dashboard');
-                                  setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'manager' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'manager' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="manager-view-btn"
-                              disabled={viewMode === 'manager'}
-                            >
-                              Management View {viewMode === 'manager' && '✓'}
-                            </button>
-                            
-                            {/* Employee View Button */}
-                            <button
-                              onClick={() => {
-                                if (viewMode !== 'employee') {
-                                  setViewMode('employee');
-                                  router.setViewMode('employee');
-                                  router.navigate('/org/cmp/employee/dashboard');
-                                  setCurrentRoute('/org/cmp/employee/dashboard');
-                                  setIsUserMenuOpen(false);
-                                }
-                              }}
-                              className={`w-full px-3 py-2 text-sm rounded transition-colors text-left ${
-                                viewMode === 'employee' 
-                                  ? 'bg-blue-100 text-blue-800 font-medium cursor-default' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
-                              }`}
-                              style={{ color: viewMode === 'employee' ? 'var(--blue-800)' : 'var(--gray-950)' }}
-                              data-testid="employee-view-btn"
-                              disabled={viewMode === 'employee'}
-                            >
-                              Employee View {viewMode === 'employee' && '✓'}
-                            </button>
-                            
-                          </div>
-                        </div>
-                      </div>
 
                       <button
                         className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100 mt-1 pt-3"
@@ -826,9 +642,9 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                                                     color: tab.isActive ? 'var(--teal-brand-hex)' : 'var(--graphite-black-hex)',
+                                                     color: tab.isActive ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
                           borderColor: 'var(--gray-250)',
-                          borderBottom: tab.isActive ? '2px solid var(--teal-700)' : 'none'
+                          borderBottom: tab.isActive ? '2px solid var(--primary-brand-hex)' : 'none'
                         }}
                         role="tab"
                         aria-selected={tab.isActive}

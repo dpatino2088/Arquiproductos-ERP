@@ -67,7 +67,7 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: false,
       sidebarCollapsed: true,
       theme: 'system',
-      viewMode: 'employee',
+      viewMode: 'manager',
       notifications: [],
       unreadNotificationCount: 0,
       globalLoading: false,

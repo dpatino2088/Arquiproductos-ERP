@@ -8,41 +8,16 @@ import { logger } from './lib/logger';
 import { useUIStore } from './stores/ui-store';
 
 // Code splitting with React.lazy
-const EmployeeDashboard = lazy(() => {
-  logger.debug('Loading EmployeeDashboard component');
-  return import('./pages/org/cmp/employee/Dashboard');
-});
-
 const ManagementDashboard = lazy(() => {
   logger.debug('Loading ManagementDashboard component');
-  return import('./pages/org/cmp/management/Dashboard');
-});
-
-const GroupDashboard = lazy(() => {
-  logger.debug('Loading GroupDashboard component');
-  return import('./pages/org/grp/Dashboard');
-});
-
-const GroupCompanies = lazy(() => {
-  logger.debug('Loading GroupCompanies component');
-  return import('./pages/org/grp/Companies');
-});
-
-const GroupReports = lazy(() => {
-  logger.debug('Loading GroupReports component');
-  return import('./pages/org/grp/Reports');
-});
-
-const GroupSettings = lazy(() => {
-  logger.debug('Loading GroupSettings component');
-  return import('./pages/org/grp/Settings');
+  return import('./pages/Dashboard');
 });
 
 
 
 const Inbox = lazy(() => {
   logger.debug('Loading Inbox component');
-  return import('./pages/org/cmp/Inbox');
+  return import('./pages/Inbox');
 });
 
 
@@ -87,266 +62,79 @@ const GatewayTimeout = lazy(() => {
   return import('./pages/error-pages/GatewayTimeout');
 });
 
-const MyInfo = lazy(() => {
-  logger.debug('Loading MyInfo component');
-  return import('./pages/org/cmp/employee/MyInfo');
-});
 
 const Directory = lazy(() => {
   logger.debug('Loading Directory component');
-  return import('./pages/org/cmp/management/employees/Directory');
+  return import('./pages/employees/Directory');
 });
 
 const EmployeeInfo = lazy(() => {
   logger.debug('Loading EmployeeInfo component');
-  return import('./pages/org/cmp/management/employees/EmployeeInfo');
+  return import('./pages/employees/EmployeeInfo');
 });
 
 const OrganizationalChart = lazy(() => {
   logger.debug('Loading OrganizationalChart component');
-  return import('./pages/org/cmp/management/employees/OrganizationalChart');
+  return import('./pages/employees/OrganizationalChart');
 });
 
 const WhosWorking = lazy(() => {
   logger.debug('Loading Whos Working component');
-  return import('./pages/org/cmp/management/time-and-attendance/WhosWorking');
+  return import('./pages/time-and-attendance/WhosWorking');
 });
 
 const TeamSchedule = lazy(() => {
   logger.debug('Loading Team Schedule component');
-  return import('./pages/org/cmp/management/time-and-attendance/TeamSchedule');
+  return import('./pages/time-and-attendance/TeamSchedule');
 });
 
 const TeamAttendance = lazy(() => {
   logger.debug('Loading Team Attendance component');
-  return import('./pages/org/cmp/management/time-and-attendance/TeamAttendance');
+  return import('./pages/time-and-attendance/TeamAttendance');
 });
 
 const AttendanceFlags = lazy(() => {
   logger.debug('Loading Attendance Flags component');
-  return import('./pages/org/cmp/management/time-and-attendance/AttendanceFlags');
+  return import('./pages/time-and-attendance/AttendanceFlags');
 });
 
 
 const EmployeeTimesheet = lazy(() => {
   logger.debug('Loading Employee Timesheet component');
-  return import('./pages/org/cmp/management/time-and-attendance/EmployeeTimesheet');
+  return import('./pages/time-and-attendance/EmployeeTimesheet');
 });
 
 
-const TeamLeaveCalendar = lazy(() => {
-  logger.debug('Loading Team Leave Calendar component');
-  return import('./pages/org/cmp/management/pto-and-leaves/TeamLeaveCalendar');
-});
-
-const TeamLeaveRequests = lazy(() => {
-  logger.debug('Loading Team Leave Requests component');
-  return import('./pages/org/cmp/management/pto-and-leaves/TeamLeaveRequests');
-});
-
-const TeamBalances = lazy(() => {
-  logger.debug('Loading Team Balances component');
-  return import('./pages/org/cmp/management/pto-and-leaves/TeamBalances');
-});
-
-const TeamDevices = lazy(() => {
-  logger.debug('Loading Team Devices component');
-  return import('./pages/org/cmp/management/it-management/TeamDevices');
-});
-
-const TeamLicenses = lazy(() => {
-  logger.debug('Loading Team Licenses component');
-  return import('./pages/org/cmp/management/it-management/TeamLicenses');
-});
-
-const TeamITRequests = lazy(() => {
-  logger.debug('Loading Team IT Requests component');
-  return import('./pages/org/cmp/management/it-management/TeamITRequests');
-});
-
-const TeamExpenses = lazy(() => {
-  logger.debug('Loading Team Expenses component');
-  return import('./pages/org/cmp/management/expenses/TeamExpenses');
-});
-
-const TeamGoalsAndPerformance = lazy(() => {
-  logger.debug('Loading Team Goals and Performance component');
-  return import('./pages/org/cmp/management/performance/TeamGoalsAndPerformance');
-});
-
-const TeamReviews = lazy(() => {
-  logger.debug('Loading Team Reviews component');
-  return import('./pages/org/cmp/management/performance/TeamReviews');
-});
-
-const TeamFeedbackAndRecognition = lazy(() => {
-  logger.debug('Loading Team Feedback and Recognition component');
-  return import('./pages/org/cmp/management/performance/TeamFeedbackAndRecognition');
-});
-
-const TeamOneOnOne = lazy(() => {
-  logger.debug('Loading Team One-on-One component');
-  return import('./pages/org/cmp/management/performance/TeamOneOnOne');
-});
-
-const TeamResponsibilities = lazy(() => {
-  logger.debug('Loading Team Responsibilities component');
-  return import('./pages/org/cmp/management/company-knowledge/TeamResponsibilities');
-});
-
-const TeamKnowledgeCompliance = lazy(() => {
-  logger.debug('Loading Team Knowledge Compliance component');
-  return import('./pages/org/cmp/management/company-knowledge/TeamKnowledgeCompliance');
-});
-
-const AboutTheCompany = lazy(() => {
-  logger.debug('Loading About the Company component');
-  return import('./pages/org/cmp/AboutTheCompany');
-});
-
-const TeamBenefits = lazy(() => {
-  logger.debug('Loading Team Benefits component');
-  return import('./pages/org/cmp/management/benefits/TeamBenefits');
-});
-
-const TeamRequests = lazy(() => {
-  logger.debug('Loading Team Requests component');
-  return import('./pages/org/cmp/management/benefits/TeamRequests');
-});
-
-const PayrollWizards = lazy(() => {
-  logger.debug('Loading Payroll Wizards component');
-  return import('./pages/org/cmp/management/payroll/PayrollWizards');
-});
 
 const CompanyReports = lazy(() => {
   logger.debug('Loading Company Reports component');
-  return import('./pages/org/cmp/management/reports/CompanyReports');
+  return import('./pages/reports/CompanyReports');
 });
 
 const CompanySettings = lazy(() => {
   logger.debug('Loading Company Settings component');
-  return import('./pages/org/cmp/management/settings/CompanySettings');
+  return import('./pages/settings/CompanySettings');
 });
 
-const JobOpenings = lazy(() => {
-  logger.debug('Loading Job Openings component');
-  return import('./pages/org/cmp/management/recruitment/JobOpenings');
+// Auth pages
+const Login = lazy(() => {
+  logger.debug('Loading Login component');
+  return import('./pages/auth/Login');
 });
 
-const Candidates = lazy(() => {
-  logger.debug('Loading Candidates component');
-  return import('./pages/org/cmp/management/recruitment/Candidates');
+const CompanyRegistration = lazy(() => {
+  logger.debug('Loading Company Registration component');
+  return import('./pages/auth/CompanyRegistration');
 });
 
-const Onboarding = lazy(() => {
-  logger.debug('Loading Onboarding component');
-  return import('./pages/org/cmp/management/recruitment/Onboarding');
+const ResetPassword = lazy(() => {
+  logger.debug('Loading Reset Password component');
+  return import('./pages/auth/ResetPassword');
 });
 
-const MyClock = lazy(() => {
-  logger.debug('Loading My Clock component');
-  return import('./pages/org/cmp/employee/time-and-attendance/MyClock');
-});
-
-const MyPlanner = lazy(() => {
-  logger.debug('Loading My Planner component');
-  return import('./pages/org/cmp/employee/time-and-attendance/MyPlanner');
-});
-
-const MyAttendance = lazy(() => {
-  logger.debug('Loading My Attendance component');
-  return import('./pages/org/cmp/employee/time-and-attendance/MyAttendance');
-});
-
-const MyRequests = lazy(() => {
-  logger.debug('Loading My Requests component');
-  return import('./pages/org/cmp/employee/pto-and-leaves/MyRequests');
-});
-
-const MyBalance = lazy(() => {
-  logger.debug('Loading My Balance component');
-  return import('./pages/org/cmp/employee/pto-and-leaves/MyBalance');
-});
-
-const MyResponsibility = lazy(() => {
-  logger.debug('Loading My Responsibility component');
-  return import('./pages/org/cmp/employee/company-knowledge/MyResponsibility');
-});
-
-const ProcessesAndPolicies = lazy(() => {
-  logger.debug('Loading Processes and Policies component');
-  return import('./pages/org/cmp/employee/company-knowledge/ProcessesAndPolicies');
-});
-
-const DocumentsAndFiles = lazy(() => {
-  logger.debug('Loading Documents and Files component');
-  return import('./pages/org/cmp/employee/company-knowledge/DocumentsAndFiles');
-});
-
-const CoursesAndTraining = lazy(() => {
-  logger.debug('Loading Courses and Training component');
-  return import('./pages/org/cmp/employee/company-knowledge/CoursesAndTraining');
-});
-
-const MyPerformance = lazy(() => {
-  logger.debug('Loading My Performance component');
-  return import('./pages/org/cmp/employee/performance/MyPerformance');
-});
-
-const MyFeedbackAndRecognition = lazy(() => {
-  logger.debug('Loading My Feedback and Recognition component');
-  return import('./pages/org/cmp/employee/performance/MyFeedbackAndRecognition');
-});
-
-const MyOneOnOne = lazy(() => {
-  logger.debug('Loading My One-on-One component');
-  return import('./pages/org/cmp/employee/performance/MyOneOnOne');
-});
-
-const MyBenefits = lazy(() => {
-  logger.debug('Loading My Benefits component');
-  return import('./pages/org/cmp/employee/benefits/MyBenefits');
-});
-
-const MyExpenses = lazy(() => {
-  logger.debug('Loading My Expenses component');
-  return import('./pages/org/cmp/employee/expenses/MyExpenses');
-});
-
-const MyDevices = lazy(() => {
-  logger.debug('Loading My Devices component');
-  return import('./pages/org/cmp/employee/it-management/MyDevices');
-});
-
-const MyLicenses = lazy(() => {
-  logger.debug('Loading My Licenses component');
-  return import('./pages/org/cmp/employee/it-management/MyLicenses');
-});
-
-const MyITRequests = lazy(() => {
-  logger.debug('Loading My IT Requests component');
-  return import('./pages/org/cmp/employee/it-management/MyITRequests');
-});
-
-const FinancialWellness = lazy(() => {
-  logger.debug('Loading Financial Wellness component');
-  return import('./pages/org/cmp/employee/wellness/FinancialWellness');
-});
-
-const MentalHealth = lazy(() => {
-  logger.debug('Loading Mental Health component');
-  return import('./pages/org/cmp/employee/wellness/MentalHealth');
-});
-
-const Fitness = lazy(() => {
-  logger.debug('Loading Fitness component');
-  return import('./pages/org/cmp/employee/wellness/Fitness');
-});
-
-const Nutrition = lazy(() => {
-  logger.debug('Loading Nutrition component');
-  return import('./pages/org/cmp/employee/wellness/Nutrition');
+const NewPassword = lazy(() => {
+  logger.debug('Loading New Password component');
+  return import('./pages/auth/NewPassword');
 });
 
 
@@ -379,8 +167,18 @@ function App() {
   console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
   }
 
-  // Setup routing
+  // Setup routing - Auth routes are always available
   useEffect(() => {
+    // Auth routes (available without authentication)
+    router.addRoute('/login', () => setCurrentPage('login'));
+    router.addRoute('/auth/login', () => setCurrentPage('login'));
+    router.addRoute('/company-registration', () => setCurrentPage('company-registration'));
+    router.addRoute('/auth/company-registration', () => setCurrentPage('company-registration'));
+    router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
+    router.addRoute('/auth/reset-password', () => setCurrentPage('reset-password'));
+    router.addRoute('/new-password', () => setCurrentPage('new-password'));
+    router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
+
     if (isAuthenticated) {
       // Initialize router view mode to match UI store
       const { viewMode } = useUIStore.getState();
@@ -400,13 +198,13 @@ function App() {
       // Set up unauthorized redirect handler
       router.setUnauthorizedRedirectHandler(() => {
         if (import.meta.env.DEV) {
-        console.log('Unauthorized access attempt blocked - redirecting to employee dashboard');
+        console.log('Unauthorized access attempt blocked - redirecting to management dashboard');
         }
-        setCurrentPage('employee-dashboard');
+        setCurrentPage('management-dashboard');
       });
       
-      // Set up routes - default route goes to employee dashboard
-      router.addRoute('/', () => setCurrentPage('employee-dashboard'));
+      // Set up routes - default route goes to management dashboard
+      router.addRoute('/', () => setCurrentPage('management-dashboard'));
       
       
       // Error routes
@@ -421,159 +219,58 @@ function App() {
       
       // 404 route handler for unknown routes
       router.addRoute('*', () => setCurrentPage('not-found'));
-      // Specific inbox routes for each view mode
-      router.addRoute('/org/cmp/management/inbox', () => setCurrentPage('inbox'));
-      router.addRoute('/org/cmp/employee/inbox', () => setCurrentPage('inbox'));
+      // Inbox route
+      router.addRoute('/inbox', () => setCurrentPage('inbox'));
       
-      // Employee view routes
-      router.addRoute('/org/cmp/employee/dashboard', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/org/cmp/employee/my-info', () => setCurrentPage('my-info'));
+      // Dashboard route
+      router.addRoute('/dashboard', () => setCurrentPage('management-dashboard'));
+      router.addRoute('/', () => setCurrentPage('management-dashboard'));
       
-      
-      // Legacy employee routes (redirect to new path)
-      router.addRoute('/org/cmp/employee/my-info', () => setCurrentPage('my-info'));
-      
-      // Management view routes
-      router.addRoute('/org/cmp/management/dashboard', () => setCurrentPage('management-dashboard'));
-      router.addRoute('/org/cmp/management/employees/directory', () => setCurrentPage('directory'));
-      router.addRoute('/org/cmp/management/it-management/team-devices', () => setCurrentPage('team-devices'));
-        router.addRoute('/org/cmp/management/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
-        router.addRoute('/org/cmp/management/employees/employee-info', () => setCurrentPage('employee-info'));
-      router.addRoute('/org/cmp/management/employees/organizational-chart', () => setCurrentPage('org-chart'));
-
-      // Group view routes (viewMode auto-inferred from URL)
-      router.addRoute('/org/grp/dashboard', () => setCurrentPage('group-dashboard'));
-      router.addRoute('/org/grp/companies', () => setCurrentPage('group-companies'));
-      router.addRoute('/org/grp/reports', () => setCurrentPage('group-reports'));
-      router.addRoute('/org/grp/settings', () => setCurrentPage('group-settings'));
-
-
-      
-      // Management routes
-      router.addRoute('/org/cmp/management/reports', () => setCurrentPage('reports'));
+      // Employees routes
+      router.addRoute('/employees/directory', () => setCurrentPage('directory'));
+      router.addRoute('/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
+      router.addRoute('/employees/employee-info', () => setCurrentPage('employee-info'));
+      router.addRoute('/employees/organizational-chart', () => setCurrentPage('org-chart'));
       
       // Time & Attendance routes
-      router.addRoute('/org/cmp/management/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
-      router.addRoute('/org/cmp/management/time-and-attendance/team-schedule', () => setCurrentPage('team-schedule'));
-      router.addRoute('/org/cmp/management/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
-      router.addRoute('/org/cmp/management/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
-      router.addRoute('/org/cmp/management/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
-      router.addRoute('/org/cmp/management/time-and-attendance/employee-timesheet', () => setCurrentPage('employee-timesheet'));
-      
-      // PTO & Leaves routes
-      router.addRoute('/org/cmp/management/pto-and-leaves/team-leave-calendar', () => setCurrentPage('team-leave-calendar'));
-      router.addRoute('/org/cmp/management/pto-and-leaves/team-leave-requests', () => setCurrentPage('team-leave-requests'));
-      router.addRoute('/org/cmp/management/pto-and-leaves/team-balances', () => setCurrentPage('team-balances'));
-      
-      // Performance routes
-      router.addRoute('/org/cmp/management/performance/team-goals-and-performance', () => setCurrentPage('team-goals'));
-      router.addRoute('/org/cmp/management/performance/team-reviews', () => setCurrentPage('team-reviews'));
-      router.addRoute('/org/cmp/management/performance/team-feedback-and-recognition', () => setCurrentPage('team-feedback-and-recognition'));
-      router.addRoute('/org/cmp/management/performance/team-one-on-one', () => setCurrentPage('team-one-on-one'));
-      
-      // Company Knowledge routes
-      router.addRoute('/org/cmp/management/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
-      router.addRoute('/org/cmp/employee/company-knowledge/about-the-company', () => setCurrentPage('about-company'));
-      router.addRoute('/org/cmp/management/company-knowledge/team-responsibilities', () => setCurrentPage('team-responsibilities'));
-      router.addRoute('/org/cmp/management/company-knowledge/team-knowledge-compliance', () => setCurrentPage('team-knowledge-compliance'));
-      
-      // Benefits routes
-      router.addRoute('/org/cmp/management/benefits/team-benefits', () => setCurrentPage('team-benefits'));
-      router.addRoute('/org/cmp/management/benefits/team-requests', () => setCurrentPage('team-requests'));
-      
-      // Expenses routes
-      router.addRoute('/org/cmp/management/expenses/team-expenses', () => setCurrentPage('team-expenses'));
-      
-      // IT Management routes
-      router.addRoute('/org/cmp/management/it-management/team-devices', () => setCurrentPage('team-devices'));
-      router.addRoute('/org/cmp/management/it-management/team-licenses', () => setCurrentPage('team-licenses'));
-      router.addRoute('/org/cmp/management/it-management/team-it-requests', () => setCurrentPage('team-it-requests'));
-      
-      // Payroll routes
-      router.addRoute('/org/cmp/management/payroll/payroll-wizards', () => setCurrentPage('payroll-wizards'));
+      router.addRoute('/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
+      router.addRoute('/time-and-attendance/team-schedule', () => setCurrentPage('team-schedule'));
+      router.addRoute('/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
+      router.addRoute('/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
+      router.addRoute('/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
+      router.addRoute('/time-and-attendance/employee-timesheet', () => setCurrentPage('employee-timesheet'));
       
       // Reports routes
-      router.addRoute('/org/cmp/management/reports/company-reports', () => setCurrentPage('company-reports'));
+      router.addRoute('/reports', () => setCurrentPage('company-reports'));
+      router.addRoute('/reports/company-reports', () => setCurrentPage('company-reports'));
       
       // Settings routes
-      router.addRoute('/org/cmp/management/settings/company-settings', () => setCurrentPage('company-settings'));
-      
-      // Recruitment routes
-      router.addRoute('/org/cmp/management/recruitment/job-openings', () => setCurrentPage('job-openings'));
-      router.addRoute('/org/cmp/management/recruitment/candidates', () => setCurrentPage('candidates'));
-      router.addRoute('/org/cmp/management/recruitment/onboarding', () => setCurrentPage('onboarding'));
-      
-      // Employee Time & Attendance routes
-      router.addRoute('/org/cmp/employee/time-and-attendance/my-clock', () => setCurrentPage('my-clock'));
-      router.addRoute('/org/cmp/employee/time-and-attendance/my-planner', () => setCurrentPage('my-planner'));
-      router.addRoute('/org/cmp/employee/time-and-attendance/my-attendance', () => setCurrentPage('my-attendance'));
-      
-      // Employee PTO & Leaves routes
-      router.addRoute('/org/cmp/employee/pto-and-leaves/my-requests', () => setCurrentPage('my-requests'));
-      router.addRoute('/org/cmp/employee/pto-and-leaves/my-balance', () => setCurrentPage('my-balance'));
-      
-      // Employee Company Knowledge routes
-      router.addRoute('/org/cmp/employee/company-knowledge/my-responsibility', () => setCurrentPage('my-responsibility'));
-      router.addRoute('/org/cmp/employee/company-knowledge/processes-and-policies', () => setCurrentPage('processes-policies'));
-      router.addRoute('/org/cmp/employee/company-knowledge/documents-and-files', () => setCurrentPage('documents-files'));
-      router.addRoute('/org/cmp/employee/company-knowledge/courses-and-training', () => setCurrentPage('courses-training'));
-      
-      // Employee Performance routes
-      router.addRoute('/org/cmp/employee/performance/my-performance', () => setCurrentPage('my-performance'));
-      router.addRoute('/org/cmp/employee/performance/my-feedback-and-recognition', () => setCurrentPage('my-feedback-recognition'));
-      router.addRoute('/org/cmp/employee/performance/my-one-on-one', () => setCurrentPage('my-one-on-one'));
-      
-      // Employee Benefits routes
-      router.addRoute('/org/cmp/employee/benefits/my-benefits', () => setCurrentPage('my-benefits'));
-      
-      // Employee Expenses routes
-      router.addRoute('/org/cmp/employee/expenses/my-expenses', () => setCurrentPage('my-expenses'));
-      
-      // Employee IT Management routes
-      router.addRoute('/org/cmp/employee/it-management/my-devices', () => setCurrentPage('my-devices'));
-      router.addRoute('/org/cmp/employee/it-management/my-licenses', () => setCurrentPage('my-licenses'));
-      router.addRoute('/org/cmp/employee/it-management/my-it-requests', () => setCurrentPage('my-it-requests'));
-
-      // Employee Wellness routes
-      router.addRoute('/org/cmp/employee/wellness/financial-wellness', () => setCurrentPage('financial-wellness'));
-      router.addRoute('/org/cmp/employee/wellness/mental-health', () => setCurrentPage('mental-health'));
-      router.addRoute('/org/cmp/employee/wellness/fitness', () => setCurrentPage('fitness'));
-      router.addRoute('/org/cmp/employee/wellness/nutrition', () => setCurrentPage('nutrition'));
+      router.addRoute('/settings', () => setCurrentPage('company-settings'));
+      router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
       
       // Legacy routes (still supported)
-      router.addRoute('/employees', () => setCurrentPage('employees'));
-      router.addRoute('/reports', () => setCurrentPage('reports')); // Legacy route redirects to same page
+      router.addRoute('/employees', () => setCurrentPage('directory'));
       
-      // Protected routes (management only)
-      router.addRoute('/payroll', () => setCurrentPage('employee-dashboard')); // This will be blocked by route guard
-      
-      // Other routes - redirect to employee dashboard for now
-      router.addRoute('/time-tracking', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/pto', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/knowledge-hub', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/performance', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/benefits', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/wellness', () => setCurrentPage('fitness'));
-      router.addRoute('/expenses', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/it-management', () => setCurrentPage('employee-dashboard'));
-      router.addRoute('/settings', () => setCurrentPage('employee-dashboard'));
-      
-      // Initialize router
-      router.init();
-      
-      // Add listener for route changes to sync with current page
-      const unsubscribe = router.addListener(() => {
-        // This ensures the UI updates when router redirects
-        const currentRoute = router.getCurrentRoute();
-        if (import.meta.env.DEV) {
-        console.log('Route changed to:', currentRoute);
-        }
-      });
-      
-      return () => {
-        if (unsubscribe) unsubscribe();
-      };
+      // Other routes - redirect to management dashboard
+      router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
+      router.addRoute('/settings', () => setCurrentPage('company-settings'));
     }
+    
+    // Initialize router (always, even if not authenticated, so auth routes work)
+    router.init();
+    
+    // Add listener for route changes to sync with current page
+    const unsubscribe = router.addListener(() => {
+      // This ensures the UI updates when router redirects
+      const currentRoute = router.getCurrentRoute();
+      if (import.meta.env.DEV) {
+        console.log('Route changed to:', currentRoute);
+      }
+    });
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [isAuthenticated]);
 
   // Monitor URL changes and trigger router navigation (for direct navigation like tests)
@@ -635,26 +332,12 @@ function App() {
         return <GatewayTimeout />;
       
       // Dashboard pages
-      case 'employee-dashboard':
-        return <EmployeeDashboard />;
       case 'management-dashboard':
         return <ManagementDashboard />;
-      case 'group-dashboard':
-        return <GroupDashboard />;
-      case 'group-companies':
-        return <GroupCompanies />;
-      case 'group-reports':
-        return <GroupReports />;
-      case 'group-settings':
-        return <GroupSettings />;
       case 'inbox':
         return <Inbox />;
-      case 'my-info':
-        return <MyInfo />;
       case 'directory':
         return <Directory />;
-      case 'team-devices':
-        return <TeamDevices />;
       case 'employee-info':
         return <EmployeeInfo />;
       case 'org-chart':
@@ -672,92 +355,23 @@ function App() {
         return <AttendanceFlags />;
       case 'employee-timesheet':
         return <EmployeeTimesheet />;
-      case 'team-leave-calendar':
-        return <TeamLeaveCalendar />;
-      case 'team-leave-requests':
-        return <TeamLeaveRequests />;
-      case 'team-balances':
-        return <TeamBalances />;
-      case 'team-goals':
-        return <TeamGoalsAndPerformance />;
-      case 'team-reviews':
-        return <TeamReviews />;
-      case 'team-feedback-and-recognition':
-        return <TeamFeedbackAndRecognition />;
-      case 'team-one-on-one':
-        return <TeamOneOnOne />;
-      case 'about-company':
-        return <AboutTheCompany />;
-      case 'team-responsibilities':
-        return <TeamResponsibilities />;
-      case 'team-knowledge-compliance':
-        return <TeamKnowledgeCompliance />;
-      case 'team-benefits':
-        return <TeamBenefits />;
-      case 'team-requests':
-        return <TeamRequests />;
-      case 'team-expenses':
-        return <TeamExpenses />;
-      case 'team-licenses':
-        return <TeamLicenses />;
-      case 'team-it-requests':
-        return <TeamITRequests />;
-      case 'payroll-wizards':
-        return <PayrollWizards />;
       case 'company-reports':
         return <CompanyReports />;
       case 'company-settings':
         return <CompanySettings />;
-      case 'job-openings':
-        return <JobOpenings />;
-      case 'candidates':
-        return <Candidates />;
-      case 'onboarding':
-        return <Onboarding />;
-      case 'my-clock':
-        return <MyClock />;
-      case 'my-planner':
-        return <MyPlanner />;
-      case 'my-attendance':
-        return <MyAttendance />;
-      case 'my-requests':
-        return <MyRequests />;
-      case 'my-balance':
-        return <MyBalance />;
-      case 'my-responsibility':
-        return <MyResponsibility />;
-      case 'processes-policies':
-        return <ProcessesAndPolicies />;
-      case 'documents-files':
-        return <DocumentsAndFiles />;
-      case 'courses-training':
-        return <CoursesAndTraining />;
-      case 'my-performance':
-        return <MyPerformance />;
-      case 'my-feedback-recognition':
-        return <MyFeedbackAndRecognition />;
-      case 'my-one-on-one':
-        return <MyOneOnOne />;
-      case 'my-benefits':
-        return <MyBenefits />;
-      case 'my-expenses':
-        return <MyExpenses />;
-      case 'my-devices':
-        return <MyDevices />;
-      case 'my-licenses':
-        return <MyLicenses />;
-      case 'my-it-requests':
-        return <MyITRequests />;
-      case 'financial-wellness':
-        return <FinancialWellness />;
-      case 'mental-health':
-        return <MentalHealth />;
-      case 'fitness':
-        return <Fitness />;
-      case 'nutrition':
-        return <Nutrition />;
+      
+      // Auth pages
+      case 'login':
+        return <Login />;
+      case 'company-registration':
+        return <CompanyRegistration />;
+      case 'reset-password':
+        return <ResetPassword />;
+      case 'new-password':
+        return <NewPassword />;
+      
       default:
-        return <EmployeeDashboard />;
+        return <ManagementDashboard />;
     }
   };
 
@@ -767,23 +381,42 @@ function App() {
     'internal-server-error', 'bad-gateway', 'service-unavailable', 'gateway-timeout'
   ].includes(currentPage);
 
-  // Redirect to employee dashboard if not authenticated
+  // Check if current page is auth page
+  const isAuthPage = [
+    'login', 'company-registration', 'reset-password', 'new-password'
+  ].includes(currentPage);
+
+  // Redirect to login if not authenticated (except for auth pages and error pages)
   useEffect(() => {
-    if (!isAuthenticated && !isLoading) {
-      window.location.href = '/org/cmp/employee/dashboard';
+    if (!isAuthenticated && !isLoading && !isAuthPage && !isErrorPage) {
+      router.navigate('/login', true);
     }
-  }, [isAuthenticated, isLoading]);
+  }, [isAuthenticated, isLoading, isAuthPage, isErrorPage]);
 
   return (
     <ErrorBoundary>
       <div className="min-h-dvh bg-background">
-        {!isAuthenticated ? (
+        {!isAuthenticated && !isAuthPage ? (
           <div className="min-h-dvh flex items-center justify-center p-6">
             <div className="text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-              <p className="text-muted-foreground">Redirecting to dashboard...</p>
+              <p className="text-muted-foreground">Redirecting to login...</p>
             </div>
           </div>
+        ) : isAuthPage ? (
+          // Auth pages without layout
+          <ErrorBoundary>
+            <Suspense fallback={
+              <div className="flex items-center justify-center min-h-[400px]">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <p className="text-sm text-muted-foreground">Loading...</p>
+                </div>
+              </div>
+            }>
+              {renderPage()}
+            </Suspense>
+          </ErrorBoundary>
         ) : isErrorPage ? (
           // Error pages without layout
           <ErrorBoundary>

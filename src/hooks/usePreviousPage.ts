@@ -12,7 +12,7 @@ export const usePreviousPage = () => {
   }, []);
 
   const getPreviousPage = (): string => {
-    return localStorage.getItem('previousPage') || '/org/cmp/management/time-and-attendance/whos-working';
+    return localStorage.getItem('previousPage') || '/time-and-attendance/whos-working';
   };
 
   const clearPreviousPage = (): void => {

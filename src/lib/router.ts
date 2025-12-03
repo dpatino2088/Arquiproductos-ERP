@@ -2,10 +2,10 @@
 export class Router {
   private routes: Map<string, () => void> = new Map();
   private currentRoute: string = '/';
-  private viewMode: 'employee' | 'manager' | 'group' = 'employee';
+  private viewMode: 'manager' = 'manager';
   private listeners: Set<() => void> = new Set();
   private unauthorizedRedirectHandler?: () => void;
-  private viewModeChangeHandler?: (viewMode: 'employee' | 'manager' | 'group') => void;
+  private viewModeChangeHandler?: (viewMode: 'manager') => void;
 
   constructor() {
     // Handle browser back/forward buttons
@@ -39,27 +39,24 @@ export class Router {
     }
   }
 
-  setViewMode(mode: 'employee' | 'manager' | 'group') {
+  setViewMode(mode: 'manager') {
     this.viewMode = mode;
   }
 
-  getViewMode(): 'employee' | 'manager' | 'group' {
+  getViewMode(): 'manager' {
     return this.viewMode;
   }
 
   // Set handler for view mode changes (to sync with UI store)
-  setViewModeChangeHandler(handler: (viewMode: 'employee' | 'manager' | 'group') => void) {
+  setViewModeChangeHandler(handler: (viewMode: 'manager') => void) {
     this.viewModeChangeHandler = handler;
   }
 
-  // Infer view mode from URL path
-  private inferViewModeFromPath(path: string): 'employee' | 'manager' | 'group' {
-    if (path.includes('/org/grp/')) return 'group';
-    if (path.includes('/org/cmp/management/')) return 'manager';
-    if (path.includes('/org/cmp/employee/')) return 'employee';
+  // Infer view mode from URL path (always manager now)
+  private inferViewModeFromPath(path: string): 'manager' {
     
-    // Default to employee for other paths
-    return 'employee';
+    // Always return manager
+    return 'manager';
   }
 
   // Set handler for unauthorized access redirects
@@ -83,8 +80,8 @@ export class Router {
       return true; // Public routes are always accessible
     }
     
-    // Protected routes require manager or group view mode
-    return this.viewMode === 'manager' || this.viewMode === 'group';
+    // All routes are accessible in manager mode
+    return true;
   }
 
   navigate(path: string, pushState: boolean = true) {
@@ -108,10 +105,10 @@ export class Router {
     
     // Check route access before navigation
     if (!this.hasRouteAccess(path)) {
-      console.warn(`Access denied to route: ${path}. Redirecting to employee dashboard.`);
+      console.warn(`Access denied to route: ${path}. Redirecting to dashboard.`);
       
-      // Redirect to employee dashboard instead
-      const redirectPath = '/employee/dashboard';
+      // Redirect to dashboard instead
+      const redirectPath = '/dashboard';
       
       // Always update the URL when redirecting
       window.history.replaceState({}, '', redirectPath);

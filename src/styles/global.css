@@ -34,7 +34,7 @@
     --teal-950: #062524;
     --teal-900: #0a3f3c;
     --teal-800: #006666;
-    --teal-700: #008383;  /* Primary brand color - anchor */
+    --teal-700: #008383;  /* Teal color (no longer primary) */
     --teal-600: #009999;
     --teal-500: #00b3b3;
     --teal-400: #33cccc;
@@ -120,7 +120,7 @@
     /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
     --foreground: 218 15% 12%;               /* Dark text - HSL for new gray-900 #1c1f26 */
     --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
-    --brand-primary: 180 100% 26%;           /* Primary brand color #008383 (teal-700) in HSL */
+    --brand-primary: 161 94% 30%;           /* Primary brand color #059669 in HSL */
     --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-500 */
 
     --primary: var(--brand-primary);
@@ -140,7 +140,7 @@
     --destructive-foreground: 200 100% 99%;  /* HSL for new gray-50 #fdfefe */
     --border: 210 17% 96%;                   /* HSL for new gray-200 #f5f7fa */
     --input: 210 17% 96%;                    /* HSL for new gray-200 #f5f7fa */
-    --ring: var(--brand-primary);            /* Focus ring - primary teal HSL */
+    --ring: var(--brand-primary);            /* Focus ring - primary green HSL */
     --radius: 0.5rem;
 
     /* Sidebar colors */
@@ -168,14 +168,21 @@
 --avatar-status-gray: #d1d5db;         /* Gray 300 - Brighter for avatar dots */
     
     /* Utility colors */
-    --focus-ring: var(--brand-primary);     /* Focus indicator - primary teal */
-    --row-highlight: var(--teal-50);        /* Row hover/highlight */
+    --focus-ring: var(--brand-primary);     /* Focus indicator - primary green */
+    --row-highlight: var(--green-50);        /* Row hover/highlight */
     
     /* Hex versions for direct usage */
-    --teal-brand-hex: var(--teal-700);        /* Primary brand - Teal 700 */
-    --teal-600-hex: var(--teal-600);          /* Management view - Teal 600 */
-    --teal-500-hex: var(--teal-500);          /* Management view sidebar - Teal 500 (better contrast) */
-    --teal-brand-rgba-10: rgba(15, 118, 110, 0.1);
+    --primary-brand-hex: #059669;        /* Primary brand color */
+    --primary-brand-hover: #047857;      /* Primary brand hover state (darker variant) */
+    --primary-600-hex: var(--green-600);          /* Primary color variant - 600 */
+    --primary-500-hex: var(--green-500);          /* Primary color variant - 500 */
+    /* RGBA variants calculated from primary brand color using color-mix */
+    --primary-brand-rgba-10: color-mix(in srgb, var(--primary-brand-hex) 10%, transparent);
+    --primary-brand-rgba-20: color-mix(in srgb, var(--primary-brand-hex) 20%, transparent);
+    --primary-brand-rgba-25: color-mix(in srgb, var(--primary-brand-hex) 25%, transparent);
+    --primary-brand-rgba-30: color-mix(in srgb, var(--primary-brand-hex) 30%, transparent);
+    --primary-brand-rgba-40: color-mix(in srgb, var(--primary-brand-hex) 40%, transparent);
+    --primary-brand-rgba-50: color-mix(in srgb, var(--primary-brand-hex) 50%, transparent);
     --graphite-black-hex: var(--gray-900);
     --white-hex: var(--gray-50);
 
@@ -313,20 +320,20 @@
   a:focus-visible,
   [tabindex]:focus-visible {
     outline: none !important;
-    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.2) !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-20) !important;
   }
 
   /* Enhanced focus for buttons - Subtle ring */
   button:focus-visible {
     outline: none !important;
-    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.25) !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-25) !important;
   }
 
   /* Focus for navigation elements - Very subtle */
   nav button:focus-visible,
   [role="navigation"] button:focus-visible {
     outline: none !important;
-    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.3) !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-30) !important;
   }
 
   /* Focus for form elements - Like Directory search */
@@ -334,8 +341,8 @@
   select:focus-visible,
   textarea:focus-visible {
     outline: none !important;
-    box-shadow: 0 0 0 2px rgba(0, 131, 131, 0.2) !important;
-    border-color: rgba(0, 131, 131, 0.5) !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-20) !important;
+    border-color: var(--primary-brand-rgba-50) !important;
   }
 
   /* Enhanced Skip Links Container */
@@ -356,7 +363,7 @@
 
   /* Individual Skip Links */
   .skip-link {
-    background: var(--teal-700);
+    background: var(--primary-brand-hex);
     color: white;
     padding: 8px 12px;
     text-decoration: none;
@@ -377,7 +384,7 @@
   }
 
   .skip-link:hover {
-    background: var(--teal-600);
+    background: var(--primary-brand-hover);
     transform: translateY(-1px);
   }
 
@@ -394,9 +401,9 @@
     textarea:focus-visible,
     a:focus-visible,
     [tabindex]:focus-visible {
-      outline: 2px solid var(--teal-700) !important;
+      outline: 2px solid var(--primary-brand-hex) !important;
       outline-offset: 1px !important;
-      box-shadow: 0 0 0 3px rgba(0, 131, 131, 0.4) !important;
+      box-shadow: 0 0 0 3px var(--primary-brand-rgba-40) !important;
     }
   }
 

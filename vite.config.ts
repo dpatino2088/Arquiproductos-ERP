@@ -20,6 +20,7 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5173,
     headers: {
       // Basic dev CSP with nonce placeholder (replace in prod with middleware)
       "Content-Security-Policy": "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline' fonts.googleapis.com; font-src 'self' fonts.gstatic.com; script-src 'self' 'unsafe-eval' 'unsafe-inline';",

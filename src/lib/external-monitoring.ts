@@ -271,10 +271,10 @@ class ExternalMonitoringManager {
 
   // Generate or get session ID
   private getSessionId(): string {
-    let sessionId = sessionStorage.getItem('rhemo_session_id');
+    let sessionId = sessionStorage.getItem('PROLOGIX_session_id');
     if (!sessionId) {
       sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      sessionStorage.setItem('rhemo_session_id', sessionId);
+      sessionStorage.setItem('PROLOGIX_session_id', sessionId);
     }
     return sessionId;
   }
