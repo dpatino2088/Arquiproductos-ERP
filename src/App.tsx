@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -6,6 +6,8 @@ import { router } from './lib/router';
 import { SubmoduleNavProvider } from './hooks/useSubmoduleNav';
 import { logger } from './lib/logger';
 import { useUIStore } from './stores/ui-store';
+import { useAuthStore } from './stores/auth-store';
+import { supabase, getUserProfile } from './lib/supabase';
 
 // Code splitting with React.lazy
 const ManagementDashboard = lazy(() => {
@@ -78,6 +80,11 @@ const OrganizationalChart = lazy(() => {
   return import('./pages/employees/OrganizationalChart');
 });
 
+const Branches = lazy(() => {
+  logger.debug('Loading Branches component');
+  return import('./pages/branches/Branches');
+});
+
 const WhosWorking = lazy(() => {
   logger.debug('Loading Whos Working component');
   return import('./pages/time-and-attendance/WhosWorking');
@@ -122,6 +129,11 @@ const Login = lazy(() => {
   return import('./pages/auth/Login');
 });
 
+const Signup = lazy(() => {
+  logger.debug('Loading Signup component');
+  return import('./pages/auth/Signup');
+});
+
 const CompanyRegistration = lazy(() => {
   logger.debug('Loading Company Registration component');
   return import('./pages/auth/CompanyRegistration');
@@ -162,6 +174,35 @@ function App() {
   const { isAuthenticated, user, isLoading } = useAuth();
   const { setViewMode } = useUIStore();
   const [currentPage, setCurrentPage] = useState('dashboard');
+  const { init: initAuth } = useAuthStore();
+
+  // Check if current page is error page (memoized - must be before all useEffect)
+  const isErrorPage = useMemo(() => [
+    'bad-request', 'unauthorized', 'forbidden', 'not-found',
+    'internal-server-error', 'bad-gateway', 'service-unavailable', 'gateway-timeout'
+  ].includes(currentPage), [currentPage]);
+
+  // Check if current page is auth page (memoized - must be before all useEffect)
+  const isAuthPage = useMemo(() => [
+    'login', 'signup', 'company-registration', 'reset-password', 'new-password'
+  ].includes(currentPage), [currentPage]);
+
+  // Initialize auth on mount
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        await initAuth();
+      } catch (error) {
+        logger.error('Error initializing auth', error);
+        // Don't break the app if auth init fails
+        useAuthStore.getState().setLoading(false);
+      }
+    };
+    
+    initializeAuth();
+  }, [initAuth]);
+
+  // Note: auth state changes handled inside auth store init
 
   if (import.meta.env.DEV) {
   console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
@@ -172,6 +213,8 @@ function App() {
     // Auth routes (available without authentication)
     router.addRoute('/login', () => setCurrentPage('login'));
     router.addRoute('/auth/login', () => setCurrentPage('login'));
+    router.addRoute('/signup', () => setCurrentPage('signup'));
+    router.addRoute('/auth/signup', () => setCurrentPage('signup'));
     router.addRoute('/company-registration', () => setCurrentPage('company-registration'));
     router.addRoute('/auth/company-registration', () => setCurrentPage('company-registration'));
     router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
@@ -179,83 +222,6 @@ function App() {
     router.addRoute('/new-password', () => setCurrentPage('new-password'));
     router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
 
-    if (isAuthenticated) {
-      // Initialize router view mode to match UI store
-      const { viewMode } = useUIStore.getState();
-      router.setViewMode(viewMode);
-      if (import.meta.env.DEV) {
-      console.log('Router initialized with view mode:', viewMode);
-      }
-      
-      // Set up view mode change handler to sync router changes with UI store
-      router.setViewModeChangeHandler((newViewMode) => {
-        if (import.meta.env.DEV) {
-        console.log('Router detected view mode change, updating UI store:', newViewMode);
-        }
-        setViewMode(newViewMode);
-      });
-      
-      // Set up unauthorized redirect handler
-      router.setUnauthorizedRedirectHandler(() => {
-        if (import.meta.env.DEV) {
-        console.log('Unauthorized access attempt blocked - redirecting to management dashboard');
-        }
-        setCurrentPage('management-dashboard');
-      });
-      
-      // Set up routes - default route goes to management dashboard
-      router.addRoute('/', () => setCurrentPage('management-dashboard'));
-      
-      
-      // Error routes
-      router.addRoute('/400', () => setCurrentPage('bad-request'));
-      router.addRoute('/401', () => setCurrentPage('unauthorized'));
-      router.addRoute('/403', () => setCurrentPage('forbidden'));
-      router.addRoute('/404', () => setCurrentPage('not-found'));
-      router.addRoute('/500', () => setCurrentPage('internal-server-error'));
-      router.addRoute('/502', () => setCurrentPage('bad-gateway'));
-      router.addRoute('/503', () => setCurrentPage('service-unavailable'));
-      router.addRoute('/504', () => setCurrentPage('gateway-timeout'));
-      
-      // 404 route handler for unknown routes
-      router.addRoute('*', () => setCurrentPage('not-found'));
-      // Inbox route
-      router.addRoute('/inbox', () => setCurrentPage('inbox'));
-      
-      // Dashboard route
-      router.addRoute('/dashboard', () => setCurrentPage('management-dashboard'));
-      router.addRoute('/', () => setCurrentPage('management-dashboard'));
-      
-      // Employees routes
-      router.addRoute('/employees/directory', () => setCurrentPage('directory'));
-      router.addRoute('/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
-      router.addRoute('/employees/employee-info', () => setCurrentPage('employee-info'));
-      router.addRoute('/employees/organizational-chart', () => setCurrentPage('org-chart'));
-      
-      // Time & Attendance routes
-      router.addRoute('/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
-      router.addRoute('/time-and-attendance/team-schedule', () => setCurrentPage('team-schedule'));
-      router.addRoute('/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
-      router.addRoute('/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
-      router.addRoute('/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
-      router.addRoute('/time-and-attendance/employee-timesheet', () => setCurrentPage('employee-timesheet'));
-      
-      // Reports routes
-      router.addRoute('/reports', () => setCurrentPage('company-reports'));
-      router.addRoute('/reports/company-reports', () => setCurrentPage('company-reports'));
-      
-      // Settings routes
-      router.addRoute('/settings', () => setCurrentPage('company-settings'));
-      router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
-      
-      // Legacy routes (still supported)
-      router.addRoute('/employees', () => setCurrentPage('directory'));
-      
-      // Other routes - redirect to management dashboard
-      router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
-      router.addRoute('/settings', () => setCurrentPage('company-settings'));
-    }
-    
     // Initialize router (always, even if not authenticated, so auth routes work)
     router.init();
     
@@ -271,7 +237,89 @@ function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [isAuthenticated]);
+  }, []); // Empty dependency array - only run once on mount
+
+  // Setup authenticated routes when user is authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    // Initialize router view mode to match UI store
+    const { viewMode } = useUIStore.getState();
+    router.setViewMode(viewMode);
+    if (import.meta.env.DEV) {
+      console.log('Router initialized with view mode:', viewMode);
+    }
+    
+    // Set up view mode change handler to sync router changes with UI store
+    router.setViewModeChangeHandler((newViewMode) => {
+      if (import.meta.env.DEV) {
+        console.log('Router detected view mode change, updating UI store:', newViewMode);
+      }
+      setViewMode(newViewMode);
+    });
+    
+    // Set up unauthorized redirect handler
+    router.setUnauthorizedRedirectHandler(() => {
+      if (import.meta.env.DEV) {
+        console.log('Unauthorized access attempt blocked - redirecting to management dashboard');
+      }
+      setCurrentPage('management-dashboard');
+    });
+    
+    // Set up routes - default route goes to management dashboard
+    router.addRoute('/', () => setCurrentPage('management-dashboard'));
+    
+    // Error routes
+    router.addRoute('/400', () => setCurrentPage('bad-request'));
+    router.addRoute('/401', () => setCurrentPage('unauthorized'));
+    router.addRoute('/403', () => setCurrentPage('forbidden'));
+    router.addRoute('/404', () => setCurrentPage('not-found'));
+    router.addRoute('/500', () => setCurrentPage('internal-server-error'));
+    router.addRoute('/502', () => setCurrentPage('bad-gateway'));
+    router.addRoute('/503', () => setCurrentPage('service-unavailable'));
+    router.addRoute('/504', () => setCurrentPage('gateway-timeout'));
+    
+    // 404 route handler for unknown routes
+    router.addRoute('*', () => setCurrentPage('not-found'));
+    // Inbox route
+    router.addRoute('/inbox', () => setCurrentPage('inbox'));
+    
+    // Dashboard route
+    router.addRoute('/dashboard', () => setCurrentPage('management-dashboard'));
+    router.addRoute('/', () => setCurrentPage('management-dashboard'));
+    
+    // Employees routes
+    router.addRoute('/employees/directory', () => setCurrentPage('directory'));
+    router.addRoute('/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
+    router.addRoute('/employees/employee-info', () => setCurrentPage('employee-info'));
+    router.addRoute('/employees/organizational-chart', () => setCurrentPage('org-chart'));
+    
+    // Branches routes
+    router.addRoute('/branches', () => setCurrentPage('branches'));
+    
+    // Time & Attendance routes
+    router.addRoute('/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
+    router.addRoute('/time-and-attendance/team-schedule', () => setCurrentPage('team-schedule'));
+    router.addRoute('/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
+    router.addRoute('/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
+    router.addRoute('/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
+    router.addRoute('/time-and-attendance/employee-timesheet', () => setCurrentPage('employee-timesheet'));
+    
+    // Reports routes
+    router.addRoute('/reports', () => setCurrentPage('company-reports'));
+    router.addRoute('/reports/company-reports', () => setCurrentPage('company-reports'));
+    
+    // Settings routes
+    router.addRoute('/settings', () => setCurrentPage('company-settings'));
+    router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
+    
+    // Legacy routes (still supported)
+    router.addRoute('/employees', () => setCurrentPage('directory'));
+    
+    // Other routes - redirect to management dashboard
+    router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
+    router.addRoute('/settings', () => setCurrentPage('company-settings'));
+  }, [isAuthenticated, setViewMode]);
 
   // Monitor URL changes and trigger router navigation (for direct navigation like tests)
   useEffect(() => {
@@ -299,7 +347,15 @@ function App() {
     return () => clearInterval(interval);
   }, [isAuthenticated, currentPage]);
 
-  if (isLoading) {
+  // Redirect to login if not authenticated (except for auth pages and error pages)
+  useEffect(() => {
+    if (!isAuthenticated && !isLoading && !isAuthPage && !isErrorPage) {
+      router.navigate('/login', true);
+    }
+  }, [isAuthenticated, isLoading, isAuthPage, isErrorPage]);
+
+  // Early return for loading state - allow auth pages to render while loading
+  if (isLoading && !isAuthPage) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -342,6 +398,8 @@ function App() {
         return <EmployeeInfo />;
       case 'org-chart':
         return <OrganizationalChart />;
+      case 'branches':
+        return <Branches />;
 
       case 'reports':
         return <CompanyReports />;
@@ -363,6 +421,8 @@ function App() {
       // Auth pages
       case 'login':
         return <Login />;
+      case 'signup':
+        return <Signup />;
       case 'company-registration':
         return <CompanyRegistration />;
       case 'reset-password':
@@ -375,28 +435,17 @@ function App() {
     }
   };
 
-  // Check if current page is error page
-  const isErrorPage = [
-    'bad-request', 'unauthorized', 'forbidden', 'not-found',
-    'internal-server-error', 'bad-gateway', 'service-unavailable', 'gateway-timeout'
-  ].includes(currentPage);
-
-  // Check if current page is auth page
-  const isAuthPage = [
-    'login', 'company-registration', 'reset-password', 'new-password'
-  ].includes(currentPage);
-
-  // Redirect to login if not authenticated (except for auth pages and error pages)
-  useEffect(() => {
-    if (!isAuthenticated && !isLoading && !isAuthPage && !isErrorPage) {
-      router.navigate('/login', true);
-    }
-  }, [isAuthenticated, isLoading, isAuthPage, isErrorPage]);
-
   return (
     <ErrorBoundary>
       <div className="min-h-dvh bg-background">
-        {!isAuthenticated && !isAuthPage ? (
+        {isLoading && !isAuthPage ? (
+          <div className="min-h-dvh flex items-center justify-center p-6">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
+          </div>
+        ) : !isAuthenticated && !isAuthPage ? (
           <div className="min-h-dvh flex items-center justify-center p-6">
             <div className="text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>

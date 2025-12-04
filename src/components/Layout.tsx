@@ -191,6 +191,9 @@ function Layout({ children }: LayoutProps) {
       case 'Employees':
         // Employees is active if we're on any employees route
         return currentRoute.includes('/employees');
+      case 'Branches':
+        // Branches is active if we're on any branches route
+        return currentRoute.includes('/branches');
       case 'My Info':
         // My Info is active if we're on any employees or my-info route
         return currentRoute.includes('/employees') || currentRoute.includes('/my-info');
@@ -211,12 +214,13 @@ function Layout({ children }: LayoutProps) {
 
   // Memoized navigation items for management view
   const navigation = useMemo(() => {
-    // Create base navigation with Employees inserted after Dashboard
+    // Create base navigation with Employees and Branches inserted after Dashboard
     const dashboardItem = baseNavigation[0]; // Dashboard
     const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
     const employeesItem = { name: 'Employees', href: '/employees', icon: Users };
-    return [dashboardItem, employeesItem, ...restOfBase, { name: 'Reports', href: '/reports/company-reports', icon: Printer }];
+    const branchesItem = { name: 'Branches', href: '/branches', icon: Building2 };
+    return [dashboardItem, employeesItem, branchesItem, ...restOfBase, { name: 'Reports', href: '/reports/company-reports', icon: Printer }];
   }, []);
 
   const dashboardItem = useMemo(() => 
@@ -593,9 +597,13 @@ function Layout({ children }: LayoutProps) {
 
                       <button
                         className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100 mt-1 pt-3"
-                        onClick={() => {
+                        onClick={async () => {
                           setIsUserMenuOpen(false);
-                          logout();
+                          try {
+                            await logout();
+                          } finally {
+                            router.navigate('/login', true);
+                          }
                         }}
                       >
                         <span style={{ width: '16px', height: '16px', display: 'inline-block' }}>⏻</span>

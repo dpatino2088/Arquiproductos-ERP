@@ -12,13 +12,14 @@ export const useAuth = () => {
     error,
     setError,
     updateUser,
+    clearAuth,
   } = useAuthStore();
 
 
-  const logout = useCallback(() => {
-    // No-op function since authentication is bypassed
-    logger.info('Logout bypassed - staying authenticated');
-  }, []);
+  const logout = useCallback(async () => {
+    logger.info('Logging out user');
+    await clearAuth();
+  }, [clearAuth]);
 
   const clearError = useCallback(() => {
     setError(null);

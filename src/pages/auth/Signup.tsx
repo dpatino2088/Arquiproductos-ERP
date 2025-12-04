@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, Phone, Box } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight, Phone, Box, User } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../stores/auth-store';
 import { getUserProfile } from '../../lib/supabase';
@@ -24,19 +24,33 @@ const GoogleIcon = () => (
   </svg>
 );
 
-export default function Login() {
-  const { setAuth, setError, setLoading } = useAuthStore();
-  const [emailOrPhone, setEmailOrPhone] = useState('');
+export default function Signup() {
+  const { setAuth, setError } = useAuthStore();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  const [signupError, setSignupError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (password !== confirmPassword) {
+      setSignupError('Passwords do not match');
+      return;
+    }
+    
+    if (password.length < 6) {
+      setSignupError('Password must be at least 6 characters');
+      return;
+    }
+    
     setIsLoading(true);
-    setLoginError(null);
+    setSignupError(null);
     setError(null);
     
     try {
@@ -44,35 +58,33 @@ export default function Login() {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
-      console.log('Environment variables check:', {
-        url: supabaseUrl,
-        urlLength: supabaseUrl?.length,
-        hasKey: !!supabaseAnonKey,
-        keyLength: supabaseAnonKey?.length,
-        keyStart: supabaseAnonKey?.substring(0, 20)
-      });
-      
       if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-        setLoginError(
-          'Supabase no está configurado. Por favor, configura las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en un archivo .env.local y REINICIA el servidor de desarrollo.'
+        setSignupError(
+          'Supabase no está configurado. Por favor, configura las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en un archivo .env.local'
         );
         setIsLoading(false);
         return;
       }
 
-      // Sign in with Supabase
-      console.log('Attempting to sign in with Supabase...', {
+      // Sign up with Supabase
+      console.log('Attempting to sign up with Supabase...', {
         url: supabaseUrl,
         hasKey: !!supabaseAnonKey,
-        email: emailOrPhone
+        email: email
       });
       
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailOrPhone, // Supabase uses email, not phone
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
         password: password,
+        options: {
+          data: {
+            name: name,
+            phone: phone,
+          },
+        },
       });
 
-      console.log('Supabase sign in response:', { data, error });
+      console.log('Supabase sign up response:', { data, error });
 
       if (error) {
         console.error('Supabase auth error:', error);
@@ -85,7 +97,7 @@ export default function Login() {
           {
             id: data.user.id,
             email: data.user.email || '',
-            name: data.user.user_metadata?.name || data.user.email || '',
+            name: name || data.user.email || '',
             role: 'user',
           },
           data.session.access_token
@@ -99,7 +111,7 @@ export default function Login() {
           .then((profile) => {
             if (!profile) return;
             useAuthStore.getState().updateUser({
-              name: profile.name || data.user?.email || '',
+              name: profile.name || name || data.user?.email || '',
               role: (profile.role as 'user' | 'admin') || 'user',
               department: profile.department,
               position: profile.position,
@@ -108,21 +120,21 @@ export default function Login() {
           .catch(() => {});
       }
     } catch (error: any) {
-      let errorMessage = 'Failed to sign in';
+      let errorMessage = 'Failed to sign up';
       
-      console.error('Login error:', error);
+      console.error('Signup error:', error);
       
       if (error?.message) {
         errorMessage = error.message;
       } else if (error?.toString().includes('Failed to fetch') || error?.toString().includes('NetworkError')) {
-        errorMessage = 'No se pudo conectar con Supabase. Verifica:\n1. Que tu proyecto de Supabase esté activo\n2. Que las credenciales en .env.local sean correctas\n3. Que no haya problemas de red o CORS';
+        errorMessage = 'No se pudo conectar con Supabase. Verifica:\n1. Que tu proyecto de Supabase esté activo (no pausado)\n2. Que las credenciales en .env.local sean correctas\n3. Que hayas reiniciado el servidor después de crear .env.local\n4. Que no haya problemas de red o CORS';
       } else if (error?.code === 'PGRST301' || error?.message?.includes('JWT')) {
         errorMessage = 'Error de autenticación con Supabase. Verifica que tu anon key sea correcta.';
-      } else if (error?.code === 'invalid_credentials' || error?.message?.includes('Invalid login')) {
-        errorMessage = 'Email o contraseña incorrectos.';
+      } else if (error?.message?.includes('User already registered')) {
+        errorMessage = 'Este email ya está registrado. Intenta hacer login en su lugar.';
       }
       
-      setLoginError(errorMessage);
+      setSignupError(errorMessage);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -130,14 +142,6 @@ export default function Login() {
   };
 
   const handleO365Login = async () => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-      setLoginError('Supabase no está configurado. Por favor, configura las variables de entorno.');
-      return;
-    }
-
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'azure',
@@ -148,19 +152,11 @@ export default function Login() {
       
       if (error) throw error;
     } catch (error: any) {
-      setLoginError(error.message || 'Failed to sign in with Microsoft');
+      setSignupError(error.message || 'Failed to sign in with Microsoft');
     }
   };
 
   const handleGoogleLogin = async () => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-      setLoginError('Supabase no está configurado. Por favor, configura las variables de entorno.');
-      return;
-    }
-
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -171,13 +167,13 @@ export default function Login() {
       
       if (error) throw error;
     } catch (error: any) {
-      setLoginError(error.message || 'Failed to sign in with Google');
+      setSignupError(error.message || 'Failed to sign in with Google');
     }
   };
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Side - Login Form */}
+      {/* Left Side - Signup Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
         <div className="w-full max-w-md">
           {/* Mobile Header */}
@@ -188,34 +184,71 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Login Form */}
+          {/* Signup Form */}
           <div className="bg-white border border-gray-200 rounded-lg py-6 px-6 shadow-card">
             <div className="mb-6">
-              <h2 className="text-2xl font-semibold text-foreground mb-2">Sign In</h2>
-              <p className="text-muted-foreground">Enter your credentials to access your company portal</p>
-              {loginError && (
+              <h2 className="text-2xl font-semibold text-foreground mb-2">Sign Up</h2>
+              <p className="text-muted-foreground">Create your account to access your company portal</p>
+              {signupError && (
                 <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                  {loginError}
+                  {signupError}
                 </div>
               )}
             </div>
 
-
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Email or Phone Input */}
+              {/* Name Input */}
               <div>
-                <label htmlFor="emailOrPhone" className="block text-sm font-medium text-foreground mb-2">
-                  Email or Phone
+                <label htmlFor="name" className="block text-sm font-medium text-foreground mb-2">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    id="name"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Enter your full name"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Email Input */}
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-foreground mb-2">
+                  Email
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    id="emailOrPhone"
-                    type="text"
-                    value={emailOrPhone}
-                    onChange={(e) => setEmailOrPhone(e.target.value)}
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                    placeholder="Enter your email or phone number"
+                    placeholder="Enter your email"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Phone Input */}
+              <div>
+                <label htmlFor="phone" className="block text-sm font-medium text-foreground mb-2">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    id="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Enter your phone number"
                     required
                   />
                 </div>
@@ -247,28 +280,33 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* Remember Me & Forgot Password */}
-              <div className="flex items-center justify-between">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-1 focus:ring-primary/20"
-                  />
-                  <span className="ml-2 text-sm text-muted-foreground">Remember me</span>
+              {/* Confirm Password Input */}
+              <div>
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground mb-2">
+                  Confirm Password
                 </label>
-                {/* Forgot Password - Available for both login types */}
-                <button
-                  type="button"
-                  onClick={() => window.location.href = '/reset-password'}
-                  className="text-sm text-primary hover:text-primary/80 transition-colors"
-                >
-                  Forgot password?
-                </button>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full pl-10 pr-10 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Confirm your password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
-              {/* Login Button */}
+              {/* Signup Button */}
               <button
                 type="submit"
                 disabled={isLoading}
@@ -279,7 +317,7 @@ export default function Login() {
                   <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <>
-                    Sign In
+                    Sign Up
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -321,21 +359,13 @@ export default function Login() {
           {/* Footer */}
           <div className="text-center mt-6">
             <p className="text-sm text-muted-foreground">
-              Don't have a user account?{' '}
+              Already have an account?{' '}
               <button 
-                onClick={() => window.location.href = '/signup'}
+                onClick={() => window.location.href = '/login'}
                 className="text-primary hover:text-primary/80 transition-colors"
               >
-                Sign up
+                Sign in
               </button>
-              {' '}or contact your administrator, or{' '}
-              <button 
-                onClick={() => window.location.href = '/company-registration'}
-                className="text-primary hover:text-primary/80 transition-colors"
-              >
-                register your company
-              </button>
-              {' '}to create a new portal.
             </p>
           </div>
         </div>
@@ -356,3 +386,4 @@ export default function Login() {
     </div>
   );
 }
+
