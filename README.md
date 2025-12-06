@@ -1,4 +1,4 @@
-# PROLOGIX Web Frontend
+# WAPunch Web Frontend
 
 A secure, enterprise-grade React application with comprehensive security features and modern UI components.
 

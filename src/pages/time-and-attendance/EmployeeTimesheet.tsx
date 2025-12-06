@@ -509,8 +509,8 @@ export default function EmployeeTimesheet() {
       <div className="p-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <h2 className="text-2xl font-semibold text-muted-foreground mb-2">Loading...</h2>
-            <p className="text-muted-foreground">Loading employee data</p>
+            <h2 className="text-2xl font-semibold text-muted-foreground mb-2">No employee selected</h2>
+            <p className="text-muted-foreground">Please select an employee to view their timesheet</p>
           </div>
         </div>
       </div>

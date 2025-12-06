@@ -1,5 +1,5 @@
-// Service Worker for PROLOGIX - Performance Optimization
-const CACHE_NAME = 'PROLOGIX-v1';
+// Service Worker for WAPunch - Performance Optimization
+const CACHE_NAME = 'WAPunch-v1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

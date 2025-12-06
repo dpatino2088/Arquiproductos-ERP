@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useEmployees } from '../../hooks/useEmployees';
 import { 
   Users, 
   GitBranch, 
@@ -65,6 +66,7 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
 
 export default function Directory() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { employees: employeesData, isLoading: employeesLoading, error: employeesError, refetch } = useEmployees();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -116,302 +118,8 @@ export default function Directory() {
     };
   }, []);
 
-  const employees: Employee[] = [
-    {
-      id: '1',
-      firstName: 'Alex',
-      lastName: 'Manager',
-      email: 'alex.manager@arquiluz.com',
-      jobTitle: 'Chief Executive Officer',
-      department: 'Executive',
-      status: 'Active',
-      location: 'San Francisco, CA',
-      startDate: '12/31/2017',
-      avatar: undefined
-    },
-    {
-      id: '2',
-      firstName: 'Alex',
-      lastName: 'Thompson',
-      email: 'alex.thompson@arquiluz.com',
-      jobTitle: 'DevOps Engineer',
-      department: 'Engineering',
-      status: 'Suspended',
-      location: 'Seattle, WA',
-      startDate: '9/11/2022',
-      avatar: undefined
-    },
-    {
-      id: '3',
-      firstName: 'Amanda',
-      lastName: 'Foster',
-      email: 'amanda.foster@arquiluz.com',
-      jobTitle: 'HR Specialist',
-      department: 'Human Resources',
-      status: 'Active',
-      location: 'Portland, OR',
-      startDate: '1/9/2022',
-      avatar: undefined
-    },
-    {
-      id: '4',
-      firstName: 'David',
-      lastName: 'Kim',
-      email: 'david.kim@arquiluz.com',
-      jobTitle: 'VP of Product',
-      department: 'Product',
-      status: 'Active',
-      location: 'Austin, TX',
-      startDate: '8/4/2019'
-    },
-    {
-      id: '5',
-      firstName: 'Emily',
-      lastName: 'Davis',
-      email: 'emily.davis@arquiluz.com',
-      jobTitle: 'Design Lead',
-      department: 'Design',
-      status: 'Active',
-      location: 'New York, NY',
-      startDate: '2/13/2021'
-    },
-    {
-      id: '6',
-      firstName: 'Jennifer',
-      lastName: 'Liu',
-      email: 'jennifer.liu@arquiluz.com',
-      jobTitle: 'Product Manager',
-      department: 'Product',
-      status: 'Active',
-      location: 'Austin, TX',
-      startDate: '1/21/2023'
-    },
-    {
-      id: '7',
-      firstName: 'Kevin',
-      lastName: 'Chang',
-      email: 'kevin.chang@arquiluz.com',
-      jobTitle: 'Data Analyst',
-      department: 'Analytics',
-      status: 'Onboarding',
-      location: 'Boston, MA',
-      startDate: '12/4/2022'
-    },
-    {
-      id: '8',
-      firstName: 'Lisa',
-      lastName: 'Anderson',
-      email: 'lisa.anderson@arquiluz.com',
-      jobTitle: 'Sales Manager',
-      department: 'Sales',
-      status: 'Active',
-      location: 'Miami, FL',
-      startDate: '11/29/2020'
-    },
-    {
-      id: '9',
-      firstName: 'Marcus',
-      lastName: 'Rodriguez',
-      email: 'marcus.rodriguez@arquiluz.com',
-      jobTitle: 'UX Designer',
-      department: 'Design',
-      status: 'On Leave',
-      location: 'New York, NY',
-      startDate: '11/7/2021'
-    },
-    {
-      id: '10',
-      firstName: 'Michael',
-      lastName: 'Chen',
-      email: 'michael.chen@arquiluz.com',
-      jobTitle: 'Engineering Manager',
-      department: 'Engineering',
-      status: 'Active',
-      location: 'San Francisco, CA',
-      startDate: '5/17/2020',
-      avatar: undefined
-    },
-    {
-      id: '11',
-      firstName: 'Sarah',
-      lastName: 'Wilson',
-      email: 'sarah.wilson@arquiluz.com',
-      jobTitle: 'Marketing Manager',
-      department: 'Marketing',
-      status: 'Active',
-      location: 'Portland, OR',
-      startDate: '5/17/2020',
-      avatar: undefined
-    },
-    {
-      id: '12',
-      firstName: 'James',
-      lastName: 'Rodriguez',
-      email: 'james.rodriguez@arquiluz.com',
-      jobTitle: 'Backend Developer',
-      department: 'Engineering',
-      status: 'Active',
-      location: 'Austin, TX',
-      startDate: '3/12/2021',
-      avatar: undefined
-    },
-    {
-      id: '13',
-      firstName: 'Lisa',
-      lastName: 'Chen',
-      email: 'lisa.chen@arquiluz.com',
-      jobTitle: 'UX Designer',
-      department: 'Product',
-      status: 'On Leave',
-      location: 'Seattle, WA',
-      startDate: '8/22/2020',
-      avatar: undefined
-    },
-    {
-      id: '14',
-      firstName: 'Robert',
-      lastName: 'Taylor',
-      email: 'robert.taylor@arquiluz.com',
-      jobTitle: 'Sales Director',
-      department: 'Sales',
-      status: 'Active',
-      location: 'New York, NY',
-      startDate: '1/15/2019',
-      avatar: undefined
-    },
-    {
-      id: '15',
-      firstName: 'Jennifer',
-      lastName: 'Martinez',
-      email: 'jennifer.martinez@arquiluz.com',
-      jobTitle: 'Content Strategist',
-      department: 'Marketing',
-      status: 'Onboarding',
-      location: 'Portland, OR',
-      startDate: '6/8/2022',
-      avatar: undefined
-    },
-    {
-      id: '16',
-      firstName: 'Kevin',
-      lastName: 'Brown',
-      email: 'kevin.brown@arquiluz.com',
-      jobTitle: 'DevOps Engineer',
-      department: 'Engineering',
-      status: 'Active',
-      location: 'San Francisco, CA',
-      startDate: '11/1/2023',
-      avatar: undefined
-    },
-    {
-      id: '17',
-      firstName: 'Michelle',
-      lastName: 'Garcia',
-      email: 'michelle.garcia@arquiluz.com',
-      jobTitle: 'HR Coordinator',
-      department: 'Human Resources',
-      status: 'Active',
-      location: 'Austin, TX',
-      startDate: '4/3/2021',
-      avatar: undefined
-    },
-    {
-      id: '18',
-      firstName: 'Daniel',
-      lastName: 'Anderson',
-      email: 'daniel.anderson@arquiluz.com',
-      jobTitle: 'Product Manager',
-      department: 'Product',
-      status: 'Active',
-      location: 'Seattle, WA',
-      startDate: '9/14/2020',
-      avatar: undefined
-    },
-    {
-      id: '19',
-      firstName: 'Ashley',
-      lastName: 'Thomas',
-      email: 'ashley.thomas@arquiluz.com',
-      jobTitle: 'Frontend Developer',
-      department: 'Engineering',
-      status: 'Suspended',
-      location: 'Portland, OR',
-      startDate: '2/28/2022',
-      avatar: undefined
-    },
-    {
-      id: '20',
-      firstName: 'Christopher',
-      lastName: 'Jackson',
-      email: 'christopher.jackson@arquiluz.com',
-      jobTitle: 'Sales Representative',
-      department: 'Sales',
-      status: 'Active',
-      location: 'New York, NY',
-      startDate: '7/19/2021',
-      avatar: undefined
-    },
-    {
-      id: '21',
-      firstName: 'Amanda',
-      lastName: 'White',
-      email: 'amanda.white@arquiluz.com',
-      jobTitle: 'Marketing Specialist',
-      department: 'Marketing',
-      status: 'Active',
-      location: 'San Francisco, CA',
-      startDate: '10/5/2022',
-      avatar: undefined
-    },
-    {
-      id: '22',
-      firstName: 'Matthew',
-      lastName: 'Harris',
-      email: 'matthew.harris@arquiluz.com',
-      jobTitle: 'QA Engineer',
-      department: 'Engineering',
-      status: 'Active',
-      location: 'Austin, TX',
-      startDate: '12/12/2021',
-      avatar: undefined
-    },
-    {
-      id: '23',
-      firstName: 'Jessica',
-      lastName: 'Clark',
-      email: 'jessica.clark@arquiluz.com',
-      jobTitle: 'UI Designer',
-      department: 'Product',
-      status: 'On Leave',
-      location: 'Seattle, WA',
-      startDate: '5/30/2020',
-      avatar: undefined
-    },
-    {
-      id: '24',
-      firstName: 'Ryan',
-      lastName: 'Lewis',
-      email: 'ryan.lewis@arquiluz.com',
-      jobTitle: 'Account Manager',
-      department: 'Sales',
-      status: 'Active',
-      location: 'Portland, OR',
-      startDate: '1/8/2023',
-      avatar: undefined
-    },
-    {
-      id: '25',
-      firstName: 'Nicole',
-      lastName: 'Walker',
-      email: 'nicole.walker@arquiluz.com',
-      jobTitle: 'Content Writer',
-      department: 'Marketing',
-      status: 'Onboarding',
-      location: 'New York, NY',
-      startDate: '11/15/2023',
-      avatar: undefined
-    }
-  ];
+  // Use employees from Supabase instead of mock data
+  const employees: Employee[] = employeesData;
 
   const filteredEmployees = useMemo(() => {
     const filtered = employees.filter(employee => {
@@ -637,8 +345,7 @@ export default function Directory() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Employee Directory</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage your team of {filteredEmployees.length} employees
-            {filteredEmployees.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}
+            {`Manage your team of ${filteredEmployees.length} employees${filteredEmployees.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -979,8 +686,27 @@ export default function Directory() {
         )}
       </div>
 
+      {/* Error Message */}
+      {employeesError && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-red-600">⚠️</span>
+            <div>
+              <div className="text-sm font-medium text-red-800">Error loading employees</div>
+              <div className="text-sm text-red-700">{employeesError}</div>
+            </div>
+            <button
+              onClick={() => refetch()}
+              className="ml-auto px-3 py-1 text-sm bg-red-100 text-red-800 rounded hover:bg-red-200"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table View */}
-      {viewMode === 'table' && (
+      {!employeesError && viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -1028,7 +754,20 @@ export default function Directory() {
               </tr>
             </thead>
             <tbody>
-              {paginatedEmployees.map((employee, _index) => (
+              {filteredEmployees.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center">
+                    <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-2">No employees found</p>
+                    <p className="text-sm text-gray-500">
+                      {employeesData.length === 0 
+                        ? 'Start by adding employees to your company'
+                        : 'Try adjusting your search criteria'}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                paginatedEmployees.map((employee, _index) => (
                 <tr key={employee.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                                     <td className="py-4 px-6">
                     <div className="flex items-center gap-3">
@@ -1084,7 +823,8 @@ export default function Directory() {
                   </div>
                   </td>
                 </tr>
-              ))}
+                ))
+              )}
             </tbody>
           </table>
                   </div>
@@ -1092,9 +832,21 @@ export default function Directory() {
       )}
 
       {/* Grid View */}
-      {viewMode === 'grid' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-4">
-          {paginatedEmployees.map((employee) => (
+      {!employeesError && viewMode === 'grid' && (
+        <>
+          {filteredEmployees.length === 0 ? (
+            <div className="bg-white border border-gray-200 rounded-lg p-12 text-center mb-4">
+              <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600 mb-2">No employees found</p>
+              <p className="text-sm text-gray-500">
+                {employeesData.length === 0 
+                  ? 'Start by adding employees to your company'
+                  : 'Try adjusting your search criteria'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-4">
+              {paginatedEmployees.map((employee) => (
             <div
               key={employee.id}
               className="bg-white border border-gray-200 hover:shadow-lg transition-all duration-200 hover:border-primary/20 group rounded-lg p-6"
@@ -1167,8 +919,10 @@ export default function Directory() {
                 </div>
               </div>
             </div>
-          ))}
-        </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Pagination */}
@@ -1256,15 +1010,6 @@ export default function Directory() {
           )}
           </div>
       </div>
-
-      {/* Empty State */}
-      {filteredEmployees.length === 0 && (
-        <div className="text-center py-8">
-          <Users className="w-8 h-8 text-gray-400 mx-auto mb-3" />
-          <h3 className="text-sm font-semibold text-gray-900 mb-1">No employees found</h3>
-          <p className="text-xs text-gray-600">Try adjusting your search criteria.</p>
-        </div>
-      )}
     </div>
   );
 }

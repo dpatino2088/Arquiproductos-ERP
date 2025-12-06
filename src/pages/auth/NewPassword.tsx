@@ -59,7 +59,7 @@ export default function NewPassword() {
               <div className="mx-auto mb-4 flex items-center justify-center">
                 <div className="flex items-center justify-center gap-2">
                   <Box size={32} style={{ color: 'var(--primary-brand-hex)' }} />
-                  <span className="text-2xl font-semibold text-gray-900">PROLOGIX</span>
+                  <span className="text-2xl font-semibold text-gray-900">WAPunch</span>
                 </div>
               </div>
               <h1 className="text-2xl font-semibold text-foreground mb-2">
@@ -145,7 +145,7 @@ export default function NewPassword() {
               <div className="mx-auto mb-4 flex items-center justify-center">
                 <div className="flex items-center justify-center gap-2">
                   <Box size={32} style={{ color: 'var(--primary-brand-hex)' }} />
-                  <span className="text-2xl font-semibold text-gray-900">PROLOGIX</span>
+                  <span className="text-2xl font-semibold text-gray-900">WAPunch</span>
                 </div>
               </div>
           </div>
@@ -270,7 +270,7 @@ export default function NewPassword() {
             <div className="mx-auto mb-6 flex items-center justify-center">
               <div className="flex items-center justify-center gap-3">
                 <Box size={48} style={{ color: 'var(--primary-brand-hex)' }} />
-                <span className="text-4xl font-semibold text-white">PROLOGIX</span>
+                <span className="text-4xl font-semibold text-white">WAPunch</span>
               </div>
             </div>
           </div>

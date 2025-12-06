@@ -1,5 +1,7 @@
 import React, { ReactNode, useState, useCallback, useMemo, useEffect, memo } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useCompany } from '../hooks/useCompany';
+import { useCompanyStore } from '../stores/company-store';
 import { router } from '../lib/router';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
@@ -34,7 +36,8 @@ import {
   Building2,
   Printer,
   CalendarCheck,
-  Box
+  Box,
+  Check
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -117,6 +120,8 @@ const baseNavigation = [
 function Layout({ children }: LayoutProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const { logout, user } = useAuth();
+  const { currentCompany, availableCompanies, canSwitchCompany, switchCompany, isLoading } = useCompany();
+  const { clearCompanies } = useCompanyStore();
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
@@ -393,7 +398,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '16px'
               }}
             >
-              PROLOGIX
+              WAPunch
             </span>
             </div>
           </div>
@@ -501,7 +506,7 @@ function Layout({ children }: LayoutProps) {
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
               <Building style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
               <div className="flex items-center font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                <span>PROLOGIX</span>
+                <span>{currentCompany?.name || 'WAPunch'}</span>
               </div>
             </div>
 
@@ -539,7 +544,7 @@ function Layout({ children }: LayoutProps) {
               </button>
 
               <span className="font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                {getViewModeLabel(viewMode)}
+                {user?.name || user?.email || getViewModeLabel(viewMode)}
               </span>
 
 
@@ -575,11 +580,97 @@ function Layout({ children }: LayoutProps) {
                     {/* User Info Section */}
                     <div className="px-4 py-3 border-b border-gray-100">
                       <div className="text-sm text-gray-500 mb-1">Logged in as</div>
-                      <div className="font-medium text-gray-900">{user?.name || 'Demo User'}</div>
+                      <div className="font-medium text-gray-900">{user?.name || user?.email || 'Demo User'}</div>
+                      {currentCompany && (
+                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                          <Building2 style={{ width: '12px', height: '12px' }} />
+                          {currentCompany.name}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Company Section */}
+                    <div className="py-1 border-b border-gray-100">
+                      <div className="px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        {availableCompanies.length > 1 ? 'Switch Company' : 'Company'}
+                      </div>
+                      {availableCompanies.length === 0 ? (
+                        <div className="px-4 py-2">
+                          <div className="text-sm text-gray-500 mb-1">No companies associated</div>
+                          <div className="text-xs text-gray-400">
+                            Contact your administrator to be added to a company
+                          </div>
+                        </div>
+                      ) : (
+                        availableCompanies.map((companyUser) => {
+                          const isCurrent = currentCompany?.id === companyUser.company_id;
+                          return (
+                            <button
+                              key={companyUser.id}
+                              className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between gap-2 ${
+                                isCurrent ? 'bg-gray-50' : 'text-gray-700'
+                              }`}
+                              onClick={async () => {
+                                if (!isCurrent && companyUser.company && availableCompanies.length > 1) {
+                                  setIsUserMenuOpen(false);
+                                  await switchCompany(companyUser.company_id);
+                                }
+                              }}
+                              role="menuitem"
+                              aria-label={`${isCurrent ? 'Current company' : 'Switch to'} ${companyUser.company?.name || 'company'}`}
+                              disabled={isCurrent || availableCompanies.length === 1}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Building2 
+                                  style={{ 
+                                    width: '16px', 
+                                    height: '16px',
+                                    color: isCurrent ? 'var(--primary-brand-hex)' : 'var(--gray-600)',
+                                    flexShrink: 0
+                                  }} 
+                                  aria-hidden="true" 
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className={`font-medium truncate ${isCurrent ? 'text-primary' : 'text-gray-900'}`}>
+                                    {companyUser.company?.name || 'Unknown Company'}
+                                  </div>
+                                  <div className="text-xs text-gray-500 capitalize">
+                                    {companyUser.role.replace('_', ' ')}
+                                  </div>
+                                </div>
+                              </div>
+                              {isCurrent && (
+                                <Check 
+                                  style={{ 
+                                    width: '16px', 
+                                    height: '16px',
+                                    color: 'var(--primary-brand-hex)',
+                                    flexShrink: 0
+                                  }} 
+                                  aria-hidden="true" 
+                                />
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
 
                     {/* Menu Items */}
                     <div className="py-1">
+                      <button
+                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          router.navigate('/organizations/manage');
+                        }}
+                        role="menuitem"
+                        aria-label="Manage organizations"
+                      >
+                        <Building2 style={{ width: '16px', height: '16px' }} aria-hidden="true" />
+                        Manage Organizations
+                      </button>
+                      
                       <button
                         className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
                         onClick={() => {
@@ -600,6 +691,7 @@ function Layout({ children }: LayoutProps) {
                         onClick={async () => {
                           setIsUserMenuOpen(false);
                           try {
+                            clearCompanies();
                             await logout();
                           } finally {
                             router.navigate('/login', true);

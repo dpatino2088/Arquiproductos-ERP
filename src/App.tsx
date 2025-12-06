@@ -123,6 +123,11 @@ const CompanySettings = lazy(() => {
   return import('./pages/settings/CompanySettings');
 });
 
+const ManageOrganizations = lazy(() => {
+  logger.debug('Loading Manage Organizations component');
+  return import('./pages/organizations/ManageOrganizations');
+});
+
 // Auth pages
 const Login = lazy(() => {
   logger.debug('Loading Login component');
@@ -313,6 +318,10 @@ function App() {
     router.addRoute('/settings', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
     
+    // Organizations routes
+    router.addRoute('/organizations', () => setCurrentPage('manage-organizations'));
+    router.addRoute('/organizations/manage', () => setCurrentPage('manage-organizations'));
+    
     // Legacy routes (still supported)
     router.addRoute('/employees', () => setCurrentPage('directory'));
     
@@ -354,17 +363,6 @@ function App() {
     }
   }, [isAuthenticated, isLoading, isAuthPage, isErrorPage]);
 
-  // Early return for loading state - allow auth pages to render while loading
-  if (isLoading && !isAuthPage) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
 
   const renderPage = () => {
     switch (currentPage) {
@@ -417,6 +415,8 @@ function App() {
         return <CompanyReports />;
       case 'company-settings':
         return <CompanySettings />;
+      case 'manage-organizations':
+        return <ManageOrganizations />;
       
       // Auth pages
       case 'login':
@@ -438,58 +438,29 @@ function App() {
   return (
     <ErrorBoundary>
       <div className="min-h-dvh bg-background">
-        {isLoading && !isAuthPage ? (
+        {!isAuthenticated && !isAuthPage ? (
           <div className="min-h-dvh flex items-center justify-center p-6">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-              <p className="text-muted-foreground">Loading...</p>
-            </div>
-          </div>
-        ) : !isAuthenticated && !isAuthPage ? (
-          <div className="min-h-dvh flex items-center justify-center p-6">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
               <p className="text-muted-foreground">Redirecting to login...</p>
             </div>
           </div>
         ) : isAuthPage ? (
           // Auth pages without layout
           <ErrorBoundary>
-            <Suspense fallback={
-              <div className="flex items-center justify-center min-h-[400px]">
-                <div className="flex flex-col items-center gap-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  <p className="text-sm text-muted-foreground">Loading...</p>
-                </div>
-              </div>
-            }>
+            <Suspense fallback={null}>
               {renderPage()}
             </Suspense>
           </ErrorBoundary>
         ) : isErrorPage ? (
           // Error pages without layout
           <ErrorBoundary>
-            <Suspense fallback={
-              <div className="flex items-center justify-center min-h-[400px]">
-                <div className="flex flex-col items-center gap-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  <p className="text-sm text-muted-foreground">Loading...</p>
-                </div>
-              </div>
-            }>
+            <Suspense fallback={null}>
               {renderPage()}
             </Suspense>
           </ErrorBoundary>
         ) : currentPage === 'company-settings' ? (
           <ErrorBoundary>
-            <Suspense fallback={
-              <div className="flex items-center justify-center min-h-[400px]">
-                <div className="flex flex-col items-center gap-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                  <p className="text-sm text-muted-foreground">Loading...</p>
-                </div>
-              </div>
-            }>
+            <Suspense fallback={null}>
               <CompanySettings />
             </Suspense>
           </ErrorBoundary>

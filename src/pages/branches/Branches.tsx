@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useBranches } from '../../hooks/useBranches';
 import { 
   Search, 
   Filter,
@@ -23,10 +24,12 @@ interface Branch {
   zipCode: string;
   latitude?: number;
   longitude?: number;
+  country?: string;
 }
 
 export default function Branches() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { branches: branchesData, isLoading: branchesLoading, error: branchesError, refetch } = useBranches();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -48,6 +51,9 @@ export default function Branches() {
     ]);
   }, [registerSubmodules]);
 
+  // Use branches from Supabase hook
+  const branches = branchesData;
+
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -65,111 +71,9 @@ export default function Branches() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const branches: Branch[] = [
-    {
-      id: '1',
-      name: 'San Francisco Main Office',
-      address: '123 Market Street',
-      city: 'San Francisco',
-      state: 'CA',
-      zipCode: '94102',
-      latitude: 37.7749,
-      longitude: -122.4194
-    },
-    {
-      id: '2',
-      name: 'Seattle Branch',
-      address: '456 Pike Street',
-      city: 'Seattle',
-      state: 'WA',
-      zipCode: '98101',
-      latitude: 47.6062,
-      longitude: -122.3321
-    },
-    {
-      id: '3',
-      name: 'Portland Office',
-      address: '789 Broadway',
-      city: 'Portland',
-      state: 'OR',
-      zipCode: '97201',
-      latitude: 45.5152,
-      longitude: -122.6784
-    },
-    {
-      id: '4',
-      name: 'Austin Branch',
-      address: '321 Congress Avenue',
-      city: 'Austin',
-      state: 'TX',
-      zipCode: '78701',
-      latitude: 30.2672,
-      longitude: -97.7431
-    },
-    {
-      id: '5',
-      name: 'New York Headquarters',
-      address: '555 Fifth Avenue',
-      city: 'New York',
-      state: 'NY',
-      zipCode: '10017',
-      latitude: 40.7128,
-      longitude: -74.0060
-    },
-    {
-      id: '6',
-      name: 'Miami Branch',
-      address: '888 Brickell Avenue',
-      city: 'Miami',
-      state: 'FL',
-      zipCode: '33131',
-      latitude: 25.7617,
-      longitude: -80.1918
-    },
-    {
-      id: '7',
-      name: 'Boston Office',
-      address: '222 Boylston Street',
-      city: 'Boston',
-      state: 'MA',
-      zipCode: '02116',
-      latitude: 42.3601,
-      longitude: -71.0589
-    },
-    {
-      id: '8',
-      name: 'Chicago Branch',
-      address: '777 Michigan Avenue',
-      city: 'Chicago',
-      state: 'IL',
-      zipCode: '60611',
-      latitude: 41.8781,
-      longitude: -87.6298
-    },
-    {
-      id: '9',
-      name: 'Denver Office',
-      address: '999 Larimer Street',
-      city: 'Denver',
-      state: 'CO',
-      zipCode: '80202',
-      latitude: 39.7392,
-      longitude: -104.9903
-    },
-    {
-      id: '10',
-      name: 'Los Angeles Branch',
-      address: '111 Sunset Boulevard',
-      city: 'Los Angeles',
-      state: 'CA',
-      zipCode: '90028',
-      latitude: 34.0522,
-      longitude: -118.2437
-    }
-  ];
 
   const filteredBranches = useMemo(() => {
-    const filtered = branches.filter(branch => {
+    const filtered = branchesData.filter(branch => {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
@@ -273,7 +177,7 @@ export default function Branches() {
 
   // Filter options based on search terms
   const getFilteredStateOptions = () => {
-    const stateOptions = Array.from(new Set(branches.map(b => b.state))).sort();
+    const stateOptions = Array.from(new Set(branchesData.map(b => b.state))).sort();
     if (!stateSearchTerm) return stateOptions;
     return stateOptions.filter(state => 
       state.toLowerCase().includes(stateSearchTerm.toLowerCase())
@@ -281,7 +185,7 @@ export default function Branches() {
   };
 
   const getFilteredCityOptions = () => {
-    const cityOptions = Array.from(new Set(branches.map(b => b.city))).sort();
+    const cityOptions = Array.from(new Set(branchesData.map(b => b.city))).sort();
     if (!citySearchTerm) return cityOptions;
     return cityOptions.filter(city => 
       city.toLowerCase().includes(citySearchTerm.toLowerCase())
@@ -295,13 +199,32 @@ export default function Branches() {
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-foreground mb-1">Branches</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            View and manage all company branches
-            {filteredBranches.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}
+            {`View and manage all company branches${filteredBranches.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>
         </div>
       </div>
 
+      {/* Error Message */}
+      {branchesError && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-red-600">⚠️</span>
+            <div>
+              <div className="text-sm font-medium text-red-800">Error loading branches</div>
+              <div className="text-sm text-red-700">{branchesError}</div>
+            </div>
+            <button
+              onClick={() => refetch()}
+              className="ml-auto px-3 py-1 text-sm bg-red-100 text-red-800 rounded hover:bg-red-200"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Search and Filters */}
+      {!branchesError && (
       <div className="mb-4">
         <div className={`bg-white border border-gray-200 py-6 px-6 ${
           showFilters ? 'rounded-t-lg' : 'rounded-lg'
@@ -545,9 +468,10 @@ export default function Branches() {
           </div>
         )}
       </div>
+      )}
 
       {/* List View */}
-      {viewMode === 'list' && (
+      {!branchesError && viewMode === 'list' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -575,7 +499,20 @@ export default function Branches() {
                 </tr>
               </thead>
               <tbody>
-                {paginatedBranches.map((branch) => (
+                {filteredBranches.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-12 text-center">
+                      <Building2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-600 mb-2">No branches found</p>
+                      <p className="text-sm text-gray-500">
+                        {branchesData.length === 0 
+                          ? 'Start by adding branches to your company'
+                          : 'Try adjusting your search criteria'}
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedBranches.map((branch) => (
                   <tr key={branch.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
@@ -610,17 +547,18 @@ export default function Branches() {
                           <MoreVertical className="w-4 h-4" />
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+                  </td>
+                </tr>
+                ))
+              )}
+            </tbody>
             </table>
           </div>
         </div>
       )}
 
       {/* Map View */}
-      {viewMode === 'map' && (
+      {!branchesError && viewMode === 'map' && (
         <div className="flex gap-4 mb-4">
           {/* Branch List - 30% width */}
           <div className="w-[30%] bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -761,14 +699,6 @@ export default function Branches() {
         </div>
       </div>
 
-      {/* Empty State */}
-      {filteredBranches.length === 0 && (
-        <div className="text-center py-8">
-          <Building2 className="w-8 h-8 text-gray-400 mx-auto mb-3" />
-          <h3 className="text-sm font-semibold text-gray-900 mb-1">No branches found</h3>
-          <p className="text-xs text-gray-600">Try adjusting your search criteria.</p>
-        </div>
-      )}
     </div>
   );
 }
