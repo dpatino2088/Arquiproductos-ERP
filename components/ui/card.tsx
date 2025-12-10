@@ -1,42 +1,130 @@
-import { cn } from './cn';
+import React, { memo } from 'react';
 
-interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
-
-export function Card({ className, children, ...props }: CardProps) {
-  return (
-    <div className={cn('surface p-6', className)} {...props}>
-      {children}
-    </div>
-  );
+interface CardProps {
+  children: React.ReactNode;
+  variant?: 'default' | 'outlined' | 'elevated';
+  padding?: 'none' | 'sm' | 'md' | 'lg';
+  className?: string;
+  hover?: boolean;
+  clickable?: boolean;
+  onClick?: () => void;
 }
 
-interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {}
+const Card = memo(({
+  children,
+  variant = 'default',
+  padding = 'md',
+  className = '',
+  hover = false,
+  clickable = false,
+  onClick,
+}: CardProps) => {
+  const baseClasses = 'bg-white rounded-lg transition-all duration-200';
 
-export function CardHeader({ className, children, ...props }: CardHeaderProps) {
+  const variantClasses = {
+    default: 'border border-gray-200',
+    outlined: 'border-2 border-gray-300',
+    elevated: 'shadow-lg border border-gray-100',
+  };
+
+  const paddingClasses = {
+    none: '',
+    sm: 'p-3',
+    md: 'p-4',
+    lg: 'p-6',
+  };
+
+  const interactionClasses = [
+    hover ? 'hover:shadow-md hover:border-gray-300' : '',
+    clickable ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2' : '',
+  ].filter(Boolean).join(' ');
+
+  const cardClasses = [
+    baseClasses,
+    variantClasses[variant],
+    paddingClasses[padding],
+    interactionClasses,
+    className,
+  ].filter(Boolean).join(' ');
+
+  const CardElement = clickable ? 'button' : 'div';
+
   return (
-    <div className={cn('mb-4 flex items-center justify-between gap-3', className)} {...props}>
+    <CardElement
+      className={cardClasses}
+      onClick={onClick}
+      {...(clickable && { role: 'button', tabIndex: 0 })}
+    >
       {children}
-    </div>
+    </CardElement>
   );
-}
+});
 
-interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {}
+Card.displayName = 'Card';
 
-export function CardTitle({ className, children, ...props }: CardTitleProps) {
-  return (
-    <h3 className={cn('text-lg font-semibold text-foreground', className)} {...props}>
-      {children}
-    </h3>
-  );
-}
+// Card sub-components
+const CardHeader = memo(({ 
+  children, 
+  className = '' 
+}: { 
+  children: React.ReactNode; 
+  className?: string; 
+}) => (
+  <div className={`mb-4 ${className}`}>
+    {children}
+  </div>
+));
 
-interface CardDescriptionProps extends React.HTMLAttributes<HTMLParagraphElement> {}
+CardHeader.displayName = 'CardHeader';
 
-export function CardDescription({ className, children, ...props }: CardDescriptionProps) {
-  return (
-    <p className={cn('text-sm text-muted-foreground', className)} {...props}>
-      {children}
-    </p>
-  );
-}
+const CardTitle = memo(({ 
+  children, 
+  className = '',
+  as: Component = 'h3'
+}: { 
+  children: React.ReactNode; 
+  className?: string;
+  as?: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+}) => (
+  <Component className={`text-lg font-semibold text-gray-900 ${className}`}>
+    {children}
+  </Component>
+));
 
+CardTitle.displayName = 'CardTitle';
+
+const CardContent = memo(({ 
+  children, 
+  className = '' 
+}: { 
+  children: React.ReactNode; 
+  className?: string; 
+}) => (
+  <div className={`text-gray-600 ${className}`}>
+    {children}
+  </div>
+));
+
+CardContent.displayName = 'CardContent';
+
+const CardFooter = memo(({ 
+  children, 
+  className = '' 
+}: { 
+  children: React.ReactNode; 
+  className?: string; 
+}) => (
+  <div className={`mt-4 ${className}`}>
+    {children}
+  </div>
+));
+
+CardFooter.displayName = 'CardFooter';
+
+// Export compound component
+export default Object.assign(Card, {
+  Header: CardHeader,
+  Title: CardTitle,
+  Content: CardContent,
+  Footer: CardFooter,
+});

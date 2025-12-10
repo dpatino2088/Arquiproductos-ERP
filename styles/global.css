@@ -1,0 +1,428 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Layout */
+    --sidebar-width: 240px;
+    --navbar-height: 56px;
+
+    /* Typography */
+    --font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    --font-size-body: 14px;
+    --font-size-small: 12px;
+    --font-size-heading: 16px;
+    --font-size-title: 20px;
+
+    /* Updated Gray Palette - App Background Harmonized */
+    --gray-950: #0d1117;   /* casi negro, con un tinte azul/gris */
+    --gray-900: #1c1f26;
+    --gray-800: #2c313a;
+    --gray-700: #3d4450;
+    --gray-600: #4f5663;
+    --gray-500: #6b7280;
+    --gray-400: #9ca3af;
+    --gray-300: #d1d5db;
+    --gray-250: #E6EBF0;   /* sidebar buttons employee view */
+    --gray-200: #f5f7fa;   /* tu tono actual */
+    --gray-100: #fafbfc;
+    --gray-50: #fdfefe;    /* prácticamente blanco */
+    
+    --teal-950: #062524;
+    --teal-900: #0a3f3c;
+    --teal-800: #006666;
+    --teal-700: #008383;  /* Teal color (no longer primary) */
+    --teal-600: #009999;
+    --teal-500: #00b3b3;
+    --teal-400: #33cccc;
+    --teal-300: #66e0e0;
+    --teal-200: #99f0f0;
+    --teal-100: #ccfafa;
+    --teal-50: #f2fefe;
+    
+    --red-950: #450a0a;
+    --red-900: #7f1d1d;
+    --red-800: #991b1b;
+    --red-700: #b91c1c;
+    --red-600: #dc2626;
+    --red-500: #ef4444;
+    --red-400: #f87171;
+    --red-300: #fca5a5;
+    --red-200: #fecaca;
+    --red-100: #fee2e2;
+    --red-50: #fef2f2;
+    
+    --orange-950: #431407;
+    --orange-900: #7c2d12;
+    --orange-800: #9a3412;
+    --orange-700: #c2410c;
+    --orange-600: #ea580c;
+    --orange-500: #f97316;
+    --orange-400: #fb923c;
+    --orange-300: #fdba74;
+    --orange-200: #fed7aa;
+    --orange-100: #ffedd5;
+    --orange-50: #fff7ed;
+    
+    --blue-950: #172554;
+    --blue-900: #1e3a8a;
+    --blue-800: #1e40af;
+    --blue-700: #1d4ed8;
+    --blue-600: #2563eb;
+    --blue-500: #3b82f6;
+    --blue-400: #60a5fa;
+    --blue-300: #93c5fd;
+    --blue-200: #bfdbfe;
+    --blue-100: #dbeafe;
+    --blue-50: #eff6ff;
+    
+    --navy-950: #08141b;
+    --navy-900: #0a1621;   /* casi negro azulado */
+    --navy-800: #0d2233;
+    --navy-700: #003153;   /* tono principal solicitado */
+    --navy-650: #003c68;   /* deep navy (sidebar base recomendado) */
+    --navy-600: #004a7f;
+    --navy-500: #0A66C2;   /* azul vibrante tipo LinkedIn */
+    --navy-400: #3b84cf;
+    --navy-300: #66a2db;
+    --navy-200: #99c2e8;
+    --navy-100: #cce0f4;
+    --navy-50: #f0f6fc;    /* muy claro, fondos suaves */
+    
+    --green-950: #052e16;
+    --green-900: #14532d;
+    --green-800: #166534;
+    --green-700: #15803d;
+    --green-600: #16a34a;
+    --green-500: #22c55e;
+    --green-400: #4ade80;
+    --green-300: #86efac;
+    --green-200: #bbf7d0;
+    --green-100: #dcfce7;
+    --green-50: #f0fdf4;
+
+    /* Purple palette - for leave status and special states */
+    --purple-950: #3b0764;
+    --purple-900: #581c87;
+    --purple-800: #6b21a8;
+    --purple-700: #7e22ce;
+    --purple-600: #9333ea;
+    --purple-500: #a855f7;
+    --purple-400: #c084fc;
+    --purple-300: #d8b4fe;
+    --purple-200: #e9d5ff;
+    --purple-100: #f3e8ff;
+    --purple-50: #faf5ff;
+
+    /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
+    --foreground: 218 15% 12%;               /* Dark text - HSL for new gray-900 #1c1f26 */
+    --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
+    --brand-primary: 161 94% 30%;           /* Primary brand color #059669 in HSL */
+    --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-500 */
+
+    --primary: var(--brand-primary);
+    --primary-foreground: 200 100% 99%;      /* HSL for new gray-50 #fdfefe */
+    --secondary: var(--brand-secondary);
+    --secondary-foreground: 200 100% 99%;    /* HSL for new gray-50 #fdfefe */
+
+    --card: 200 100% 99%;                    /* HSL for new gray-50 #fdfefe */
+    --card-foreground: var(--foreground);
+    --popover: 200 100% 99%;                 /* HSL for new gray-50 #fdfefe */
+    --popover-foreground: var(--foreground);
+    --muted: 210 20% 98%;                    /* HSL for new gray-100 #fafbfc */
+    --muted-foreground: 220 9% 46%;          /* HSL for gray-500 */
+    --accent: var(--brand-primary);
+    --accent-foreground: 200 100% 99%;       /* HSL for new gray-50 #fdfefe */
+    --destructive: 0 84% 60%;                /* HSL for red-600 */
+    --destructive-foreground: 200 100% 99%;  /* HSL for new gray-50 #fdfefe */
+    --border: 210 17% 96%;                   /* HSL for new gray-200 #f5f7fa */
+    --input: 210 17% 96%;                    /* HSL for new gray-200 #f5f7fa */
+    --ring: var(--brand-primary);            /* Focus ring - primary green HSL */
+    --radius: 0.5rem;
+
+    /* Sidebar colors */
+    --sidebar-light-background: var(--gray-50);
+    --sidebar-dark-background: var(--gray-900);
+    --sidebar-background: var(--sidebar-light-background);
+    --sidebar-foreground: var(--foreground);
+
+/* Status colors per design system specification - WCAG 2.2 AA compliant */
+--status-green: #15803d;               /* Success/Active - Green 700 for better contrast */
+--status-red: #b91c1c;                 /* Error/Critical/Delete - Red 700 for better contrast */
+--status-blue: #2563eb;                /* Info/Neutral actions - Blue 500 from our palette */
+--status-purple: #9333ea;              /* Purple status - Purple 600 for better contrast */
+--status-yellow: #a16207;              /* Yellow status - Yellow 700 for better contrast */
+--status-orange: #c2410c;              /* Orange status - Orange 700 for better contrast */
+--status-gray: #6b7280;                /* Gray status - Gray 500 for neutral/inactive states */
+
+/* Avatar status dots - Brighter colors for better visibility */
+--avatar-status-green: #16a34a;        /* Green 600 - Brighter for avatar dots */
+--avatar-status-red: #dc2626;          /* Red 600 - Brighter for avatar dots */
+--avatar-status-yellow: #eab308;       /* Yellow 500 - Brighter for avatar dots */
+--avatar-status-purple: #9333ea;       /* Purple 600 - Brighter for avatar dots */
+--avatar-status-blue: #2563eb;         /* Blue 600 - Brighter for avatar dots */
+--avatar-status-orange: #ea580c;       /* Orange 600 - Brighter for avatar dots */
+--avatar-status-gray: #d1d5db;         /* Gray 300 - Brighter for avatar dots */
+    
+    /* Utility colors */
+    --focus-ring: var(--brand-primary);     /* Focus indicator - primary green */
+    --row-highlight: var(--green-50);        /* Row hover/highlight */
+    
+    /* Hex versions for direct usage */
+    --primary-brand-hex: #059669;        /* Primary brand color */
+    --primary-brand-hover: #047857;      /* Primary brand hover state (darker variant) */
+    --primary-600-hex: var(--green-600);          /* Primary color variant - 600 */
+    --primary-500-hex: var(--green-500);          /* Primary color variant - 500 */
+    /* RGBA variants calculated from primary brand color using color-mix */
+    --primary-brand-rgba-10: color-mix(in srgb, var(--primary-brand-hex) 10%, transparent);
+    --primary-brand-rgba-20: color-mix(in srgb, var(--primary-brand-hex) 20%, transparent);
+    --primary-brand-rgba-25: color-mix(in srgb, var(--primary-brand-hex) 25%, transparent);
+    --primary-brand-rgba-30: color-mix(in srgb, var(--primary-brand-hex) 30%, transparent);
+    --primary-brand-rgba-40: color-mix(in srgb, var(--primary-brand-hex) 40%, transparent);
+    --primary-brand-rgba-50: color-mix(in srgb, var(--primary-brand-hex) 50%, transparent);
+    --graphite-black-hex: var(--gray-900);
+    --white-hex: var(--gray-50);
+
+    /* Additional utility colors */
+    --neutral-gray: #9E9E9E;               /* Disabled/Inactive elements */
+    --highlight-bg: #E3F2FD;               /* Hover states, highlighted rows */
+  }
+
+  .dark {
+    --sidebar-background: var(--sidebar-dark-background);
+    --sidebar-foreground: 0 0% 98%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; font-family: var(--font-family); font-size: var(--font-size-body); line-height: 1.5; }
+
+  .btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: 8px; @apply inline-flex items-center justify-center font-medium transition-colors; }
+  .btn-primary { @apply bg-primary text-primary-foreground hover:bg-primary/90; }
+  .btn-secondary { @apply bg-background border border-border text-foreground hover:bg-muted; }
+
+  .icon-btn { width: 32px; height: 32px; @apply inline-flex items-center justify-center rounded hover:bg-muted transition-colors; }
+
+  .text-body { font-size: var(--font-size-body); }
+  .text-small { font-size: var(--font-size-small); }
+  .text-heading { font-size: var(--font-size-heading); }
+  .text-title { font-size: var(--font-size-title); }
+
+/* Status utilities using design system colors */
+.text-status-green { color: var(--status-green); }
+.text-status-red { color: var(--status-red); }
+.text-status-blue { color: var(--status-blue); }
+.text-status-purple { color: var(--status-purple); }
+.text-status-yellow { color: var(--status-yellow); }
+.text-status-orange { color: var(--status-orange); }
+.text-status-gray { color: var(--status-gray); }
+  .text-neutral-gray { color: var(--neutral-gray); }
+
+  /* Text utilities */
+  .text-secondary { color: var(--gray-600); }
+  .text-muted { color: var(--gray-500); }
+  .text-primary-contrast { color: var(--teal-800); } /* Higher contrast version of primary for WCAG compliance */
+  
+  /* Navy text utilities */
+  .text-navy-900 { color: var(--navy-900); }
+  .text-navy-800 { color: var(--navy-800); }
+  .text-navy-700 { color: var(--navy-700); }
+  .text-navy-650 { color: var(--navy-650); }
+  .text-navy-600 { color: var(--navy-600); }
+  .text-navy-500 { color: var(--navy-500); }
+  .text-navy-400 { color: var(--navy-400); }
+  .text-navy-300 { color: var(--navy-300); }
+  .text-navy-200 { color: var(--navy-200); }
+  .text-navy-100 { color: var(--navy-100); }
+  .text-navy-50 { color: var(--navy-50); }
+  
+  /* Light background variants for badges using design system palette - WCAG 2.2 AA compliant */
+  .bg-status-green-light { background-color: var(--green-100); }
+  .bg-status-red-light { background-color: var(--red-100); }
+  .bg-status-blue-light { background-color: var(--blue-100); }
+  .bg-status-orange-light { background-color: var(--orange-100); }
+  .bg-status-purple-light { background-color: var(--purple-100); }
+
+/* Solid backgrounds */
+.bg-status-green { background-color: var(--status-green); }
+.bg-status-red { background-color: var(--status-red); }
+.bg-status-blue { background-color: var(--status-blue); }
+.bg-status-purple { background-color: var(--status-purple); }
+.bg-status-yellow { background-color: var(--status-yellow); }
+.bg-status-orange { background-color: var(--status-orange); }
+.bg-status-gray { background-color: var(--status-gray); }
+
+/* Avatar status dot backgrounds - Brighter colors */
+.bg-avatar-status-green { background-color: var(--avatar-status-green); }
+.bg-avatar-status-red { background-color: var(--avatar-status-red); }
+.bg-avatar-status-yellow { background-color: var(--avatar-status-yellow); }
+.bg-avatar-status-purple { background-color: var(--avatar-status-purple); }
+.bg-avatar-status-blue { background-color: var(--avatar-status-blue); }
+.bg-avatar-status-orange { background-color: var(--avatar-status-orange); }
+.bg-avatar-status-gray { background-color: var(--avatar-status-gray); }
+  .bg-neutral-gray { background-color: var(--neutral-gray); }
+  .bg-highlight { background-color: var(--highlight-bg); }
+  .bg-row-highlight { background-color: var(--row-highlight); }
+  
+  /* Navy background utilities */
+  .bg-navy-900 { background-color: var(--navy-900); }
+  .bg-navy-800 { background-color: var(--navy-800); }
+  .bg-navy-700 { background-color: var(--navy-700); }
+  .bg-navy-650 { background-color: var(--navy-650); }
+  .bg-navy-600 { background-color: var(--navy-600); }
+  .bg-navy-500 { background-color: var(--navy-500); }
+  .bg-navy-400 { background-color: var(--navy-400); }
+  .bg-navy-300 { background-color: var(--navy-300); }
+  .bg-navy-200 { background-color: var(--navy-200); }
+  .bg-navy-100 { background-color: var(--navy-100); }
+  .bg-navy-50 { background-color: var(--navy-50); }
+
+/* Border colors for tooltip arrows */
+.border-t-status-green { border-top-color: var(--status-green); }
+.border-t-status-red { border-top-color: var(--status-red); }
+.border-t-status-blue { border-top-color: var(--status-blue); }
+.border-t-status-purple { border-top-color: var(--status-purple); }
+.border-t-status-yellow { border-top-color: var(--status-yellow); }
+.border-t-status-orange { border-top-color: var(--status-orange); }
+.border-t-status-gray { border-top-color: var(--status-gray); }
+
+  /* Borders using Tailwind v3 */
+  .border-subtle { border-color: var(--gray-200); }
+  .border-strong { border-color: var(--gray-300); }
+  
+  /* Navy border utilities */
+  .border-navy-900 { border-color: var(--navy-900); }
+  .border-navy-800 { border-color: var(--navy-800); }
+  .border-navy-700 { border-color: var(--navy-700); }
+  .border-navy-650 { border-color: var(--navy-650); }
+  .border-navy-600 { border-color: var(--navy-600); }
+  .border-navy-500 { border-color: var(--navy-500); }
+  .border-navy-400 { border-color: var(--navy-400); }
+  .border-navy-300 { border-color: var(--navy-300); }
+  .border-navy-200 { border-color: var(--navy-200); }
+  .border-navy-100 { border-color: var(--navy-100); }
+  .border-navy-50 { border-color: var(--navy-50); }
+
+  /* Enhanced Focus Management for WCAG 2.2 AA Compliance */
+  .focus-ring { 
+    box-shadow: 0 0 0 2px var(--focus-ring); 
+  }
+
+  /* Universal focus styles - Very subtle like Directory search bar */
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  a:focus-visible,
+  [tabindex]:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-20) !important;
+  }
+
+  /* Enhanced focus for buttons - Subtle ring */
+  button:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-25) !important;
+  }
+
+  /* Focus for navigation elements - Very subtle */
+  nav button:focus-visible,
+  [role="navigation"] button:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-30) !important;
+  }
+
+  /* Focus for form elements - Like Directory search */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px var(--primary-brand-rgba-20) !important;
+    border-color: var(--primary-brand-rgba-50) !important;
+  }
+
+  /* Enhanced Skip Links Container */
+  .skip-links-container {
+    position: absolute;
+    top: -200px;
+    left: 6px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: top 0.2s ease-in-out;
+  }
+
+  .skip-links-container:focus-within {
+    top: 6px;
+  }
+
+  /* Individual Skip Links */
+  .skip-link {
+    background: var(--primary-brand-hex);
+    color: white;
+    padding: 8px 12px;
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 14px;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    border: 2px solid transparent;
+    transition: all 0.2s ease-in-out;
+  }
+
+  .skip-link:focus {
+    outline: none;
+    border-color: white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .skip-link:hover {
+    background: var(--primary-brand-hover);
+    transform: translateY(-1px);
+  }
+
+  .skip-link:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+
+  /* High contrast mode support - Enhanced but still subtle */
+  @media (prefers-contrast: high) {
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    a:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--primary-brand-hex) !important;
+      outline-offset: 1px !important;
+      box-shadow: 0 0 0 3px var(--primary-brand-rgba-40) !important;
+    }
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    a:focus-visible,
+    [tabindex]:focus-visible {
+      transition: none !important;
+    }
+  }
+
+  /* Legacy compatibility variants */
+  .bg-status-green-10 { background-color: var(--green-100); }
+  .bg-status-red-10 { background-color: var(--red-100); }
+  .bg-status-blue-10 { background-color: var(--blue-100); }
+  .bg-status-amber-10 { background-color: var(--orange-100); }
+  .bg-neutral-gray-10 { background-color: var(--gray-100); }
+}

@@ -1,30 +1,36 @@
-# Arquiproductos ERP
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-Next.js 14 (App Router) + TypeScript + Supabase + Tailwind ERP skeleton for multi-empresa operation. Sigue las reglas de nombres y metadata descritas en el master prompt.
+## Getting Started
 
-## Estructura
-- `app/(auth)/login`: pantalla de acceso usando Supabase Auth.
-- `app/(dashboard)`: layout con sidebar/topbar y páginas de núcleo, directorio, inventario, finanzas y configuración.
-- `components/ui`: librería de UI reusable (botones, inputs, tablas, tarjetas).
-- `components/layout`: shell principal, sidebar y encabezados de página.
-- `lib`: clientes Supabase y helpers de auth/RLS.
-- `supabase/schema.sql`: definición inicial de tablas con `company_id` y columnas de metadata.
+First, run the development server:
 
-## Configuración rápida
-1) Copia `env.sample` a `.env.local` y rellena `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-2) Instala dependencias:
-   ```bash
-   pnpm install # o npm install / yarn
-   pnpm dev
-   ```
-3) Aplica `supabase/schema.sql` en tu proyecto Supabase y configura RLS para restringir `company_id`.
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
 
-## Reglas clave
-- Tablas en PascalCase, columnas snake_case.
-- Columnas metadata: `deleted`, `archived`, `created_date`, `modified_date`, `creator`, `modifier`.
-- Multi-empresa: todas las tablas de negocio tienen `company_id` FK a `Companies`.
-- Roles en `UserProfiles.role`: `ADMIN`, `MANAGER`, `INTERNAL_USER`, `DISTRIBUTOR_USER`, `VIEW_ONLY`.
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Seguridad
-No subas llaves privadas al repo. Se añadieron entradas en `.gitignore` para evitarlo. Mueve cualquier clave de `Enter passphrase (empty for no passphrase):` fuera del proyecto.
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
