@@ -1,0 +1,17 @@
+.next
+node_modules
+.turbo
+.vercel
+.DS_Store
+*.log
+*.local
+env.local
+.env
+.env.*
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+Enter passphrase (empty for no passphrase):
+Enter passphrase (empty for no passphrase):.pub
+supabase/.temp
+
