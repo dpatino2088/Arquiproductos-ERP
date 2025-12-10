@@ -14,4 +14,5 @@ yarn.lock
 Enter passphrase (empty for no passphrase):
 Enter passphrase (empty for no passphrase):.pub
 supabase/.temp
+.cursor
 
