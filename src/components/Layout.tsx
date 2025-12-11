@@ -37,7 +37,8 @@ import {
   Printer,
   CalendarCheck,
   Box,
-  Check
+  Check,
+  BookOpen
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -193,15 +194,15 @@ function Layout({ children }: LayoutProps) {
       case 'Dashboard':
         // Dashboard is active if we're on root, dashboard route, or inbox
         return currentRoute === '/' || currentRoute === '/dashboard' || currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
-      case 'Employees':
-        // Employees is active if we're on any employees route
-        return currentRoute.includes('/employees');
+      case 'Directory':
+        // Directory is active if we're on any directory route
+        return currentRoute.includes('/directory');
       case 'Branches':
         // Branches is active if we're on any branches route
         return currentRoute.includes('/branches');
       case 'My Info':
-        // My Info is active if we're on any employees or my-info route
-        return currentRoute.includes('/employees') || currentRoute.includes('/my-info');
+        // My Info is active if we're on any my-info route
+        return currentRoute.includes('/my-info');
       case 'Time & Attendance':
         // Time & Attendance is active if we're on any time-and-attendance route
         return currentRoute.includes('/time-and-attendance');
@@ -219,13 +220,13 @@ function Layout({ children }: LayoutProps) {
 
   // Memoized navigation items for management view
   const navigation = useMemo(() => {
-    // Create base navigation with Employees and Branches inserted after Dashboard
+    // Create base navigation with Directory and Branches inserted after Dashboard
     const dashboardItem = baseNavigation[0]; // Dashboard
     const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
-    const employeesItem = { name: 'Employees', href: '/employees', icon: Users };
+    const directoryItem = { name: 'Directory', href: '/directory', icon: BookOpen };
     const branchesItem = { name: 'Branches', href: '/branches', icon: Building2 };
-    return [dashboardItem, employeesItem, branchesItem, ...restOfBase, { name: 'Reports', href: '/reports/company-reports', icon: Printer }];
+    return [dashboardItem, directoryItem, branchesItem, ...restOfBase, { name: 'Reports', href: '/reports/company-reports', icon: Printer }];
   }, []);
 
   const dashboardItem = useMemo(() => 
@@ -262,8 +263,8 @@ function Layout({ children }: LayoutProps) {
       const actualPath = '/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
-    } else if (path === '/employees') {
-      const actualPath = '/employees/directory';
+    } else if (path === '/directory') {
+      const actualPath = '/directory/contacts';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
@@ -398,7 +399,7 @@ function Layout({ children }: LayoutProps) {
                 fontSize: '16px'
               }}
             >
-              WAPunch
+              Adaptio
             </span>
             </div>
           </div>
@@ -506,7 +507,7 @@ function Layout({ children }: LayoutProps) {
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
               <Building style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
               <div className="flex items-center font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                <span>{currentCompany?.name || 'WAPunch'}</span>
+                <span>{currentCompany?.name || 'Adaptio'}</span>
               </div>
             </div>
 

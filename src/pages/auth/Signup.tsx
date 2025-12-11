@@ -180,7 +180,7 @@ export default function Signup() {
           <div className="lg:hidden text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center gap-2">
               <Box size={32} style={{ color: 'var(--primary-brand-hex)' }} />
-              <span className="text-2xl font-semibold text-gray-900">WAPunch</span>
+              <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
           </div>
 
@@ -371,13 +371,13 @@ export default function Signup() {
         </div>
       </div>
 
-      {/* Right Side - Graphite Black Background */}
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: 'var(--gray-950)' }}>
+      {/* Right Side - Brand Background */}
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#172554' }}>
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">
               <Box size={48} style={{ color: 'var(--primary-brand-hex)' }} />
-              <span className="text-4xl font-semibold text-white">WAPunch</span>
+              <span className="text-4xl font-semibold text-white">Adaptio</span>
             </div>
           </div>
           

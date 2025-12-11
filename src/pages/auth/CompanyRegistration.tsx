@@ -1024,7 +1024,7 @@ export default function CompanyRegistration() {
               <div className="flex items-center">
                 <div className="flex items-center gap-2">
                   <Box size={24} style={{ color: 'var(--primary-brand-hex)' }} />
-                  <span className="text-lg font-semibold text-gray-900">WAPunch</span>
+                  <span className="text-lg font-semibold text-gray-900">Adaptio</span>
                 </div>
               </div>
               <div className="flex items-center space-x-4">
@@ -1809,13 +1809,13 @@ export default function CompanyRegistration() {
       </div>
 
       {/* Right Panel - Branding & Information */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col items-center justify-center p-12" style={{ backgroundColor: 'var(--gray-250)' }}>
+      <div className="hidden lg:flex lg:w-1/2 flex-col items-center justify-center p-12" style={{ backgroundColor: '#172554' }}>
         <div className="w-full max-w-md">
           {/* Logo */}
           <div className="text-center mb-12">
             <div className="flex items-center justify-center gap-2 mb-6">
               <Box size={32} style={{ color: 'var(--primary-brand-hex)' }} />
-              <span className="text-2xl font-semibold text-gray-900">WAPunch</span>
+              <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Company Registration</h2>
             <p className="text-sm text-gray-600">Create your company portal to manage your workforce</p>

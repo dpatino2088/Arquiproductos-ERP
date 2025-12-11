@@ -120,7 +120,7 @@
     /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
     --foreground: 218 15% 12%;               /* Dark text - HSL for new gray-900 #1c1f26 */
     --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
-    --brand-primary: 161 94% 30%;           /* Primary brand color #059669 in HSL */
+    --brand-primary: 20 92% 48%;           /* Primary brand color #ea580c in HSL */
     --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-500 */
 
     --primary: var(--brand-primary);
@@ -172,10 +172,10 @@
     --row-highlight: var(--green-50);        /* Row hover/highlight */
     
     /* Hex versions for direct usage */
-    --primary-brand-hex: #059669;        /* Primary brand color */
-    --primary-brand-hover: #047857;      /* Primary brand hover state (darker variant) */
-    --primary-600-hex: var(--green-600);          /* Primary color variant - 600 */
-    --primary-500-hex: var(--green-500);          /* Primary color variant - 500 */
+    --primary-brand-hex: #ea580c;        /* Primary brand color */
+    --primary-brand-hover: #c2410c;      /* Primary brand hover state (darker variant) */
+    --primary-600-hex: var(--orange-600);          /* Primary color variant - 600 */
+    --primary-500-hex: var(--orange-500);          /* Primary color variant - 500 */
     /* RGBA variants calculated from primary brand color using color-mix */
     --primary-brand-rgba-10: color-mix(in srgb, var(--primary-brand-hex) 10%, transparent);
     --primary-brand-rgba-20: color-mix(in srgb, var(--primary-brand-hex) 20%, transparent);

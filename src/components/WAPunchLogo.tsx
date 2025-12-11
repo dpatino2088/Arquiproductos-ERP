@@ -1,13 +1,13 @@
 import React from 'react';
 
-interface WAPunchLogoProps {
+interface AdaptioLogoProps {
   width?: string | number;
   height?: string | number;
   viewMode?: 'manager';
   style?: React.CSSProperties;
 }
 
-export const WAPunchLogo: React.FC<WAPunchLogoProps> = ({ 
+export const AdaptioLogo: React.FC<AdaptioLogoProps> = ({ 
   width = 27, 
   height = 27, 
   viewMode = 'manager',

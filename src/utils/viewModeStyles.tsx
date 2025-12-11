@@ -6,8 +6,8 @@ export type ViewMode = 'manager';
 export const VIEW_MODE_COLORS = {
   manager: {
     sidebar: {
-      background: 'var(--gray-950)',
-      border: 'var(--gray-950)',
+      background: '#172554',
+      border: '#172554',
       textPrimary: 'var(--gray-300)',
       textSecondary: 'var(--gray-100)'
     },

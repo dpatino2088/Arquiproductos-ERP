@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+      import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -65,24 +65,60 @@ const GatewayTimeout = lazy(() => {
 });
 
 
-const Directory = lazy(() => {
-  logger.debug('Loading Directory component');
-  return import('./pages/employees/Directory');
-});
-
-const EmployeeInfo = lazy(() => {
-  logger.debug('Loading EmployeeInfo component');
-  return import('./pages/employees/EmployeeInfo');
-});
-
-const OrganizationalChart = lazy(() => {
-  logger.debug('Loading OrganizationalChart component');
-  return import('./pages/employees/OrganizationalChart');
-});
-
 const Branches = lazy(() => {
   logger.debug('Loading Branches component');
   return import('./pages/branches/Branches');
+});
+
+// Directory module pages
+const DirectoryContacts = lazy(() => {
+  logger.debug('Loading Directory Contacts component');
+  return import('./pages/directory/Contacts');
+});
+
+const DirectoryContactNew = lazy(() => {
+  logger.debug('Loading Directory Contact New component');
+  return import('./pages/directory/ContactNew');
+});
+
+const DirectoryCustomers = lazy(() => {
+  logger.debug('Loading Directory Customers component');
+  return import('./pages/directory/Customers');
+});
+
+const DirectoryCustomerNew = lazy(() => {
+  logger.debug('Loading Directory Customer New component');
+  return import('./pages/directory/CustomerNew');
+});
+
+const DirectorySites = lazy(() => {
+  logger.debug('Loading Directory Sites component');
+  return import('./pages/directory/Sites');
+});
+
+const DirectorySiteNew = lazy(() => {
+  logger.debug('Loading Directory Site New component');
+  return import('./pages/directory/SiteNew');
+});
+
+const DirectoryVendors = lazy(() => {
+  logger.debug('Loading Directory Vendors component');
+  return import('./pages/directory/Vendors');
+});
+
+const DirectoryVendorNew = lazy(() => {
+  logger.debug('Loading Directory Vendor New component');
+  return import('./pages/directory/VendorNew');
+});
+
+const DirectoryContractors = lazy(() => {
+  logger.debug('Loading Directory Contractors component');
+  return import('./pages/directory/Contractors');
+});
+
+const DirectoryContractorNew = lazy(() => {
+  logger.debug('Loading Directory Contractor New component');
+  return import('./pages/directory/ContractorNew');
 });
 
 const WhosWorking = lazy(() => {
@@ -293,14 +329,21 @@ function App() {
     router.addRoute('/dashboard', () => setCurrentPage('management-dashboard'));
     router.addRoute('/', () => setCurrentPage('management-dashboard'));
     
-    // Employees routes
-    router.addRoute('/employees/directory', () => setCurrentPage('directory'));
-    router.addRoute('/employees/employee-info/:slug', () => setCurrentPage('employee-info'));
-    router.addRoute('/employees/employee-info', () => setCurrentPage('employee-info'));
-    router.addRoute('/employees/organizational-chart', () => setCurrentPage('org-chart'));
-    
     // Branches routes
     router.addRoute('/branches', () => setCurrentPage('branches'));
+    
+    // Directory routes
+    router.addRoute('/directory/contacts', () => setCurrentPage('directory-contacts'));
+    router.addRoute('/directory/contacts/new', () => setCurrentPage('directory-contact-new'));
+    router.addRoute('/directory/customers', () => setCurrentPage('directory-customers'));
+    router.addRoute('/directory/customers/new', () => setCurrentPage('directory-customer-new'));
+    router.addRoute('/directory/sites', () => setCurrentPage('directory-sites'));
+    router.addRoute('/directory/sites/new', () => setCurrentPage('directory-site-new'));
+    router.addRoute('/directory/vendors', () => setCurrentPage('directory-vendors'));
+    router.addRoute('/directory/vendors/new', () => setCurrentPage('directory-vendor-new'));
+    router.addRoute('/directory/contractors', () => setCurrentPage('directory-contractors'));
+    router.addRoute('/directory/contractors/new', () => setCurrentPage('directory-contractor-new'));
+    router.addRoute('/directory', () => setCurrentPage('directory-contacts')); // Default to contacts
     
     // Time & Attendance routes
     router.addRoute('/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
@@ -321,9 +364,6 @@ function App() {
     // Organizations routes
     router.addRoute('/organizations', () => setCurrentPage('manage-organizations'));
     router.addRoute('/organizations/manage', () => setCurrentPage('manage-organizations'));
-    
-    // Legacy routes (still supported)
-    router.addRoute('/employees', () => setCurrentPage('directory'));
     
     // Other routes - redirect to management dashboard
     router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
@@ -390,14 +430,30 @@ function App() {
         return <ManagementDashboard />;
       case 'inbox':
         return <Inbox />;
-      case 'directory':
-        return <Directory />;
-      case 'employee-info':
-        return <EmployeeInfo />;
-      case 'org-chart':
-        return <OrganizationalChart />;
       case 'branches':
         return <Branches />;
+      
+      // Directory module pages
+      case 'directory-contacts':
+        return <DirectoryContacts />;
+      case 'directory-contact-new':
+        return <DirectoryContactNew />;
+      case 'directory-customers':
+        return <DirectoryCustomers />;
+      case 'directory-customer-new':
+        return <DirectoryCustomerNew />;
+      case 'directory-sites':
+        return <DirectorySites />;
+      case 'directory-site-new':
+        return <DirectorySiteNew />;
+      case 'directory-vendors':
+        return <DirectoryVendors />;
+      case 'directory-vendor-new':
+        return <DirectoryVendorNew />;
+      case 'directory-contractors':
+        return <DirectoryContractors />;
+      case 'directory-contractor-new':
+        return <DirectoryContractorNew />;
 
       case 'reports':
         return <CompanyReports />;
