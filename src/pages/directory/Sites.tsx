@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useSites } from '../../hooks/useDirectory';
 import { 
   MapPin, 
   Search, 
@@ -46,7 +47,7 @@ interface SiteItem {
 // Function to generate avatar initials from site name
 const generateAvatarInitials = (siteName: string) => {
   const words = siteName.trim().split(/\s+/);
-  if (words.length >= 2) {
+  if (words.length >= 2 && words[0] && words[1]) {
     return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
   }
   return siteName.substring(0, 2).toUpperCase();
@@ -121,102 +122,11 @@ export default function Sites() {
     };
   }, []);
 
-  // Mock data for sites - replace with actual data source
-  const sites: SiteItem[] = useMemo(() => [
-    {
-      id: '1',
-      siteName: 'Main Headquarters',
-      siteId: 'SITE-001',
-      siteAddress: '123 Business Park Drive',
-      country: 'United States',
-      city: 'San Francisco',
-      state: 'CA',
-      postalCode: '94105',
-      latitude: 37.7749,
-      longitude: -122.4194,
-      siteType: 'Office',
-      status: 'Active',
-      dateAdded: '2024-01-15',
-      contactName: 'John Smith',
-      contactEmail: 'john.smith@company.com',
-      contactPhone: '+1 (555) 123-4567'
-    },
-    {
-      id: '2',
-      siteName: 'West Coast Warehouse',
-      siteId: 'SITE-002',
-      siteAddress: '456 Industrial Blvd',
-      country: 'United States',
-      city: 'Seattle',
-      state: 'WA',
-      postalCode: '98101',
-      latitude: 47.6062,
-      longitude: -122.3321,
-      siteType: 'Warehouse',
-      status: 'Active',
-      dateAdded: '2024-02-20',
-      contactName: 'Sarah Johnson',
-      contactEmail: 'sarah.j@company.com',
-      contactPhone: '+1 (555) 234-5678'
-    },
-    {
-      id: '3',
-      siteName: 'Distribution Center',
-      siteId: 'SITE-003',
-      siteAddress: '789 Logistics Way',
-      country: 'United States',
-      city: 'Portland',
-      state: 'OR',
-      postalCode: '97201',
-      latitude: 45.5152,
-      longitude: -122.6784,
-      siteType: 'Distribution',
-      status: 'Active',
-      dateAdded: '2024-03-10',
-      contactName: 'Michael Brown',
-      contactEmail: 'm.brown@company.com',
-      contactPhone: '+1 (555) 345-6789'
-    },
-    {
-      id: '4',
-      siteName: 'Retail Store Downtown',
-      siteId: 'SITE-004',
-      siteAddress: '321 Main Street',
-      country: 'United States',
-      city: 'Austin',
-      state: 'TX',
-      postalCode: '78701',
-      latitude: 30.2672,
-      longitude: -97.7431,
-      siteType: 'Retail',
-      status: 'Active',
-      dateAdded: '2023-12-05',
-      contactName: 'Emily Davis',
-      contactEmail: 'emily.d@company.com',
-      contactPhone: '+1 (555) 456-7890'
-    },
-    {
-      id: '5',
-      siteName: 'Manufacturing Plant',
-      siteId: 'SITE-005',
-      siteAddress: '654 Production Ave',
-      country: 'United States',
-      city: 'Detroit',
-      state: 'MI',
-      postalCode: '48201',
-      latitude: 42.3314,
-      longitude: -83.0458,
-      siteType: 'Manufacturing',
-      status: 'Under Construction',
-      dateAdded: '2024-01-30',
-      contactName: 'David Wilson',
-      contactEmail: 'd.wilson@company.com',
-      contactPhone: '+1 (555) 567-8901'
-    }
-  ], []);
+  // Get sites from Supabase
+  const { sites: sitesData, loading: sitesLoading, error: sitesError } = useSites();
 
   const filteredSites = useMemo(() => {
-    const filtered = sites.filter(site => {
+    const filtered = sitesData.filter(site => {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
@@ -284,7 +194,7 @@ export default function Sites() {
         return 0;
       }
     });
-  }, [searchTerm, sites, sortBy, sortOrder, selectedSiteType, selectedStatus, selectedCountry]);
+  }, [searchTerm, sitesData, sortBy, sortOrder, selectedSiteType, selectedStatus, selectedCountry]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredSites.length / itemsPerPage);
@@ -847,7 +757,7 @@ export default function Sites() {
                       <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No sites found</p>
                       <p className="text-sm text-gray-500">
-                        {sites.length === 0 
+                        {sitesData.length === 0 
                           ? 'Start by adding sites to your directory'
                           : 'Try adjusting your search criteria'}
                       </p>
@@ -940,7 +850,7 @@ export default function Sites() {
               <MapPin className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">No sites found</p>
               <p className="text-sm text-gray-500">
-                {sites.length === 0 
+                {sitesData.length === 0 
                   ? 'Start by adding sites to your directory'
                   : 'Try adjusting your search criteria'}
               </p>
@@ -1059,7 +969,7 @@ export default function Sites() {
               </p>
               {filteredSites.length === 0 && (
                 <p className="text-sm text-gray-500 mt-4">
-                  {sites.length === 0 
+                  {sitesData.length === 0 
                     ? 'Start by adding sites to your directory'
                     : 'Try adjusting your search criteria'}
                 </p>

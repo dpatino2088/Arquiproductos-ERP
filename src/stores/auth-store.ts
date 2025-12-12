@@ -75,7 +75,7 @@ export const useAuthStore = create<AuthState>()(
           ]) as any);
           
           if (error) {
-            logger.error('Error getting session', error);
+            logger.error('Error getting session', error as Error);
             set({ isLoading: false, isAuthenticated: false });
             return;
           }
@@ -110,17 +110,41 @@ export const useAuthStore = create<AuthState>()(
               .finally(() => {
                 set({ isLoading: false });
               });
-            return;
           } else {
             set({ isLoading: false, isAuthenticated: false });
           }
 
-          // Subscribe to auth state changes once
+          // Subscribe to auth state changes once - ALWAYS set up listener
+          // This is critical to capture login/logout/token refresh events
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const storeAny: any = useAuthStore as any;
           if (!storeAny.__authListenerSet) {
             const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+              console.log('🔔 Auth state change:', event, session?.user?.email);
+              
+              // Handle password recovery - DO NOT auto-redirect or set auth
+              // The AuthCallback component will handle the redirect to /auth/reset-password
+              if (event === 'PASSWORD_RECOVERY') {
+                console.log('🔐 Password recovery event detected - AuthCallback will handle redirect');
+                // Don't set auth in store - user needs to complete password reset first
+                // Don't redirect - AuthCallback component handles this
+                return;
+              }
+              
+              // Handle USER_UPDATED (after password change) - don't auto-set auth during recovery
+              if (event === 'USER_UPDATED') {
+                console.log('🔐 User updated event');
+                // If we're in the recovery flow, don't auto-set auth
+                // The ResetPasswordForm component will handle sign out after password update
+                if (window.location.pathname.includes('/auth/reset-password') || 
+                    window.location.pathname.includes('/new-password')) {
+                  console.log('✅ Password updated during recovery flow - ResetPasswordForm will handle');
+                  return;
+                }
+              }
+              
               if (event === 'SIGNED_IN' && session?.user) {
+                console.log('✅ User signed in:', session.user.email);
                 const basicUser: User = {
                   id: session.user.id,
                   email: session.user.email || '',
@@ -145,6 +169,7 @@ export const useAuthStore = create<AuthState>()(
                   })
                   .catch(() => {});
               } else if (event === 'SIGNED_OUT') {
+                console.log('👋 User signed out');
                 set({
                   user: null,
                   accessToken: null,
@@ -155,9 +180,12 @@ export const useAuthStore = create<AuthState>()(
               }
             });
             storeAny.__authListenerSet = subscription;
+            console.log('✅ Auth state listener established');
+          } else {
+            console.log('ℹ️ Auth state listener already exists');
           }
         } catch (error) {
-          logger.error('Error initializing auth', error);
+          logger.error('Error initializing auth', error as Error);
           // Always set loading to false, even on error
           set({ 
             isLoading: false,
@@ -165,6 +193,37 @@ export const useAuthStore = create<AuthState>()(
             user: null,
             accessToken: null,
           });
+          
+          // Still try to set up listener even on error
+          const storeAny: any = useAuthStore as any;
+          if (!storeAny.__authListenerSet) {
+            try {
+              const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+                console.log('🔔 Auth state change (fallback listener):', event, session?.user?.email);
+                if (event === 'SIGNED_IN' && session?.user) {
+                  const basicUser: User = {
+                    id: session.user.id,
+                    email: session.user.email || '',
+                    name: session.user.user_metadata?.name || session.user.email || '',
+                    role: 'user',
+                  };
+                  get().setAuth(basicUser, session.access_token);
+                } else if (event === 'SIGNED_OUT') {
+                  set({
+                    user: null,
+                    accessToken: null,
+                    isAuthenticated: false,
+                    error: null,
+                    isLoading: false,
+                  });
+                }
+              });
+              storeAny.__authListenerSet = subscription;
+              console.log('✅ Fallback auth state listener established');
+            } catch (listenerError) {
+              console.error('❌ Failed to establish fallback auth listener:', listenerError);
+            }
+          }
         }
       },
 
@@ -195,7 +254,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           await supabase.auth.signOut();
         } catch (error) {
-          logger.error('Error signing out from Supabase', error);
+          logger.error('Error signing out from Supabase', error as Error);
         }
         
         set({

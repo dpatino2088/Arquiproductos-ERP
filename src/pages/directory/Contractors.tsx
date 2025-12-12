@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useContractors } from '../../hooks/useDirectory';
 import { 
   Wrench, 
   Search, 
@@ -43,7 +44,7 @@ interface ContractorItem {
 // Function to generate avatar initials from name
 const generateAvatarInitials = (name: string) => {
   const words = name.trim().split(/\s+/);
-  if (words.length >= 2) {
+  if (words.length >= 2 && words[0] && words[1]) {
     return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
   }
   return name.substring(0, 2).toUpperCase();
@@ -118,82 +119,11 @@ export default function Contractors() {
     };
   }, []);
 
-  // Mock data for contractors - replace with actual data source
-  const contractors: ContractorItem[] = useMemo(() => [
-    {
-      id: '1',
-      company: 'ABC Construction',
-      name: 'John Smith',
-      licensesApplied: ['General Contractor', 'Electrical'],
-      cellPhone: '+1 (555) 123-4567',
-      proficiency1: 'Construction Management',
-      proficiency2: 'Project Planning',
-      proficiency3: 'Safety Compliance',
-      email: 'john.smith@abcconstruction.com',
-      status: 'Active',
-      dateAdded: '2024-01-15',
-      location: 'San Francisco, CA'
-    },
-    {
-      id: '2',
-      company: 'TechBuild Solutions',
-      name: 'Sarah Johnson',
-      licensesApplied: ['Plumbing', 'HVAC'],
-      cellPhone: '+1 (555) 234-5678',
-      proficiency1: 'HVAC Systems',
-      proficiency2: 'Plumbing Installation',
-      proficiency3: 'Energy Efficiency',
-      email: 'sarah.j@techbuild.com',
-      status: 'Active',
-      dateAdded: '2024-02-20',
-      location: 'Seattle, WA'
-    },
-    {
-      id: '3',
-      company: 'Elite Contractors Inc',
-      name: 'Michael Brown',
-      licensesApplied: ['General Contractor', 'Roofing', 'Siding'],
-      cellPhone: '+1 (555) 345-6789',
-      proficiency1: 'Roofing Systems',
-      proficiency2: 'Exterior Finishing',
-      proficiency3: 'Waterproofing',
-      email: 'm.brown@elitecontractors.com',
-      status: 'Active',
-      dateAdded: '2024-03-10',
-      location: 'Portland, OR'
-    },
-    {
-      id: '4',
-      company: 'Premier Renovations',
-      name: 'Emily Davis',
-      licensesApplied: ['Interior Design', 'Carpentry'],
-      cellPhone: '+1 (555) 456-7890',
-      proficiency1: 'Interior Design',
-      proficiency2: 'Custom Carpentry',
-      proficiency3: 'Finish Work',
-      email: 'emily.d@premierreno.com',
-      status: 'On Hold',
-      dateAdded: '2023-12-05',
-      location: 'Austin, TX'
-    },
-    {
-      id: '5',
-      company: 'Masonry Masters',
-      name: 'David Wilson',
-      licensesApplied: ['Masonry', 'Concrete'],
-      cellPhone: '+1 (555) 567-8901',
-      proficiency1: 'Stone Masonry',
-      proficiency2: 'Concrete Work',
-      proficiency3: 'Foundation Repair',
-      email: 'd.wilson@masonrymasters.com',
-      status: 'Active',
-      dateAdded: '2024-01-30',
-      location: 'Detroit, MI'
-    }
-  ], []);
+  // Get contractors from Supabase
+  const { contractors: contractorsData, loading: contractorsLoading, error: contractorsError } = useContractors();
 
   const filteredContractors = useMemo(() => {
-    const filtered = contractors.filter(contractor => {
+    const filtered = contractorsData.filter(contractor => {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
@@ -203,7 +133,7 @@ export default function Contractors() {
         contractor.proficiency1.toLowerCase().includes(searchLower) ||
         contractor.proficiency2.toLowerCase().includes(searchLower) ||
         contractor.proficiency3.toLowerCase().includes(searchLower) ||
-        contractor.licensesApplied.some(license => license.toLowerCase().includes(searchLower)) ||
+        contractor.licensesApplied.some((license: string) => license.toLowerCase().includes(searchLower)) ||
         (contractor.email && contractor.email.toLowerCase().includes(searchLower)) ||
         (contractor.location && contractor.location.toLowerCase().includes(searchLower))
       );
@@ -267,7 +197,7 @@ export default function Contractors() {
         return 0;
       }
     });
-  }, [searchTerm, contractors, sortBy, sortOrder, selectedStatus, selectedProficiency1, selectedProficiency2]);
+  }, [searchTerm, contractorsData, sortBy, sortOrder, selectedStatus, selectedProficiency1, selectedProficiency2]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredContractors.length / itemsPerPage);
@@ -797,7 +727,7 @@ export default function Contractors() {
                       <Wrench className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No contractors found</p>
                       <p className="text-sm text-gray-500">
-                        {contractors.length === 0 
+                        {contractorsData.length === 0 
                           ? 'Start by adding contractors to your directory'
                           : 'Try adjusting your search criteria'}
                       </p>
@@ -837,7 +767,7 @@ export default function Contractors() {
                       <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{contractor.name}</td>
                       <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>
                         <div className="flex flex-wrap gap-1">
-                          {contractor.licensesApplied.map((license, index) => (
+                          {contractor.licensesApplied.map((license: string, index: number) => (
                             <span key={index} className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
                               {license}
                             </span>
@@ -884,7 +814,7 @@ export default function Contractors() {
               <Wrench className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">No contractors found</p>
               <p className="text-sm text-gray-500">
-                {contractors.length === 0 
+                {contractorsData.length === 0 
                   ? 'Start by adding contractors to your directory'
                   : 'Try adjusting your search criteria'}
               </p>
@@ -949,7 +879,7 @@ export default function Contractors() {
                       </div>
                     )}
                     <div className="flex flex-wrap gap-1">
-                      {contractor.licensesApplied.map((license, index) => (
+                      {contractor.licensesApplied.map((license: string, index: number) => (
                         <span key={index} className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
                           {license}
                         </span>

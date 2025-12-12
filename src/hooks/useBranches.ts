@@ -63,9 +63,26 @@ export const useBranches = (): UseBranchesResult => {
         .order('created_at', { ascending: false });
 
       if (fetchError) {
-        if (import.meta.env.DEV) {
+        // Handle expected errors silently (table doesn't exist, RLS, etc.)
+        const isExpectedError = 
+          fetchError.code === 'PGRST116' ||
+          fetchError.code === '42501' ||
+          fetchError.code === '42P01' ||
+          fetchError.message?.includes('relation') ||
+          fetchError.message?.includes('does not exist') ||
+          fetchError.message?.includes('permission denied');
+
+        if (!isExpectedError && import.meta.env.DEV) {
           console.error('❌ Error fetching branches:', fetchError);
         }
+        
+        if (isExpectedError) {
+          // Silently return empty array for expected errors
+          setBranches([]);
+          setIsLoading(false);
+          return;
+        }
+        
         throw fetchError;
       }
 
@@ -113,8 +130,20 @@ export const useBranches = (): UseBranchesResult => {
       setBranches(mappedBranches);
       logger.info('Branches loaded', { count: mappedBranches.length, companyId: currentCompany.id });
     } catch (err: any) {
-      logger.error('Error loading branches', err);
-      setError(err?.message || 'Failed to load branches');
+      // Only log unexpected errors
+      const isExpectedError = 
+        err?.code === 'PGRST116' ||
+        err?.code === '42501' ||
+        err?.code === '42P01' ||
+        err?.message?.includes('relation') ||
+        err?.message?.includes('does not exist') ||
+        err?.message?.includes('permission denied');
+
+      if (!isExpectedError) {
+        logger.error('Error loading branches', err);
+      }
+      
+      setError(isExpectedError ? null : (err?.message || 'Failed to load branches'));
       setBranches([]);
     } finally {
       setIsLoading(false);

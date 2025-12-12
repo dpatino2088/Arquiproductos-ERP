@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useContacts } from '../../hooks/useDirectory';
 import { 
   Contact, 
   Search, 
@@ -25,10 +26,10 @@ import {
 
 interface ContactItem {
   id: string;
-  firstName: string;
-  lastName: string;
+  firstName: string; // This will contain customer_name for compatibility
+  lastName: string; // This will be empty for unified model
   email: string;
-  company: string;
+  company: string; // This will contain customer_name for company type
   category: string;
   status: 'Active' | 'Inactive' | 'Archived';
   location: string;
@@ -39,13 +40,19 @@ interface ContactItem {
 }
 
 // Function to generate avatar initials (100% reliable, works everywhere)
-const generateAvatarInitials = (firstName: string, lastName: string) => {
-  return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+const generateAvatarInitials = (customerName: string) => {
+  // For unified model, use first two characters of customer_name
+  if (!customerName) return '??';
+  const words = customerName.trim().split(/\s+/);
+  if (words.length >= 2 && words[0] && words[1]) {
+    return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
+  }
+  return customerName.substring(0, 2).toUpperCase();
 };
 
 // Function to generate a consistent background color based on name
 // Using primary brand color for all avatars for consistency
-const generateAvatarColor = (firstName: string, lastName: string) => {
+const generateAvatarColor = (customerName: string) => {
   return 'var(--primary-brand-hex)'; // Primary brand color
 };
 
@@ -64,6 +71,13 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
 };
 
 export default function Contacts() {
+  // Debug log to confirm component is rendering
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('✅ Contacts component is rendering');
+    }
+  }, []);
+
   const { registerSubmodules } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -118,85 +132,31 @@ export default function Contacts() {
     };
   }, []);
 
-  // Mock data for contacts - replace with actual data source
-  const contacts: ContactItem[] = useMemo(() => [
-    {
-      id: '1',
-      firstName: 'John',
-      lastName: 'Smith',
-      email: 'john.smith@example.com',
-      company: 'Acme Corporation',
-      category: 'Client',
-      status: 'Active',
-      location: 'San Francisco, CA',
-      dateAdded: '2024-01-15',
-      phone: '+1 (555) 123-4567',
-      contactType: 'Business'
-    },
-    {
-      id: '2',
-      firstName: 'Sarah',
-      lastName: 'Johnson',
-      email: 'sarah.j@techcorp.com',
-      company: 'TechCorp Inc',
-      category: 'Partner',
-      status: 'Active',
-      location: 'Seattle, WA',
-      dateAdded: '2024-02-20',
-      phone: '+1 (555) 234-5678',
-      contactType: 'Business'
-    },
-    {
-      id: '3',
-      firstName: 'Michael',
-      lastName: 'Brown',
-      email: 'm.brown@email.com',
-      company: 'Brown & Associates',
-      category: 'Vendor',
-      status: 'Active',
-      location: 'New York, NY',
-      dateAdded: '2024-03-10',
-      phone: '+1 (555) 345-6789',
-      contactType: 'Business'
-    },
-    {
-      id: '4',
-      firstName: 'Emily',
-      lastName: 'Davis',
-      email: 'emily.davis@startup.io',
-      company: 'StartupCo',
-      category: 'Client',
-      status: 'Inactive',
-      location: 'Austin, TX',
-      dateAdded: '2023-12-05',
-      phone: '+1 (555) 456-7890',
-      contactType: 'Business'
-    },
-    {
-      id: '5',
-      firstName: 'David',
-      lastName: 'Wilson',
-      email: 'd.wilson@global.com',
-      company: 'Global Solutions',
-      category: 'Partner',
-      status: 'Active',
-      location: 'Portland, OR',
-      dateAdded: '2024-01-30',
-      phone: '+1 (555) 567-8901',
-      contactType: 'Business'
+  // Get contacts from Supabase
+  const { contacts: contactsData, loading: contactsLoading, error: contactsError } = useContacts();
+
+  // Debug log
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('🔍 Contacts component - Data:', {
+        contactsCount: contactsData.length,
+        loading: contactsLoading,
+        error: contactsError,
+        contacts: contactsData
+      });
     }
-  ], []);
+  }, [contactsData, contactsLoading, contactsError]);
 
   const filteredContacts = useMemo(() => {
-    const filtered = contacts.filter(contact => {
-      // Search filter
+    const filtered = contactsData.filter(contact => {
+      // Search filter - safely handle undefined/null values
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
-        contact.firstName.toLowerCase().includes(searchLower) ||
-        contact.lastName.toLowerCase().includes(searchLower) ||
-        contact.email.toLowerCase().includes(searchLower) ||
-        contact.company.toLowerCase().includes(searchLower) ||
-        contact.category.toLowerCase().includes(searchLower)
+        (contact.firstName || '').toLowerCase().includes(searchLower) ||
+        (contact.lastName || '').toLowerCase().includes(searchLower) ||
+        (contact.email || '').toLowerCase().includes(searchLower) ||
+        (contact.company || '').toLowerCase().includes(searchLower) ||
+        (contact.category || '').toLowerCase().includes(searchLower)
       );
 
       // Category filter
@@ -215,31 +175,31 @@ export default function Contacts() {
       return matchesSearch && matchesCategory && matchesStatus && matchesContactType && matchesLocation;
     });
 
-    // Apply sorting
+    // Apply sorting - safely handle undefined/null values
     return filtered.sort((a, b) => {
       let aValue: string | Date;
       let bValue: string | Date;
 
       switch (sortBy) {
         case 'firstName':
-          aValue = a.firstName.toLowerCase();
-          bValue = b.firstName.toLowerCase();
+          aValue = (a.firstName || '').toLowerCase();
+          bValue = (b.firstName || '').toLowerCase();
           break;
         case 'company':
-          aValue = a.company.toLowerCase();
-          bValue = b.company.toLowerCase();
+          aValue = (a.company || '').toLowerCase();
+          bValue = (b.company || '').toLowerCase();
           break;
         case 'category':
-          aValue = a.category.toLowerCase();
-          bValue = b.category.toLowerCase();
+          aValue = (a.category || '').toLowerCase();
+          bValue = (b.category || '').toLowerCase();
           break;
         case 'dateAdded':
-          aValue = new Date(a.dateAdded);
-          bValue = new Date(b.dateAdded);
+          aValue = a.dateAdded ? new Date(a.dateAdded) : new Date(0);
+          bValue = b.dateAdded ? new Date(b.dateAdded) : new Date(0);
           break;
         default:
-          aValue = a.firstName.toLowerCase();
-          bValue = b.firstName.toLowerCase();
+          aValue = (a.firstName || '').toLowerCase();
+          bValue = (b.firstName || '').toLowerCase();
       }
 
       if (sortBy === 'dateAdded') {
@@ -254,7 +214,7 @@ export default function Contacts() {
         return 0;
       }
     });
-  }, [searchTerm, contacts, sortBy, sortOrder, selectedCategory, selectedStatus, selectedContactType, selectedLocation]);
+  }, [searchTerm, contactsData, sortBy, sortOrder, selectedCategory, selectedStatus, selectedContactType, selectedLocation]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredContacts.length / itemsPerPage);
@@ -324,10 +284,11 @@ export default function Contacts() {
 
   // Filter options based on search terms
   const getFilteredCategoryOptions = () => {
-    const categoryOptions = ['Client', 'Partner', 'Vendor', 'Supplier', 'Consultant'];
+    // Get unique categories from actual data - safely handle null/undefined
+    const categoryOptions = Array.from(new Set(contactsData.map(c => c.category).filter(Boolean).filter(cat => cat != null)));
     if (!categorySearchTerm) return categoryOptions;
     return categoryOptions.filter(cat => 
-      cat.toLowerCase().includes(categorySearchTerm.toLowerCase())
+      (cat || '').toLowerCase().includes(categorySearchTerm.toLowerCase())
     );
   };
 
@@ -360,8 +321,8 @@ export default function Contacts() {
     // Store contact data in sessionStorage for the Contact Info page
     sessionStorage.setItem('selectedContact', JSON.stringify(contact));
     
-    // Create slug from contact name
-    const slug = `${contact.firstName.toLowerCase()}-${contact.lastName.toLowerCase()}`;
+    // Create slug from contact name - safely handle null/undefined
+    const slug = (contact.firstName || 'contact').toLowerCase().replace(/\s+/g, '-');
     
     // Navigate to contact detail (you can create this page later)
     // router.navigate(`/directory/contacts/${slug}`);
@@ -397,6 +358,42 @@ export default function Contacts() {
     }
   };
 
+  // Show loading state
+  if (contactsLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading contacts...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (contactsError) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <p className="text-sm text-red-600 mb-2">Error loading contacts: {contactsError}</p>
+            {contactsError.includes('null') && (
+              <p className="text-xs text-gray-500 mb-4">Please make sure you have selected a company.</p>
+            )}
+            <button 
+              onClick={() => window.location.reload()} 
+              className="px-4 py-2 bg-primary text-white rounded hover:opacity-90"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -418,7 +415,7 @@ export default function Contacts() {
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
           >
             <Plus style={{ width: '14px', height: '14px' }} />
-            Add Contact
+            New Contact
           </button>
         </div>
       </div>
@@ -753,28 +750,19 @@ export default function Contacts() {
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
-              <colgroup>
-                <col style={{ width: '22%' }} /> {/* Contact - base width */}
-                <col style={{ width: '18%' }} /> {/* Company - base * 0.818 */}
-                <col style={{ width: '15%' }} /> {/* Category - base * 0.682 */}
-                <col style={{ width: '12%' }} /> {/* Status - base * 0.545 */}
-                <col style={{ width: '18%' }} /> {/* Location - base * 0.818 */}
-                <col style={{ width: '10%' }} /> {/* Date Added - base * 0.455 */}
-                <col style={{ width: '5%' }} />  {/* Actions - fixed small */}
-              </colgroup>
+            <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '1.5rem', paddingRight: '1rem' }}>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('firstName')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Contact
+                      Customer Name
                       {sortBy === 'firstName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.818rem', paddingRight: '0.818rem' }}>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('company')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -783,37 +771,30 @@ export default function Contacts() {
                       {sortBy === 'company' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.682rem', paddingRight: '0.682rem' }}>
-                    <button
-                      onClick={() => handleSort('category')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Category
-                      {sortBy === 'category' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.545rem', paddingRight: '0.545rem' }}>Status</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.818rem', paddingRight: '0.818rem' }}>Location</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.455rem', paddingRight: '0.455rem' }}>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Primary Phone</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Country</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">City</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Contact Type</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Date Added
+                      Created At
                       {sortBy === 'dateAdded' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-200">
                 {filteredContacts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center">
+                    <td colSpan={8} className="py-12 text-center">
                       <Contact className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No contacts found</p>
                       <p className="text-sm text-gray-500">
-                        {contacts.length === 0 
+                        {contactsData.length === 0 
                           ? 'Start by adding contacts to your directory'
                           : 'Try adjusting your search criteria'}
                       </p>
@@ -821,58 +802,50 @@ export default function Contacts() {
                   </tr>
                 ) : (
                   paginatedContacts.map((contact) => (
-                    <tr key={contact.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '1.5rem', paddingRight: '1rem' }}>
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            <div 
-                              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" 
-                              style={{ backgroundColor: generateAvatarColor(contact.firstName, contact.lastName) }}
-                            >
-                              {generateAvatarInitials(contact.firstName, contact.lastName)}
-                            </div>
-                            <div 
-                              className={`absolute -bottom-0.5 -right-0.5 ${getDotSize('sm')} rounded-full border border-white`}
-                              style={{
-                                backgroundColor: 
-                                  contact.status === 'Active' ? 'var(--avatar-status-green)' :
-                                  contact.status === 'Inactive' ? 'var(--avatar-status-gray)' :
-                                  contact.status === 'Archived' ? 'var(--avatar-status-purple)' :
-                                  'var(--avatar-status-gray)'
-                              }}>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="font-medium text-gray-900 text-sm">
-                              {contact.firstName} {contact.lastName}
-                            </div>
-                            <div className="text-xs" style={{ color: 'var(--gray-500)' }}>{contact.email}</div>
-                          </div>
+                    <tr 
+                      key={contact.id} 
+                      onClick={() => router.navigate(`/directory/contacts/edit/${contact.id}`)}
+                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                    >
+                      <td className="py-4 px-4 text-gray-900 text-sm">
+                        <div className="font-medium">{contact.firstName}</div>
+                      </td>
+                      <td className="py-4 px-4 text-gray-700 text-sm">
+                        {contact.company || 'N/A'}
+                      </td>
+                      <td className="py-4 px-4 text-gray-700 text-sm">
+                        <div className="flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-gray-400" />
+                          {(contact as any).primary_phone || contact.phone || 'N/A'}
                         </div>
                       </td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.818rem', paddingRight: '0.818rem' }}>{contact.company}</td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.682rem', paddingRight: '0.682rem' }}>{contact.category}</td>
-                      <td className="py-4" style={{ paddingLeft: '0.545rem', paddingRight: '0.545rem' }}>{getStatusBadge(contact.status)}</td>
-                      <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.818rem', paddingRight: '0.818rem' }}>{contact.location}</td>
-                      <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.455rem', paddingRight: '0.455rem' }}>{new Date(contact.dateAdded).toLocaleDateString()}</td>
-                      <td className="py-2" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>
-                        <div className="flex items-center">
-                          <button 
-                            onClick={() => handleViewContact(contact)}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            aria-label={`View ${contact.firstName} ${contact.lastName}`}
-                            title={`View ${contact.firstName} ${contact.lastName}`}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button 
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            aria-label={`More options for ${contact.firstName} ${contact.lastName}`}
-                            title={`More options for ${contact.firstName} ${contact.lastName}`}
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </button>
+                      <td className="py-4 px-4 text-gray-700 text-sm">
+                        <div className="flex items-center gap-1">
+                          <Mail className="w-3 h-3 text-gray-400" />
+                          {contact.email || 'N/A'}
                         </div>
+                      </td>
+                      <td className="py-4 px-4 text-gray-700 text-sm">
+                        {(contact as any).country || contact.location?.split(', ').pop() || 'N/A'}
+                      </td>
+                      <td className="py-4 px-4 text-gray-700 text-sm">
+                        {(contact as any).city || contact.location?.split(', ')[0] || 'N/A'}
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium capitalize ${
+                          (contact as any).contact_type === 'company' || contact.category === 'Company'
+                            ? 'bg-blue-50 text-blue-700' 
+                            : 'bg-gray-50 text-gray-700'
+                        }`}>
+                          {(contact as any).contact_type === 'company' ? 'Company' : 'Individual'}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-gray-600 text-sm">
+                        {(contact as any).created_at 
+                          ? new Date((contact as any).created_at).toLocaleDateString() 
+                          : contact.dateAdded 
+                            ? new Date(contact.dateAdded).toLocaleDateString() 
+                            : 'N/A'}
                       </td>
                     </tr>
                   ))
@@ -891,7 +864,7 @@ export default function Contacts() {
               <Contact className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">No contacts found</p>
               <p className="text-sm text-gray-500">
-                {contacts.length === 0 
+                {contactsData.length === 0 
                   ? 'Start by adding contacts to your directory'
                   : 'Try adjusting your search criteria'}
               </p>
@@ -908,9 +881,9 @@ export default function Contacts() {
                     <div className="relative">
                       <div 
                         className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base" 
-                        style={{ backgroundColor: generateAvatarColor(contact.firstName, contact.lastName) }}
+                        style={{ backgroundColor: generateAvatarColor(contact.firstName) }}
                       >
-                        {generateAvatarInitials(contact.firstName, contact.lastName)}
+                        {generateAvatarInitials(contact.firstName)}
                       </div>
                       <div 
                         className={`absolute -bottom-1 -right-1 ${getDotSize('lg')} rounded-full border-2 border-white`}
@@ -925,9 +898,11 @@ export default function Contacts() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">
-                        {contact.firstName} {contact.lastName}
+                        {contact.firstName}
                       </h3>
-                      <p className="text-xs text-gray-600 truncate">{contact.company}</p>
+                      {contact.category === 'Individual' && contact.company && (
+                        <p className="text-xs text-gray-600 truncate">{contact.company}</p>
+                      )}
                       <div className="mt-1">
                         {getStatusBadge(contact.status)}
                       </div>
@@ -935,8 +910,8 @@ export default function Contacts() {
                     <button 
                       onClick={() => handleViewContact(contact)}
                       className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
-                      aria-label={`Edit ${contact.firstName} ${contact.lastName}`}
-                      title={`Edit ${contact.firstName} ${contact.lastName}`}
+                      aria-label={`Edit ${contact.firstName}`}
+                      title={`Edit ${contact.firstName}`}
                     >
                       <Edit className="w-4 h-4" />
                     </button>

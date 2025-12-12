@@ -14,6 +14,7 @@ import './lib/service-worker' // Initialize Service Worker
 import './lib/rum-monitoring' // Initialize RUM
 import './lib/performance-budgets' // Initialize performance budgets
 import { useAuthStore } from './stores/auth-store'
+import { OrganizationProvider } from './context/OrganizationContext'
 
 // Initialize performance monitoring
 performanceMonitor.init()
@@ -32,8 +33,10 @@ logger.info('Application starting up', {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
-      <ReactQueryDevtools initialIsOpen={false} />
+      <OrganizationProvider>
+        <App />
+        <ReactQueryDevtools initialIsOpen={false} />
+      </OrganizationProvider>
     </QueryClientProvider>
   </React.StrictMode>
 )

@@ -62,9 +62,26 @@ export const useEmployees = (): UseEmployeesResult => {
         .order('created_at', { ascending: false });
 
       if (fetchError) {
-        if (import.meta.env.DEV) {
+        // Handle expected errors silently (table doesn't exist, RLS, etc.)
+        const isExpectedError = 
+          fetchError.code === 'PGRST116' ||
+          fetchError.code === '42501' ||
+          fetchError.code === '42P01' ||
+          fetchError.message?.includes('relation') ||
+          fetchError.message?.includes('does not exist') ||
+          fetchError.message?.includes('permission denied');
+
+        if (!isExpectedError && import.meta.env.DEV) {
           console.error('❌ Error fetching employees:', fetchError);
         }
+        
+        if (isExpectedError) {
+          // Silently return empty array for expected errors
+          setEmployees([]);
+          setIsLoading(false);
+          return;
+        }
+        
         throw fetchError;
       }
 
@@ -112,8 +129,20 @@ export const useEmployees = (): UseEmployeesResult => {
       setEmployees(mappedEmployees);
       logger.info('Employees loaded', { count: mappedEmployees.length, companyId: currentCompany.id });
     } catch (err: any) {
-      logger.error('Error loading employees', err);
-      setError(err?.message || 'Failed to load employees');
+      // Only log unexpected errors
+      const isExpectedError = 
+        err?.code === 'PGRST116' ||
+        err?.code === '42501' ||
+        err?.code === '42P01' ||
+        err?.message?.includes('relation') ||
+        err?.message?.includes('does not exist') ||
+        err?.message?.includes('permission denied');
+
+      if (!isExpectedError) {
+        logger.error('Error loading employees', err);
+      }
+      
+      setError(isExpectedError ? null : (err?.message || 'Failed to load employees'));
       setEmployees([]);
     } finally {
       setIsLoading(false);

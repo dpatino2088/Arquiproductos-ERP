@@ -77,6 +77,7 @@ export default function Signup() {
         email: email,
         password: password,
         options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
           data: {
             name: name,
             phone: phone,
@@ -88,6 +89,14 @@ export default function Signup() {
 
       if (error) {
         console.error('Supabase auth error:', error);
+        
+        // Handle rate limiting specifically
+        if (error.message?.includes('For security purposes') || error.message?.includes('429')) {
+          const waitTimeMatch = error.message.match(/(\d+) seconds?/);
+          const waitTime = waitTimeMatch ? waitTimeMatch[1] : '17';
+          throw new Error(`Too many signup attempts. Please wait ${waitTime} seconds before trying again.`);
+        }
+        
         throw error;
       }
 
@@ -125,13 +134,22 @@ export default function Signup() {
       console.error('Signup error:', error);
       
       if (error?.message) {
-        errorMessage = error.message;
+        // Check for rate limiting errors
+        if (error.message.includes('Too many signup attempts') || 
+            error.message.includes('For security purposes') ||
+            error.message.includes('429')) {
+          errorMessage = error.message;
+        } else {
+          errorMessage = error.message;
+        }
       } else if (error?.toString().includes('Failed to fetch') || error?.toString().includes('NetworkError')) {
         errorMessage = 'No se pudo conectar con Supabase. Verifica:\n1. Que tu proyecto de Supabase esté activo (no pausado)\n2. Que las credenciales en .env.local sean correctas\n3. Que hayas reiniciado el servidor después de crear .env.local\n4. Que no haya problemas de red o CORS';
       } else if (error?.code === 'PGRST301' || error?.message?.includes('JWT')) {
         errorMessage = 'Error de autenticación con Supabase. Verifica que tu anon key sea correcta.';
       } else if (error?.message?.includes('User already registered')) {
         errorMessage = 'Este email ya está registrado. Intenta hacer login en su lugar.';
+      } else if (error?.status === 429 || error?.code === '429') {
+        errorMessage = 'Too many signup attempts. Please wait a few seconds before trying again.';
       }
       
       setSignupError(errorMessage);

@@ -16,6 +16,7 @@ import {
   Filter,
   Search
 } from 'lucide-react';
+import DirectoryReports from './DirectoryReports';
 
 interface ReportModule {
   id: string;
@@ -78,6 +79,12 @@ const reportModules: ReportModule[] = [
     label: 'IT Management',
     icon: Monitor,
     description: 'IT asset reports, system usage, and technology analytics'
+  },
+  {
+    id: 'directory',
+    label: 'Directory',
+    icon: FileText,
+    description: 'Directory reports, contacts analytics, customers, sites, vendors, and contractors reports'
   }
 ];
 
@@ -137,7 +144,10 @@ export default function CompanyReports() {
         {/* Content Body */}
         <div className="flex-1 bg-gray-50 overflow-y-auto">
           <div>
-            {/* Coming Soon Content */}
+            {activeModule === 'directory' ? (
+              <DirectoryReports />
+            ) : (
+              /* Coming Soon Content */
             <div className="flex items-center justify-center min-h-[400px]">
               <div className="text-center">
                 <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -153,6 +163,7 @@ export default function CompanyReports() {
                 </div>
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>

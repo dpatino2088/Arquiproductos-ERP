@@ -1,4 +1,4 @@
-      import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import { useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -8,6 +8,7 @@ import { logger } from './lib/logger';
 import { useUIStore } from './stores/ui-store';
 import { useAuthStore } from './stores/auth-store';
 import { supabase, getUserProfile } from './lib/supabase';
+import Toast from './components/ui/Toast';
 
 // Code splitting with React.lazy
 const ManagementDashboard = lazy(() => {
@@ -121,6 +122,11 @@ const DirectoryContractorNew = lazy(() => {
   return import('./pages/directory/ContractorNew');
 });
 
+const TestDirectory = lazy(() => {
+  logger.debug('Loading Test Directory component');
+  return import('./pages/directory/TestDirectory');
+});
+
 const WhosWorking = lazy(() => {
   logger.debug('Loading Whos Working component');
   return import('./pages/time-and-attendance/WhosWorking');
@@ -159,6 +165,11 @@ const CompanySettings = lazy(() => {
   return import('./pages/settings/CompanySettings');
 });
 
+const OrganizationUsers = lazy(() => {
+  logger.debug('Loading Organization Users component');
+  return import('./pages/settings/OrganizationUsers');
+});
+
 const ManageOrganizations = lazy(() => {
   logger.debug('Loading Manage Organizations component');
   return import('./pages/organizations/ManageOrganizations');
@@ -183,6 +194,16 @@ const CompanyRegistration = lazy(() => {
 const ResetPassword = lazy(() => {
   logger.debug('Loading Reset Password component');
   return import('./pages/auth/ResetPassword');
+});
+
+const AuthCallback = lazy(() => {
+  logger.debug('Loading Auth Callback component');
+  return import('./pages/auth/AuthCallback');
+});
+
+const ResetPasswordForm = lazy(() => {
+  logger.debug('Loading Reset Password Form component');
+  return import('./pages/auth/ResetPasswordForm');
 });
 
 const NewPassword = lazy(() => {
@@ -225,7 +246,8 @@ function App() {
 
   // Check if current page is auth page (memoized - must be before all useEffect)
   const isAuthPage = useMemo(() => [
-    'login', 'signup', 'company-registration', 'reset-password', 'new-password'
+    'login', 'signup', 'company-registration', 'reset-password', 'new-password',
+    'auth-callback', 'auth-reset-password'
   ].includes(currentPage), [currentPage]);
 
   // Initialize auth on mount
@@ -234,7 +256,7 @@ function App() {
       try {
         await initAuth();
       } catch (error) {
-        logger.error('Error initializing auth', error);
+        logger.error('Error initializing auth', error as Error);
         // Don't break the app if auth init fails
         useAuthStore.getState().setLoading(false);
       }
@@ -242,6 +264,12 @@ function App() {
     
     initializeAuth();
   }, [initAuth]);
+
+  // Note: Auth callbacks (recovery, signup, invite) are now handled by AuthCallback component
+  // This keeps the logic centralized and prevents conflicts with auto-redirects
+  // The AuthCallback component handles:
+  // - Password recovery tokens (type=recovery) → redirects to /auth/reset-password
+  // - Email confirmation (type=signup/invite) → processes and redirects to dashboard
 
   // Note: auth state changes handled inside auth store init
 
@@ -259,7 +287,8 @@ function App() {
     router.addRoute('/company-registration', () => setCurrentPage('company-registration'));
     router.addRoute('/auth/company-registration', () => setCurrentPage('company-registration'));
     router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
-    router.addRoute('/auth/reset-password', () => setCurrentPage('reset-password'));
+    router.addRoute('/auth/reset-password', () => setCurrentPage('auth-reset-password'));
+    router.addRoute('/auth/callback', () => setCurrentPage('auth-callback'));
     router.addRoute('/new-password', () => setCurrentPage('new-password'));
     router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
 
@@ -335,6 +364,7 @@ function App() {
     // Directory routes
     router.addRoute('/directory/contacts', () => setCurrentPage('directory-contacts'));
     router.addRoute('/directory/contacts/new', () => setCurrentPage('directory-contact-new'));
+    router.addRoute('/directory/contacts/edit/:id', () => setCurrentPage('directory-contact-new'));
     router.addRoute('/directory/customers', () => setCurrentPage('directory-customers'));
     router.addRoute('/directory/customers/new', () => setCurrentPage('directory-customer-new'));
     router.addRoute('/directory/sites', () => setCurrentPage('directory-sites'));
@@ -343,6 +373,7 @@ function App() {
     router.addRoute('/directory/vendors/new', () => setCurrentPage('directory-vendor-new'));
     router.addRoute('/directory/contractors', () => setCurrentPage('directory-contractors'));
     router.addRoute('/directory/contractors/new', () => setCurrentPage('directory-contractor-new'));
+    router.addRoute('/directory/test', () => setCurrentPage('test-directory'));
     router.addRoute('/directory', () => setCurrentPage('directory-contacts')); // Default to contacts
     
     // Time & Attendance routes
@@ -367,7 +398,6 @@ function App() {
     
     // Other routes - redirect to management dashboard
     router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
-    router.addRoute('/settings', () => setCurrentPage('company-settings'));
   }, [isAuthenticated, setViewMode]);
 
   // Monitor URL changes and trigger router navigation (for direct navigation like tests)
@@ -454,6 +484,8 @@ function App() {
         return <DirectoryContractors />;
       case 'directory-contractor-new':
         return <DirectoryContractorNew />;
+      case 'test-directory':
+        return <TestDirectory />;
 
       case 'reports':
         return <CompanyReports />;
@@ -471,6 +503,8 @@ function App() {
         return <CompanyReports />;
       case 'company-settings':
         return <CompanySettings />;
+      case 'organization-users':
+        return <OrganizationUsers organizationId={null} />;
       case 'manage-organizations':
         return <ManageOrganizations />;
       
@@ -485,6 +519,10 @@ function App() {
         return <ResetPassword />;
       case 'new-password':
         return <NewPassword />;
+      case 'auth-callback':
+        return <AuthCallback />;
+      case 'auth-reset-password':
+        return <ResetPasswordForm />;
       
       default:
         return <ManagementDashboard />;
@@ -493,6 +531,7 @@ function App() {
 
   return (
     <ErrorBoundary>
+      <Toast />
       <div className="min-h-dvh bg-background">
         {!isAuthenticated && !isAuthPage ? (
           <div className="min-h-dvh flex items-center justify-center p-6">

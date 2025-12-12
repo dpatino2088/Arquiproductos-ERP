@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Mail, CheckCircle, AlertCircle, Shield, Clock, Phone, Box } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export default function ResetPassword() {
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -12,15 +13,32 @@ export default function ResetPassword() {
     setIsLoading(true);
     setError('');
     
-    // Simulate reset password process
-    setTimeout(() => {
-      setIsLoading(false);
-      if (emailOrPhone) {
-        setIsSubmitted(true);
-      } else {
-        setError('Please enter a valid email address or phone number');
+    try {
+      // Get the frontend URL for password reset redirect
+      // Use /auth/callback to handle the recovery token properly
+      const siteUrl = window.location.origin;
+      const redirectTo = `${siteUrl}/auth/callback`;
+
+      // Call Supabase reset password
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(emailOrPhone, {
+        redirectTo: redirectTo,
+      });
+
+      if (resetError) {
+        console.error('Error resetting password:', resetError);
+        setError(resetError.message || 'Failed to send reset email. Please try again.');
+        setIsLoading(false);
+        return;
       }
-    }, 2000);
+
+      // Success
+      setIsSubmitted(true);
+      setIsLoading(false);
+    } catch (err: any) {
+      console.error('Error in reset password:', err);
+      setError(err.message || 'An unexpected error occurred. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   const handleBackToLogin = () => {

@@ -1,6 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useCustomers } from '../../hooks/useDirectory';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { 
   Users, 
   Search, 
@@ -42,7 +45,7 @@ interface CustomerItem {
 // Function to generate avatar initials from company name
 const generateAvatarInitials = (companyName: string) => {
   const words = companyName.trim().split(/\s+/);
-  if (words.length >= 2) {
+  if (words.length >= 2 && words[0] && words[1]) {
     return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
   }
   return companyName.substring(0, 2).toUpperCase();
@@ -69,6 +72,8 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
 
 export default function Customers() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { activeOrganizationId } = useOrganizationContext();
+  const { canEditCustomers, canViewQuotes, loading: roleLoading } = useCurrentOrgRole();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -122,77 +127,11 @@ export default function Customers() {
     };
   }, []);
 
-  // Mock data for customers - replace with actual data source
-  const customers: CustomerItem[] = useMemo(() => [
-    {
-      id: '1',
-      companyName: 'Acme Corporation',
-      contactName: 'John Smith',
-      email: 'john.smith@acme.com',
-      phone: '+1 (555) 123-4567',
-      industry: 'Technology',
-      customerType: 'Enterprise',
-      status: 'Active',
-      location: 'San Francisco, CA',
-      dateAdded: '2024-01-15',
-      totalRevenue: 125000
-    },
-    {
-      id: '2',
-      companyName: 'TechCorp Inc',
-      contactName: 'Sarah Johnson',
-      email: 'sarah.j@techcorp.com',
-      phone: '+1 (555) 234-5678',
-      industry: 'Software',
-      customerType: 'SMB',
-      status: 'Active',
-      location: 'Seattle, WA',
-      dateAdded: '2024-02-20',
-      totalRevenue: 45000
-    },
-    {
-      id: '3',
-      companyName: 'Global Solutions',
-      contactName: 'Michael Brown',
-      email: 'm.brown@global.com',
-      phone: '+1 (555) 345-6789',
-      industry: 'Consulting',
-      customerType: 'Enterprise',
-      status: 'Active',
-      location: 'New York, NY',
-      dateAdded: '2024-03-10',
-      totalRevenue: 250000
-    },
-    {
-      id: '4',
-      companyName: 'StartupCo',
-      contactName: 'Emily Davis',
-      email: 'emily.davis@startup.io',
-      phone: '+1 (555) 456-7890',
-      industry: 'E-commerce',
-      customerType: 'Startup',
-      status: 'On Hold',
-      location: 'Austin, TX',
-      dateAdded: '2023-12-05',
-      totalRevenue: 15000
-    },
-    {
-      id: '5',
-      companyName: 'Digital Ventures',
-      contactName: 'David Wilson',
-      email: 'd.wilson@digital.com',
-      phone: '+1 (555) 567-8901',
-      industry: 'Marketing',
-      customerType: 'SMB',
-      status: 'Active',
-      location: 'Portland, OR',
-      dateAdded: '2024-01-30',
-      totalRevenue: 32000
-    }
-  ], []);
+  // Get customers from Supabase
+  const { customers: customersData, loading: customersLoading, error: customersError } = useCustomers();
 
   const filteredCustomers = useMemo(() => {
-    const filtered = customers.filter(customer => {
+    const filtered = customersData.filter(customer => {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
@@ -257,7 +196,7 @@ export default function Customers() {
         return 0;
       }
     });
-  }, [searchTerm, customers, sortBy, sortOrder, selectedIndustry, selectedStatus, selectedCustomerType, selectedLocation]);
+  }, [searchTerm, customersData, sortBy, sortOrder, selectedIndustry, selectedStatus, selectedCustomerType, selectedLocation]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
@@ -351,7 +290,8 @@ export default function Customers() {
   };
 
   const getFilteredLocationOptions = () => {
-    const locationOptions = ['San Francisco, CA', 'Seattle, WA', 'Portland, OR', 'Austin, TX', 'New York, NY'];
+    // Get unique locations from actual data
+    const locationOptions = Array.from(new Set(customersData.map(c => c.location).filter(Boolean)));
     if (!locationSearchTerm) return locationOptions;
     return locationOptions.filter(location => 
       location.toLowerCase().includes(locationSearchTerm.toLowerCase())
@@ -451,6 +391,39 @@ export default function Customers() {
     }).format(amount);
   };
 
+  // Show loading state
+  if (customersLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading customers...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (customersError) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <p className="text-sm text-red-600 mb-4">Error loading customers: {customersError}</p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="px-4 py-2 bg-primary text-white rounded hover:opacity-90"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -466,14 +439,20 @@ export default function Customers() {
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
           </button>
-          <button
-            onClick={() => router.navigate('/directory/customers/new')}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-          >
-            <Plus style={{ width: '14px', height: '14px' }} />
-            Add Customer
-          </button>
+          {canEditCustomers ? (
+            <button
+              onClick={() => router.navigate('/directory/customers/new')}
+              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            >
+              <Plus style={{ width: '14px', height: '14px' }} />
+              Add Customer
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              You don't have permission to create customers
+            </span>
+          )}
         </div>
       </div>
 
@@ -861,7 +840,7 @@ export default function Customers() {
                       <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No customers found</p>
                       <p className="text-sm text-gray-500">
-                        {customers.length === 0 
+                        {customersData.length === 0 
                           ? 'Start by adding customers to your directory'
                           : 'Try adjusting your search criteria'}
                       </p>
@@ -915,13 +894,25 @@ export default function Customers() {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button 
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            aria-label={`More options for ${customer.companyName}`}
-                            title={`More options for ${customer.companyName}`}
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </button>
+                          {canEditCustomers && (
+                            <button 
+                              onClick={() => handleViewCustomer(customer)}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors"
+                              aria-label={`Edit ${customer.companyName}`}
+                              title={`Edit ${customer.companyName}`}
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canEditCustomers && (
+                            <button 
+                              className="p-1 hover:bg-gray-100 rounded transition-colors"
+                              aria-label={`More options for ${customer.companyName}`}
+                              title={`More options for ${customer.companyName}`}
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -941,7 +932,7 @@ export default function Customers() {
               <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">No customers found</p>
               <p className="text-sm text-gray-500">
-                {customers.length === 0 
+                {customersData.length === 0 
                   ? 'Start by adding customers to your directory'
                   : 'Try adjusting your search criteria'}
               </p>
@@ -984,14 +975,16 @@ export default function Customers() {
                         {getCustomerTypeBadge(customer.customerType)}
                       </div>
                     </div>
-                    <button 
-                      onClick={() => handleViewCustomer(customer)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
-                      aria-label={`Edit ${customer.companyName}`}
-                      title={`Edit ${customer.companyName}`}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
+                    {canEditCustomers && (
+                      <button 
+                        onClick={() => handleViewCustomer(customer)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
+                        aria-label={`Edit ${customer.companyName}`}
+                        title={`Edit ${customer.companyName}`}
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Customer Info */}

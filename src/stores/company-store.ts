@@ -82,10 +82,42 @@ export const useCompanyStore = create<CompanyState>()(
             .order('created_at', { ascending: true });
 
           if (error) {
-            if (import.meta.env.DEV) {
-              console.error('❌ Error loading companies:', error);
+            // Handle case where table doesn't exist or user has no companies
+            // Also handle RLS errors (42501) and 404/500 errors gracefully
+            const isExpectedError = 
+              error.code === 'PGRST116' || // No rows returned
+              error.code === '42501' || // Permission denied (RLS)
+              error.code === '42P01' || // Relation does not exist
+              error.message?.includes('relation') || 
+              error.message?.includes('does not exist') ||
+              error.message?.includes('permission denied') ||
+              error.message?.includes('row-level security');
+
+            if (isExpectedError) {
+              // Silently handle expected errors - user may not have companies yet or tables don't exist
+              if (import.meta.env.DEV) {
+                console.debug('⚠️ Companies query returned expected error (user may not have companies):', error.code);
+              }
+              // Return empty array instead of throwing
+              set({
+                availableCompanies: [],
+                isLoading: false,
+                error: null,
+              });
+              return;
             }
-            throw error;
+            
+            // Only log unexpected errors
+            if (import.meta.env.DEV) {
+              console.error('❌ Unexpected error loading companies:', error);
+            }
+            // Don't throw - just set error state
+            set({
+              error: error?.message || 'Failed to load companies',
+              availableCompanies: [],
+              isLoading: false,
+            });
+            return;
           }
 
           if (import.meta.env.DEV) {
@@ -110,18 +142,31 @@ export const useCompanyStore = create<CompanyState>()(
           set({ availableCompanies: companyUsers });
 
           // If no current company is set, use the first one
-          if (!get().currentCompany && companyUsers.length > 0 && companyUsers[0].company) {
-            get().setCurrentCompany(companyUsers[0].company, companyUsers[0]);
+          const firstCompanyUser = companyUsers[0];
+          if (!get().currentCompany && firstCompanyUser && firstCompanyUser.company) {
+            get().setCurrentCompany(firstCompanyUser.company, firstCompanyUser);
           }
 
           logger.info('User companies loaded', { count: companyUsers.length });
         } catch (error: any) {
-          logger.error('Error loading user companies', error);
-          if (import.meta.env.DEV) {
-            console.error('❌ Error in loadUserCompanies:', error);
+          // Only log unexpected errors
+          const isExpectedError = 
+            error?.code === 'PGRST116' ||
+            error?.code === '42501' ||
+            error?.code === '42P01' ||
+            error?.message?.includes('relation') ||
+            error?.message?.includes('does not exist') ||
+            error?.message?.includes('permission denied');
+
+          if (!isExpectedError) {
+            logger.error('Error loading user companies', error);
+            if (import.meta.env.DEV) {
+              console.error('❌ Error in loadUserCompanies:', error);
+            }
           }
+          
           set({ 
-            error: error?.message || 'Failed to load companies',
+            error: isExpectedError ? null : (error?.message || 'Failed to load companies'),
             availableCompanies: [],
           });
         } finally {
@@ -137,7 +182,7 @@ export const useCompanyStore = create<CompanyState>()(
         );
 
         if (!companyUser || !companyUser.company) {
-          logger.error('Company not found', { companyId });
+          logger.warn('Company not found', { companyId });
           set({ error: 'Company not found' });
           return;
         }

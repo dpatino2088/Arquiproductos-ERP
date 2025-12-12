@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useVendors } from '../../hooks/useDirectory';
 import { 
   Store, 
   Search, 
@@ -41,7 +42,7 @@ interface VendorItem {
 // Function to generate avatar initials from vendor name
 const generateAvatarInitials = (vendorName: string) => {
   const words = vendorName.trim().split(/\s+/);
-  if (words.length >= 2) {
+  if (words.length >= 2 && words[0] && words[1]) {
     return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
   }
   return vendorName.substring(0, 2).toUpperCase();
@@ -116,90 +117,11 @@ export default function Vendors() {
     };
   }, []);
 
-  // Mock data for vendors - replace with actual data source
-  const vendors: VendorItem[] = useMemo(() => [
-    {
-      id: '1',
-      vendorName: 'Global Supplies Co.',
-      vendorId: 'VEND-001',
-      phone: '+1 (555) 123-4567',
-      email: 'contact@globalsupplies.com',
-      country: 'United States',
-      currency: 'USD',
-      status: 'Active',
-      dateAdded: '2024-01-15',
-      contactName: 'John Smith',
-      website: 'www.globalsupplies.com'
-    },
-    {
-      id: '2',
-      vendorName: 'TechParts International',
-      vendorId: 'VEND-002',
-      phone: '+1 (555) 234-5678',
-      email: 'info@techparts.com',
-      country: 'United States',
-      currency: 'USD',
-      status: 'Active',
-      dateAdded: '2024-02-20',
-      contactName: 'Sarah Johnson',
-      website: 'www.techparts.com'
-    },
-    {
-      id: '3',
-      vendorName: 'European Materials Ltd',
-      vendorId: 'VEND-003',
-      phone: '+44 20 1234 5678',
-      email: 'sales@europeanmaterials.co.uk',
-      country: 'United Kingdom',
-      currency: 'GBP',
-      status: 'Active',
-      dateAdded: '2024-03-10',
-      contactName: 'Michael Brown',
-      website: 'www.europeanmaterials.co.uk'
-    },
-    {
-      id: '4',
-      vendorName: 'Asia Pacific Trading',
-      vendorId: 'VEND-004',
-      phone: '+65 6123 4567',
-      email: 'contact@asiapacific.sg',
-      country: 'Singapore',
-      currency: 'SGD',
-      status: 'Active',
-      dateAdded: '2023-12-05',
-      contactName: 'Emily Davis',
-      website: 'www.asiapacific.sg'
-    },
-    {
-      id: '5',
-      vendorName: 'Canadian Wholesale Inc',
-      vendorId: 'VEND-005',
-      phone: '+1 (416) 555-7890',
-      email: 'info@canadianwholesale.ca',
-      country: 'Canada',
-      currency: 'CAD',
-      status: 'On Hold',
-      dateAdded: '2024-01-30',
-      contactName: 'David Wilson',
-      website: 'www.canadianwholesale.ca'
-    },
-    {
-      id: '6',
-      vendorName: 'Deutsche Materials GmbH',
-      vendorId: 'VEND-006',
-      phone: '+49 30 12345678',
-      email: 'kontakt@deutschematerials.de',
-      country: 'Germany',
-      currency: 'EUR',
-      status: 'Active',
-      dateAdded: '2024-02-15',
-      contactName: 'Hans Mueller',
-      website: 'www.deutschematerials.de'
-    }
-  ], []);
+  // Get vendors from Supabase
+  const { vendors: vendorsData, loading: vendorsLoading, error: vendorsError } = useVendors();
 
   const filteredVendors = useMemo(() => {
-    const filtered = vendors.filter(vendor => {
+    const filtered = vendorsData.filter(vendor => {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
@@ -267,7 +189,7 @@ export default function Vendors() {
         return 0;
       }
     });
-  }, [searchTerm, vendors, sortBy, sortOrder, selectedCountry, selectedStatus, selectedCurrency]);
+  }, [searchTerm, vendorsData, sortBy, sortOrder, selectedCountry, selectedStatus, selectedCurrency]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredVendors.length / itemsPerPage);
@@ -769,7 +691,7 @@ export default function Vendors() {
                       <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No vendors found</p>
                       <p className="text-sm text-gray-500">
-                        {vendors.length === 0 
+                        {vendorsData.length === 0 
                           ? 'Start by adding vendors to your directory'
                           : 'Try adjusting your search criteria'}
                       </p>
@@ -854,7 +776,7 @@ export default function Vendors() {
               <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">No vendors found</p>
               <p className="text-sm text-gray-500">
-                {vendors.length === 0 
+                {vendorsData.length === 0 
                   ? 'Start by adding vendors to your directory'
                   : 'Try adjusting your search criteria'}
               </p>

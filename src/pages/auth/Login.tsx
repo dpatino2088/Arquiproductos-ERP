@@ -76,6 +76,14 @@ export default function Login() {
 
       if (error) {
         console.error('Supabase auth error:', error);
+        
+        // Handle rate limiting specifically
+        if (error.message?.includes('For security purposes') || error.message?.includes('429')) {
+          const waitTimeMatch = error.message.match(/(\d+) seconds?/);
+          const waitTime = waitTimeMatch ? waitTimeMatch[1] : '17';
+          throw new Error(`Too many login attempts. Please wait ${waitTime} seconds before trying again.`);
+        }
+        
         throw error;
       }
 
@@ -113,13 +121,22 @@ export default function Login() {
       console.error('Login error:', error);
       
       if (error?.message) {
-        errorMessage = error.message;
+        // Check for rate limiting errors
+        if (error.message.includes('Too many login attempts') || 
+            error.message.includes('For security purposes') ||
+            error.message.includes('429')) {
+          errorMessage = error.message;
+        } else {
+          errorMessage = error.message;
+        }
       } else if (error?.toString().includes('Failed to fetch') || error?.toString().includes('NetworkError')) {
         errorMessage = 'No se pudo conectar con Supabase. Verifica:\n1. Que tu proyecto de Supabase esté activo\n2. Que las credenciales en .env.local sean correctas\n3. Que no haya problemas de red o CORS';
       } else if (error?.code === 'PGRST301' || error?.message?.includes('JWT')) {
         errorMessage = 'Error de autenticación con Supabase. Verifica que tu anon key sea correcta.';
       } else if (error?.code === 'invalid_credentials' || error?.message?.includes('Invalid login')) {
         errorMessage = 'Email o contraseña incorrectos.';
+      } else if (error?.status === 429 || error?.code === '429') {
+        errorMessage = 'Too many login attempts. Please wait a few seconds before trying again.';
       }
       
       setLoginError(errorMessage);

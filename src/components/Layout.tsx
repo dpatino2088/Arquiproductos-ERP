@@ -3,9 +3,11 @@ import { useAuth } from '../hooks/useAuth';
 import { useCompany } from '../hooks/useCompany';
 import { useCompanyStore } from '../stores/company-store';
 import { router } from '../lib/router';
+import { supabase } from '../lib/supabase';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
+import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { 
   getSidebarStyles, 
   getButtonStyles, 
@@ -123,6 +125,7 @@ function Layout({ children }: LayoutProps) {
   const { logout, user } = useAuth();
   const { currentCompany, availableCompanies, canSwitchCompany, switchCompany, isLoading } = useCompany();
   const { clearCompanies } = useCompanyStore();
+  const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
@@ -169,6 +172,100 @@ function Layout({ children }: LayoutProps) {
       removeListener();
     };
   }, []);
+
+  // Load current organization
+  useEffect(() => {
+    const loadCurrentOrganization = async () => {
+      if (!user?.id) {
+        setCurrentOrganization(null);
+        return;
+      }
+
+      try {
+        // Get the first organization the user belongs to
+        // Try with proper foreign key relationship first
+        const { data: orgUser, error } = await supabase
+          .from('OrganizationUsers')
+          .select(`
+            organization_id,
+            organization_id (
+              id,
+              organization_name
+            )
+          `)
+          .eq('user_id', user.id)
+          .eq('deleted', false)
+          .limit(1)
+          .maybeSingle(); // Use maybeSingle to handle no results gracefully
+
+        if (error) {
+          // Handle expected errors silently (user may not have organizations yet)
+          const isExpectedError = 
+            error.code === 'PGRST116' || // No rows returned
+            error.code === '42501' || // Permission denied (RLS)
+            error.code === '42P01' || // Relation does not exist
+            error.message?.includes('relation') ||
+            error.message?.includes('does not exist') ||
+            error.message?.includes('permission denied') ||
+            error.message?.includes('row-level security');
+
+          if (!isExpectedError && import.meta.env.DEV) {
+            console.error('Error loading organization:', error);
+          }
+          setCurrentOrganization(null);
+          return;
+        }
+
+        // Handle response - the organization data might be nested differently
+        if (orgUser) {
+          // Try different response structures
+          const org = (orgUser as any).organization_id || (orgUser as any).Organizations;
+          
+          if (org && typeof org === 'object' && org.id && org.organization_name) {
+            setCurrentOrganization({
+              id: org.id,
+              name: org.organization_name || 'Organization',
+            });
+            return;
+          }
+          
+          // If we have organization_id but no nested data, fetch it separately
+          if (orgUser.organization_id) {
+            const { data: orgData, error: orgError } = await supabase
+              .from('Organizations')
+              .select('id, organization_name')
+              .eq('id', orgUser.organization_id)
+              .maybeSingle();
+
+            if (!orgError && orgData) {
+              setCurrentOrganization({
+                id: orgData.id,
+                name: orgData.organization_name || 'Organization',
+              });
+              return;
+            }
+          }
+        }
+        
+        setCurrentOrganization(null);
+      } catch (err: any) {
+        // Silently handle errors - user may not have organizations yet
+        const isExpectedError = 
+          err?.code === 'PGRST116' ||
+          err?.code === '42501' ||
+          err?.code === '42P01' ||
+          err?.message?.includes('relation') ||
+          err?.message?.includes('does not exist');
+
+        if (!isExpectedError && import.meta.env.DEV) {
+          console.error('Error in loadCurrentOrganization:', err);
+        }
+        setCurrentOrganization(null);
+      }
+    };
+
+    loadCurrentOrganization();
+  }, [user?.id]);
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -503,12 +600,9 @@ function Layout({ children }: LayoutProps) {
           role="banner"
         >
           <div className="flex items-center justify-between h-full px-6">
-            {/* Left side - Company name */}
+            {/* Left side - Organization Switcher */}
             <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
-              <Building style={{ width: '16px', height: '16px', color: 'var(--gray-950)', marginRight: '12px' }} />
-              <div className="flex items-center font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
-                <span>{currentCompany?.name || 'Adaptio'}</span>
-              </div>
+              <OrganizationSwitcher />
             </div>
 
             {/* Center - Empty space for future use */}
@@ -589,6 +683,16 @@ function Layout({ children }: LayoutProps) {
                         </div>
                       )}
                     </div>
+
+                    {/* Organization Section */}
+                    {currentOrganization && (
+                      <div className="py-1 border-b border-gray-100">
+                        <div className="px-4 py-2">
+                          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">ORGANIZATION</div>
+                          <div className="text-sm text-gray-900 font-medium">{currentOrganization.name}</div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Company Section */}
                     <div className="py-1 border-b border-gray-100">

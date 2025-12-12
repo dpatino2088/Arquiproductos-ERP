@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
 import { usePreviousPage } from '../../hooks/usePreviousPage';
+import { useCompanyStore } from '../../stores/company-store';
 import {
   Building,
   Users,
@@ -16,10 +17,12 @@ import {
   X,
   BookOpen
 } from 'lucide-react';
+import OrganizationProfile from './OrganizationProfile';
 
 export default function CompanySettings() {
   const { getPreviousPage } = usePreviousPage();
-  const [activeSection, setActiveSection] = useState<string>('time-and-attendance');
+  const { currentCompany } = useCompanyStore();
+  const [activeSection, setActiveSection] = useState<string>('organization-profile');
   const [activeTab, setActiveTab] = useState<string>('general');
 
   // Handle ESC key to close settings and return to previous page
@@ -46,6 +49,7 @@ export default function CompanySettings() {
 
   // Settings menu configuration based on our app modules
   const settingsMenu = [
+    { id: 'organization-profile', label: 'Organization Profile', icon: Building },
     { id: 'time-and-attendance', label: 'Time & Attendance', icon: Clock },
     { id: 'employees', label: 'Employees', icon: Users },
     { id: 'pto-leaves', label: 'PTO & Leaves', icon: Calendar },
@@ -59,6 +63,7 @@ export default function CompanySettings() {
 
   // Tab configurations for each section
   const sectionTabs: Record<string, Array<{ id: string; label: string }>> = {
+    'organization-profile': [],
     'time-and-attendance': [
       { id: 'general', label: 'General' },
       { id: 'time-tracking', label: 'Time Tracking' },
@@ -141,6 +146,10 @@ export default function CompanySettings() {
   };
 
   const renderTabContent = () => {
+    if (activeSection === 'organization-profile') {
+      return <OrganizationProfile />;
+    }
+
     if (activeSection === 'time-and-attendance') {
       switch (activeTab) {
         case 'general':
@@ -375,7 +384,7 @@ export default function CompanySettings() {
 
           <div className="flex items-center gap-2">
             <Building className="text-gray-900" style={{ width: '18px', height: '18px' }} />
-            <span className="text-sm font-medium text-gray-900">Arquiluz S.A.</span>
+            <span className="text-sm font-medium text-gray-900">{currentCompany?.name || 'No Company'}</span>
           </div>
 
           <div className="ml-auto">
