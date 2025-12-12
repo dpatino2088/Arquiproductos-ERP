@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase';
-import { useCompanyStore } from '../../stores/company-store';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
 import { X } from 'lucide-react';
@@ -9,6 +9,8 @@ import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Checkbox from '../../components/ui/Checkbox';
 import Label from '../../components/ui/Label';
+import { useSiteById } from '../../hooks/useDirectory';
+import { queryClient } from '../../lib/query-client';
 
 interface Contact {
   id: string;
@@ -27,8 +29,69 @@ interface Contractor {
 }
 
 export default function SiteNew() {
-  const { currentCompany } = useCompanyStore();
-  const [activeTab, setActiveTab] = useState<'site' | 'primary_contact' | 'billing'>('site');
+  const { activeOrganizationId } = useOrganizationContext();
+  const [siteId, setSiteId] = useState<string | null>(null);
+  
+  // Get site ID from URL if in edit mode
+  useEffect(() => {
+    const path = window.location.pathname;
+    const match = path.match(/\/directory\/sites\/(?:edit\/)?([^/]+)/);
+    if (match && match[1] && match[1] !== 'new') {
+      setSiteId(match[1]);
+    }
+  }, []);
+
+  // Use hook to fetch site data if editing
+  const { site, isLoading: isLoadingSite, isError: isErrorSite } = useSiteById({
+    id: siteId,
+    organizationId: activeOrganizationId,
+  });
+
+  // Show message if no organization is selected
+  if (!activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to {siteId ? 'edit' : 'create'} a site.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state while fetching site data
+  if (siteId && isLoadingSite) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading site...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if failed to load site
+  if (siteId && isErrorSite) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading site</p>
+          <p className="text-sm text-red-700">Could not load the site. Please try again.</p>
+          <button
+            onClick={() => router.navigate('/directory/sites')}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:opacity-90"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  const [activeTab, setActiveTab] = useState<'site' | 'primary_contact'>('site');
   const [siteName, setSiteName] = useState('');
   const [zone, setZone] = useState('');
   const [relatedCustomerId, setRelatedCustomerId] = useState<string | null>(null);
@@ -40,32 +103,35 @@ export default function SiteNew() {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [loadingContractors, setLoadingContractors] = useState(false);
-  const [billingSameAsStreet, setBillingSameAsStreet] = useState(false);
   const [street1, setStreet1] = useState('');
   const [street2, setStreet2] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [zip, setZip] = useState('');
   const [country, setCountry] = useState('');
-  const [billingStreet1, setBillingStreet1] = useState('');
-  const [billingStreet2, setBillingStreet2] = useState('');
-  const [billingCity, setBillingCity] = useState('');
-  const [billingState, setBillingState] = useState('');
-  const [billingZip, setBillingZip] = useState('');
-  const [billingCountry, setBillingCountry] = useState('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
-  // Hook to copy address → billing when checkbox is active
+  // Load site data when site is fetched
   useEffect(() => {
-    if (billingSameAsStreet) {
-      setBillingStreet1(street1 || '');
-      setBillingStreet2(street2 || '');
-      setBillingCity(city || '');
-      setBillingState(state || '');
-      setBillingZip(zip || '');
-      setBillingCountry(country || '');
+    if (site) {
+      setSiteName(site.site_name || '');
+      setZone(site.zone || '');
+      setRelatedCustomerId(site.customer_id || null);
+      setRelatedContactId(site.contact_id || null);
+      setRelatedContractorId(site.contractor_id || null);
+      setStreet1(site.street_address_line_1 || '');
+      setStreet2(site.street_address_line_2 || '');
+      setCity(site.city || '');
+      setState(site.state || '');
+      setZip(site.zip_code || '');
+      setCountry(site.country || '');
+      // DirectorySites does not have billing address columns
+      // Only DirectoryVendors and DirectoryCustomers have billing address
     }
-  }, [billingSameAsStreet, street1, street2, city, state, zip, country]);
+  }, [site]);
+
+  // Note: DirectorySites does not have billing address columns
+  // Only DirectoryVendors and DirectoryCustomers have billing address
 
   return (
     <div className="p-6">
@@ -76,7 +142,7 @@ export default function SiteNew() {
             Site Details
           </h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Create a new site
+            {siteId ? 'Edit site' : 'Create a new site'}
           </p>
         </div>
         
@@ -132,7 +198,7 @@ export default function SiteNew() {
               }
               
               // Save site to Supabase
-              if (!currentCompany?.id) {
+              if (!activeOrganizationId) {
                 useUIStore.getState().addNotification({
                   type: 'error',
                   title: 'No organization configured',
@@ -143,7 +209,7 @@ export default function SiteNew() {
 
               try {
                 const siteData = {
-                  organization_id: currentCompany.id,
+                  organization_id: activeOrganizationId,
                   site_name: siteName.trim(),
                   zone: zone.trim() || null,
                   customer_id: relatedCustomerId || null,
@@ -155,39 +221,57 @@ export default function SiteNew() {
                   state: state.trim(),
                   zip_code: zip.trim() || null,
                   country: country.trim(),
-                  billing_street_address_line_1: billingSameAsStreet ? street1.trim() : billingStreet1.trim() || null,
-                  billing_street_address_line_2: billingSameAsStreet ? street2.trim() : billingStreet2.trim() || null,
-                  billing_city: billingSameAsStreet ? city.trim() : billingCity.trim() || null,
-                  billing_state: billingSameAsStreet ? state.trim() : billingState.trim() || null,
-                  billing_zip_code: billingSameAsStreet ? zip.trim() : billingZip.trim() || null,
-                  billing_country: billingSameAsStreet ? country.trim() : billingCountry.trim() || null,
-                  deleted: false,
-                  archived: false,
                 };
 
-                const { data, error } = await supabase
-                  .from('DirectorySites')
-                  .insert([siteData])
-                  .select()
-                  .single();
-
-                if (error) {
-                  console.error('Error saving site:', error);
-                  throw error;
+                let result;
+                if (siteId) {
+                  // Update existing site
+                  result = await supabase
+                    .from('DirectorySites')
+                    .update(siteData)
+                    .eq('id', siteId)
+                    .eq('organization_id', activeOrganizationId)
+                    .select()
+                    .single();
+                } else {
+                  // Create new site
+                  result = await supabase
+                    .from('DirectorySites')
+                    .insert([{
+                      ...siteData,
+                      deleted: false,
+                      archived: false,
+                    }])
+                    .select()
+                    .single();
                 }
 
-                console.log('Site saved successfully:', data);
+                if (result.error) {
+                  if (import.meta.env.DEV) {
+                    console.error('Error saving site:', result.error);
+                  }
+                  throw result.error;
+                }
+
+                if (import.meta.env.DEV) {
+                  console.log('Site saved successfully:', result.data);
+                }
+                
+                // Invalidate queries to refresh list
+                queryClient.invalidateQueries({ queryKey: ['directory-sites'] });
                 
                 // Show success notification
                 useUIStore.getState().addNotification({
                   type: 'success',
                   title: 'Site saved successfully',
-                  message: 'The site has been saved and is now available in your directory.',
+                  message: `The site has been ${siteId ? 'updated' : 'saved'} and is now available in your directory.`,
                 });
                 
                 router.navigate('/directory/sites');
               } catch (err: any) {
-                console.error('Error saving site:', err);
+                if (import.meta.env.DEV) {
+                  console.error('Error saving site:', err);
+                }
                 useUIStore.getState().addNotification({
                   type: 'error',
                   title: 'Error saving site',
@@ -258,28 +342,6 @@ export default function SiteNew() {
               aria-label={`Primary Contact${activeTab === 'primary_contact' ? ' (current tab)' : ''}`}
             >
               Primary Contact
-            </button>
-            <button
-              onClick={() => setActiveTab('billing')}
-              className={`transition-colors flex items-center justify-start ${
-                activeTab === 'billing'
-                  ? 'bg-white font-semibold'
-                  : 'hover:bg-white/50 font-normal'
-              }`}
-              style={{
-                fontSize: '12px',
-                padding: '0 48px',
-                height: '100%',
-                minWidth: '140px',
-                width: 'auto',
-                color: activeTab === 'billing' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
-                borderBottom: activeTab === 'billing' ? '2px solid var(--primary-brand-hex)' : 'none'
-              }}
-              role="tab"
-              aria-selected={activeTab === 'billing'}
-              aria-label={`Billing${activeTab === 'billing' ? ' (current tab)' : ''}`}
-            >
-              Billing
             </button>
           </div>
         </div>
@@ -488,110 +550,6 @@ export default function SiteNew() {
                       {validationErrors.country && (
                         <p className="mt-1 text-xs text-red-600">{validationErrors.country}</p>
                       )}
-                    </div>
-                  </div>
-                </div>
-              </>
-            ) : activeTab === 'billing' ? (
-              <>
-                {/* Billing Address Section */}
-                <div className="col-span-12">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Billing Address</h3>
-                  
-                  {/* CHECKBOX: Same as Street Address */}
-                  <div className="flex items-center gap-2 mb-4">
-                    <input
-                      type="checkbox"
-                      id="billing_same_as_street"
-                      checked={billingSameAsStreet}
-                      onChange={(e) => setBillingSameAsStreet(e.target.checked)}
-                      className="h-4 w-4"
-                    />
-                    <label htmlFor="billing_same_as_street" className="text-sm">
-                      Billing address is the same as street address
-                    </label>
-                  </div>
-
-                  {/* BILLING ADDRESS */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="billing_street_address_line_1" className="text-xs">Billing Street 1</Label>
-                      <Input
-                        id="billing_street_address_line_1"
-                        name="billing_street_address_line_1"
-                        value={billingStreet1}
-                        onChange={(e) => setBillingStreet1(e.target.value)}
-                        className="py-1 text-xs"
-                        disabled={billingSameAsStreet}
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="billing_street_address_line_2" className="text-xs">Billing Street 2</Label>
-                      <Input
-                        id="billing_street_address_line_2"
-                        name="billing_street_address_line_2"
-                        value={billingStreet2}
-                        onChange={(e) => setBillingStreet2(e.target.value)}
-                        className="py-1 text-xs"
-                        disabled={billingSameAsStreet}
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="billing_city" className="text-xs">Billing City</Label>
-                      <Input
-                        id="billing_city"
-                        name="billing_city"
-                        value={billingCity}
-                        onChange={(e) => setBillingCity(e.target.value)}
-                        className="py-1 text-xs"
-                        disabled={billingSameAsStreet}
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="billing_state" className="text-xs">Billing State</Label>
-                      <Input
-                        id="billing_state"
-                        name="billing_state"
-                        value={billingState}
-                        onChange={(e) => setBillingState(e.target.value)}
-                        className="py-1 text-xs"
-                        disabled={billingSameAsStreet}
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="billing_zip_code" className="text-xs">Billing ZIP</Label>
-                      <Input
-                        id="billing_zip_code"
-                        name="billing_zip_code"
-                        value={billingZip}
-                        onChange={(e) => setBillingZip(e.target.value)}
-                        className="py-1 text-xs"
-                        disabled={billingSameAsStreet}
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="billing_country" className="text-xs">Billing Country</Label>
-                      <SelectShadcn
-                        value={billingCountry || undefined}
-                        onValueChange={(value: string) => setBillingCountry(value)}
-                        disabled={billingSameAsStreet}
-                      >
-                        <SelectTrigger className="py-1 text-xs">
-                          <SelectValue placeholder="Select billing country" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {COUNTRIES.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </SelectShadcn>
                     </div>
                   </div>
                 </div>

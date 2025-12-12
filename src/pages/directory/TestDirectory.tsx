@@ -35,7 +35,7 @@ export default function TestDirectory() {
             email,
             city,
             primary_contact_id,
-            DirectoryContacts!primary_contact_id (
+            "DirectoryContacts"!primary_contact_id (
               first_name,
               last_name,
               email

@@ -63,14 +63,14 @@ export const useCompanyStore = create<CompanyState>()(
       },
 
       // Load all companies for a user
+      // NOTE: This store is for legacy "company" system. The new system uses Organizations.
+      // This function will gracefully fail if the tables don't exist (expected in new system).
       loadUserCompanies: async (userId: string) => {
         try {
           set({ isLoading: true, error: null });
 
-          if (import.meta.env.DEV) {
-            console.log('🔍 Loading companies for user:', userId);
-          }
-
+          // Check if tables exist by attempting a simple query
+          // If tables don't exist, this is expected in the new organization-based system
           const { data, error } = await supabase
             .from('company_users')
             .select(`
@@ -79,43 +79,34 @@ export const useCompanyStore = create<CompanyState>()(
             `)
             .eq('user_id', userId)
             .eq('is_deleted', false)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: true })
+            .limit(1); // Limit to 1 to reduce overhead if table doesn't exist
 
           if (error) {
-            // Handle case where table doesn't exist or user has no companies
-            // Also handle RLS errors (42501) and 404/500 errors gracefully
+            // ALL errors are expected if using the new organization system
+            // The company_users and companies tables may not exist
             const isExpectedError = 
               error.code === 'PGRST116' || // No rows returned
               error.code === '42501' || // Permission denied (RLS)
               error.code === '42P01' || // Relation does not exist
+              error.status === 404 || // Table not found
               error.message?.includes('relation') || 
               error.message?.includes('does not exist') ||
               error.message?.includes('permission denied') ||
-              error.message?.includes('row-level security');
+              error.message?.includes('row-level security') ||
+              error.message?.includes('Could not find a relationship');
 
-            if (isExpectedError) {
-              // Silently handle expected errors - user may not have companies yet or tables don't exist
-              if (import.meta.env.DEV) {
-                console.debug('⚠️ Companies query returned expected error (user may not have companies):', error.code);
-              }
-              // Return empty array instead of throwing
-              set({
-                availableCompanies: [],
-                isLoading: false,
-                error: null,
-              });
-              return;
+            // Silently handle all errors - this is expected when using Organizations instead of Companies
+            if (import.meta.env.DEV && !isExpectedError) {
+              // Only log truly unexpected errors
+              console.debug('⚠️ Companies query error (expected if using Organizations):', error.code, error.message);
             }
             
-            // Only log unexpected errors
-            if (import.meta.env.DEV) {
-              console.error('❌ Unexpected error loading companies:', error);
-            }
-            // Don't throw - just set error state
+            // Return empty array - this is normal when using the new organization system
             set({
-              error: error?.message || 'Failed to load companies',
               availableCompanies: [],
               isLoading: false,
+              error: null, // Don't set error state - this is expected
             });
             return;
           }

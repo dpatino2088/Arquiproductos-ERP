@@ -185,7 +185,7 @@ export default function CustomerNew() {
     };
 
     loadContacts();
-  }, [currentCompany]);
+  }, [activeOrganizationId]);
 
   // Hook to copy address → billing when checkbox is active
   useEffect(() => {
@@ -200,8 +200,12 @@ export default function CustomerNew() {
   }, [billingSame, street1, street2, city, state, zip, country, setValue]);
 
   const onSubmit = async (values: CustomerFormValues) => {
-    if (!currentCompany?.id) {
-      setSaveError('No company selected. Please select a company first.');
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'No organization selected',
+        message: 'Please select an organization to continue.',
+      });
       return;
     }
 

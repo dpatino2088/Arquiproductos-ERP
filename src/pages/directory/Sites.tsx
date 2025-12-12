@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSites } from '../../hooks/useDirectory';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { 
   MapPin, 
   Search, 
@@ -122,8 +123,23 @@ export default function Sites() {
     };
   }, []);
 
+  // Get active organization
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+
+  // Prevent hook execution without org
+  if (!orgLoading && !activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view sites.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Get sites from Supabase
-  const { sites: sitesData, loading: sitesLoading, error: sitesError } = useSites();
+  const { data: sitesData, isLoading: sitesLoading, isError: sitesIsError, error: sitesError } = useSites();
 
   const filteredSites = useMemo(() => {
     const filtered = sitesData.filter(site => {
@@ -277,17 +293,9 @@ export default function Sites() {
     );
   };
 
-  // Navigate to site detail page (placeholder)
+  // Navigate to site detail page
   const handleViewSite = (site: SiteItem) => {
-    // Store site data in sessionStorage for the Site Info page
-    sessionStorage.setItem('selectedSite', JSON.stringify(site));
-    
-    // Create slug from site name
-    const slug = site.siteName.toLowerCase().replace(/\s+/g, '-');
-    
-    // Navigate to site detail (you can create this page later)
-    // router.navigate(`/directory/sites/${slug}`);
-    console.log('View site:', site);
+    router.navigate(`/directory/sites/edit/${site.id}`);
   };
 
   const getStatusBadge = (status: string) => {
@@ -371,6 +379,32 @@ export default function Sites() {
         );
     }
   };
+
+  // Show loading state
+  if (orgLoading || sitesLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading sites...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (sitesIsError && sitesError) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading sites</p>
+          <p className="text-sm text-red-700">{sitesError}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">

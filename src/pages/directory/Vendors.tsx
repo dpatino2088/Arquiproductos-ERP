@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useVendors } from '../../hooks/useDirectory';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { 
   Store, 
   Search, 
@@ -117,8 +118,23 @@ export default function Vendors() {
     };
   }, []);
 
+  // Get active organization
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+
+  // Prevent hook execution without org
+  if (!orgLoading && !activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view vendors.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Get vendors from Supabase
-  const { vendors: vendorsData, loading: vendorsLoading, error: vendorsError } = useVendors();
+  const { data: vendorsData, isLoading: vendorsLoading, isError: vendorsIsError, error: vendorsError } = useVendors();
 
   const filteredVendors = useMemo(() => {
     const filtered = vendorsData.filter(vendor => {
@@ -272,17 +288,9 @@ export default function Vendors() {
     );
   };
 
-  // Navigate to vendor detail page (placeholder)
+  // Navigate to vendor detail page
   const handleViewVendor = (vendor: VendorItem) => {
-    // Store vendor data in sessionStorage for the Vendor Info page
-    sessionStorage.setItem('selectedVendor', JSON.stringify(vendor));
-    
-    // Create slug from vendor name
-    const slug = vendor.vendorName.toLowerCase().replace(/\s+/g, '-');
-    
-    // Navigate to vendor detail (you can create this page later)
-    // router.navigate(`/directory/vendors/${slug}`);
-    console.log('View vendor:', vendor);
+    router.navigate(`/directory/vendors/edit/${vendor.id}`);
   };
 
   const getStatusBadge = (status: string) => {
@@ -319,6 +327,32 @@ export default function Vendors() {
         );
     }
   };
+
+  // Show loading state
+  if (orgLoading || vendorsLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading vendors...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (vendorsIsError && vendorsError) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading vendors</p>
+          <p className="text-sm text-red-700">{vendorsError}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">

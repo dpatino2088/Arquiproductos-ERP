@@ -268,8 +268,8 @@ function App() {
   // Note: Auth callbacks (recovery, signup, invite) are now handled by AuthCallback component
   // This keeps the logic centralized and prevents conflicts with auto-redirects
   // The AuthCallback component handles:
-  // - Password recovery tokens (type=recovery) → redirects to /auth/reset-password
-  // - Email confirmation (type=signup/invite) → processes and redirects to dashboard
+  // - Password recovery tokens (type=recovery) ? redirects to /auth/reset-password
+  // - Email confirmation (type=signup/invite) ? processes and redirects to dashboard
 
   // Note: auth state changes handled inside auth store init
 
@@ -369,10 +369,16 @@ function App() {
     router.addRoute('/directory/customers/new', () => setCurrentPage('directory-customer-new'));
     router.addRoute('/directory/sites', () => setCurrentPage('directory-sites'));
     router.addRoute('/directory/sites/new', () => setCurrentPage('directory-site-new'));
+    router.addRoute('/directory/sites/:id', () => setCurrentPage('directory-site-new'));
+    router.addRoute('/directory/sites/edit/:id', () => setCurrentPage('directory-site-new'));
     router.addRoute('/directory/vendors', () => setCurrentPage('directory-vendors'));
     router.addRoute('/directory/vendors/new', () => setCurrentPage('directory-vendor-new'));
+    router.addRoute('/directory/vendors/:id', () => setCurrentPage('directory-vendor-new'));
+    router.addRoute('/directory/vendors/edit/:id', () => setCurrentPage('directory-vendor-new'));
     router.addRoute('/directory/contractors', () => setCurrentPage('directory-contractors'));
     router.addRoute('/directory/contractors/new', () => setCurrentPage('directory-contractor-new'));
+    router.addRoute('/directory/contractors/:id', () => setCurrentPage('directory-contractor-new'));
+    router.addRoute('/directory/contractors/edit/:id', () => setCurrentPage('directory-contractor-new'));
     router.addRoute('/directory/test', () => setCurrentPage('test-directory'));
     router.addRoute('/directory', () => setCurrentPage('directory-contacts')); // Default to contacts
     

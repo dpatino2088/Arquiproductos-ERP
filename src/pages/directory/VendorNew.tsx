@@ -1,14 +1,19 @@
 import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
+import { supabase } from '../../lib/supabase';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
 import { X } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import Checkbox from '../../components/ui/Checkbox';
 import Label from '../../components/ui/Label';
+import { useVendorById } from '../../hooks/useDirectory';
+import { queryClient } from '../../lib/query-client';
 
 export default function VendorNew() {
+  const { activeOrganizationId } = useOrganizationContext();
+  const [vendorId, setVendorId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'billing'>('details');
   const [billingSameAsStreet, setBillingSameAsStreet] = useState(false);
   const [vendorName, setVendorName] = useState('');
@@ -31,6 +36,96 @@ export default function VendorNew() {
   const [billingCountry, setBillingCountry] = useState('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
+  // Get vendor ID from URL if in edit mode
+  useEffect(() => {
+    const path = window.location.pathname;
+    const match = path.match(/\/directory\/vendors\/(?:edit\/)?([^/]+)/);
+    if (match && match[1] && match[1] !== 'new') {
+      setVendorId(match[1]);
+    }
+  }, []);
+
+  // Use hook to fetch vendor data if editing
+  const { vendor, isLoading: isLoadingVendor, isError: isErrorVendor } = useVendorById({
+    id: vendorId,
+    organizationId: activeOrganizationId,
+  });
+
+  // Show message if no organization is selected
+  if (!activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to {vendorId ? 'edit' : 'create'} a vendor.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state while fetching vendor data
+  if (vendorId && isLoadingVendor) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading vendor...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if failed to load vendor
+  if (vendorId && isErrorVendor) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading vendor</p>
+          <p className="text-sm text-red-700">Could not load the vendor. Please try again.</p>
+          <button
+            onClick={() => router.navigate('/directory/vendors')}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:opacity-90"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Load vendor data when vendor is fetched
+  useEffect(() => {
+    if (vendor) {
+      // Map name field (prioritize 'name' as it's the NOT NULL column, fallback to vendor_name)
+      setVendorName(vendor.name || vendor.vendor_name || '');
+      setIdentificationNumber(vendor.ein || '');
+      setWebsite(vendor.website || '');
+      setEmail(vendor.email || '');
+      setWorkPhone(vendor.work_phone || '');
+      setFax(vendor.fax || '');
+      setStreet1(vendor.street_address_line_1 || '');
+      setStreet2(vendor.street_address_line_2 || '');
+      setCity(vendor.city || '');
+      setState(vendor.state || '');
+      setZip(vendor.zip_code || '');
+      setCountry(vendor.country || '');
+      setBillingStreet1(vendor.billing_street_address_line_1 || '');
+      setBillingStreet2(vendor.billing_street_address_line_2 || '');
+      setBillingCity(vendor.billing_city || '');
+      setBillingState(vendor.billing_state || '');
+      setBillingZip(vendor.billing_zip_code || '');
+      setBillingCountry(vendor.billing_country || '');
+      setBillingSameAsStreet(
+        vendor.billing_street_address_line_1 === vendor.street_address_line_1 &&
+        vendor.billing_city === vendor.city &&
+        vendor.billing_state === vendor.state &&
+        vendor.billing_country === vendor.country
+      );
+    }
+  }, [vendor]);
+
   // Hook to copy address → billing when checkbox is active
   useEffect(() => {
     if (billingSameAsStreet) {
@@ -43,6 +138,152 @@ export default function VendorNew() {
     }
   }, [billingSameAsStreet, street1, street2, city, state, zip, country]);
 
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    // Validate required fields
+    const errors: Record<string, string> = {};
+    const missingFields: string[] = [];
+    
+    if (!vendorName.trim()) {
+      errors.vendor_name = 'Vendor name is required';
+      missingFields.push('Vendor Name');
+    }
+    if (!street1.trim()) {
+      errors.street_address_line_1 = 'Street address is required';
+      missingFields.push('Street Address');
+    }
+    if (!city.trim()) {
+      errors.city = 'City is required';
+      missingFields.push('City');
+    }
+    if (!state.trim()) {
+      errors.state = 'State is required';
+      missingFields.push('State');
+    }
+    if (!country.trim()) {
+      errors.country = 'Country is required';
+      missingFields.push('Country');
+    }
+    
+    setValidationErrors(errors);
+    
+    if (missingFields.length > 0) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Missing Required Information',
+        message: `Please complete the following required fields: ${missingFields.join(', ')}.`,
+      });
+      return;
+    }
+
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'No organization configured',
+        message: 'Please configure an organization in Settings > Organization Profile.',
+      });
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      // Validate name is not empty before proceeding
+      if (!vendorName.trim()) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Vendor name is required',
+          message: 'Please enter a vendor name before saving.',
+        });
+        setSaving(false);
+        return;
+      }
+
+      const vendorData: any = {
+        organization_id: activeOrganizationId,
+        name: vendorName.trim(), // Use 'name' as required by DB schema
+        vendor_name: vendorName.trim(), // Keep for backward compatibility if needed
+        ein: identificationNumber.trim() || null,
+        website: website.trim() || null,
+        email: email.trim() || null,
+        work_phone: workPhone.trim() || null,
+        fax: fax.trim() || null,
+        street_address_line_1: street1.trim(),
+        street_address_line_2: street2.trim() || null,
+        city: city.trim(),
+        state: state.trim(),
+        zip_code: zip.trim() || null,
+        country: country.trim(),
+        billing_street_address_line_1: billingSameAsStreet ? street1.trim() : billingStreet1.trim() || null,
+        billing_street_address_line_2: billingSameAsStreet ? street2.trim() : billingStreet2.trim() || null,
+        billing_city: billingSameAsStreet ? city.trim() : billingCity.trim() || null,
+        billing_state: billingSameAsStreet ? state.trim() : billingState.trim() || null,
+        billing_zip_code: billingSameAsStreet ? zip.trim() : billingZip.trim() || null,
+        billing_country: billingSameAsStreet ? country.trim() : billingCountry.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      let result;
+
+      if (vendorId) {
+        // Update existing vendor
+        result = await supabase
+          .from('DirectoryVendors')
+          .update(vendorData)
+          .eq('id', vendorId)
+          .eq('organization_id', activeOrganizationId)
+          .select()
+          .single();
+      } else {
+        // Create new vendor
+        vendorData.created_at = new Date().toISOString();
+        vendorData.deleted = false;
+        vendorData.archived = false;
+
+        result = await supabase
+          .from('DirectoryVendors')
+          .insert([vendorData])
+          .select()
+          .single();
+      }
+
+      if (result.error) {
+        if (import.meta.env.DEV) {
+          console.error('Error saving vendor:', result.error);
+        }
+        throw result.error;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('Vendor saved successfully:', result.data);
+      }
+      
+      // Invalidate queries to refresh list
+      queryClient.invalidateQueries({ queryKey: ['directory-vendors'] });
+      
+      // Show success notification
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Vendor saved successfully',
+        message: `The vendor has been ${vendorId ? 'updated' : 'saved'} and is now available in your directory.`,
+      });
+      
+      router.navigate('/directory/vendors');
+    } catch (err: any) {
+      if (import.meta.env.DEV) {
+        console.error('Error saving vendor:', err);
+      }
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error saving vendor',
+        message: err.message || 'Something went wrong while saving. Please try again.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="p-6">
       {/* Header - Matching Contacts page layout */}
@@ -52,7 +293,7 @@ export default function VendorNew() {
             Vendor Details
           </h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Create a new vendor
+            {vendorId ? 'Edit vendor' : 'Create a new vendor'}
           </p>
         </div>
         
@@ -70,52 +311,7 @@ export default function VendorNew() {
             type="button"
             className="px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            onClick={() => {
-              // Validate required fields
-              const errors: Record<string, string> = {};
-              const missingFields: string[] = [];
-              
-              if (!vendorName.trim()) {
-                errors.vendor_name = 'Vendor name is required';
-                missingFields.push('Vendor Name');
-              }
-              if (!street1.trim()) {
-                errors.street_address_line_1 = 'Street address is required';
-                missingFields.push('Street Address');
-              }
-              if (!city.trim()) {
-                errors.city = 'City is required';
-                missingFields.push('City');
-              }
-              if (!state.trim()) {
-                errors.state = 'State is required';
-                missingFields.push('State');
-              }
-              if (!country.trim()) {
-                errors.country = 'Country is required';
-                missingFields.push('Country');
-              }
-              
-              setValidationErrors(errors);
-              
-              if (missingFields.length > 0) {
-                useUIStore.getState().addNotification({
-                  type: 'error',
-                  title: 'Missing Required Information',
-                  message: `Please complete the following required fields: ${missingFields.join(', ')}.`,
-                });
-                return;
-              }
-              
-              console.log('Save vendor');
-              // Show success notification
-              useUIStore.getState().addNotification({
-                type: 'success',
-                title: 'Vendor saved successfully',
-                message: 'The vendor has been saved and is now available in your directory.',
-              });
-              router.navigate('/directory/vendors');
-            }}
+            onClick={handleSave}
           >
             Save and Close
           </button>
@@ -290,7 +486,7 @@ export default function VendorNew() {
             </>
           ) : (
             <>
-          <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+              <div className="grid grid-cols-12 gap-x-4 gap-y-4">
             {/* Top Section */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-6">

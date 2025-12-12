@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useContacts } from '../../hooks/useDirectory';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { 
   Contact, 
   Search, 
@@ -132,8 +133,23 @@ export default function Contacts() {
     };
   }, []);
 
+  // Get active organization
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+  
+  // Prevent hook execution without org
+  if (!orgLoading && !activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view contacts.</p>
+        </div>
+      </div>
+    );
+  }
+  
   // Get contacts from Supabase
-  const { contacts: contactsData, loading: contactsLoading, error: contactsError } = useContacts();
+  const { data: contactsData, isLoading: contactsLoading, isError: contactsIsError, error: contactsError } = useContacts();
 
   // Debug log
   useEffect(() => {
@@ -359,7 +375,7 @@ export default function Contacts() {
   };
 
   // Show loading state
-  if (contactsLoading) {
+  if (orgLoading || contactsLoading) {
     return (
       <div className="p-6">
         <div className="flex items-center justify-center min-h-[400px]">
@@ -373,22 +389,21 @@ export default function Contacts() {
   }
 
   // Show error state
-  if (contactsError) {
+  if (contactsIsError && contactsError) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <p className="text-sm text-red-600 mb-2">Error loading contacts: {contactsError}</p>
-            {contactsError.includes('null') && (
-              <p className="text-xs text-gray-500 mb-4">Please make sure you have selected a company.</p>
-            )}
-            <button 
-              onClick={() => window.location.reload()} 
-              className="px-4 py-2 bg-primary text-white rounded hover:opacity-90"
-            >
-              Retry
-            </button>
-          </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading contacts</p>
+          <p className="text-sm text-red-700">{contactsError}</p>
+          {import.meta.env.DEV && (
+            <p className="text-xs text-gray-500 mb-4">Please make sure you have selected a company.</p>
+          )}
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-4 py-2 bg-primary text-white rounded hover:opacity-90"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );

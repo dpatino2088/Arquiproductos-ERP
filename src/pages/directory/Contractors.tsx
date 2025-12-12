@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useContractors } from '../../hooks/useDirectory';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { 
   Wrench, 
   Search, 
@@ -119,8 +120,23 @@ export default function Contractors() {
     };
   }, []);
 
+  // Get active organization
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+
+  // Prevent hook execution without org
+  if (!orgLoading && !activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view contractors.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Get contractors from Supabase
-  const { contractors: contractorsData, loading: contractorsLoading, error: contractorsError } = useContractors();
+  const { data: contractorsData, isLoading: contractorsLoading, isError: contractorsIsError, error: contractorsError } = useContractors();
 
   const filteredContractors = useMemo(() => {
     const filtered = contractorsData.filter(contractor => {
@@ -280,17 +296,9 @@ export default function Contractors() {
     );
   };
 
-  // Navigate to contractor detail page (placeholder)
+  // Navigate to contractor detail page
   const handleViewContractor = (contractor: ContractorItem) => {
-    // Store contractor data in sessionStorage for the Contractor Info page
-    sessionStorage.setItem('selectedContractor', JSON.stringify(contractor));
-    
-    // Create slug from contractor name
-    const slug = contractor.name.toLowerCase().replace(/\s+/g, '-');
-    
-    // Navigate to contractor detail (you can create this page later)
-    // router.navigate(`/directory/contractors/${slug}`);
-    console.log('View contractor:', contractor);
+    router.navigate(`/directory/contractors/edit/${contractor.id}`);
   };
 
   const getStatusBadge = (status: string) => {
@@ -327,6 +335,32 @@ export default function Contractors() {
         );
     }
   };
+
+  // Show loading state
+  if (orgLoading || contractorsLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading contractors...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (contractorsIsError && contractorsError) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading contractors</p>
+          <p className="text-sm text-red-700">{contractorsError}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -659,14 +693,14 @@ export default function Contractors() {
           <div className="overflow-x-auto">
             <table className="w-full table-fixed">
               <colgroup>
-                <col style={{ width: '18%' }} /> {/* Company - base * 0.9 */}
-                <col style={{ width: '15%' }} /> {/* Name - base * 0.75 */}
-                <col style={{ width: '15%' }} /> {/* Licenses Applied - base * 0.75 */}
-                <col style={{ width: '12%' }} /> {/* Cell Phone - base * 0.618 */}
-                <col style={{ width: '13%' }} /> {/* Proficiency 1 - base * 0.65 */}
-                <col style={{ width: '13%' }} /> {/* Proficiency 2 - base * 0.65 */}
-                <col style={{ width: '9%' }} />  {/* Proficiency 3 - base * 0.45 */}
-                <col style={{ width: '5%' }} />  {/* Actions - fixed small */}
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '5%' }} />
               </colgroup>
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>

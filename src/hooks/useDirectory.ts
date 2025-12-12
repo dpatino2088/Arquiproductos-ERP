@@ -1,43 +1,21 @@
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { useAuthStore } from '../stores/auth-store';
-import { useCompanyStore } from '../stores/company-store';
-
-// Helper to get organization_id from user metadata or currentCompany
-// This is synchronous to avoid timing issues in useEffect
-const getOrganizationId = (user: any, currentCompany: any): string | null => {
-  // First try to get from user metadata (set during login)
-  if (user?.metadata?.default_organization_id) {
-    return user.metadata.default_organization_id;
-  }
-  
-  // Fallback to currentCompany.id (this should be the organization_id in the new model)
-  // In the new model, currentCompany.id IS the organization_id
-  return currentCompany?.id || null;
-};
+import { useOrganizationContext } from '../context/OrganizationContext';
 
 // Hook para obtener contactos
 export function useContacts() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuthStore();
-  const { currentCompany } = useCompanyStore();
+  const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
     async function fetchContacts() {
-      if (!user || !currentCompany?.id) {
+      if (!activeOrganizationId) {
         setLoading(false);
-        return;
-      }
-      
-      const organizationId = getOrganizationId(user, currentCompany);
-      
-      if (!organizationId) {
-        setLoading(false);
-        if (import.meta.env.DEV) {
-          console.warn('⚠️ No organization_id available for fetching contacts');
-        }
+        setContacts([]);
+        setError(null);
         return;
       }
 
@@ -45,100 +23,68 @@ export function useContacts() {
         setLoading(true);
         setError(null);
 
-        if (import.meta.env.DEV) {
-          console.log('🔍 Fetching contacts for organization:', organizationId);
-        }
-
         const { data, error: queryError } = await supabase
           .from('DirectoryContacts')
-          .select(`
-            id,
-            contact_type,
-            title_id,
-            customer_name,
-            identification_number,
-            primary_phone,
-            cell_phone,
-            alt_phone,
-            email,
-            street_address_line_1,
-            street_address_line_2,
-            city,
-            state,
-            zip_code,
-            country,
-            company_id,
-            created_at,
-            deleted,
-            archived,
-            ContactTitles!title_id (
-              title
-            ),
-            DirectoryCustomers!company_id (
-              id,
-              company_name
-            )
-          `)
-          .eq('organization_id', organizationId)
-          .eq('deleted', false)
-          .eq('archived', false)
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
           .order('created_at', { ascending: false });
 
         if (queryError) {
-          console.error('❌ Supabase query error:', queryError);
+          if (import.meta.env.DEV) {
+            console.error('Error fetching Contacts:', queryError);
+          }
           throw queryError;
         }
 
-        if (import.meta.env.DEV) {
-          console.log('📊 Raw contacts data from Supabase:', data);
-          console.log('📊 Contacts count:', data?.length || 0);
-        }
-
         // Transform data to match frontend interface
-        const transformedContacts = (data || []).map((contact) => {
-          const companyData = (contact.DirectoryCustomers as any) || null;
-          return {
-            id: contact.id,
-            firstName: contact.customer_name || '',
-            lastName: '',
-            email: contact.email || '',
-            company: companyData?.company_name || '',
-            company_id: contact.company_id || null,
-            category: contact.contact_type === 'company' ? 'Company' : 'Individual',
-            status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
-            location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',
-            dateAdded: contact.created_at || '',
-            phone: contact.primary_phone || contact.cell_phone || '',
-            contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer',
-            title: (contact.ContactTitles as any)?.title || null,
-            // Additional fields for table display
-            primary_phone: contact.primary_phone || '',
-            city: contact.city || '',
-            country: contact.country || '',
-            contact_type: contact.contact_type || 'individual',
-            created_at: contact.created_at || '',
-          };
-        });
+        const transformedContacts = (data || []).map((contact) => ({
+          id: contact.id,
+          firstName: contact.customer_name || '',
+          lastName: '',
+          email: contact.email || '',
+          company: '', // Will be populated from join if needed
+          company_id: contact.company_id || null,
+          category: contact.contact_type === 'company' ? 'Company' : 'Individual',
+          status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
+          location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',
+          dateAdded: contact.created_at || '',
+          phone: contact.primary_phone || contact.cell_phone || '',
+          contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer',
+          // Additional fields for table display
+          primary_phone: contact.primary_phone || '',
+          city: contact.city || '',
+          country: contact.country || '',
+          contact_type: contact.contact_type || 'individual',
+          created_at: contact.created_at || '',
+        }));
 
         setContacts(transformedContacts);
-        
-        // Debug log
-        if (import.meta.env.DEV) {
-          console.log('📦 Contacts loaded:', transformedContacts.length, 'contacts');
-          console.log('📋 Contacts data:', transformedContacts);
-        }
       } catch (err) {
-        console.error('❌ Error fetching contacts:', err);
-        setError(err instanceof Error ? err.message : 'Error loading contacts');
+        const errorMessage = err instanceof Error ? err.message : 'Error loading contacts';
+        if (import.meta.env.DEV) {
+          console.error('Error fetching Contacts:', err);
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
     fetchContacts();
-  }, [user, currentCompany?.id]);
+  }, [activeOrganizationId]);
 
-  return { contacts, loading, error };
+  return {
+    data: contacts,
+    contacts, // Alias for backward compatibility
+    error,
+    isLoading: loading,
+    loading, // Alias for backward compatibility
+    isError: !!error,
+    refetch: () => {
+      // Trigger re-fetch by setting loading state
+      setLoading(true);
+    },
+  };
 }
 
 // Hook para obtener customers
@@ -146,13 +92,14 @@ export function useCustomers() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuthStore();
-  const { currentCompany } = useCompanyStore();
+  const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
     async function fetchCustomers() {
-      if (!user || !currentCompany?.id) {
+      if (!activeOrganizationId) {
         setLoading(false);
+        setCustomers([]);
+        setError(null);
         return;
       }
 
@@ -162,52 +109,26 @@ export function useCustomers() {
 
         const { data, error: queryError } = await supabase
           .from('DirectoryCustomers')
-          .select(`
-            id,
-            customer_type_id,
-            company_name,
-            ein,
-            website,
-            email,
-            company_phone,
-            alt_phone,
-            street_address_line_1,
-            street_address_line_2,
-            city,
-            state,
-            zip_code,
-            country,
-            primary_contact_id,
-            created_at,
-            deleted,
-            archived,
-            CustomerTypes!customer_type_id (
-              name
-            ),
-            DirectoryContacts!primary_contact_id (
-              customer_name,
-              identification_number,
-              email
-            )
-          `)
-          .eq('organization_id', currentCompany.id)
-          .eq('deleted', false)
-          .eq('archived', false)
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
           .order('created_at', { ascending: false });
 
-        if (queryError) throw queryError;
+        if (queryError) {
+          if (import.meta.env.DEV) {
+            console.error('Error fetching Customers:', queryError);
+          }
+          throw queryError;
+        }
 
         // Transform data to match frontend interface
         const transformedCustomers = (data || []).map((customer) => ({
           id: customer.id,
           companyName: customer.company_name || '',
-          contactName: customer.DirectoryContacts 
-            ? (customer.DirectoryContacts as any).customer_name || ''
-            : '',
+          contactName: '',
           email: customer.email || '',
           phone: customer.company_phone || '',
           industry: 'N/A', // Not in schema yet
-          customerType: (customer.CustomerTypes as any)?.name || 'Customer',
+          customerType: 'Customer',
           status: customer.archived ? 'Archived' : 'Active' as 'Active' | 'On Hold' | 'Archived',
           location: [customer.city, customer.state, customer.country].filter(Boolean).join(', ') || 'N/A',
           dateAdded: customer.created_at ? new Date(customer.created_at).toISOString().split('T')[0] : '',
@@ -216,17 +137,30 @@ export function useCustomers() {
 
         setCustomers(transformedCustomers);
       } catch (err) {
-        console.error('Error fetching customers:', err);
-        setError(err instanceof Error ? err.message : 'Error loading customers');
+        const errorMessage = err instanceof Error ? err.message : 'Error loading customers';
+        if (import.meta.env.DEV) {
+          console.error('Error fetching Customers:', err);
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
     fetchCustomers();
-  }, [user, currentCompany?.id]);
+  }, [activeOrganizationId]);
 
-  return { customers, loading, error };
+  return {
+    data: customers,
+    customers, // Alias for backward compatibility
+    error,
+    isLoading: loading,
+    loading, // Alias for backward compatibility
+    isError: !!error,
+    refetch: () => {
+      setLoading(true);
+    },
+  };
 }
 
 // Hook para obtener vendors
@@ -234,20 +168,14 @@ export function useVendors() {
   const [vendors, setVendors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuthStore();
-  const { currentCompany } = useCompanyStore();
+  const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
     async function fetchVendors() {
-      if (!user || !currentCompany?.id) {
+      if (!activeOrganizationId) {
         setLoading(false);
-        return;
-      }
-
-      const organizationId = getOrganizationId(user, currentCompany);
-      
-      if (!organizationId) {
-        setLoading(false);
+        setVendors([]);
+        setError(null);
         return;
       }
 
@@ -257,39 +185,22 @@ export function useVendors() {
 
         const { data, error: queryError } = await supabase
           .from('DirectoryVendors')
-          .select(`
-            id,
-            vendor_type_id,
-            vendor_name,
-            ein,
-            website,
-            email,
-            work_phone,
-            fax,
-            street_address_line_1,
-            street_address_line_2,
-            city,
-            state,
-            zip_code,
-            country,
-            created_at,
-            deleted,
-            archived,
-            VendorTypes!vendor_type_id (
-              name
-            )
-          `)
-          .eq('organization_id', organizationId)
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
-          .eq('archived', false)
           .order('created_at', { ascending: false });
 
-        if (queryError) throw queryError;
+        if (queryError) {
+          if (import.meta.env.DEV) {
+            console.error('[useDirectory] Error fetching vendors from DirectoryVendors:', queryError);
+          }
+          throw queryError;
+        }
 
         // Transform data to match frontend interface
         const transformedVendors = (data || []).map((vendor) => ({
           id: vendor.id,
-          vendorName: vendor.vendor_name || '',
+          vendorName: vendor.name || vendor.vendor_name || '',
           vendorId: vendor.ein || '',
           phone: vendor.work_phone || '',
           email: vendor.email || '',
@@ -297,22 +208,35 @@ export function useVendors() {
           currency: 'USD', // Not in schema yet
           status: vendor.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
           dateAdded: vendor.created_at ? new Date(vendor.created_at).toISOString().split('T')[0] : '',
-          vendorType: (vendor.VendorTypes as any)?.name || '',
+          vendorType: '',
         }));
 
         setVendors(transformedVendors);
       } catch (err) {
-        console.error('Error fetching vendors:', err);
-        setError(err instanceof Error ? err.message : 'Error loading vendors');
+        const errorMessage = err instanceof Error ? err.message : 'Error loading vendors';
+        if (import.meta.env.DEV) {
+          console.error('[useDirectory] Error fetching vendors from DirectoryVendors:', err);
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
     fetchVendors();
-  }, [user, currentCompany?.id]);
+  }, [activeOrganizationId]);
 
-  return { vendors, loading, error };
+  return {
+    data: vendors,
+    vendors, // Alias for backward compatibility
+    error,
+    isLoading: loading,
+    loading, // Alias for backward compatibility
+    isError: !!error,
+    refetch: () => {
+      setLoading(true);
+    },
+  };
 }
 
 // Hook para obtener contractors
@@ -320,20 +244,14 @@ export function useContractors() {
   const [contractors, setContractors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuthStore();
-  const { currentCompany } = useCompanyStore();
+  const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
     async function fetchContractors() {
-      if (!user || !currentCompany?.id) {
+      if (!activeOrganizationId) {
         setLoading(false);
-        return;
-      }
-      
-      const organizationId = getOrganizationId(user, currentCompany);
-      
-      if (!organizationId) {
-        setLoading(false);
+        setContractors([]);
+        setError(null);
         return;
       }
 
@@ -343,50 +261,26 @@ export function useContractors() {
 
         const { data, error: queryError } = await supabase
           .from('DirectoryContractors')
-          .select(`
-            id,
-            contractor_role_id,
-            contractor_company_name,
-            contact_name,
-            position,
-            street_address_line_1,
-            street_address_line_2,
-            city,
-            state,
-            zip_code,
-            country,
-            date_of_hire,
-            date_of_birth,
-            ein,
-            company_number,
-            primary_email,
-            secondary_email,
-            phone,
-            extension,
-            cell_phone,
-            fax,
-            created_at,
-            deleted,
-            archived,
-            ContractorRoles!contractor_role_id (
-              role_name
-            )
-          `)
-          .eq('organization_id', organizationId)
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
-          .eq('archived', false)
           .order('created_at', { ascending: false });
 
-        if (queryError) throw queryError;
+        if (queryError) {
+          if (import.meta.env.DEV) {
+            console.error('[useDirectory] Error fetching contractors from DirectoryContractors:', queryError);
+          }
+          throw queryError;
+        }
 
         // Transform data to match frontend interface
         const transformedContractors = (data || []).map((contractor) => ({
           id: contractor.id,
           company: contractor.contractor_company_name || '',
           name: contractor.contact_name || '',
-          licensesApplied: contractor.company_number || '',
+          licensesApplied: contractor.company_number ? [contractor.company_number] : [],
           cellPhone: contractor.cell_phone || '',
-          proficiency1: (contractor.ContractorRoles as any)?.role_name || '',
+          proficiency1: '',
           proficiency2: '',
           proficiency3: '',
           email: contractor.primary_email || '',
@@ -397,17 +291,30 @@ export function useContractors() {
 
         setContractors(transformedContractors);
       } catch (err) {
-        console.error('Error fetching contractors:', err);
-        setError(err instanceof Error ? err.message : 'Error loading contractors');
+        const errorMessage = err instanceof Error ? err.message : 'Error loading contractors';
+        if (import.meta.env.DEV) {
+          console.error('[useDirectory] Error fetching contractors from DirectoryContractors:', err);
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
     fetchContractors();
-  }, [user, currentCompany?.id]);
+  }, [activeOrganizationId]);
 
-  return { contractors, loading, error };
+  return {
+    data: contractors,
+    contractors, // Alias for backward compatibility
+    error,
+    isLoading: loading,
+    loading, // Alias for backward compatibility
+    isError: !!error,
+    refetch: () => {
+      setLoading(true);
+    },
+  };
 }
 
 // Hook para obtener sites
@@ -415,20 +322,14 @@ export function useSites() {
   const [sites, setSites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuthStore();
-  const { currentCompany } = useCompanyStore();
+  const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
     async function fetchSites() {
-      if (!user || !currentCompany?.id) {
+      if (!activeOrganizationId) {
         setLoading(false);
-        return;
-      }
-      
-      const organizationId = getOrganizationId(user, currentCompany);
-      
-      if (!organizationId) {
-        setLoading(false);
+        setSites([]);
+        setError(null);
         return;
       }
 
@@ -438,31 +339,16 @@ export function useSites() {
 
         const { data, error: queryError } = await supabase
           .from('DirectorySites')
-          .select(`
-            id,
-            site_type_id,
-            site_name,
-            zone,
-            street_address_line_1,
-            street_address_line_2,
-            city,
-            state,
-            zip_code,
-            country,
-            site_id,
-            created_at,
-            deleted,
-            archived,
-            SiteTypes!site_type_id (
-              name
-            )
-          `)
-          .eq('organization_id', organizationId)
-          .eq('deleted', false)
-          .eq('archived', false)
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
           .order('created_at', { ascending: false });
 
-        if (queryError) throw queryError;
+        if (queryError) {
+          if (import.meta.env.DEV) {
+            console.error('Error fetching Sites:', queryError);
+          }
+          throw queryError;
+        }
 
         // Transform data to match frontend interface
         const transformedSites = (data || []).map((site) => ({
@@ -471,23 +357,140 @@ export function useSites() {
           siteId: site.site_id || '',
           siteAddress: [site.street_address_line_1, site.street_address_line_2, site.city, site.state, site.zip_code].filter(Boolean).join(', ') || 'N/A',
           country: site.country || '',
-          siteType: (site.SiteTypes as any)?.name || '',
+          siteType: '',
           status: site.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
           dateAdded: site.created_at ? new Date(site.created_at).toISOString().split('T')[0] : '',
         }));
 
         setSites(transformedSites);
       } catch (err) {
-        console.error('Error fetching sites:', err);
-        setError(err instanceof Error ? err.message : 'Error loading sites');
+        const errorMessage = err instanceof Error ? err.message : 'Error loading sites';
+        if (import.meta.env.DEV) {
+          console.error('Error fetching Sites:', err);
+        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
     fetchSites();
-  }, [user, currentCompany?.id]);
+  }, [activeOrganizationId]);
 
-  return { sites, loading, error };
+  return {
+    data: sites,
+    sites, // Alias for backward compatibility
+    error,
+    isLoading: loading,
+    loading, // Alias for backward compatibility
+    isError: !!error,
+    refetch: () => {
+      setLoading(true);
+    },
+  };
 }
 
+// Hook para obtener un site por ID
+export function useSiteById(options: { id?: string | null; organizationId?: string | null }) {
+  const { id, organizationId } = options;
+  const enabled = Boolean(id && organizationId);
+
+  const query = useQuery({
+    queryKey: ['directory-site', { organizationId, id }],
+    enabled,
+    queryFn: async () => {
+      if (!id || !organizationId) return null;
+
+      const { data, error } = await supabase
+        .from('DirectorySites')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+
+      if (error) {
+        if (import.meta.env.DEV) {
+          console.error('Error fetching site by id from DirectorySites:', error);
+        }
+        throw error;
+      }
+
+      return data;
+    },
+  });
+
+  return {
+    site: query.data,
+    ...query,
+  };
+}
+
+// Hook para obtener un vendor por ID
+export function useVendorById(options: { id?: string | null; organizationId?: string | null }) {
+  const { id, organizationId } = options;
+  const enabled = Boolean(id && organizationId);
+
+  const query = useQuery({
+    queryKey: ['directory-vendor', { organizationId, id }],
+    enabled,
+    queryFn: async () => {
+      if (!id || !organizationId) return null;
+
+      const { data, error } = await supabase
+        .from('DirectoryVendors')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+
+      if (error) {
+        if (import.meta.env.DEV) {
+          console.error('[useDirectory] Error fetching vendor by id from DirectoryVendors:', error);
+        }
+        throw error;
+      }
+
+      return data;
+    },
+  });
+
+  return {
+    vendor: query.data,
+    ...query,
+  };
+}
+
+// Hook para obtener un contractor por ID
+export function useContractorById(options: { id?: string | null; organizationId?: string | null }) {
+  const { id, organizationId } = options;
+  const enabled = Boolean(id && organizationId);
+
+  const query = useQuery({
+    queryKey: ['directory-contractor', { organizationId, id }],
+    enabled,
+    queryFn: async () => {
+      if (!id || !organizationId) return null;
+
+      const { data, error } = await supabase
+        .from('DirectoryContractors')
+        .select('*')
+        .eq('id', id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+
+      if (error) {
+        if (import.meta.env.DEV) {
+          console.error('[useDirectory] Error fetching contractor by id from DirectoryContractors:', error);
+        }
+        throw error;
+      }
+
+      return data;
+    },
+  });
+
+  return {
+    contractor: query.data,
+    ...query,
+  };
+}

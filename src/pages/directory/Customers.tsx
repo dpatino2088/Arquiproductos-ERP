@@ -72,7 +72,7 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
 
 export default function Customers() {
   const { registerSubmodules } = useSubmoduleNav();
-  const { activeOrganizationId } = useOrganizationContext();
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { canEditCustomers, canViewQuotes, loading: roleLoading } = useCurrentOrgRole();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -127,8 +127,20 @@ export default function Customers() {
     };
   }, []);
 
+  // Prevent hook execution without org
+  if (!orgLoading && !activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view customers.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Get customers from Supabase
-  const { customers: customersData, loading: customersLoading, error: customersError } = useCustomers();
+  const { data: customersData, isLoading: customersLoading, isError: customersIsError, error: customersError } = useCustomers();
 
   const filteredCustomers = useMemo(() => {
     const filtered = customersData.filter(customer => {
@@ -392,7 +404,7 @@ export default function Customers() {
   };
 
   // Show loading state
-  if (customersLoading) {
+  if (orgLoading || customersLoading) {
     return (
       <div className="p-6">
         <div className="flex items-center justify-center min-h-[400px]">
@@ -406,19 +418,17 @@ export default function Customers() {
   }
 
   // Show error state
-  if (customersError) {
+  if (customersIsError && customersError) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <p className="text-sm text-red-600 mb-4">Error loading customers: {customersError}</p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="px-4 py-2 bg-primary text-white rounded hover:opacity-90"
-            >
-              Retry
-            </button>
-          </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading customers</p>
+          <p className="text-sm text-red-700">{customersError}</p>
+          {import.meta.env.DEV && (
+            <p className="text-xs text-red-600 mt-2">
+              Check the browser console for more details.
+            </p>
+          )}
         </div>
       </div>
     );

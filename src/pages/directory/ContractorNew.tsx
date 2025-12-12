@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
+import { supabase } from '../../lib/supabase';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
 import { X } from 'lucide-react';
@@ -7,8 +9,72 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Label from '../../components/ui/Label';
+import { useContractorById } from '../../hooks/useDirectory';
+import { queryClient } from '../../lib/query-client';
 
 export default function ContractorNew() {
+  const { activeOrganizationId } = useOrganizationContext();
+  const [contractorId, setContractorId] = useState<string | null>(null);
+
+  // Get contractor ID from URL if in edit mode
+  useEffect(() => {
+    const path = window.location.pathname;
+    const match = path.match(/\/directory\/contractors\/(?:edit\/)?([^/]+)/);
+    if (match && match[1] && match[1] !== 'new') {
+      setContractorId(match[1]);
+    }
+  }, []);
+
+  // Use hook to fetch contractor data if editing
+  const { contractor, isLoading: isLoadingContractor, isError: isErrorContractor } = useContractorById({
+    id: contractorId,
+    organizationId: activeOrganizationId,
+  });
+
+  // Show message if no organization is selected
+  if (!activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to {contractorId ? 'edit' : 'create'} a contractor.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state while fetching contractor data
+  if (contractorId && isLoadingContractor) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading contractor...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if failed to load contractor
+  if (contractorId && isErrorContractor) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading contractor</p>
+          <p className="text-sm text-red-700">Could not load the contractor. Please try again.</p>
+          <button
+            onClick={() => router.navigate('/directory/contractors')}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:opacity-90"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const [activeTab, setActiveTab] = useState<'contractor' | 'primary_contact'>('contractor');
   const [contractorName, setContractorName] = useState('');
   const [contactName, setContactName] = useState('');
@@ -19,7 +85,179 @@ export default function ContractorNew() {
   const [state, setState] = useState('');
   const [zip, setZip] = useState('');
   const [country, setCountry] = useState('');
+  const [primaryEmail, setPrimaryEmail] = useState('');
+  const [secondaryEmail, setSecondaryEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [extension, setExtension] = useState('');
+  const [cellPhone, setCellPhone] = useState('');
+  const [fax, setFax] = useState('');
+  const [preferredNotificationMethod, setPreferredNotificationMethod] = useState('');
+  const [dateOfHire, setDateOfHire] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [identificationNumber, setIdentificationNumber] = useState('');
+  const [companyNumber, setCompanyNumber] = useState('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  // Load contractor data when contractor is fetched
+  useEffect(() => {
+    if (contractor) {
+      setContractorName(contractor.contractor_company_name || '');
+      setContactName(contractor.contact_name || '');
+      setPosition(contractor.position || '');
+      setStreet1(contractor.street_address_line_1 || '');
+      setStreet2(contractor.street_address_line_2 || '');
+      setCity(contractor.city || '');
+      setState(contractor.state || '');
+      setZip(contractor.zip_code || '');
+      setCountry(contractor.country || '');
+      setPrimaryEmail(contractor.primary_email || '');
+      setSecondaryEmail(contractor.secondary_email || '');
+      setPhone(contractor.phone || '');
+      setExtension(contractor.extension || '');
+      setCellPhone(contractor.cell_phone || '');
+      setFax(contractor.fax || '');
+      setPreferredNotificationMethod(contractor.preferred_notification_method || '');
+      setDateOfHire(contractor.date_of_hire || '');
+      setDateOfBirth(contractor.date_of_birth || '');
+      setIdentificationNumber(contractor.ein || '');
+      setCompanyNumber(contractor.company_number || '');
+    }
+  }, [contractor]);
+
+  const handleSave = async () => {
+    // Validate required fields
+    const errors: Record<string, string> = {};
+    const missingFields: string[] = [];
+    
+    if (!contractorName.trim()) {
+      errors.contractor_company_name = 'Contractor company name is required';
+      missingFields.push('Contractor Company Name');
+    }
+    if (!street1.trim()) {
+      errors.street_address_line_1 = 'Street address is required';
+      missingFields.push('Street Address');
+    }
+    if (!city.trim()) {
+      errors.city = 'City is required';
+      missingFields.push('City');
+    }
+    if (!state.trim()) {
+      errors.state = 'State is required';
+      missingFields.push('State');
+    }
+    if (!country.trim()) {
+      errors.country = 'Country is required';
+      missingFields.push('Country');
+    }
+    
+    setValidationErrors(errors);
+    
+    if (missingFields.length > 0) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Missing Required Information',
+        message: `Please complete the following required fields: ${missingFields.join(', ')}.`,
+      });
+      return;
+    }
+
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'No organization configured',
+        message: 'Please configure an organization in Settings > Organization Profile.',
+      });
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const contractorData: any = {
+        organization_id: activeOrganizationId,
+        contractor_company_name: contractorName.trim(),
+        contact_name: contactName.trim() || null,
+        position: position.trim() || null,
+        street_address_line_1: street1.trim(),
+        street_address_line_2: street2.trim() || null,
+        city: city.trim(),
+        state: state.trim(),
+        zip_code: zip.trim() || null,
+        country: country.trim(),
+        primary_email: primaryEmail.trim() || null,
+        secondary_email: secondaryEmail.trim() || null,
+        phone: phone.trim() || null,
+        extension: extension.trim() || null,
+        cell_phone: cellPhone.trim() || null,
+        fax: fax.trim() || null,
+        preferred_notification_method: preferredNotificationMethod.trim() || null,
+        date_of_hire: dateOfHire || null,
+        date_of_birth: dateOfBirth || null,
+        ein: identificationNumber.trim() || null,
+        company_number: companyNumber.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      let result;
+
+      if (contractorId) {
+        // Update existing contractor
+        result = await supabase
+          .from('DirectoryContractors')
+          .update(contractorData)
+          .eq('id', contractorId)
+          .eq('organization_id', activeOrganizationId)
+          .select()
+          .single();
+      } else {
+        // Create new contractor
+        contractorData.created_at = new Date().toISOString();
+        contractorData.deleted = false;
+        contractorData.archived = false;
+
+        result = await supabase
+          .from('DirectoryContractors')
+          .insert([contractorData])
+          .select()
+          .single();
+      }
+
+      if (result.error) {
+        if (import.meta.env.DEV) {
+          console.error('Error saving contractor:', result.error);
+        }
+        throw result.error;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('Contractor saved successfully:', result.data);
+      }
+      
+      // Invalidate queries to refresh list
+      queryClient.invalidateQueries({ queryKey: ['directory-contractors'] });
+      
+      // Show success notification
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Contractor saved successfully',
+        message: `The contractor has been ${contractorId ? 'updated' : 'saved'} and is now available in your directory.`,
+      });
+      
+      router.navigate('/directory/contractors');
+    } catch (err: any) {
+      if (import.meta.env.DEV) {
+        console.error('Error saving contractor:', err);
+      }
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error saving contractor',
+        message: err.message || 'Something went wrong while saving. Please try again.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="p-6">
@@ -30,7 +268,7 @@ export default function ContractorNew() {
             Contractor Details
           </h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Create a new contractor
+            {contractorId ? 'Edit contractor' : 'Create a new contractor'}
           </p>
         </div>
         
@@ -48,52 +286,8 @@ export default function ContractorNew() {
             type="button"
             className="px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            onClick={() => {
-              // Validate required fields
-              const errors: Record<string, string> = {};
-              const missingFields: string[] = [];
-              
-              if (!contractorName.trim()) {
-                errors.contractor_company_name = 'Contractor company name is required';
-                missingFields.push('Contractor Company Name');
-              }
-              if (!street1.trim()) {
-                errors.street_address_line_1 = 'Street address is required';
-                missingFields.push('Street Address');
-              }
-              if (!city.trim()) {
-                errors.city = 'City is required';
-                missingFields.push('City');
-              }
-              if (!state.trim()) {
-                errors.state = 'State is required';
-                missingFields.push('State');
-              }
-              if (!country.trim()) {
-                errors.country = 'Country is required';
-                missingFields.push('Country');
-              }
-              
-              setValidationErrors(errors);
-              
-              if (missingFields.length > 0) {
-                useUIStore.getState().addNotification({
-                  type: 'error',
-                  title: 'Missing Required Information',
-                  message: `Please complete the following required fields: ${missingFields.join(', ')}.`,
-                });
-                return;
-              }
-              
-              console.log('Save contractor');
-              // Show success notification
-              useUIStore.getState().addNotification({
-                type: 'success',
-                title: 'Contractor saved successfully',
-                message: 'The contractor has been saved and is now available in your directory.',
-              });
-              router.navigate('/directory/contractors');
-            }}
+            onClick={handleSave}
+            disabled={saving}
           >
             Save and Close
           </button>
@@ -317,19 +511,45 @@ export default function ContractorNew() {
                   <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                     <div className="col-span-3">
                       <Label htmlFor="date_of_hire" className="text-xs">Date of Hire</Label>
-                      <Input id="date_of_hire" name="date_of_hire" type="date" className="py-1 text-xs" />
+                      <Input 
+                        id="date_of_hire" 
+                        name="date_of_hire" 
+                        type="date" 
+                        value={dateOfHire}
+                        onChange={(e) => setDateOfHire(e.target.value)}
+                        className="py-1 text-xs" 
+                      />
                     </div>
                     <div className="col-span-3">
                       <Label htmlFor="date_of_birth" className="text-xs">Date of Birth</Label>
-                      <Input id="date_of_birth" name="date_of_birth" type="date" className="py-1 text-xs" />
+                      <Input 
+                        id="date_of_birth" 
+                        name="date_of_birth" 
+                        type="date" 
+                        value={dateOfBirth}
+                        onChange={(e) => setDateOfBirth(e.target.value)}
+                        className="py-1 text-xs" 
+                      />
                     </div>
                     <div className="col-span-3">
                       <Label htmlFor="identification_number" className="text-xs">ID Number</Label>
-                      <Input id="identification_number" name="identification_number" className="py-1 text-xs" />
+                      <Input 
+                        id="identification_number" 
+                        name="identification_number" 
+                        value={identificationNumber}
+                        onChange={(e) => setIdentificationNumber(e.target.value)}
+                        className="py-1 text-xs" 
+                      />
                     </div>
                     <div className="col-span-3">
                       <Label htmlFor="company_number" className="text-xs">Company Number</Label>
-                      <Input id="company_number" name="company_number" className="py-1 text-xs" />
+                      <Input 
+                        id="company_number" 
+                        name="company_number" 
+                        value={companyNumber}
+                        onChange={(e) => setCompanyNumber(e.target.value)}
+                        className="py-1 text-xs" 
+                      />
                     </div>
                   </div>
                 </div>
@@ -354,36 +574,79 @@ export default function ContractorNew() {
                 <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
                   <div className="col-span-4">
                     <Label htmlFor="primary_email" className="text-xs" required>Primary Email</Label>
-                    <Input id="primary_email" name="primary_email" type="email" className="py-1 text-xs" />
+                    <Input 
+                      id="primary_email" 
+                      name="primary_email" 
+                      type="email" 
+                      value={primaryEmail}
+                      onChange={(e) => setPrimaryEmail(e.target.value)}
+                      className="py-1 text-xs" 
+                    />
                   </div>
                   <div className="col-span-4">
                     <Label htmlFor="secondary_email" className="text-xs">Secondary Email</Label>
-                    <Input id="secondary_email" name="secondary_email" type="email" className="py-1 text-xs" />
+                    <Input 
+                      id="secondary_email" 
+                      name="secondary_email" 
+                      type="email" 
+                      value={secondaryEmail}
+                      onChange={(e) => setSecondaryEmail(e.target.value)}
+                      className="py-1 text-xs" 
+                    />
                   </div>
                   <div className="col-span-4">
                     <Label htmlFor="phone" className="text-xs">Phone</Label>
-                    <Input id="phone" name="phone" type="tel" className="py-1 text-xs" />
+                    <Input 
+                      id="phone" 
+                      name="phone" 
+                      type="tel" 
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="py-1 text-xs" 
+                    />
                   </div>
                 </div>
 
                 <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
                   <div className="col-span-3">
                     <Label htmlFor="extension" className="text-xs">Extension</Label>
-                    <Input id="extension" name="extension" className="py-1 text-xs" />
+                    <Input 
+                      id="extension" 
+                      name="extension" 
+                      value={extension}
+                      onChange={(e) => setExtension(e.target.value)}
+                      className="py-1 text-xs" 
+                    />
                   </div>
                   <div className="col-span-3">
                     <Label htmlFor="cell_phone" className="text-xs">Cell Phone</Label>
-                    <Input id="cell_phone" name="cell_phone" type="tel" className="py-1 text-xs" />
+                    <Input 
+                      id="cell_phone" 
+                      name="cell_phone" 
+                      type="tel" 
+                      value={cellPhone}
+                      onChange={(e) => setCellPhone(e.target.value)}
+                      className="py-1 text-xs" 
+                    />
                   </div>
                   <div className="col-span-3">
                     <Label htmlFor="fax" className="text-xs">Fax</Label>
-                    <Input id="fax" name="fax" type="tel" className="py-1 text-xs" />
+                    <Input 
+                      id="fax" 
+                      name="fax" 
+                      type="tel" 
+                      value={fax}
+                      onChange={(e) => setFax(e.target.value)}
+                      className="py-1 text-xs" 
+                    />
                   </div>
                   <div className="col-span-3">
                     <Label htmlFor="preferred_notification_method" className="text-xs">Preferred Notification Method</Label>
                     <Select
                       id="preferred_notification_method"
                       name="preferred_notification_method"
+                      value={preferredNotificationMethod}
+                      onChange={(e) => setPreferredNotificationMethod(e.target.value)}
                       options={[
                         { value: 'not_selected', label: 'Not Selected' },
                         { value: 'email', label: 'Email' },
