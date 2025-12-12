@@ -3,10 +3,20 @@
  * Unified model for DirectoryContacts
  */
 
+// Contact type enum values matching Supabase directory_contact_type
+export type DirectoryContactType = 
+  | 'architect'
+  | 'interior_designer'
+  | 'project_manager'
+  | 'consultant'
+  | 'dealer'
+  | 'reseller'
+  | 'partner';
+
 export interface DirectoryContact {
   id: string;
   organization_id: string;
-  contact_type: 'individual' | 'company';
+  contact_type: DirectoryContactType;
   title_id?: string | null;
   customer_name: string;
   identification_number?: string | null;

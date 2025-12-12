@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { router } from '../../lib/router';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
 import { X } from 'lucide-react';
@@ -14,10 +14,21 @@ import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 
+// Contact type options matching Supabase ENUM directory_contact_type
+const CONTACT_TYPE_OPTIONS = [
+  { value: 'architect', label: 'Architect' },
+  { value: 'interior_designer', label: 'Interior Designer' },
+  { value: 'project_manager', label: 'Project Manager' },
+  { value: 'consultant', label: 'Consultant' },
+  { value: 'dealer', label: 'Dealer' },
+  { value: 'reseller', label: 'Reseller' },
+  { value: 'partner', label: 'Partner' },
+] as const;
+
 // Unified schema for contacts
 const contactSchema = z.object({
   company_id: z.string().optional(), // Optional: Contacts can exist without a Company
-  contact_type: z.enum(['individual', 'company']),
+  contact_type: z.enum(['architect', 'interior_designer', 'project_manager', 'consultant', 'dealer', 'reseller', 'partner']),
   title_id: z.string().optional(),
   customer_name: z.string().min(1, 'Customer name is required'),
   identification_number: z.string().optional(),
@@ -74,7 +85,7 @@ export default function ContactNew() {
   const form = useForm<ContactFormData>({
     resolver: zodResolver(contactSchema),
     defaultValues: {
-      contact_type: 'individual',
+      contact_type: 'architect',
       company_id: '',
     },
   });
@@ -145,7 +156,7 @@ export default function ContactNew() {
       if (data) {
         form.reset({
           company_id: data.company_id || '',
-          contact_type: (data.contact_type as 'individual' | 'company') || 'individual',
+          contact_type: (data.contact_type || 'architect') as any,
           title_id: data.title_id || undefined,
           customer_name: data.customer_name || '',
           identification_number: data.identification_number || '',
@@ -180,7 +191,6 @@ export default function ContactNew() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'No organization selected',
-        message: 'Please select an organization to continue.',
         message: 'Please configure an organization in Settings > Organization Profile.',
       });
       return;
@@ -381,20 +391,26 @@ export default function ContactNew() {
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="contact_type" className="text-xs">Contact Type</Label>
+                <Label htmlFor="contact_type" className="text-xs" required>Contact Type</Label>
                 <SelectShadcn
-                  value={form.watch('contact_type') || 'individual'}
-                  onValueChange={(value) => form.setValue('contact_type', value as 'individual' | 'company', { shouldValidate: true })}
+                  value={form.watch('contact_type') || 'architect'}
+                  onValueChange={(value) => form.setValue('contact_type', value as any, { shouldValidate: true })}
                   disabled={isReadOnly}
                 >
-                  <SelectTrigger className="py-1 text-xs">
+                  <SelectTrigger className={`py-1 text-xs ${form.formState.errors.contact_type ? 'border-red-300 bg-red-50' : ''}`}>
                     <SelectValue placeholder="Select contact type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="individual">Individual</SelectItem>
-                    <SelectItem value="company">Company</SelectItem>
+                    {CONTACT_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </SelectShadcn>
+                {form.formState.errors.contact_type && (
+                  <p className="mt-1 text-xs text-red-600">{form.formState.errors.contact_type.message}</p>
+                )}
               </div>
             </div>
 

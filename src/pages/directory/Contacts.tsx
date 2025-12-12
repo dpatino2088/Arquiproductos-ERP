@@ -71,6 +71,36 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
   }
 };
 
+// Function to get badge color for contact type
+const getContactTypeBadgeColor = (contactType: string) => {
+  switch (contactType) {
+    case 'architect':
+      return 'bg-purple-50 text-purple-700';
+    case 'interior_designer':
+      return 'bg-pink-50 text-pink-700';
+    case 'project_manager':
+      return 'bg-blue-50 text-blue-700';
+    case 'consultant':
+      return 'bg-green-50 text-green-700';
+    case 'dealer':
+      return 'bg-orange-50 text-orange-700';
+    case 'reseller':
+      return 'bg-yellow-50 text-yellow-700';
+    case 'partner':
+      return 'bg-indigo-50 text-indigo-700';
+    default:
+      return 'bg-gray-50 text-gray-700';
+  }
+};
+
+// Function to format contact type label
+const formatContactTypeLabel = (contactType: string) => {
+  return contactType
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 export default function Contacts() {
   // Debug log to confirm component is rendering
   useEffect(() => {
@@ -104,9 +134,7 @@ export default function Contacts() {
     registerSubmodules('Directory', [
       { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
       { id: 'customers', label: 'Customers', href: '/directory/customers' },
-      { id: 'sites', label: 'Sites', href: '/directory/sites' },
       { id: 'vendors', label: 'Vendors', href: '/directory/vendors' },
-      { id: 'contractors', label: 'Contractors', href: '/directory/contractors' },
     ]);
   }, [registerSubmodules]);
 
@@ -181,9 +209,11 @@ export default function Contacts() {
       // Status filter
       const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(contact.status);
 
-      // Contact type filter
+      // Contact type filter (using actual contact_type from database)
+      const contactType = (contact as any).contact_type;
+      const formattedContactType = contactType ? formatContactTypeLabel(contactType) : '';
       const matchesContactType = selectedContactType.length === 0 || 
-        (contact.contactType && selectedContactType.includes(contact.contactType));
+        selectedContactType.includes(formattedContactType);
 
       // Location filter
       const matchesLocation = selectedLocation.length === 0 || selectedLocation.includes(contact.location);
@@ -317,7 +347,15 @@ export default function Contacts() {
   };
 
   const getFilteredContactTypeOptions = () => {
-    const contactTypeOptions = ['Business', 'Personal', 'Vendor', 'Customer'];
+    const contactTypeOptions = [
+      'Architect',
+      'Interior Designer',
+      'Project Manager',
+      'Consultant',
+      'Dealer',
+      'Reseller',
+      'Partner'
+    ];
     if (!contactTypeSearchTerm) return contactTypeOptions;
     return contactTypeOptions.filter(type => 
       type.toLowerCase().includes(contactTypeSearchTerm.toLowerCase())
@@ -847,12 +885,10 @@ export default function Contacts() {
                         {(contact as any).city || contact.location?.split(', ')[0] || 'N/A'}
                       </td>
                       <td className="py-4 px-4">
-                        <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                          (contact as any).contact_type === 'company' || contact.category === 'Company'
-                            ? 'bg-blue-50 text-blue-700' 
-                            : 'bg-gray-50 text-gray-700'
+                        <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${
+                          getContactTypeBadgeColor((contact as any).contact_type || '')
                         }`}>
-                          {(contact as any).contact_type === 'company' ? 'Company' : 'Individual'}
+                          {formatContactTypeLabel((contact as any).contact_type || 'architect')}
                         </span>
                       </td>
                       <td className="py-4 px-4 text-gray-600 text-sm">
@@ -952,13 +988,15 @@ export default function Contacts() {
                     </div>
                   </div>
 
-                  {/* Category */}
+                  {/* Contact Type Badge */}
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-medium text-gray-900">{contact.category}</span>
-                      {contact.contactType && (
-                        <span className="text-xs text-gray-500">{contact.contactType}</span>
-                      )}
+                      <span className="text-xs text-gray-600">Type:</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        getContactTypeBadgeColor((contact as any).contact_type || '')
+                      }`}>
+                        {formatContactTypeLabel((contact as any).contact_type || 'architect')}
+                      </span>
                     </div>
                   </div>
                 </div>

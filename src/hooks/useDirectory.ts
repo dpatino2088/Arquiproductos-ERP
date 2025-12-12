@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 
 // Hook para obtener contactos
@@ -44,7 +44,7 @@ export function useContacts() {
           email: contact.email || '',
           company: '', // Will be populated from join if needed
           company_id: contact.company_id || null,
-          category: contact.contact_type === 'company' ? 'Company' : 'Individual',
+          category: contact.contact_type ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : 'Architect',
           status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
           location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',
           dateAdded: contact.created_at || '',
@@ -54,7 +54,7 @@ export function useContacts() {
           primary_phone: contact.primary_phone || '',
           city: contact.city || '',
           country: contact.country || '',
-          contact_type: contact.contact_type || 'individual',
+          contact_type: contact.contact_type || 'architect',
           created_at: contact.created_at || '',
         }));
 
@@ -239,191 +239,6 @@ export function useVendors() {
   };
 }
 
-// Hook para obtener contractors
-export function useContractors() {
-  const [contractors, setContractors] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { activeOrganizationId } = useOrganizationContext();
-
-  useEffect(() => {
-    async function fetchContractors() {
-      if (!activeOrganizationId) {
-        setLoading(false);
-        setContractors([]);
-        setError(null);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        const { data, error: queryError } = await supabase
-          .from('DirectoryContractors')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-
-        if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('[useDirectory] Error fetching contractors from DirectoryContractors:', queryError);
-          }
-          throw queryError;
-        }
-
-        // Transform data to match frontend interface
-        const transformedContractors = (data || []).map((contractor) => ({
-          id: contractor.id,
-          company: contractor.contractor_company_name || '',
-          name: contractor.contact_name || '',
-          licensesApplied: contractor.company_number ? [contractor.company_number] : [],
-          cellPhone: contractor.cell_phone || '',
-          proficiency1: '',
-          proficiency2: '',
-          proficiency3: '',
-          email: contractor.primary_email || '',
-          status: contractor.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
-          dateAdded: contractor.created_at ? new Date(contractor.created_at).toISOString().split('T')[0] : '',
-          location: [contractor.city, contractor.state, contractor.country].filter(Boolean).join(', ') || 'N/A',
-        }));
-
-        setContractors(transformedContractors);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading contractors';
-        if (import.meta.env.DEV) {
-          console.error('[useDirectory] Error fetching contractors from DirectoryContractors:', err);
-        }
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchContractors();
-  }, [activeOrganizationId]);
-
-  return {
-    data: contractors,
-    contractors, // Alias for backward compatibility
-    error,
-    isLoading: loading,
-    loading, // Alias for backward compatibility
-    isError: !!error,
-    refetch: () => {
-      setLoading(true);
-    },
-  };
-}
-
-// Hook para obtener sites
-export function useSites() {
-  const [sites, setSites] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { activeOrganizationId } = useOrganizationContext();
-
-  useEffect(() => {
-    async function fetchSites() {
-      if (!activeOrganizationId) {
-        setLoading(false);
-        setSites([]);
-        setError(null);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        const { data, error: queryError } = await supabase
-          .from('DirectorySites')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .order('created_at', { ascending: false });
-
-        if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('Error fetching Sites:', queryError);
-          }
-          throw queryError;
-        }
-
-        // Transform data to match frontend interface
-        const transformedSites = (data || []).map((site) => ({
-          id: site.id,
-          siteName: site.site_name || '',
-          siteId: site.site_id || '',
-          siteAddress: [site.street_address_line_1, site.street_address_line_2, site.city, site.state, site.zip_code].filter(Boolean).join(', ') || 'N/A',
-          country: site.country || '',
-          siteType: '',
-          status: site.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
-          dateAdded: site.created_at ? new Date(site.created_at).toISOString().split('T')[0] : '',
-        }));
-
-        setSites(transformedSites);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading sites';
-        if (import.meta.env.DEV) {
-          console.error('Error fetching Sites:', err);
-        }
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchSites();
-  }, [activeOrganizationId]);
-
-  return {
-    data: sites,
-    sites, // Alias for backward compatibility
-    error,
-    isLoading: loading,
-    loading, // Alias for backward compatibility
-    isError: !!error,
-    refetch: () => {
-      setLoading(true);
-    },
-  };
-}
-
-// Hook para obtener un site por ID
-export function useSiteById(options: { id?: string | null; organizationId?: string | null }) {
-  const { id, organizationId } = options;
-  const enabled = Boolean(id && organizationId);
-
-  const query = useQuery({
-    queryKey: ['directory-site', { organizationId, id }],
-    enabled,
-    queryFn: async () => {
-      if (!id || !organizationId) return null;
-
-      const { data, error } = await supabase
-        .from('DirectorySites')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-
-      if (error) {
-        if (import.meta.env.DEV) {
-          console.error('Error fetching site by id from DirectorySites:', error);
-        }
-        throw error;
-      }
-
-      return data;
-    },
-  });
-
-  return {
-    site: query.data,
-    ...query,
-  };
-}
 
 // Hook para obtener un vendor por ID
 export function useVendorById(options: { id?: string | null; organizationId?: string | null }) {
@@ -460,37 +275,3 @@ export function useVendorById(options: { id?: string | null; organizationId?: st
   };
 }
 
-// Hook para obtener un contractor por ID
-export function useContractorById(options: { id?: string | null; organizationId?: string | null }) {
-  const { id, organizationId } = options;
-  const enabled = Boolean(id && organizationId);
-
-  const query = useQuery({
-    queryKey: ['directory-contractor', { organizationId, id }],
-    enabled,
-    queryFn: async () => {
-      if (!id || !organizationId) return null;
-
-      const { data, error } = await supabase
-        .from('DirectoryContractors')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-
-      if (error) {
-        if (import.meta.env.DEV) {
-          console.error('[useDirectory] Error fetching contractor by id from DirectoryContractors:', error);
-        }
-        throw error;
-      }
-
-      return data;
-    },
-  });
-
-  return {
-    contractor: query.data,
-    ...query,
-  };
-}
