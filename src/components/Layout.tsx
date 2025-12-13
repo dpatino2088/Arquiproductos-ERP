@@ -4,7 +4,6 @@ import { useCompany } from '../hooks/useCompany';
 import { useCompanyStore } from '../stores/company-store';
 import { router } from '../lib/router';
 import { supabase } from '../lib/supabase/client';
-import { useOrganizationContext } from '../context/OrganizationContext';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
@@ -125,44 +124,10 @@ function Layout({ children }: LayoutProps) {
   const { logout, user } = useAuth();
   const { currentCompany, availableCompanies, canSwitchCompany, switchCompany, isLoading } = useCompany();
   const { clearCompanies } = useCompanyStore();
-  const { activeOrganizationId } = useOrganizationContext();
-  const [currentCustomerName, setCurrentCustomerName] = useState<string | null>(null);
   const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
-
-  // Fetch customer name from DirectoryCustomers based on organization_id
-  useEffect(() => {
-    const fetchCustomerName = async () => {
-      if (!activeOrganizationId) {
-        setCurrentCustomerName(null);
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from('DirectoryCustomers')
-          .select('company_name')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .maybeSingle();
-
-        if (error) {
-          console.error('Error fetching customer name:', error);
-          setCurrentCustomerName(null);
-          return;
-        }
-
-        setCurrentCustomerName(data?.company_name || null);
-      } catch (err) {
-        console.error('Error fetching customer name:', err);
-        setCurrentCustomerName(null);
-      }
-    };
-
-    fetchCustomerName();
-  }, [activeOrganizationId]);
   
   // Use UI store for sidebar and view mode state
   const { 
@@ -697,7 +662,7 @@ function Layout({ children }: LayoutProps) {
                 {/* User Dropdown Menu */}
                 {isUserMenuOpen && (
                   <div 
-                    className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50"
+                    className="absolute right-0 mt-2 w-56 bg-white shadow-lg border border-gray-200 py-2 z-50"
                     style={{ top: '100%' }}
                     role="menu"
                     aria-label="User account menu"
@@ -725,34 +690,13 @@ function Layout({ children }: LayoutProps) {
                       </div>
                     )}
 
-                    {/* Customer Name Section */}
-                    <div className="py-1 border-b border-gray-100">
-                      <div className="px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Customer Name
-                      </div>
-                      {!currentCustomerName ? (
-                        <div className="px-4 py-2">
-                          <div className="text-sm text-gray-500 mb-1">No customer associated</div>
-                          <div className="text-xs text-gray-400">
-                            No customer found for this organization
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-4 py-2">
-                          <div className="text-sm font-medium text-gray-900">
-                            {currentCustomerName}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
                     {/* Menu Items */}
                     <div className="py-1">
                       <button
                         className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
                         onClick={() => {
                           setIsUserMenuOpen(false);
-                          router.navigate('/organizations/manage');
+                          router.navigate('/settings/organization-user');
                         }}
                         role="menuitem"
                         aria-label="Manage organizations"
