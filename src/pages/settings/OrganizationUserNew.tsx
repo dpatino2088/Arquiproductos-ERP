@@ -319,7 +319,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     await loadContactsForCustomer(customerId);
   };
 
-  // Handler for when contact is selected (should only happen if there are multiple contacts, but for now customer has only one primary contact)
+  // Handler for when contact is selected (a customer can have multiple contacts)
   const handleContactChange = async (contactId: string) => {
     form.setValue('contact_id', contactId, { shouldValidate: true });
 
@@ -618,7 +618,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             <p className="mt-1 text-xs text-gray-500">
               {userId 
                 ? 'Customer cannot be changed for existing users'
-                : 'Select a customer first. The contact will be automatically loaded based on the customer\'s primary contact.'}
+                : 'Select a customer first. Then select one of the contacts that belong to this customer.'}
             </p>
             {availableCustomers.length === 0 && !customersLoading && (
               <p className="mt-1 text-xs text-yellow-600">
@@ -659,7 +659,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                 {availableContactsForCustomer.length === 0 ? (
                   <div className="px-2 py-1.5 text-xs text-gray-500">
                     {selectedCustomerId 
-                      ? "No contact available. The customer must have a primary contact."
+                      ? "No contacts available. The customer must have at least one contact associated."
                       : "Select a customer first"}
                   </div>
                 ) : (
