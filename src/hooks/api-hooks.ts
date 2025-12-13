@@ -28,12 +28,7 @@ const apiClient = {
       } as T;
     }
     
-    if (endpoint === '/api/employees') {
-      return [
-        { id: '1', name: 'John Doe', email: 'john@example.com', department: 'Engineering' },
-        { id: '2', name: 'Jane Smith', email: 'jane@example.com', department: 'Marketing' },
-      ] as T;
-    }
+    // Employees endpoint removed - no longer using employees table
     
     throw new Error(`Endpoint not implemented: ${endpoint}`);
   },
@@ -129,28 +124,7 @@ export function useUpdateUserProfile() {
   });
 }
 
-// Employee management hooks
-export function useEmployees() {
-  return useApiQuery(['employees'], '/api/employees');
-}
-
-export function useCreateEmployee() {
-  return useApiMutation('/api/employees', 'POST', {
-    invalidateQueries: ['employees'],
-  });
-}
-
-export function useUpdateEmployee() {
-  return useApiMutation('/api/employees', 'PUT', {
-    invalidateQueries: ['employees'],
-  });
-}
-
-export function useDeleteEmployee() {
-  return useApiMutation('/api/employees', 'DELETE', {
-    invalidateQueries: ['employees'],
-  });
-}
+// Employee management hooks - REMOVED (no longer using employees table)
 
 // Reports hooks
 export function useReports(filters?: Record<string, string>) {

@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useCompany } from '../hooks/useCompany';
 import { useCompanyStore } from '../stores/company-store';
 import { router } from '../lib/router';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase/client';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';

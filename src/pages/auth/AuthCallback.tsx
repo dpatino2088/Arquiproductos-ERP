@@ -1,18 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { router } from '../../lib/router';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase/client';
 import { AlertCircle, Box } from 'lucide-react';
 
 /**
- * AuthCallback - Handles OAuth callbacks and password recovery tokens from Supabase
+ * AuthCallback - Handles OAuth callbacks, password recovery tokens, and Magic Links from Supabase
  * 
  * This component processes the URL hash/fragment that Supabase sends after:
- * - Password reset email link click
- * - OAuth provider redirects
- * - Email confirmation links
- * 
- * For password recovery (type=recovery), it redirects to /auth/reset-password
- * For other types, it processes normally and redirects to dashboard
+ * - Password reset email link click (type=recovery) → redirects to /auth/reset-password
+ * - Magic Link click (no type) → redirects to /signup?action=set-password if user needs to set password
+ * - OAuth provider redirects → processes and redirects to dashboard
+ * - Email confirmation links (type=signup/invite) → processes and redirects to dashboard
  */
 export default function AuthCallback() {
   const [isProcessing, setIsProcessing] = useState(true);
@@ -78,6 +76,39 @@ export default function AuthCallback() {
           // Redirect to reset-password page
           router.navigate('/auth/reset-password', true);
           return;
+        }
+
+        // Handle Magic Link (OTP) - redirect to signup for password setup
+        if (accessToken && !type) {
+          console.log('🔐 Magic Link detected, redirecting to signup for password setup...');
+          
+          // Wait a moment for Supabase to process the token
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Verify session was created
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError || !session) {
+            console.error('❌ Error getting session after magic link:', sessionError);
+            setError('Invalid or expired magic link. Please request a new one.');
+            setIsProcessing(false);
+            setTimeout(() => {
+              router.navigate('/login', true);
+            }, 3000);
+            return;
+          }
+
+          if (session?.user) {
+            console.log('✅ Magic Link session established, checking if user needs to set password...');
+            
+            // Check if user already has a password set
+            // For Magic Links, we'll always redirect to signup to allow password setup
+            // The signup page will handle the logic of whether to update or create
+            // This ensures users can set/change their password via Magic Link
+            window.history.replaceState(null, '', '/signup?action=set-password');
+            router.navigate('/signup?action=set-password', true);
+            return;
+          }
         }
 
         // Handle other auth types (signup, invite, etc.)

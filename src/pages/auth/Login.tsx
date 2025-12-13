@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Phone, Box } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, getUserProfile } from '../../lib/supabase/client';
 import { useAuthStore } from '../../stores/auth-store';
-import { getUserProfile } from '../../lib/supabase';
 import { router } from '../../lib/router';
 
 // Microsoft and Google SVG Icons

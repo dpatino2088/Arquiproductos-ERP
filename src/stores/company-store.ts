@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { logger } from '../lib/logger';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase/client';
 
 export interface Company {
   id: string;

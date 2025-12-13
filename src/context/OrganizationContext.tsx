@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase/client';
 import type { OrgRole } from '../types/roles';
 
 export type OrganizationSummary = {
@@ -15,6 +15,7 @@ type OrganizationContextValue = {
   setActiveOrganizationId: (id: string | null) => void;
   loading: boolean;
   error: string | null;
+  hasOrganizations: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -114,7 +115,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       if (storedId && orgs.some((org) => org.id === storedId)) {
         // Use stored ID if it still exists
         newActiveId = storedId;
-      } else if (orgs.length > 0) {
+      } else if (orgs.length > 0 && orgs[0]) {
         // Use first organization
         newActiveId = orgs[0].id;
       }
@@ -139,11 +140,16 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     loadOrganizations();
 
-    // Listen for auth state changes
+    // Listen for auth state changes - OPTIMIZED: Solo recargar en eventos críticos
+    // Esto evita recargas innecesarias en cada TOKEN_REFRESHED
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      loadOrganizations();
+    } = supabase.auth.onAuthStateChange((event) => {
+      // Solo recargar en eventos importantes, no en cada cambio de token
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
+        loadOrganizations();
+      }
+      // Ignorar: TOKEN_REFRESHED, PASSWORD_RECOVERY, etc. para reducir peticiones
     });
 
     return () => {
@@ -153,6 +159,8 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
   const activeOrganization =
     organizations.find((org) => org.id === activeOrganizationId) || null;
+
+  const hasOrganizations = organizations.length > 0;
 
   const refresh = async () => {
     await loadOrganizations();
@@ -167,6 +175,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         setActiveOrganizationId,
         loading,
         error,
+        hasOrganizations,
         refresh,
       }}
     >

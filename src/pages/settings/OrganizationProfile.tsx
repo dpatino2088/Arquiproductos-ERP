@@ -1,984 +1,775 @@
-import { useState, useEffect } from 'react';
-import { useCompanyStore } from '../../stores/company-store';
-import { useUIStore } from '../../stores/ui-store';
-import { supabase } from '../../lib/supabase';
-import Input from '../../components/ui/Input';
-import Label from '../../components/ui/Label';
-import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { COUNTRIES } from '../../lib/constants';
-import OrganizationsRecords from './OrganizationsRecords';
-import OrganizationUsers from './OrganizationUsers';
-import { Organization } from '../../hooks/useOrganizations';
-import PasswordModal from '../../components/ui/PasswordModal';
+import { useEffect, useState, useMemo } from 'react';
+import { router } from '../../lib/router';
+import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
+import { 
+  User, 
+  Search, 
+  Filter,
+  Plus,
+  Mail,
+  Shield,
+  Eye,
+  Edit,
+  MoreVertical,
+  ChevronLeft,
+  ChevronRight,
+  List,
+  Grid3X3,
+  SortAsc,
+  SortDesc,
+  Calendar
+} from 'lucide-react';
+import { supabase } from '../../lib/supabase/client';
+import { useAuthStore } from '../../stores/auth-store';
 
-// Import refetch function from hook
-let organizationsRefetch: (() => Promise<void>) | null = null;
+interface OrganizationUser {
+  id: string;
+  role: 'owner' | 'admin' | 'member' | 'viewer';
+  created_at: string;
+  user_id: string;
+  name?: string;
+  email?: string;
+}
 
 export default function OrganizationProfile() {
-  const { currentCompany } = useCompanyStore();
-  const [activeTab, setActiveTab] = useState<'profile' | 'records' | 'users'>('profile');
-  const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
-  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const { registerSubmodules } = useSubmoduleNav();
+  const { activeOrganizationId, loading: orgLoading, hasOrganizations } = useOrganizationContext();
+  const { user } = useAuthStore();
+  const { canManageUsers, loading: roleLoading, role } = useCurrentOrgRole();
   
-  // Identity fields
-  const [organizationName, setOrganizationName] = useState('');
-  const [legalName, setLegalName] = useState('');
-  const [taxId, setTaxId] = useState('');
-  const [country, setCountry] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  const [sortBy, setSortBy] = useState<'email' | 'role' | 'created_at'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [selectedRole, setSelectedRole] = useState<string[]>([]);
+  const [showRoleDropdown, setShowRoleDropdown] = useState(false);
+  const [roleSearchTerm, setRoleSearchTerm] = useState('');
   
-  // Contact fields
-  const [mainEmail, setMainEmail] = useState('');
-  const [billingEmail, setBillingEmail] = useState('');
-  const [supportEmail, setSupportEmail] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  
-  // Plan/Tier fields
-  const [tier, setTier] = useState<'free' | 'starter' | 'pro' | 'enterprise'>('free');
-  const [status, setStatus] = useState<'active' | 'trialing' | 'suspended'>('active');
-  
-  // Address fields
-  const [addressLine1, setAddressLine1] = useState('');
-  const [addressLine2, setAddressLine2] = useState('');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('');
-  const [zipCode, setZipCode] = useState('');
-  
-  // Config defaults
-  const [defaultCurrency, setDefaultCurrency] = useState<'USD' | 'PAB' | 'EUR'>('USD');
-  const [defaultLocale, setDefaultLocale] = useState<'es-PA' | 'en-US'>('es-PA');
-  
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordModalData, setPasswordModalData] = useState<{
-    email: string;
-    password: string;
-    organizationName: string;
-  } | null>(null);
+  const [users, setUsers] = useState<OrganizationUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load organization data
-  const loadOrganizationData = async (orgId?: string | null) => {
-    const idToLoad = orgId || selectedOrganization?.id || currentCompany?.id;
-    if (!idToLoad) return;
-
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('Organizations')
-        .select('*')
-        .eq('id', idToLoad)
-        .single();
-
-      if (error) {
-        console.error('Error loading organization:', error);
-        // If organization doesn't exist, start with empty form
-        if (error.code === 'PGRST116') {
-          setOrganizationId(null);
-          resetForm();
-          setIsLoading(false);
-          return;
-        }
-        throw error;
-      }
-
-      if (data) {
-        setOrganizationId(data.id);
-        setOrganizationName(data.organization_name || '');
-        setLegalName(data.legal_name || '');
-        setTaxId(data.tax_id || '');
-        setCountry(data.country || '');
-        setMainEmail(data.main_email || '');
-        setBillingEmail(data.billing_email || '');
-        setSupportEmail(data.support_email || '');
-        setPhoneNumber(data.phone_number || '');
-        setTier(data.tier || 'free');
-        setStatus(data.status || 'active');
-        setAddressLine1(data.address_line_1 || '');
-        setAddressLine2(data.address_line_2 || '');
-        setCity(data.city || '');
-        setState(data.state || '');
-        setZipCode(data.zip_code || '');
-        setDefaultCurrency(data.default_currency || 'USD');
-        setDefaultLocale(data.default_locale || 'es-PA');
-      }
-    } catch (err: any) {
-      console.error('Error loading organization data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Reset form to empty state
-  const resetForm = () => {
-    console.log('🔄 Resetting form to empty state');
-    setOrganizationId(null);
-    setOrganizationName('');
-    setLegalName('');
-    setTaxId('');
-    setCountry('');
-    setMainEmail('');
-    setBillingEmail('');
-    setSupportEmail('');
-    setPhoneNumber('');
-    setTier('free');
-    setStatus('active');
-    setAddressLine1('');
-    setAddressLine2('');
-    setCity('');
-    setState('');
-    setZipCode('');
-    setDefaultCurrency('USD');
-    setDefaultLocale('es-PA');
-    setValidationErrors({});
-  };
-
-  // Load organization data on mount or when selected organization changes
   useEffect(() => {
-    if (selectedOrganization) {
-      loadOrganizationData(selectedOrganization.id);
-    } else {
-      // Reset form to empty state when no organization is selected
-      resetForm();
-      setOrganizationId(null);
-    }
-  }, [selectedOrganization]);
+    registerSubmodules('Settings', [
+      { id: 'organization-profile', label: 'Organization Profile', href: '/settings/organization-profile' },
+    ]);
+  }, [registerSubmodules]);
 
-  // Reset form when component unmounts or when switching away from profile tab
+  // Close dropdowns when clicking outside
   useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setShowRoleDropdown(false);
+        setRoleSearchTerm('');
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      // Cleanup: reset form when component unmounts
-      resetForm();
-      setOrganizationId(null);
+      document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
 
-  const handleSave = async (e?: React.FormEvent) => {
-    if (e) {
-      e.preventDefault();
-    }
-
-    // Validate required fields
-    const errors: Record<string, string> = {};
-    const missingFields: string[] = [];
-    
-    if (!organizationName.trim()) {
-      errors.organizationName = 'Organization name is required';
-      missingFields.push('Organization Name');
-    }
-    if (!taxId.trim()) {
-      errors.tax_id = 'ID Number is required';
-      missingFields.push('ID Number');
-    }
-    if (!mainEmail.trim()) {
-      errors.main_email = 'Main email is required';
-      missingFields.push('Main Email');
-    } else {
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(mainEmail.trim())) {
-        errors.main_email = 'Please enter a valid email address';
-        missingFields.push('Main Email (invalid format)');
-      }
-    }
-    if (!country.trim()) {
-      errors.country = 'Country is required';
-      missingFields.push('Country');
-    }
-    if (!addressLine1.trim()) {
-      errors.address_line_1 = 'Address Line 1 is required';
-      missingFields.push('Address Line 1');
-    }
-    if (!city.trim()) {
-      errors.city = 'City is required';
-      missingFields.push('City');
-    }
-    if (!state.trim()) {
-      errors.state = 'State is required';
-      missingFields.push('State');
-    }
-    if (!zipCode.trim()) {
-      errors.zip_code = 'Zip Code is required';
-      missingFields.push('Zip Code');
-    }
-    
-    setValidationErrors(errors);
-    
-    if (missingFields.length > 0) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Missing Required Information',
-        message: `Please complete the following required fields: ${missingFields.join(', ')}.`,
-      });
+  // Load users function
+  const loadUsers = async () => {
+    if (!activeOrganizationId) {
+      setUsers([]);
+      setIsLoading(false);
       return;
     }
 
-    setIsSaving(true);
-
+    setIsLoading(true);
     try {
-      // Prepare organization data
-      const organizationData = {
-        organization_name: organizationName.trim(),
-        legal_name: legalName?.trim() || null,
-        tax_id: taxId?.trim() || null,
-        country: country?.trim() || null,
-        main_email: mainEmail?.trim() || null,
-        billing_email: billingEmail?.trim() || null,
-        support_email: supportEmail?.trim() || null,
-        phone_number: phoneNumber?.trim() || null,
-        tier: tier || null,
-        status: status || null,
-        address_line_1: addressLine1?.trim() || null,
-        address_line_2: addressLine2?.trim() || null,
-        city: city?.trim() || null,
-        state: state?.trim() || null,
-        zip_code: zipCode?.trim() || null,
-        default_currency: defaultCurrency || null,
-        default_locale: defaultLocale || null,
-        updated_at: new Date().toISOString(),
-      };
+      // First, try direct query (simpler and faster if RLS allows it)
+      const { data: directData, error: directError } = await supabase
+        .from('OrganizationUsers')
+        .select('id, role, created_at, user_id, name, email, invited_by')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .order('created_at', { ascending: false });
 
-      // Check for duplicate organization by name (excluding current organization if updating)
-      if (organizationName.trim()) {
-        let duplicateQuery = supabase
-          .from('Organizations')
-          .select('id, organization_name')
-          .eq('organization_name', organizationName.trim())
-          .limit(1);
+      if (!directError && directData) {
+        // Success with direct query
+        setUsers(directData);
+        setIsLoading(false);
+        return;
+      }
 
-        if (organizationId) {
-          duplicateQuery = duplicateQuery.neq('id', organizationId);
-        }
-
-        const { data: existingOrg, error: checkError } = await duplicateQuery;
-
-        if (checkError) {
-          console.error('Error checking for duplicate organization:', checkError);
-        }
-
-        if (existingOrg && existingOrg.length > 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Duplicate organization name',
-            message: 'An organization with this name already exists. Please use a different name.',
-          });
-          setIsSaving(false);
-          return;
+      // If direct query fails, check if it's a recursion error
+      if (directError) {
+        // Check for stack depth error (RLS recursion)
+        if (directError.message?.includes('stack depth') || directError.message?.includes('54001')) {
+          if (import.meta.env.DEV) {
+            console.error('RLS recursion error detected. Please run fix_organization_users_rls_recursion.sql migration:', directError);
+          }
+          // Still try Edge Function as fallback
+        } else if (import.meta.env.DEV) {
+          console.warn('Direct query failed, trying Edge Function:', directError);
         }
       }
 
-      // Check for duplicate organization by main_email (excluding current organization if updating)
-      if (mainEmail.trim()) {
-        let duplicateEmailQuery = supabase
-          .from('Organizations')
-          .select('id, organization_name, main_email')
-          .eq('main_email', mainEmail.trim())
-          .limit(1);
-
-        if (organizationId) {
-          duplicateEmailQuery = duplicateEmailQuery.neq('id', organizationId);
-        }
-
-        const { data: existingOrgByEmail, error: checkEmailError } = await duplicateEmailQuery;
-
-        if (checkEmailError) {
-          console.error('Error checking for duplicate email:', checkEmailError);
-        }
-
-        if (existingOrgByEmail && existingOrgByEmail.length > 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Duplicate email',
-            message: 'An organization with this main email already exists. Please use a different email.',
-          });
-          setIsSaving(false);
-          return;
-        }
-      }
-
-      // Try Edge Function first, fallback to direct Supabase if it fails
-      console.log('💾 Saving organization with payload:', organizationData);
-      console.log('📋 Organization ID:', organizationId || 'NEW');
-      
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       if (!supabaseUrl) {
         throw new Error('VITE_SUPABASE_URL is not configured');
       }
 
-      let result: any = null;
-      let useEdgeFunction = true;
-
-      // Try Edge Function
+      const { data: session, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session?.session) {
+        if (import.meta.env.DEV) {
+          console.error('Error getting session:', sessionError);
+        }
+        setUsers([]);
+        setIsLoading(false);
+        return;
+      }
+      
+      // Call Edge Function to get users with emails
+      const functionUrl = `${supabaseUrl}/functions/v1/get-organization-users`;
+      
       try {
-        const functionUrl = `${supabaseUrl}/functions/v1/create-organization-with-user`;
-        const { data: session } = await supabase.auth.getSession();
-        
-        console.log('📞 Calling Edge Function:', functionUrl);
-        
         const response = await fetch(functionUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.session?.access_token || ''}`,
+            'Authorization': `Bearer ${session.session.access_token}`,
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
           },
-          body: JSON.stringify({
-            organizationId: organizationId || null,
-            organizationData,
-          }),
+          body: JSON.stringify({ organizationId: activeOrganizationId }),
         });
 
-        console.log('📥 Edge Function response status:', response.status);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Edge Function error response:', errorText);
-          let errorData;
-          try {
-            errorData = JSON.parse(errorText);
-          } catch {
-            errorData = { error: errorText || 'Edge Function failed' };
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success && result.users) {
+            setUsers(result.users);
+            setIsLoading(false);
+            return;
           }
-          throw new Error(errorData.error || `Edge Function returned status ${response.status}`);
         }
-
-        result = await response.json();
-        console.log('✅ Edge Function response:', result);
-        
-        if (!result.success) {
-          throw new Error(result.error || 'Edge Function returned unsuccessful response');
-        }
-      } catch (edgeError: any) {
-        console.warn('⚠️ Edge Function failed, falling back to direct Supabase:', edgeError);
-        useEdgeFunction = false;
-        
-        // Fallback: Use direct Supabase (without user creation for now)
-        const now = new Date().toISOString();
-        
-        if (organizationId) {
-          // Update existing organization
-          console.log('🔄 Updating existing organization directly...');
-          const { data: savedOrg, error: updateError } = await supabase
-            .from('Organizations')
-            .update({
-              ...organizationData,
-              updated_at: now,
-            })
-            .eq('id', organizationId)
-            .select()
-            .single();
-
-          if (updateError) {
-            console.error('❌ Error updating organization:', updateError);
-            throw updateError;
-          }
-
-          if (!savedOrg) {
-            throw new Error('No data returned from update operation');
-          }
-
-          result = {
-            success: true,
-            organization: savedOrg,
-            initialPassword: undefined,
-            userCreationError: 'Edge Function not available. User creation skipped.',
-          };
-        } else {
-          // Insert new organization
-          console.log('➕ Creating new organization directly...');
-          const { data: savedOrg, error: insertError } = await supabase
-            .from('Organizations')
-            .insert({
-              ...organizationData,
-              created_at: now,
-              updated_at: now,
-            })
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('❌ Error creating organization:', insertError);
-            throw insertError;
-          }
-
-          if (!savedOrg) {
-            throw new Error('No data returned from insert operation');
-          }
-
-          result = {
-            success: true,
-            organization: savedOrg,
-            initialPassword: undefined,
-            userCreationError: 'Edge Function not available. Please create user manually or deploy the Edge Function.',
-          };
+      } catch (fetchError) {
+        if (import.meta.env.DEV) {
+          console.warn('Edge Function also failed:', fetchError);
         }
       }
 
-      console.log('✅ Final result:', result);
-
-      if (!result || !result.organization) {
-        console.error('❌ Invalid result structure:', result);
-        throw new Error('Invalid response from server: missing organization data');
+      // If both fail, show empty array but log the error
+      if (import.meta.env.DEV) {
+        console.error('Both direct query and Edge Function failed. Direct error:', directError);
       }
-
-      const savedOrg = result.organization;
-      console.log('📋 Saved organization data:', savedOrg);
-
-      // Update local state with saved data
-      setOrganizationId(savedOrg.id);
-      setOrganizationName(savedOrg.organization_name || '');
-      setLegalName(savedOrg.legal_name || '');
-      setTaxId(savedOrg.tax_id || '');
-      setCountry(savedOrg.country || '');
-      setMainEmail(savedOrg.main_email || '');
-      setBillingEmail(savedOrg.billing_email || '');
-      setSupportEmail(savedOrg.support_email || '');
-      setPhoneNumber(savedOrg.phone_number || '');
-      setTier(savedOrg.tier || 'free');
-      setStatus(savedOrg.status || 'active');
-      setAddressLine1(savedOrg.address_line_1 || '');
-      setAddressLine2(savedOrg.address_line_2 || '');
-      setCity(savedOrg.city || '');
-      setState(savedOrg.state || '');
-      setZipCode(savedOrg.zip_code || '');
-      setDefaultCurrency(savedOrg.default_currency || 'USD');
-      setDefaultLocale(savedOrg.default_locale || 'es-PA');
+      setUsers([]);
       
-      // Handle response
-      if (result.initialPassword) {
-        // New organization with user created - show password modal
-        setPasswordModalData({
-          email: mainEmail.trim(),
-          password: result.initialPassword,
-          organizationName: organizationName.trim(),
-        });
-        setShowPasswordModal(true);
-        
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Organization created and access enabled',
-          message: 'The organization has been created and a user account has been set up.',
-        });
-      } else if (result.userCreationError) {
-        // Organization created but user creation failed
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Organization saved, but failed to create login user',
-          message: result.userCreationError,
-        });
-      } else if (organizationId) {
-        // Existing organization updated
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Organization updated',
-          message: 'Your organization profile has been saved successfully.',
-        });
-      } else {
-        // New organization but user already exists
-        console.log('✅ Organization created successfully (user already exists or Edge Function not available)');
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Organization created',
-          message: 'The organization has been created successfully.' + (result.userCreationError ? ' Note: ' + result.userCreationError : ''),
-        });
+    } catch (err: any) {
+      if (import.meta.env.DEV) {
+        console.error('Error loading users:', err);
       }
-
-      // Refresh organizations list
-      if (organizationsRefetch) {
-        console.log('🔄 Refreshing organizations list...');
-        try {
-          await organizationsRefetch();
-          console.log('✅ Organizations list refreshed');
-        } catch (refetchError) {
-          console.error('⚠️ Error refreshing organizations list:', refetchError);
-        }
-      }
-      
-      console.log('✅ Save operation completed successfully');
-
-    } catch (error: any) {
-      console.error('❌ Error saving organization profile:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error keys:', Object.keys(error || {}));
-      console.error('Error message:', error?.message);
-      console.error('Error details:', error?.details);
-      console.error('Error code:', error?.code);
-      console.error('Error hint:', error?.hint);
-      
-      // Show error notification with detailed message
-      const errorMessage = error?.message || error?.details || error?.hint || 'Something went wrong while saving the organization profile. Please try again.';
-      
-      console.error('📢 Showing error notification to user:', errorMessage);
-      console.error('Full error object:', JSON.stringify(error, null, 2));
-      
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Could not save organization',
-        message: errorMessage,
-      });
+      setUsers([]);
     } finally {
-      setIsSaving(false);
-      console.log('🏁 Save operation completed, isSaving set to false');
+      setIsLoading(false);
     }
   };
 
-  const handleCancel = () => {
-    // Reset form to empty state
-    resetForm();
+  // Load users when organization changes
+  useEffect(() => {
+    loadUsers();
+  }, [activeOrganizationId]);
+
+  // Filter and sort users
+  const filteredUsers = useMemo(() => {
+    const filtered = users.filter(user => {
+      // Search filter
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = !searchTerm || (
+        (user.name || '').toLowerCase().includes(searchLower) ||
+        (user.email || '').toLowerCase().includes(searchLower) ||
+        (user.user_id || '').toLowerCase().includes(searchLower) ||
+        (user.role || '').toLowerCase().includes(searchLower)
+      );
+
+      // Role filter
+      const matchesRole = selectedRole.length === 0 || selectedRole.includes(user.role);
+
+      return matchesSearch && matchesRole;
+    });
+
+    // Apply sorting
+    return filtered.sort((a, b) => {
+      let aValue: string | Date;
+      let bValue: string | Date;
+
+      switch (sortBy) {
+        case 'email':
+          aValue = (a.email || '').toLowerCase();
+          bValue = (b.email || '').toLowerCase();
+          break;
+        case 'role':
+          aValue = (a.role || '').toLowerCase();
+          bValue = (b.role || '').toLowerCase();
+          break;
+        case 'created_at':
+          aValue = a.created_at ? new Date(a.created_at) : new Date(0);
+          bValue = b.created_at ? new Date(b.created_at) : new Date(0);
+          break;
+        default:
+          aValue = (a.email || '').toLowerCase();
+          bValue = (b.email || '').toLowerCase();
+      }
+
+      if (sortBy === 'created_at') {
+        const dateA = aValue as Date;
+        const dateB = bValue as Date;
+        return sortOrder === 'asc' ? dateA.getTime() - dateB.getTime() : dateB.getTime() - dateA.getTime();
+      } else {
+        const strA = aValue as string;
+        const strB = bValue as string;
+        if (strA < strB) return sortOrder === 'asc' ? -1 : 1;
+        if (strA > strB) return sortOrder === 'asc' ? 1 : -1;
+        return 0;
+      }
+    });
+  }, [searchTerm, users, sortBy, sortOrder, selectedRole]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedUsers = filteredUsers.slice(startIndex, startIndex + itemsPerPage);
+
+  // Reset to first page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // Show message if user has no organizations at all
+  if (!orgLoading && !hasOrganizations) {
+    return <NoOrganizationMessage />;
+  }
+
+  // Show message if organization is not selected (but user has organizations)
+  if (!orgLoading && !activeOrganizationId && hasOrganizations) {
+    return (
+      <div className="p-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization from the switcher above to view users.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Handle sorting
+  const handleSort = (field: typeof sortBy) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
   };
 
-  const handleSelectOrganization = (org: Organization) => {
-    setSelectedOrganization(org);
-    setActiveTab('profile');
+  // Clear all filters
+  const clearAllFilters = () => {
+    setSelectedRole([]);
+    setSearchTerm('');
+    setRoleSearchTerm('');
   };
 
-  return (
-    <div className="p-6">
-      {/* Tab Toggle Header - Matching Sub bar style from Layout (height: 2.625rem) */}
-      <div className="bg-white border border-gray-200 rounded-t-lg overflow-hidden mb-0">
-        <div 
-          className="border-b"
-          style={{
-            height: '2.625rem',
-            backgroundColor: 'var(--gray-100)',
-            borderColor: 'var(--gray-250)'
-          }}
-        >
-          <div className="flex items-stretch h-full" role="tablist">
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`transition-colors flex items-center justify-start border-r ${
-                activeTab === 'profile'
-                  ? 'bg-white font-semibold'
-                  : 'hover:bg-white/50 font-normal'
-              }`}
-              style={{
-                fontSize: '12px',
-                padding: '0 48px',
-                height: '100%',
-                minWidth: '140px',
-                width: 'auto',
-                color: activeTab === 'profile' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
-                borderColor: 'var(--gray-250)',
-                borderBottom: activeTab === 'profile' ? '2px solid var(--primary-brand-hex)' : 'none'
-              }}
-              role="tab"
-              aria-selected={activeTab === 'profile'}
-            >
-              Profile
-            </button>
-            <button
-              onClick={() => setActiveTab('records')}
-              className={`transition-colors flex items-center justify-start ${
-                activeTab === 'records'
-                  ? 'bg-white font-semibold'
-                  : 'hover:bg-white/50 font-normal'
-              }`}
-              style={{
-                fontSize: '12px',
-                padding: '0 48px',
-                height: '100%',
-                minWidth: '140px',
-                width: 'auto',
-                color: activeTab === 'records' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
-                borderBottom: activeTab === 'records' ? '2px solid var(--primary-brand-hex)' : 'none'
-              }}
-              role="tab"
-              aria-selected={activeTab === 'records'}
-            >
-              Records
-            </button>
-            <button
-              onClick={() => setActiveTab('users')}
-              className={`transition-colors flex items-center justify-start ${
-                activeTab === 'users'
-                  ? 'bg-white font-semibold'
-                  : 'hover:bg-white/50 font-normal'
-              }`}
-              style={{
-                fontSize: '12px',
-                padding: '0 48px',
-                height: '100%',
-                minWidth: '140px',
-                width: 'auto',
-                color: activeTab === 'users' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
-                borderBottom: activeTab === 'users' ? '2px solid var(--primary-brand-hex)' : 'none'
-              }}
-              role="tab"
-              aria-selected={activeTab === 'users'}
-            >
-              Users
-            </button>
+  // Helper functions for multi-select
+  const handleRoleToggle = (role: string) => {
+    setSelectedRole(prev => 
+      prev.includes(role) 
+        ? prev.filter(r => r !== role)
+        : [...prev, role]
+    );
+  };
+
+  // Filter options based on search terms
+  const getFilteredRoleOptions = () => {
+    const roleOptions = ['owner', 'admin', 'member', 'viewer'];
+    if (!roleSearchTerm) return roleOptions;
+    return roleOptions.filter(role => 
+      role.toLowerCase().includes(roleSearchTerm.toLowerCase())
+    );
+  };
+
+  // Get role badge color
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case 'owner':
+        return 'bg-purple-100 text-purple-800';
+      case 'admin':
+        return 'bg-blue-100 text-blue-800';
+      case 'member':
+        return 'bg-green-100 text-green-800';
+      case 'viewer':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Show loading state
+  if (orgLoading || isLoading || roleLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading organization users...</p>
           </div>
         </div>
       </div>
+    );
+  }
 
-      {/* Tab Content */}
-      {activeTab === 'users' ? (
-        <OrganizationUsers organizationId={organizationId || selectedOrganization?.id || null} />
-      ) : activeTab === 'records' ? (
-        <OrganizationsRecords 
-          onSelectOrganization={handleSelectOrganization}
-          selectedOrganizationId={organizationId || undefined}
-          onRefetchReady={(refetch) => { organizationsRefetch = refetch; }}
-        />
-      ) : (
-        <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg p-6">
-          {isLoading ? (
-            <div className="flex items-center justify-center min-h-[400px]">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-sm text-gray-600">Loading organization...</p>
+  return (
+    <div className="p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Organization Profile</h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+            {`Manage ${filteredUsers.length} organization users${filteredUsers.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {canManageUsers ? (
+            <button 
+              onClick={() => router.navigate('/settings/organization-users/new')}
+              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            >
+              <Plus style={{ width: '14px', height: '14px' }} />
+              Add User
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              Role: {role ?? 'no role'} — You don't have permission to manage users.
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Search and Filters */}
+      <div className="mb-4">
+        <div className={`bg-white border border-gray-200 py-6 px-6 ${
+          showFilters ? 'rounded-t-lg' : 'rounded-lg'
+        }`}>
+          <div className="flex items-center justify-between gap-3">
+            {/* Search Bar */}
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search users by email, role..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search users"
+              />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {/* Filters Button */}
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                  showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Filter style={{ width: '14px', height: '14px' }} />
+                Filters
+              </button>
+
+              {/* View Mode Toggle */}
+              <div className="flex border border-gray-200 rounded overflow-hidden">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`p-1.5 transition-colors ${
+                    viewMode === 'table'
+                      ? 'bg-gray-300 text-black'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                  aria-label="Switch to list view"
+                  title="Switch to list view"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-gray-300 text-black'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                  aria-label="Switch to grid view"
+                  title="Switch to grid view"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Advanced Filters */}
+        {showFilters && (
+          <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              {/* Role Multi-Select */}
+              <div className="relative dropdown-container">
+                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
+                     onClick={() => setShowRoleDropdown(!showRoleDropdown)}>
+                  <span className="text-gray-700">
+                    {selectedRole.length === 0 ? 'All Roles' : 
+                     selectedRole.length === 1 ? selectedRole[0] :
+                     `${selectedRole.length} selected`}
+                  </span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+                {showRoleDropdown && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Search roles..."
+                          value={roleSearchTerm}
+                          onChange={(e) => setRoleSearchTerm(e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {selectedRole.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedRole([]);
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                          >
+                            Clear ({selectedRole.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {getFilteredRoleOptions().map((role) => (
+                      <div key={role} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                           onClick={() => handleRoleToggle(role)}>
+                        <input type="checkbox" checked={selectedRole.includes(role)} readOnly className="w-4 h-4" />
+                        <span className="text-sm text-gray-700 capitalize">{role}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <button 
+                onClick={clearAllFilters}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Clear all filters
+              </button>
+              <div className="flex gap-3 items-center">
+                <span className="text-xs text-gray-500">Sort by:</span>
+                <button 
+                  onClick={() => handleSort('email')}
+                  className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
+                    sortBy === 'email' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                  }`}
+                >
+                  Email
+                  {sortBy === 'email' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                </button>
+                <button 
+                  onClick={() => handleSort('role')}
+                  className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
+                    sortBy === 'role' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                  }`}
+                >
+                  Role
+                  {sortBy === 'role' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                </button>
+                <button 
+                  onClick={() => handleSort('created_at')}
+                  className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
+                    sortBy === 'created_at' ? 'text-gray-900 font-medium' : 'text-gray-600'
+                  }`}
+                >
+                  Date Added
+                  {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Table View */}
+      {viewMode === 'table' && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('email')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Name / Email
+                      {sortBy === 'email' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('role')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Role
+                      {sortBy === 'role' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('created_at')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Joined
+                      {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-12 text-center">
+                      <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-600 mb-2">No users found</p>
+                      <p className="text-sm text-gray-500">
+                        {users.length === 0 
+                          ? 'Start by adding users to your organization'
+                          : 'Try adjusting your search criteria'}
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedUsers.map((orgUser) => (
+                    <tr 
+                      key={orgUser.id} 
+                      onClick={() => router.navigate(`/settings/organization-users/edit/${orgUser.id}`)}
+                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                    >
+                      <td className="py-4 px-4 text-gray-900 text-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
+                            <User className="w-4 h-4 text-gray-600" />
+                          </div>
+                          <div>
+                            <div className="font-medium">{orgUser.name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}</div>
+                            {orgUser.name && orgUser.email && (
+                              <div className="text-xs text-gray-500">{orgUser.email}</div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className={`text-xs font-medium px-2 py-1 rounded capitalize ${getRoleBadgeColor(orgUser.role)}`}>
+                          {orgUser.role}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-gray-600 text-sm">
+                        {new Date(orgUser.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="py-4 px-4">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
+                          }}
+                          className="text-gray-400 hover:text-primary transition-colors"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Grid View */}
+      {viewMode === 'grid' && (
+        <>
+          {filteredUsers.length === 0 ? (
+            <div className="bg-white border border-gray-200 rounded-lg p-12 text-center mb-4">
+              <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600 mb-2">No users found</p>
+              <p className="text-sm text-gray-500">
+                {users.length === 0 
+                  ? 'Start by adding users to your organization'
+                  : 'Try adjusting your search criteria'}
+              </p>
             </div>
           ) : (
-            <div className="space-y-6">
-        {/* IDENTITY - Row 1 */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">IDENTITY</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="organization_name" className="text-xs" required>Organization Name</Label>
-              <Input
-                id="organization_name"
-                value={organizationName}
-                onChange={(e) => {
-                  setOrganizationName(e.target.value);
-                  if (validationErrors.organizationName) {
-                    setValidationErrors(prev => ({ ...prev, organizationName: '' }));
-                  }
-                }}
-                placeholder="Organization Name"
-                className="py-1 text-xs"
-                error={validationErrors.organizationName}
-              />
-            </div>
-            <div>
-              <Label htmlFor="legal_name" className="text-xs">Legal Name</Label>
-              <Input
-                id="legal_name"
-                value={legalName}
-                onChange={(e) => setLegalName(e.target.value)}
-                className="py-1 text-xs"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* IDENTITY - Row 2 */}
-        <div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="tax_id" className="text-xs" required>ID Number</Label>
-              <Input
-                id="tax_id"
-                value={taxId}
-                onChange={(e) => {
-                  setTaxId(e.target.value);
-                  if (validationErrors.tax_id) {
-                    setValidationErrors(prev => ({ ...prev, tax_id: '' }));
-                  }
-                }}
-                className="py-1 text-xs"
-                error={validationErrors.tax_id}
-              />
-            </div>
-            <div>
-              <Label htmlFor="country" className="text-xs" required>Country</Label>
-              <SelectShadcn
-                value={country || ''}
-                onValueChange={(value) => {
-                  setCountry(value);
-                  if (validationErrors.country) {
-                    setValidationErrors(prev => ({ ...prev, country: '' }));
-                  }
-                }}
-              >
-                <SelectTrigger className={`py-1 text-xs ${validationErrors.country ? 'border-red-300 bg-red-50' : ''}`}>
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  {COUNTRIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectShadcn>
-              {validationErrors.country && (
-                <p className="mt-1 text-xs text-red-600">{validationErrors.country}</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* CONTACT - Row 3 */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">CONTACT</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="main_email" className="text-xs" required>Main Email</Label>
-              <Input
-                id="main_email"
-                type="email"
-                value={mainEmail}
-                onChange={(e) => {
-                  setMainEmail(e.target.value);
-                  if (validationErrors.main_email) {
-                    setValidationErrors(prev => ({ ...prev, main_email: '' }));
-                  }
-                }}
-                className="py-1 text-xs"
-                error={validationErrors.main_email}
-              />
-            </div>
-            <div>
-              <Label htmlFor="billing_email" className="text-xs">Billing Email</Label>
-              <Input
-                id="billing_email"
-                type="email"
-                value={billingEmail}
-                onChange={(e) => setBillingEmail(e.target.value)}
-                className="py-1 text-xs"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* CONTACT - Row 4 */}
-        <div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="support_email" className="text-xs">Support Email</Label>
-              <Input
-                id="support_email"
-                type="email"
-                value={supportEmail}
-                onChange={(e) => setSupportEmail(e.target.value)}
-                className="py-1 text-xs"
-              />
-            </div>
-            <div>
-              <Label htmlFor="phone_number" className="text-xs">Phone Number</Label>
-              <Input
-                id="phone_number"
-                type="tel"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                className="py-1 text-xs"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* PLAN / TIER - Row 5 */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">PLAN / TIER</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="tier" className="text-xs">Tier</Label>
-              <SelectShadcn
-                value={tier}
-                onValueChange={(value) => setTier(value as typeof tier)}
-              >
-                <SelectTrigger className="py-1 text-xs">
-                  <SelectValue placeholder="Select tier" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="free">Free</SelectItem>
-                  <SelectItem value="starter">Starter</SelectItem>
-                  <SelectItem value="pro">Pro</SelectItem>
-                  <SelectItem value="enterprise">Enterprise</SelectItem>
-                </SelectContent>
-              </SelectShadcn>
-            </div>
-            <div>
-              <Label htmlFor="status" className="text-xs">Status</Label>
-              <SelectShadcn
-                value={status}
-                onValueChange={(value) => setStatus(value as typeof status)}
-              >
-                <SelectTrigger className="py-1 text-xs">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="trialing">Trialing</SelectItem>
-                  <SelectItem value="suspended">Suspended</SelectItem>
-                </SelectContent>
-              </SelectShadcn>
-            </div>
-          </div>
-        </div>
-
-        {/* ADDRESS - Row 6 */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">ADDRESS</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="address_line_1" className="text-xs" required>Address Line 1</Label>
-              <Input
-                id="address_line_1"
-                value={addressLine1}
-                onChange={(e) => {
-                  setAddressLine1(e.target.value);
-                  if (validationErrors.address_line_1) {
-                    setValidationErrors(prev => ({ ...prev, address_line_1: '' }));
-                  }
-                }}
-                className="py-1 text-xs"
-                error={validationErrors.address_line_1}
-              />
-            </div>
-            <div>
-              <Label htmlFor="address_line_2" className="text-xs">Address Line 2</Label>
-              <Input
-                id="address_line_2"
-                value={addressLine2}
-                onChange={(e) => setAddressLine2(e.target.value)}
-                className="py-1 text-xs"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ADDRESS - Row 7 */}
-        <div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="city" className="text-xs" required>City</Label>
-              <Input
-                id="city"
-                value={city}
-                onChange={(e) => {
-                  setCity(e.target.value);
-                  if (validationErrors.city) {
-                    setValidationErrors(prev => ({ ...prev, city: '' }));
-                  }
-                }}
-                className="py-1 text-xs"
-                error={validationErrors.city}
-              />
-            </div>
-            <div>
-              <Label htmlFor="state" className="text-xs" required>State</Label>
-              <Input
-                id="state"
-                value={state}
-                onChange={(e) => {
-                  setState(e.target.value);
-                  if (validationErrors.state) {
-                    setValidationErrors(prev => ({ ...prev, state: '' }));
-                  }
-                }}
-                className="py-1 text-xs"
-                error={validationErrors.state}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="zip_code" className="text-xs" required>Zip Code</Label>
-              <Input
-                id="zip_code"
-                value={zipCode}
-                onChange={(e) => {
-                  setZipCode(e.target.value);
-                  if (validationErrors.zip_code) {
-                    setValidationErrors(prev => ({ ...prev, zip_code: '' }));
-                  }
-                }}
-                className="py-1 text-xs"
-                error={validationErrors.zip_code}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* CONFIG DEFAULTS - Row 8 */}
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">CONFIG DEFAULTS</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <Label htmlFor="default_currency" className="text-xs">Default Currency</Label>
-              <SelectShadcn
-                value={defaultCurrency}
-                onValueChange={(value) => setDefaultCurrency(value as typeof defaultCurrency)}
-              >
-                <SelectTrigger className="py-1 text-xs">
-                  <SelectValue placeholder="Select currency" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="USD">USD</SelectItem>
-                  <SelectItem value="PAB">PAB</SelectItem>
-                  <SelectItem value="EUR">EUR</SelectItem>
-                </SelectContent>
-              </SelectShadcn>
-            </div>
-            <div>
-              <Label htmlFor="default_locale" className="text-xs">Default Locale</Label>
-              <SelectShadcn
-                value={defaultLocale}
-                onValueChange={(value) => setDefaultLocale(value as typeof defaultLocale)}
-              >
-                <SelectTrigger className="py-1 text-xs">
-                  <SelectValue placeholder="Select locale" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="es-PA">es-PA</SelectItem>
-                  <SelectItem value="en-US">en-US</SelectItem>
-                </SelectContent>
-              </SelectShadcn>
-            </div>
-          </div>
-        </div>
-
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleSave(e);
-                  }}
-                  disabled={isSaving}
-                  className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                  style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-4">
+              {paginatedUsers.map((orgUser) => (
+                <div
+                  key={orgUser.id}
+                  onClick={() => router.navigate(`/settings/organization-users/edit/${orgUser.id}`)}
+                  className="bg-white border border-gray-200 hover:shadow-lg transition-all duration-200 hover:border-primary/20 group rounded-lg p-6 cursor-pointer"
                 >
-                  {isSaving && (
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                  )}
-                  {isSaving ? 'Saving...' : 'Save Changes'}
-                </button>
-                <button
-                  onClick={handleCancel}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-sm"
-                >
-                  Cancel
-                </button>
+                  {/* User Avatar and Basic Info */}
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="relative">
+                      <div 
+                        className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-base bg-gray-200"
+                      >
+                        <User className="w-6 h-6 text-gray-600" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors truncate">
+                        {orgUser.name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}
+                      </h3>
+                      {orgUser.name && orgUser.email && (
+                        <p className="text-xs text-gray-500 truncate">{orgUser.email}</p>
+                      )}
+                      <div className="mt-1">
+                        <span className={`text-xs font-medium px-2 py-1 rounded capitalize ${getRoleBadgeColor(orgUser.role)}`}>
+                          {orgUser.role}
+                        </span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
+                      aria-label={`Edit ${orgUser.email}`}
+                      title={`Edit ${orgUser.email}`}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* User Info */}
+                  <div className="space-y-2">
+                    {orgUser.email && (
+                      <div className="flex items-center gap-2 text-xs text-gray-600">
+                        <Mail className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{orgUser.email}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-gray-600">
+                      <Calendar className="w-3 h-3 flex-shrink-0" />
+                      <span>Joined {new Date(orgUser.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Pagination */}
+      <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-600">Show:</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => {
+                setItemsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+              aria-label="Items per page"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span className="text-xs text-gray-600">
+              Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredUsers.length)} of {filteredUsers.length}
+            </span>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className={`flex items-center gap-1 px-2 py-1 border rounded text-xs transition-colors ${
+                  currentPage === 1
+                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <ChevronLeft className="w-3 h-3" />
+                Previous
+              </button>
+
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`w-6 h-6 text-xs rounded transition-colors flex items-center justify-center ${
+                        currentPage === pageNum
+                          ? 'bg-gray-300 text-black'
+                          : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
               </div>
+
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className={`flex items-center gap-1 px-2 py-1 border rounded text-xs transition-colors ${
+                  currentPage === totalPages
+                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Next
+                <ChevronRight className="w-3 h-3" />
+              </button>
             </div>
           )}
         </div>
-      )}
-
-      {/* Password Modal */}
-      {passwordModalData && (
-        <PasswordModal
-          isOpen={showPasswordModal}
-          onClose={() => {
-            setShowPasswordModal(false);
-            setPasswordModalData(null);
-          }}
-          email={passwordModalData.email}
-          password={passwordModalData.password}
-          organizationName={passwordModalData.organizationName}
-        />
-      )}
+      </div>
     </div>
   );
 }
-

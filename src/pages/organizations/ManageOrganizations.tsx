@@ -4,7 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { Building2, Plus, Check, X, AlertCircle, Loader2 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase/client';
 import type { Company, CompanyUser } from '../../stores/company-store';
 
 export default function ManageOrganizations() {

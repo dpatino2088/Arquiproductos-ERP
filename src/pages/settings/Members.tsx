@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useCompanyStore } from '../../stores/company-store';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase/client';
 import { Plus, Mail, MoreVertical, X } from 'lucide-react';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Input from '../../components/ui/Input';

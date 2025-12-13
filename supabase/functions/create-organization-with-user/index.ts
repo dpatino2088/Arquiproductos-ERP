@@ -196,12 +196,18 @@ serve(async (req) => {
               .single();
 
             if (!existingOrgUser) {
+              // Get user name and email from auth data
+              const ownerName = authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || '';
+              const ownerEmail = authData.user.email || main_email;
+              
               const { error: orgUserError } = await supabaseClient
                 .from('OrganizationUsers')
                 .insert({
                   organization_id: savedOrganization.id,
                   user_id: ownerUserId,
                   role: 'owner',
+                  name: ownerName,
+                  email: ownerEmail,
                   invited_by: null, // Owner is not invited by anyone
                   deleted: false,
                 });

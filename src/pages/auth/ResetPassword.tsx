@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Mail, CheckCircle, AlertCircle, Shield, Clock, Phone, Box } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase/client';
 
 export default function ResetPassword() {
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -90,7 +90,7 @@ export default function ResetPassword() {
                   </div>
                   <div>
                     <p className="text-sm text-foreground font-medium">Check your email inbox</p>
-                    <p className="text-xs text-muted-foreground">Look for an email from RHEMO</p>
+                    <p className="text-xs text-muted-foreground">Look for an email from Adaptio</p>
                   </div>
                 </div>
 

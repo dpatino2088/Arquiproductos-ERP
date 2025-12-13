@@ -91,9 +91,7 @@ export default function Vendors() {
     registerSubmodules('Directory', [
       { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
       { id: 'customers', label: 'Customers', href: '/directory/customers' },
-      { id: 'sites', label: 'Sites', href: '/directory/sites' },
       { id: 'vendors', label: 'Vendors', href: '/directory/vendors' },
-      { id: 'contractors', label: 'Contractors', href: '/directory/contractors' },
     ]);
   }, [registerSubmodules]);
 

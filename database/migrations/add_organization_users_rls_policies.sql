@@ -39,19 +39,41 @@ USING (
 
 -- Step 4: INSERT policy
 -- Only owners, admins, and superadmins can invite/create users in their organization
+-- BUT: Admins cannot create users with 'owner' role (only owners can create owners)
+-- SuperAdmins can create users in any organization with any role
 CREATE POLICY "organizationusers_insert_owners_admins"
 ON "OrganizationUsers"
 FOR INSERT
 WITH CHECK (
-  -- Must be owner or admin in the same organization
-  public.org_is_owner_or_admin(auth.uid(), organization_id)
-  -- The organization_id must match one where the inviter has permissions
-  AND organization_id IN (
-    SELECT organization_id 
-    FROM "OrganizationUsers" 
-    WHERE user_id = auth.uid() 
-      AND deleted = false
-      AND role IN ('owner', 'admin')
+  -- SuperAdmins can create users in any organization
+  EXISTS (
+    SELECT 1 
+    FROM "PlatformAdmins" 
+    WHERE user_id = auth.uid()
+  )
+  OR (
+    -- Must be owner or admin in the same organization
+    public.org_is_owner_or_admin(auth.uid(), organization_id)
+    -- The organization_id must match one where the inviter has permissions
+    AND organization_id IN (
+      SELECT organization_id 
+      FROM "OrganizationUsers" 
+      WHERE user_id = auth.uid() 
+        AND deleted = false
+        AND role IN ('owner', 'admin')
+    )
+    -- IMPORTANT: If user is admin (not owner), they cannot create owners
+    AND (
+      role != 'owner' 
+      OR EXISTS (
+        SELECT 1 
+        FROM "OrganizationUsers" 
+        WHERE user_id = auth.uid() 
+          AND organization_id = "OrganizationUsers".organization_id
+          AND deleted = false
+          AND role = 'owner'
+      )
+    )
   )
 );
 
@@ -143,7 +165,7 @@ COMMENT ON POLICY "organizationusers_select_org_admins" ON "OrganizationUsers" I
   'Owners, admins, and superadmins can see all users in their organization';
 
 COMMENT ON POLICY "organizationusers_insert_owners_admins" ON "OrganizationUsers" IS 
-  'Only owners, admins, and superadmins can invite users to their organization';
+  'Only owners, admins, and superadmins can invite users to their organization. Admins cannot create owners (only owners can create owners)';
 
 COMMENT ON POLICY "organizationusers_update_owners" ON "OrganizationUsers" IS 
   'Only owners and superadmins can change roles; users can update their own record (except role)';

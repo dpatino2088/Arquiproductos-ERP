@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Lock, CheckCircle, AlertCircle, ArrowRight, Shield, Box } from 'lucide-react';
-import { supabase, getUserProfile } from '../../lib/supabase';
+import { supabase, getUserProfile } from '../../lib/supabase/client';
 import { router } from '../../lib/router';
 import { useAuthStore } from '../../stores/auth-store';
 

@@ -86,7 +86,17 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
 export function useSubmoduleNav() {
   const context = useContext(SubmoduleNavContext);
   if (context === undefined) {
-    throw new Error('useSubmoduleNav must be used within a SubmoduleNavProvider');
+    // Return default values instead of throwing error for better resilience
+    // This allows components to work even if there's a timing issue with the provider
+    return {
+      title: '',
+      tabs: [],
+      breadcrumbs: [],
+      setSubmoduleNav: () => {},
+      setBreadcrumbs: () => {},
+      clearSubmoduleNav: () => {},
+      registerSubmodules: () => {}
+    };
   }
   return context;
 }

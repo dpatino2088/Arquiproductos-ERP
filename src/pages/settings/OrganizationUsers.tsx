@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Mail, Shield, User, X, Copy } from 'lucide-react';
 import { useUIStore } from '../../stores/ui-store';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase/client';
 import { useAuthStore } from '../../stores/auth-store';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';

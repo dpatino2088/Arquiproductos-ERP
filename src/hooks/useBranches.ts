@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase/client';
 import { useCompany } from './useCompany';
 import { logger } from '../lib/logger';
 
@@ -53,10 +53,10 @@ export const useBranches = (): UseBranchesResult => {
         console.log('🔍 Fetching branches for company:', currentCompany.id);
       }
 
-      // Fetch branches from Supabase
+      // Fetch branches from Supabase - OPTIMIZED: Solo columnas necesarias
       const { data, error: fetchError } = await supabase
         .from('branches')
-        .select('*')
+        .select('id, branch_name, branch_address, latitude, longitude, country, timezone, radius_meters, type, is_active, created_at')
         .eq('company_id', currentCompany.id)
         .eq('is_deleted', false)
         .eq('archived', false)

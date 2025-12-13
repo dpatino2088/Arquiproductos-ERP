@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { logger } from '../lib/logger';
 import { errorTracker } from '../lib/error-tracker';
 import { externalMonitoring } from '../lib/external-monitoring';
-import { supabase, getUserProfile } from '../lib/supabase';
+import { supabase, getUserProfile } from '../lib/supabase/client';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface User {
@@ -120,12 +120,18 @@ export const useAuthStore = create<AuthState>()(
           const storeAny: any = useAuthStore as any;
           if (!storeAny.__authListenerSet) {
             const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-              console.log('🔔 Auth state change:', event, session?.user?.email);
+              // Reducir logging para disminuir overhead
+              if (import.meta.env.DEV) {
+                console.log('🔔 Auth state change:', event, session?.user?.email);
+              }
               
               // Handle password recovery - DO NOT auto-redirect or set auth
               // The AuthCallback component will handle the redirect to /auth/reset-password
               if (event === 'PASSWORD_RECOVERY') {
-                console.log('🔐 Password recovery event detected - AuthCallback will handle redirect');
+                // Reducir logging
+                if (import.meta.env.DEV) {
+                  console.log('🔐 Password recovery event detected - AuthCallback will handle redirect');
+                }
                 // Don't set auth in store - user needs to complete password reset first
                 // Don't redirect - AuthCallback component handles this
                 return;
@@ -133,18 +139,26 @@ export const useAuthStore = create<AuthState>()(
               
               // Handle USER_UPDATED (after password change) - don't auto-set auth during recovery
               if (event === 'USER_UPDATED') {
-                console.log('🔐 User updated event');
+                // Reducir logging
+                if (import.meta.env.DEV) {
+                  console.log('🔐 User updated event');
+                }
                 // If we're in the recovery flow, don't auto-set auth
                 // The ResetPasswordForm component will handle sign out after password update
                 if (window.location.pathname.includes('/auth/reset-password') || 
                     window.location.pathname.includes('/new-password')) {
-                  console.log('✅ Password updated during recovery flow - ResetPasswordForm will handle');
+                  if (import.meta.env.DEV) {
+                    console.log('✅ Password updated during recovery flow - ResetPasswordForm will handle');
+                  }
                   return;
                 }
               }
               
               if (event === 'SIGNED_IN' && session?.user) {
-                console.log('✅ User signed in:', session.user.email);
+                // Reducir logging
+                if (import.meta.env.DEV) {
+                  console.log('✅ User signed in:', session.user.email);
+                }
                 const basicUser: User = {
                   id: session.user.id,
                   email: session.user.email || '',
@@ -169,7 +183,10 @@ export const useAuthStore = create<AuthState>()(
                   })
                   .catch(() => {});
               } else if (event === 'SIGNED_OUT') {
-                console.log('👋 User signed out');
+                // Reducir logging
+                if (import.meta.env.DEV) {
+                  console.log('👋 User signed out');
+                }
                 set({
                   user: null,
                   accessToken: null,
@@ -180,9 +197,13 @@ export const useAuthStore = create<AuthState>()(
               }
             });
             storeAny.__authListenerSet = subscription;
-            console.log('✅ Auth state listener established');
+            if (import.meta.env.DEV) {
+              console.log('✅ Auth state listener established');
+            }
           } else {
-            console.log('ℹ️ Auth state listener already exists');
+            if (import.meta.env.DEV) {
+              console.log('ℹ️ Auth state listener already exists');
+            }
           }
         } catch (error) {
           logger.error('Error initializing auth', error as Error);

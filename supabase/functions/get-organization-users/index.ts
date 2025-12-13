@@ -57,10 +57,10 @@ serve(async (req) => {
       );
     }
 
-    // Get organization users
+    // Get organization users (now includes name and email directly from table)
     const { data: orgUsers, error: orgUsersError } = await supabaseClient
       .from('OrganizationUsers')
-      .select('id, role, created_at, user_id, invited_by')
+      .select('id, role, created_at, user_id, name, email, invited_by')
       .eq('organization_id', organizationId)
       .eq('deleted', false)
       .order('created_at', { ascending: false });
@@ -69,25 +69,64 @@ serve(async (req) => {
       throw new Error(`Failed to fetch organization users: ${orgUsersError.message}`);
     }
 
-    // Get emails for all users
-    const { data: allUsers, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
+    // If name or email are missing, try to get them from auth.users as fallback
+    const usersWithData = await Promise.all((orgUsers || []).map(async (orgUser) => {
+      // If we already have name and email, use them
+      if (orgUser.name && orgUser.email) {
+        return {
+          id: orgUser.id,
+          role: orgUser.role,
+          created_at: orgUser.created_at,
+          user_id: orgUser.user_id,
+          name: orgUser.name,
+          email: orgUser.email,
+          invited_by: orgUser.invited_by || undefined,
+        };
+      }
 
-    if (usersError) {
-      throw new Error(`Failed to fetch users: ${usersError.message}`);
-    }
+      // Otherwise, fetch from auth.users
+      try {
+        const { data: authUser, error: getUserError } = await supabaseAdmin.auth.admin.getUserById(orgUser.user_id);
+        
+        if (!getUserError && authUser?.user) {
+          const name = orgUser.name || authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || '';
+          const email = orgUser.email || authUser.user.email || '';
+          
+          // Update OrganizationUsers with name and email if missing
+          if (!orgUser.name || !orgUser.email) {
+            await supabaseClient
+              .from('OrganizationUsers')
+              .update({ name, email })
+              .eq('id', orgUser.id);
+          }
+          
+          return {
+            id: orgUser.id,
+            role: orgUser.role,
+            created_at: orgUser.created_at,
+            user_id: orgUser.user_id,
+            name,
+            email,
+            invited_by: orgUser.invited_by || undefined,
+          };
+        }
+      } catch (err) {
+        console.error(`Error fetching user ${orgUser.user_id}:`, err);
+      }
 
-    // Map organization users with emails
-    const usersWithEmails = (orgUsers || []).map((orgUser) => {
-      const authUser = allUsers.users.find(u => u.id === orgUser.user_id);
+      // Fallback if we can't get user data
       return {
         id: orgUser.id,
         role: orgUser.role,
         created_at: orgUser.created_at,
         user_id: orgUser.user_id,
-        email: authUser?.email || undefined,
+        name: orgUser.name || '',
+        email: orgUser.email || '',
         invited_by: orgUser.invited_by || undefined,
       };
-    });
+    }));
+
+    const usersWithEmails = usersWithData;
 
     return new Response(
       JSON.stringify({

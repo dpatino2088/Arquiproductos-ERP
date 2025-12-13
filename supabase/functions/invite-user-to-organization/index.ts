@@ -14,8 +14,12 @@ const corsHeaders = {
 
 serve(async (req) => {
   // Handle CORS preflight requests
+  // IMPORTANT: Must return 200 OK with CORS headers for preflight to pass
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { 
+      status: 200,
+      headers: corsHeaders 
+    });
   }
 
   if (req.method !== 'POST') {
@@ -50,20 +54,72 @@ serve(async (req) => {
     // Parse request body
     const {
       organizationId,
+      name,
       email,
       role,
       invitedByUserId,
     } = await req.json();
 
+    // Validación mejorada de campos requeridos
     if (!organizationId || !email || !role || !invitedByUserId) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: organizationId, email, role, invitedByUserId' }),
+        JSON.stringify({ 
+          error: 'Missing required fields: organizationId, email, role, invitedByUserId',
+          received: { 
+            hasOrganizationId: !!organizationId,
+            hasEmail: !!email,
+            hasRole: !!role,
+            hasInvitedByUserId: !!invitedByUserId
+          }
+        }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
     }
+
+    // Validar que organizationId es un UUID válido
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(organizationId)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid organizationId format. Must be a valid UUID.' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Verificar que la organización existe y no está eliminada
+    const { data: org, error: orgError } = await supabaseClient
+      .from('Organizations')
+      .select('id, organization_name, deleted')
+      .eq('id', organizationId)
+      .single();
+
+    if (orgError || !org) {
+      console.error('Organization not found:', { organizationId, error: orgError });
+      return new Response(
+        JSON.stringify({ error: 'Organization not found or has been deleted' }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    if (org.deleted) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot add users to a deleted organization' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    console.log('Creating user for organization:', org.organization_name, '(', organizationId, ')');
 
     // Validate and normalize email
     const normalizedEmail = email.trim().toLowerCase();
@@ -91,39 +147,70 @@ serve(async (req) => {
 
     console.log('Inviting user to organization:', { organizationId, email: normalizedEmail, role, invitedByUserId });
 
-    // 1) Verify that the inviter has permission (owner or admin)
-    const { data: inviterRole, error: inviterError } = await supabaseClient
-      .from('OrganizationUsers')
-      .select('role')
-      .eq('organization_id', organizationId)
+    // 1) First check if inviter is SuperAdmin
+    const { data: platformAdmin } = await supabaseClient
+      .from('PlatformAdmins')
+      .select('user_id')
       .eq('user_id', invitedByUserId)
-      .eq('deleted', false)
-      .single();
+      .maybeSingle();
 
-    if (inviterError || !inviterRole) {
-      return new Response(
-        JSON.stringify({ error: 'Inviter does not have access to this organization' }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
+    const isSuperAdmin = !!platformAdmin;
 
-    const inviterRoleValue = inviterRole.role;
-    if (inviterRoleValue !== 'owner' && inviterRoleValue !== 'admin') {
-      return new Response(
-        JSON.stringify({ error: 'Only owners and admins can invite users' }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+    // 2) If not SuperAdmin, verify they have permission in the organization
+    let inviterRoleValue: string | null = null;
+    
+    if (!isSuperAdmin) {
+      const { data: inviterRole, error: inviterError } = await supabaseClient
+        .from('OrganizationUsers')
+        .select('role')
+        .eq('organization_id', organizationId)
+        .eq('user_id', invitedByUserId)
+        .eq('deleted', false)
+        .single();
+
+      if (inviterError || !inviterRole) {
+        return new Response(
+          JSON.stringify({ error: 'Inviter does not have access to this organization' }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      inviterRoleValue = inviterRole.role;
+      if (inviterRoleValue !== 'owner' && inviterRoleValue !== 'admin') {
+        return new Response(
+          JSON.stringify({ error: 'Only owners and admins can invite users' }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // IMPORTANT: Admins cannot create owners, only owners can create owners
+      if (role === 'owner' && inviterRoleValue !== 'owner') {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Only owners and superadmins can create users with owner role' 
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    } else {
+      // SuperAdmin can create any role, including owners
+      console.log('SuperAdmin is creating user - bypassing role restrictions');
     }
 
     // 2) Check if user already exists in auth.users
     let userId: string;
     let isNewUser = false;
+    let userName: string | undefined;
+    let userEmail: string = normalizedEmail;
 
     // Try to get user by email
     const { data: existingUser, error: getUserError } = await supabaseAdmin.auth.admin.getUserByEmail(normalizedEmail);
@@ -169,6 +256,9 @@ serve(async (req) => {
       }
 
       userId = inviteData.user.id;
+      // Use name from request if provided, otherwise try to get from user metadata or email
+      userName = name?.trim() || inviteData.user.user_metadata?.name || normalizedEmail.split('@')[0];
+      userEmail = inviteData.user.email || normalizedEmail;
       console.log('Invitation sent, user ID:', userId);
     } else if (getUserError) {
       // Unexpected error
@@ -178,6 +268,9 @@ serve(async (req) => {
       // User already exists - reuse their ID
       console.log('User already exists:', existingUser.user.id);
       userId = existingUser.user.id;
+      // Use name from request if provided, otherwise try to get from user metadata or email
+      userName = name?.trim() || existingUser.user.user_metadata?.name || existingUser.user.email?.split('@')[0] || normalizedEmail.split('@')[0];
+      userEmail = existingUser.user.email || normalizedEmail;
 
       // Update user_metadata if needed
       const currentMetadata = existingUser.user.user_metadata || {};
@@ -225,6 +318,8 @@ serve(async (req) => {
           .from('OrganizationUsers')
           .update({
             role: role,
+            name: userName,
+            email: userEmail,
             deleted: false,
             updated_at: new Date().toISOString(),
           })
@@ -248,15 +343,27 @@ serve(async (req) => {
       }
     } else {
       // Insert new OrganizationUsers entry
+      // Asegurar que organization_id se asigna correctamente
+      const insertData = {
+        organization_id: organizationId, // ✅ Siempre usar el organizationId del request
+        user_id: userId,
+        role: role,
+        name: userName,
+        email: userEmail,
+        invited_by: invitedByUserId,
+        deleted: false,
+      };
+
+      console.log('Inserting OrganizationUser with data:', {
+        organization_id: insertData.organization_id,
+        user_id: insertData.user_id,
+        role: insertData.role,
+        email: insertData.email,
+      });
+
       const { error: insertError } = await supabaseClient
         .from('OrganizationUsers')
-        .insert({
-          organization_id: organizationId,
-          user_id: userId,
-          role: role,
-          invited_by: invitedByUserId,
-          deleted: false,
-        });
+        .insert(insertData);
 
       if (insertError) {
         console.error('Error inserting OrganizationUsers:', insertError);
@@ -272,9 +379,8 @@ serve(async (req) => {
         role,
         created_at,
         user_id,
-        users:user_id (
-          email
-        )
+        name,
+        email
       `)
       .eq('organization_id', organizationId)
       .eq('deleted', false)
@@ -318,8 +424,12 @@ serve(async (req) => {
     } else if (error.message?.includes('not found') || error.message?.includes('404')) {
       statusCode = 404;
       errorMessage = 'Recurso no encontrado';
+    } else if (error.message?.includes('Missing Supabase environment variables')) {
+      statusCode = 500;
+      errorMessage = 'Server configuration error. Please contact administrator.';
     }
     
+    // IMPORTANT: Always include CORS headers in error responses
     return new Response(
       JSON.stringify({
         success: false,
@@ -327,7 +437,10 @@ serve(async (req) => {
       }),
       {
         status: statusCode,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json' 
+        },
       }
     );
   }

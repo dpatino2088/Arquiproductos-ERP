@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { Building2, ChevronDown, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { router } from '../../lib/router';
 
 export function OrganizationSwitcher() {
   const {
@@ -80,10 +81,14 @@ export function OrganizationSwitcher() {
   // No organizations
   if (organizations.length === 0) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-500">
-        <Building2 className="w-4 h-4" />
-        <span>No organizations</span>
-      </div>
+      <button
+        onClick={() => router.navigate('/organizations/manage')}
+        className="flex items-center gap-2 px-3 py-1.5 text-sm text-yellow-600 bg-yellow-50 rounded-md border border-yellow-200 hover:bg-yellow-100 transition-colors"
+        title="Click to manage organizations"
+      >
+        <AlertCircle className="w-4 h-4" />
+        <span>No organizations - Click to manage</span>
+      </button>
     );
   }
 

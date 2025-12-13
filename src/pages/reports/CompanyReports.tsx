@@ -84,7 +84,7 @@ const reportModules: ReportModule[] = [
     id: 'directory',
     label: 'Directory',
     icon: FileText,
-    description: 'Directory reports, contacts analytics, customers, sites, vendors, and contractors reports'
+    description: 'Directory reports, contacts analytics, customers, and vendors reports'
   }
 ];
 

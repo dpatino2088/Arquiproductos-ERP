@@ -7,7 +7,9 @@ import { SubmoduleNavProvider } from './hooks/useSubmoduleNav';
 import { logger } from './lib/logger';
 import { useUIStore } from './stores/ui-store';
 import { useAuthStore } from './stores/auth-store';
-import { supabase, getUserProfile } from './lib/supabase';
+import { supabase, getUserProfile } from './lib/supabase/client';
+import { useSupabaseStatus } from './lib/services/supabase-status';
+import { SupabaseStatusBanner } from './hooks/useSupabaseHealth';
 import Toast from './components/ui/Toast';
 
 // Code splitting with React.lazy
@@ -92,16 +94,6 @@ const DirectoryCustomerNew = lazy(() => {
   return import('./pages/directory/CustomerNew');
 });
 
-const DirectorySites = lazy(() => {
-  logger.debug('Loading Directory Sites component');
-  return import('./pages/directory/Sites');
-});
-
-const DirectorySiteNew = lazy(() => {
-  logger.debug('Loading Directory Site New component');
-  return import('./pages/directory/SiteNew');
-});
-
 const DirectoryVendors = lazy(() => {
   logger.debug('Loading Directory Vendors component');
   return import('./pages/directory/Vendors');
@@ -112,46 +104,12 @@ const DirectoryVendorNew = lazy(() => {
   return import('./pages/directory/VendorNew');
 });
 
-const DirectoryContractors = lazy(() => {
-  logger.debug('Loading Directory Contractors component');
-  return import('./pages/directory/Contractors');
-});
-
-const DirectoryContractorNew = lazy(() => {
-  logger.debug('Loading Directory Contractor New component');
-  return import('./pages/directory/ContractorNew');
-});
-
 const TestDirectory = lazy(() => {
   logger.debug('Loading Test Directory component');
   return import('./pages/directory/TestDirectory');
 });
 
-const WhosWorking = lazy(() => {
-  logger.debug('Loading Whos Working component');
-  return import('./pages/time-and-attendance/WhosWorking');
-});
-
-const TeamSchedule = lazy(() => {
-  logger.debug('Loading Team Schedule component');
-  return import('./pages/time-and-attendance/TeamSchedule');
-});
-
-const TeamAttendance = lazy(() => {
-  logger.debug('Loading Team Attendance component');
-  return import('./pages/time-and-attendance/TeamAttendance');
-});
-
-const AttendanceFlags = lazy(() => {
-  logger.debug('Loading Attendance Flags component');
-  return import('./pages/time-and-attendance/AttendanceFlags');
-});
-
-
-const EmployeeTimesheet = lazy(() => {
-  logger.debug('Loading Employee Timesheet component');
-  return import('./pages/time-and-attendance/EmployeeTimesheet');
-});
+// Time and Attendance modules removed - no longer using employees table
 
 
 
@@ -168,6 +126,16 @@ const CompanySettings = lazy(() => {
 const OrganizationUsers = lazy(() => {
   logger.debug('Loading Organization Users component');
   return import('./pages/settings/OrganizationUsers');
+});
+
+const OrganizationProfile = lazy(() => {
+  logger.debug('Loading Organization Profile component');
+  return import('./pages/settings/OrganizationProfile');
+});
+
+const OrganizationUserNew = lazy(() => {
+  logger.debug('Loading Organization User New component');
+  return import('./pages/settings/OrganizationUserNew');
 });
 
 const ManageOrganizations = lazy(() => {
@@ -264,6 +232,14 @@ function App() {
     
     initializeAuth();
   }, [initAuth]);
+
+  // Start Supabase monitoring
+  useEffect(() => {
+    useSupabaseStatus.getState().startMonitoring();
+    return () => {
+      useSupabaseStatus.getState().stopMonitoring();
+    };
+  }, []);
 
   // Note: Auth callbacks (recovery, signup, invite) are now handled by AuthCallback component
   // This keeps the logic centralized and prevents conflicts with auto-redirects
@@ -367,28 +343,14 @@ function App() {
     router.addRoute('/directory/contacts/edit/:id', () => setCurrentPage('directory-contact-new'));
     router.addRoute('/directory/customers', () => setCurrentPage('directory-customers'));
     router.addRoute('/directory/customers/new', () => setCurrentPage('directory-customer-new'));
-    router.addRoute('/directory/sites', () => setCurrentPage('directory-sites'));
-    router.addRoute('/directory/sites/new', () => setCurrentPage('directory-site-new'));
-    router.addRoute('/directory/sites/:id', () => setCurrentPage('directory-site-new'));
-    router.addRoute('/directory/sites/edit/:id', () => setCurrentPage('directory-site-new'));
     router.addRoute('/directory/vendors', () => setCurrentPage('directory-vendors'));
     router.addRoute('/directory/vendors/new', () => setCurrentPage('directory-vendor-new'));
     router.addRoute('/directory/vendors/:id', () => setCurrentPage('directory-vendor-new'));
     router.addRoute('/directory/vendors/edit/:id', () => setCurrentPage('directory-vendor-new'));
-    router.addRoute('/directory/contractors', () => setCurrentPage('directory-contractors'));
-    router.addRoute('/directory/contractors/new', () => setCurrentPage('directory-contractor-new'));
-    router.addRoute('/directory/contractors/:id', () => setCurrentPage('directory-contractor-new'));
-    router.addRoute('/directory/contractors/edit/:id', () => setCurrentPage('directory-contractor-new'));
     router.addRoute('/directory/test', () => setCurrentPage('test-directory'));
     router.addRoute('/directory', () => setCurrentPage('directory-contacts')); // Default to contacts
     
-    // Time & Attendance routes
-    router.addRoute('/time-and-attendance/whos-working', () => setCurrentPage('whos-working'));
-    router.addRoute('/time-and-attendance/team-schedule', () => setCurrentPage('team-schedule'));
-    router.addRoute('/time-and-attendance/team-attendance', () => setCurrentPage('team-attendance'));
-    router.addRoute('/time-and-attendance/attendance-flags', () => setCurrentPage('attendance-flags'));
-    router.addRoute('/time-and-attendance/employee-timesheet/:slug', () => setCurrentPage('employee-timesheet'));
-    router.addRoute('/time-and-attendance/employee-timesheet', () => setCurrentPage('employee-timesheet'));
+    // Time & Attendance routes - REMOVED (no longer using employees table)
     
     // Reports routes
     router.addRoute('/reports', () => setCurrentPage('company-reports'));
@@ -397,6 +359,9 @@ function App() {
     // Settings routes
     router.addRoute('/settings', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
+    router.addRoute('/settings/organization-profile', () => setCurrentPage('organization-profile'));
+    router.addRoute('/settings/organization-users/new', () => setCurrentPage('organization-user-new'));
+    router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('organization-user-new'));
     
     // Organizations routes
     router.addRoute('/organizations', () => setCurrentPage('manage-organizations'));
@@ -478,39 +443,25 @@ function App() {
         return <DirectoryCustomers />;
       case 'directory-customer-new':
         return <DirectoryCustomerNew />;
-      case 'directory-sites':
-        return <DirectorySites />;
-      case 'directory-site-new':
-        return <DirectorySiteNew />;
       case 'directory-vendors':
         return <DirectoryVendors />;
       case 'directory-vendor-new':
         return <DirectoryVendorNew />;
-      case 'directory-contractors':
-        return <DirectoryContractors />;
-      case 'directory-contractor-new':
-        return <DirectoryContractorNew />;
       case 'test-directory':
         return <TestDirectory />;
 
       case 'reports':
         return <CompanyReports />;
-      case 'whos-working':
-        return <WhosWorking />;
-      case 'team-schedule':
-        return <TeamSchedule />;
-      case 'team-attendance':
-        return <TeamAttendance />;
-      case 'attendance-flags':
-        return <AttendanceFlags />;
-      case 'employee-timesheet':
-        return <EmployeeTimesheet />;
       case 'company-reports':
         return <CompanyReports />;
       case 'company-settings':
         return <CompanySettings />;
       case 'organization-users':
         return <OrganizationUsers organizationId={null} />;
+      case 'organization-profile':
+        return <OrganizationProfile />;
+      case 'organization-user-new':
+        return <OrganizationUserNew />;
       case 'manage-organizations':
         return <ManageOrganizations />;
       
@@ -538,6 +489,7 @@ function App() {
   return (
     <ErrorBoundary>
       <Toast />
+      <SupabaseStatusBanner />
       <div className="min-h-dvh bg-background">
         {!isAuthenticated && !isAuthPage ? (
           <div className="min-h-dvh flex items-center justify-center p-6">
@@ -570,6 +522,7 @@ function App() {
           <SubmoduleNavProvider>
             <Layout>
               <ErrorBoundary>
+                <SupabaseStatusBanner />
                 <Suspense fallback={
                   <div className="flex items-center justify-center min-h-[400px]">
                     <div className="flex flex-col items-center gap-4">
