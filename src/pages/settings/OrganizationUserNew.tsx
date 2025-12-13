@@ -13,7 +13,7 @@ import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
-import { useContacts } from '../../hooks/useDirectory';
+import { useContacts, useCustomers } from '../../hooks/useDirectory';
 
 // Schema for organization user
 const organizationUserSchema = z.object({
@@ -56,16 +56,17 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   // Determine if form should be read-only
   const isReadOnly = isViewer || !canManageUsers;
 
-  // Load contacts for selection
+  // Load customers and contacts for selection
+  const { customers, isLoading: customersLoading } = useCustomers();
   const { contacts, isLoading: contactsLoading } = useContacts();
   
-  // State to track selected contact and available customers
-  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
-  const [availableCustomersForContact, setAvailableCustomersForContact] = useState<Array<{ id: string; company_name: string }>>([]);
+  // State to track selected customer and available contacts for that customer
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [availableContactsForCustomer, setAvailableContactsForCustomer] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([]);
 
-  // Filter contacts to only show active, non-deleted contacts
-  const availableContacts = contacts.filter(
-    (contact) => !contact.status || contact.status !== 'Archived'
+  // Filter customers to only show active, non-deleted
+  const availableCustomers = customers.filter(
+    (customer) => !customer.deleted && !customer.archived
   );
 
   // Get user ID from URL if in edit mode
@@ -125,10 +126,10 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
           customer_id: customerId,
         });
 
-        // Load available customers for the contact if contact_id exists
-        if (contactId) {
-          setSelectedContactId(contactId);
-          await loadCustomersForContact(contactId, customerId);
+        // Load available contacts for the customer if customer_id exists
+        if (customerId) {
+          setSelectedCustomerId(customerId);
+          await loadContactsForCustomer(customerId, contactId);
         }
         
         setIsLoading(false);
@@ -176,29 +177,10 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             customer_id: customerId,
           });
 
-          // Load available customers for the contact if contact_id exists
-          if (contactId) {
-            setSelectedContactId(contactId);
-            // Load customers for this contact
-            try {
-              const { data: customerData } = await supabase
-                .from('DirectoryCustomers')
-                .select('id, company_name')
-                .eq('primary_contact_id', contactId)
-                .eq('organization_id', activeOrganizationId)
-                .eq('deleted', false);
-              
-              if (customerData && customerData.length > 0) {
-                setAvailableCustomersForContact(customerData);
-                if (customerId) {
-                  form.setValue('customer_id', customerId);
-                } else if (customerData.length === 1 && customerData[0]) {
-                  form.setValue('customer_id', customerData[0].id);
-                }
-              }
-            } catch (err) {
-              console.error('Error loading customers:', err);
-            }
+          // Load available contacts for the customer if customer_id exists
+          if (customerId) {
+            setSelectedCustomerId(customerId);
+            await loadContactsForCustomer(customerId, contactId);
           }
           
           setIsLoading(false);
@@ -223,65 +205,104 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     }
   };
 
-  // Helper function to load customers for a contact
-  const loadCustomersForContact = async (contactId: string, preselectedCustomerId?: string) => {
+  // Helper function to load contacts for a customer
+  const loadContactsForCustomer = async (customerId: string, preselectedContactId?: string) => {
     if (!activeOrganizationId) return;
 
     try {
+      // Get the customer to find its primary_contact_id
       const { data: customerData, error: customerError } = await supabase
         .from('DirectoryCustomers')
-        .select('id, company_name')
-        .eq('primary_contact_id', contactId)
+        .select('primary_contact_id')
+        .eq('id', customerId)
         .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false);
+        .eq('deleted', false)
+        .maybeSingle();
 
-      if (!customerError && customerData && customerData.length > 0) {
-        setAvailableCustomersForContact(customerData);
+      if (customerError || !customerData) {
+        setAvailableContactsForCustomer([]);
+        form.setValue('contact_id', '');
+        return;
+      }
 
-        // If there's exactly one customer, auto-select it (unless we have a preselected one)
-        if (preselectedCustomerId) {
-          form.setValue('customer_id', preselectedCustomerId);
-        } else if (customerData.length === 1 && customerData[0]) {
-          form.setValue('customer_id', customerData[0].id);
-        } else if (customerData.length > 1) {
-          // Multiple customers - user must select one
-          form.setValue('customer_id', '');
+      // Get the primary contact for this customer
+      const primaryContactId = customerData.primary_contact_id;
+      
+      if (!primaryContactId) {
+        setAvailableContactsForCustomer([]);
+        form.setValue('contact_id', '');
+        return;
+      }
+
+      // Get the contact details
+      const { data: contactData, error: contactError } = await supabase
+        .from('DirectoryContacts')
+        .select('id, customer_name, email, first_name, last_name')
+        .eq('id', primaryContactId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .maybeSingle();
+
+      if (!contactError && contactData) {
+        // Transform to match the interface
+        const contact = {
+          id: contactData.id,
+          firstName: contactData.first_name || contactData.customer_name || '',
+          lastName: contactData.last_name || '',
+          email: contactData.email || '',
+        };
+        
+        setAvailableContactsForCustomer([contact]);
+
+        // Auto-select the primary contact
+        if (preselectedContactId) {
+          form.setValue('contact_id', preselectedContactId);
+        } else {
+          form.setValue('contact_id', contactData.id);
+          // Auto-fill name and email (only when creating new user)
+          if (!userId) {
+            form.setValue('name', contact.firstName);
+            form.setValue('email', contact.email);
+          }
         }
       } else {
-        // No customer found for this contact
-        setAvailableCustomersForContact([]);
-        form.setValue('customer_id', '');
+        setAvailableContactsForCustomer([]);
+        form.setValue('contact_id', '');
       }
     } catch (err) {
-      console.error('Error finding customer for contact:', err);
-      setAvailableCustomersForContact([]);
-      form.setValue('customer_id', '');
+      console.error('Error finding contact for customer:', err);
+      setAvailableContactsForCustomer([]);
+      form.setValue('contact_id', '');
     }
   };
 
-  // Handler for when contact is selected
+  // Handler for when customer is selected
+  const handleCustomerChange = async (customerId: string) => {
+    form.setValue('customer_id', customerId, { shouldValidate: true });
+    setSelectedCustomerId(customerId);
+
+    // Clear contact and related fields when customer changes
+    form.setValue('contact_id', '');
+    if (!userId) {
+      form.setValue('name', '');
+      form.setValue('email', '');
+    }
+
+    // Load contacts for this customer
+    await loadContactsForCustomer(customerId);
+  };
+
+  // Handler for when contact is selected (should only happen if there are multiple contacts, but for now customer has only one primary contact)
   const handleContactChange = async (contactId: string) => {
     form.setValue('contact_id', contactId, { shouldValidate: true });
-    setSelectedContactId(contactId);
 
     // Find the selected contact
-    const selectedContact = availableContacts.find((c) => c.id === contactId);
+    const selectedContact = availableContactsForCustomer.find((c) => c.id === contactId);
 
-    if (selectedContact) {
+    if (selectedContact && !userId) {
       // Auto-fill name and email from contact (only when creating new user)
-      if (!userId) {
-        const contactName = selectedContact.firstName || '';
-        const contactEmail = selectedContact.email || '';
-        form.setValue('name', contactName);
-        form.setValue('email', contactEmail);
-      }
-
-      // Load customers for this contact
-      await loadCustomersForContact(contactId);
-    } else {
-      // Contact not found, clear customer selection
-      setAvailableCustomersForContact([]);
-      form.setValue('customer_id', '');
+      form.setValue('name', selectedContact.firstName || '');
+      form.setValue('email', selectedContact.email || '');
     }
   };
 
@@ -533,7 +554,49 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       {/* Form */}
       <div className="bg-white border border-gray-200 p-6">
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-          {/* Contact Field */}
+          {/* Customer Field - FIRST */}
+          <div>
+            <Label htmlFor="customer_id" className="text-xs" required>
+              Customer
+            </Label>
+            <SelectShadcn
+              value={form.watch('customer_id') || ''}
+              onValueChange={handleCustomerChange}
+              disabled={isReadOnly || !!userId} // Disable if editing (can't change customer)
+            >
+              <SelectTrigger className={`py-1 text-xs ${form.formState.errors.customer_id ? 'border-red-300 bg-red-50' : ''}`}>
+                <SelectValue placeholder={customersLoading ? "Loading customers..." : "Select a customer"} />
+              </SelectTrigger>
+              <SelectContent>
+                {availableCustomers.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-gray-500">
+                    {customersLoading ? "Loading..." : "No customers available. Please create a customer first in the Directory module."}
+                  </div>
+                ) : (
+                  availableCustomers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.companyName || 'Unnamed Customer'}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </SelectShadcn>
+            {form.formState.errors.customer_id && (
+              <p className="mt-1 text-xs text-red-600">{form.formState.errors.customer_id.message}</p>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              {userId 
+                ? 'Customer cannot be changed for existing users'
+                : 'Select a customer first. The contact will be automatically loaded based on the customer\'s primary contact.'}
+            </p>
+            {availableCustomers.length === 0 && !customersLoading && (
+              <p className="mt-1 text-xs text-yellow-600">
+                ⚠️ No customers found. Please create a customer in the Directory module before creating a user.
+              </p>
+            )}
+          </div>
+
+          {/* Contact Field - SECOND */}
           <div>
             <Label htmlFor="contact_id" className="text-xs" required>
               Contact
@@ -541,18 +604,26 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             <SelectShadcn
               value={form.watch('contact_id') || ''}
               onValueChange={handleContactChange}
-              disabled={isReadOnly || !!userId} // Disable if editing (can't change contact)
+              disabled={isReadOnly || !!userId || !selectedCustomerId || availableContactsForCustomer.length === 0}
             >
               <SelectTrigger className={`py-1 text-xs ${form.formState.errors.contact_id ? 'border-red-300 bg-red-50' : ''}`}>
-                <SelectValue placeholder={contactsLoading ? "Loading contacts..." : "Select a contact"} />
+                <SelectValue placeholder={
+                  !selectedCustomerId 
+                    ? "Select a customer first" 
+                    : availableContactsForCustomer.length === 0 
+                      ? "No contact found for this customer"
+                      : "Select a contact"
+                } />
               </SelectTrigger>
               <SelectContent>
-                {availableContacts.length === 0 ? (
+                {availableContactsForCustomer.length === 0 ? (
                   <div className="px-2 py-1.5 text-xs text-gray-500">
-                    {contactsLoading ? "Loading..." : "No contacts available. Please create a contact first in the Directory module."}
+                    {selectedCustomerId 
+                      ? "No contact available. The customer must have a primary contact."
+                      : "Select a customer first"}
                   </div>
                 ) : (
-                  availableContacts.map((contact) => (
+                  availableContactsForCustomer.map((contact) => (
                     <SelectItem key={contact.id} value={contact.id}>
                       {(contact.firstName || '')} {(contact.lastName || '')} {contact.email ? `(${contact.email})` : ''}
                     </SelectItem>
@@ -564,57 +635,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               <p className="mt-1 text-xs text-red-600">{form.formState.errors.contact_id.message}</p>
             )}
             <p className="mt-1 text-xs text-gray-500">
-              {userId 
-                ? 'Contact cannot be changed for existing users'
-                : 'Select an existing contact. The contact must be the primary contact of a customer.'}
-            </p>
-            {availableContacts.length === 0 && !contactsLoading && (
-              <p className="mt-1 text-xs text-yellow-600">
-                ⚠️ No contacts found. Please create a contact in the Directory module before creating a user.
-              </p>
-            )}
-          </div>
-
-          {/* Customer Field */}
-          <div>
-            <Label htmlFor="customer_id" className="text-xs" required>
-              Customer
-            </Label>
-            <SelectShadcn
-              value={form.watch('customer_id') || ''}
-              onValueChange={(value) => form.setValue('customer_id', value, { shouldValidate: true })}
-              disabled={isReadOnly || !selectedContactId || availableCustomersForContact.length === 0}
-            >
-              <SelectTrigger className={`py-1 text-xs ${form.formState.errors.customer_id ? 'border-red-300 bg-red-50' : ''}`}>
-                <SelectValue placeholder={
-                  !selectedContactId 
-                    ? "Select a contact first" 
-                    : availableCustomersForContact.length === 0 
-                      ? "No customer found for this contact"
-                      : availableCustomersForContact.length === 1 && availableCustomersForContact[0]
-                        ? availableCustomersForContact[0].company_name
-                        : "Select a customer"
-                } />
-              </SelectTrigger>
-              <SelectContent>
-                {availableCustomersForContact.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-gray-500">
-                    No customer available. The selected contact must be the primary contact of a customer.
-                  </div>
-                ) : (
-                  availableCustomersForContact.map((customer) => (
-                    <SelectItem key={customer.id} value={customer.id}>
-                      {customer.company_name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </SelectShadcn>
-            {form.formState.errors.customer_id && (
-              <p className="mt-1 text-xs text-red-600">{form.formState.errors.customer_id.message}</p>
-            )}
-            <p className="mt-1 text-xs text-gray-500">
-              Customer is automatically selected based on the contact. If multiple customers use this contact, select the correct one.
+              Contact is automatically loaded from the customer's primary contact. Email and name will be auto-filled.
             </p>
           </div>
 
