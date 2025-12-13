@@ -59,6 +59,8 @@ interface Employee {
   email: string;
   location: string;
   avatar?: string;
+  phone?: string;
+  status?: string;
 }
 
 export default function EmployeeTimesheet() {
@@ -138,7 +140,7 @@ export default function EmployeeTimesheet() {
     if (currentEmployeeIndex > 0) {
       const newIndex = currentEmployeeIndex - 1;
       setCurrentEmployeeIndex(newIndex);
-      setEmployee(employeeList[newIndex]);
+      setEmployee(employeeList[newIndex] || null);
     }
   };
 
@@ -146,7 +148,7 @@ export default function EmployeeTimesheet() {
     if (currentEmployeeIndex < employeeList.length - 1) {
       const newIndex = currentEmployeeIndex + 1;
       setCurrentEmployeeIndex(newIndex);
-      setEmployee(employeeList[newIndex]);
+      setEmployee(employeeList[newIndex] || null);
     }
   };
 
@@ -208,13 +210,16 @@ export default function EmployeeTimesheet() {
       }
     } else {
       // No employee in sessionStorage, use first employee
-      setEmployee(mockEmployees[0]);
-      setCurrentEmployeeIndex(0);
-      setBreadcrumbs([
-        { label: 'Time & Attendance' },
-        { label: 'Team Attendance', href: '/time-and-attendance/team-attendance' },
-        { label: mockEmployees[0].employeeName }
-      ]);
+      const firstEmployee = mockEmployees[0];
+      if (firstEmployee) {
+        setEmployee(firstEmployee);
+        setCurrentEmployeeIndex(0);
+        setBreadcrumbs([
+          { label: 'Time & Attendance' },
+          { label: 'Team Attendance', href: '/time-and-attendance/team-attendance' },
+          { label: firstEmployee.employeeName }
+        ]);
+      }
     }
   }, [setBreadcrumbs, clearSubmoduleNav]);
 
@@ -236,7 +241,7 @@ export default function EmployeeTimesheet() {
       
       if (isWeekend) {
         mockData.push({
-          date: date.toISOString().split('T')[0],
+          date: date.toISOString().split('T')[0] || '',
           timeEntries: [],
           sessions: [],
           totalHours: 0,
@@ -259,14 +264,15 @@ export default function EmployeeTimesheet() {
         for (let i = 0; i < numEntries; i++) {
           const clockIn = `${8 + Math.floor(Math.random() * 2)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
           const hours = 2 + Math.random() * 4; // 2-6 hours per entry
-          const clockOut = `${parseInt(clockIn.split(':')[0]) + Math.floor(hours)}:${Math.floor((hours % 1) * 60).toString().padStart(2, '0')}`;
+          const clockInHour = parseInt(clockIn.split(':')[0] || '8');
+          const clockOut = `${clockInHour + Math.floor(hours)}:${Math.floor((hours % 1) * 60).toString().padStart(2, '0')}`;
           
           timeEntries.push({
-            id: `${emp.id}-${date.toISOString().split('T')[0]}-${i}`,
+            id: `${emp.id}-${date.toISOString().split('T')[0] || ''}}-${i}`,
             clockIn,
             clockOut,
-            project: projects[Math.floor(Math.random() * projects.length)],
-            activity: activities[Math.floor(Math.random() * activities.length)],
+            project: projects[Math.floor(Math.random() * projects.length)] || 'Project',
+            activity: activities[Math.floor(Math.random() * activities.length)] || 'Development',
             hours: Math.round(hours * 100) / 100,
             notes: `Entry ${i + 1} for ${date.toLocaleDateString()}`
           });
@@ -302,14 +308,15 @@ export default function EmployeeTimesheet() {
             const endMinute = (startMinute + Math.floor((duration % 1) * 60)) % 60;
             const endTime = `${endHour.toString().padStart(2, '0')}:${endMinute.toString().padStart(2, '0')}`;
             
+            const sessionDescriptions = descriptions[sessionType] || [];
             sessions.push({
-              id: `${emp.id}-${date.toISOString().split('T')[0]}-session-${sessionCounter}`,
+              id: `${emp.id}-${date.toISOString().split('T')[0] || ''}-session-${sessionCounter}`,
               type: sessionType,
               startTime,
               endTime,
               duration: Math.round(duration * 100) / 100,
               location: emp.location,
-              description: descriptions[sessionType][Math.floor(Math.random() * descriptions[sessionType].length)],
+              description: sessionDescriptions[Math.floor(Math.random() * sessionDescriptions.length)] || 'Session',
               notes: `${sessionType} session ${i + 1}`
             });
             
@@ -322,12 +329,15 @@ export default function EmployeeTimesheet() {
           status = 'absent';
         } else if (totalHours < 6) {
           status = 'partial';
-        } else if (timeEntries[0]?.clockIn && parseInt(timeEntries[0].clockIn.split(':')[0]) > 9) {
-          status = 'late';
+        } else if (timeEntries[0]?.clockIn) {
+          const clockInHour = parseInt(timeEntries[0].clockIn.split(':')[0] || '0');
+          if (clockInHour > 9) {
+            status = 'late';
+          }
         }
 
         mockData.push({
-          date: date.toISOString().split('T')[0],
+          date: date.toISOString().split('T')[0] || '',
           timeEntries,
           sessions,
           totalHours: Math.round(totalHours * 100) / 100,
@@ -477,6 +487,7 @@ export default function EmployeeTimesheet() {
     const weekDates = getWeekDates(currentWeek);
     const startDate = weekDates[0];
     const endDate = weekDates[6];
+    if (!startDate || !endDate) return '';
     return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
   };
 
@@ -486,14 +497,14 @@ export default function EmployeeTimesheet() {
 
   const totalWeeklyOvertime = useMemo(() => {
     return weeklyAttendance.reduce((sum, day) => {
-      return sum + day.sessions.reduce((daySum, session) => {
+      return sum + day.sessions.reduce((daySum: number, session: any) => {
         const overtimeHours = Math.max(0, session.duration - 8);
         return daySum + overtimeHours;
       }, 0);
     }, 0);
   }, [weeklyAttendance]);
 
-  const getDailyOvertime = (day: DayAttendance) => {
+  const getDailyOvertime = (day: DailyAttendance) => {
     return day.sessions.reduce((sum, session) => {
       const overtimeHours = Math.max(0, session.duration - 8);
       return sum + overtimeHours;
@@ -644,10 +655,11 @@ export default function EmployeeTimesheet() {
                   {/* Group sessions by type */}
                   {(() => {
                     const groupedSessions = day.sessions.reduce((groups, session) => {
-                      if (!groups[session.type]) {
-                        groups[session.type] = [];
+                      const sessionType = session.type || 'work';
+                      if (!groups[sessionType]) {
+                        groups[sessionType] = [];
                       }
-                      groups[session.type].push(session);
+                      groups[sessionType].push(session);
                       return groups;
                     }, {} as Record<string, Session[]>);
 

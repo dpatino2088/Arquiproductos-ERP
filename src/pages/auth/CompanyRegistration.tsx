@@ -152,7 +152,7 @@ export default function CompanyRegistration() {
     
     if (!isValid) {
       const expectedLength = phoneInfo.national_number_pattern.match(/\d{(\d+),(\d+)}/);
-      if (expectedLength) {
+      if (expectedLength && expectedLength[1] && expectedLength[2]) {
         const minLength = parseInt(expectedLength[1]);
         const maxLength = parseInt(expectedLength[2]);
         if (cleanNumber.length < minLength) {
@@ -270,8 +270,7 @@ export default function CompanyRegistration() {
       'VI': 'U.S. Virgin Islands',
       'AS': 'American Samoa',
       'GU': 'Guam',
-      'MP': 'Northern Mariana Islands',
-      'VI': 'U.S. Virgin Islands'
+      'MP': 'Northern Mariana Islands'
     };
     return countryNames[countryCode] || countryCode;
   };
@@ -874,10 +873,10 @@ export default function CompanyRegistration() {
       newErrors.corporateEmail = 'Please use a corporate email address (not Gmail, Yahoo, etc.)';
     }
 
-    if (!formData.phone.trim()) {
-      newErrors.phone = 'Phone number is required';
-    } else if (!/^\+?[\d\s\-\(\)]+$/.test(formData.phone)) {
-      newErrors.phone = 'Please enter a valid phone number';
+    if (!formData.phoneNumber.trim()) {
+      newErrors.phoneNumber = 'Phone number is required';
+    } else if (!/^\+?[\d\s\-\(\)]+$/.test(formData.phoneNumber)) {
+      newErrors.phoneNumber = 'Please enter a valid phone number';
     }
 
     if (!formData.password) {
@@ -900,8 +899,8 @@ export default function CompanyRegistration() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     
     if (!validateForm()) {
       return;

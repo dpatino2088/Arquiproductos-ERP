@@ -13,7 +13,7 @@ interface DirectoryCustomer {
   email: string | null;
   city: string | null;
   primary_contact_id: string | null;
-  DirectoryContacts: DirectoryContact | null;
+  DirectoryContacts: DirectoryContact[] | null;
 }
 
 export default function TestDirectory() {
