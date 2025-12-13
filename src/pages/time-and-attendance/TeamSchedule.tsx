@@ -744,23 +744,24 @@ export default function TeamSchedule() {
   ];
 
   // Get current week dates for shift data
-  const getCurrentWeekDates = () => {
+  const getCurrentWeekDates = (): string[] => {
     const today = new Date();
     const start = new Date(today);
     const day = start.getDay();
     const diff = start.getDate() - day + (day === 0 ? -6 : 1);
     start.setDate(diff);
     
-    const week = [];
+    const week: string[] = [];
     for (let i = 0; i < 7; i++) {
       const day = new Date(start);
       day.setDate(start.getDate() + i);
-      week.push(day.toISOString().split('T')[0]);
+      const dateStr = day.toISOString().split('T')[0];
+      if (dateStr) week.push(dateStr);
     }
     return week;
   };
 
-  const currentWeekDates = getCurrentWeekDates();
+  const currentWeekDates = getCurrentWeekDates() as [string, string, string, string, string, string, string];
 
   const shifts: Shift[] = [
     // Monday shifts
@@ -1547,13 +1548,13 @@ export default function TeamSchedule() {
   const endIndex = startIndex + itemsPerPage;
   const paginatedEmployees = filteredEmployees.slice(startIndex, endIndex);
 
-  const getWeekDates = (date: Date) => {
+  const getWeekDates = (date: Date): Date[] => {
     const start = new Date(date);
     const day = start.getDay();
     const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
     start.setDate(diff);
     
-    const week = [];
+    const week: Date[] = [];
     for (let i = 0; i < 7; i++) {
       const day = new Date(start);
       day.setDate(start.getDate() + i);
@@ -1562,7 +1563,7 @@ export default function TeamSchedule() {
     return week;
   };
 
-  const weekDates = getWeekDates(currentDate);
+  const weekDates = getWeekDates(currentDate) as [Date, Date, Date, Date, Date, Date, Date];
 
   const navigateWeek = (direction: 'prev' | 'next') => {
     const newDate = new Date(currentDate);
@@ -1827,7 +1828,7 @@ export default function TeamSchedule() {
                      onClick={() => setShowStatusDropdown(!showStatusDropdown)}>
                   <span className="text-gray-700">
                     {selectedStatus.length === 0 ? 'All Statuses' : 
-                     selectedStatus.length === 1 ? selectedStatus[0].replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) :
+                     selectedStatus.length === 1 ? (selectedStatus[0] || '').replace('-', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) :
                      `${selectedStatus.length} selected`}
                   </span>
                   <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2145,7 +2146,10 @@ export default function TeamSchedule() {
                 <div className={`w-64 p-3 pl-6 border-r border-gray-200 flex items-center gap-3 ${employeeIndex < paginatedEmployees.length - 1 ? 'border-b border-gray-200' : ''}`}>
                   <div className="relative">
                     <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
-                      {generateAvatarInitials(employee.name.split(' ')[0], employee.name.split(' ')[1] || '')}
+                      {(() => {
+                        const nameParts = employee.name.split(' ');
+                        return generateAvatarInitials(nameParts[0] || '', nameParts[1] || '');
+                      })()}
                     </div>
                     <div 
                       className={`absolute -bottom-0.5 -right-0.5 ${getDotSize('sm')} rounded-full border border-white`}
