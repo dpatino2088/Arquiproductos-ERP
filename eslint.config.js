@@ -15,6 +15,7 @@ export default tseslint.config(
       globals: globals.browser,
     },
     rules: {
+      // TypeScript specific rules
       '@typescript-eslint/no-unused-vars': [
         'warn',
         {
@@ -22,6 +23,26 @@ export default tseslint.config(
           varsIgnorePattern: '^_',
         },
       ],
+      '@typescript-eslint/no-explicit-any': 'warn', // Flag explicit 'any' usage
+      '@typescript-eslint/explicit-function-return-type': 'off', // Too strict for now
+      
+      // Console logs - error in production, allow warn/error
+      'no-console': [
+        'error',
+        {
+          allow: ['warn', 'error'],
+        },
+      ],
+      
+      // Best practices
+      'no-debugger': 'error',
+      'no-alert': 'error',
+      'prefer-const': 'warn',
+      'no-var': 'error',
+      
+      // Code quality
+      'eqeqeq': ['error', 'always'], // Require === and !==
+      'curly': ['error', 'all'], // Require curly braces for all control statements
     },
   },
 );

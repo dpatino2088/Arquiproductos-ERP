@@ -2,7 +2,16 @@ import { QueryClient } from '@tanstack/react-query';
 import { logger } from './logger';
 import { errorTracker } from './error-tracker';
 
-// Create and configure React Query client
+/**
+ * React Query Client Configuration
+ * Optimized for performance and UX in production
+ * 
+ * Key optimizations:
+ * - 10min staleTime: Reduce unnecessary refetches
+ * - 30min gcTime: Keep data in cache longer
+ * - No refetch on focus/reconnect: Better mobile performance
+ * - Smart retry logic: Don't retry client errors (4xx)
+ */
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -11,13 +20,14 @@ export const queryClient = new QueryClient({
         if (error?.status && error.status >= 400 && error.status < 500) {
           return false;
         }
-        // Retry up to 2 times for other errors
+        // Retry up to 2 times for other errors (5xx, network)
         return failureCount < 2;
       },
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000, // 10 minutes (previously cacheTime)
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
+      staleTime: 10 * 60 * 1000, // 10 minutes - Data considered fresh
+      gcTime: 30 * 60 * 1000, // 30 minutes - Cache cleanup time
+      refetchOnWindowFocus: false, // Don't refetch when window regains focus
+      refetchOnReconnect: false, // Don't refetch when internet reconnects
+      refetchOnMount: false, // Only refetch if data is stale
     },
     mutations: {
       retry: (failureCount, error: Error & { status?: number }) => {
