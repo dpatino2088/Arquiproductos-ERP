@@ -361,8 +361,8 @@ function App() {
     router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/organization-user', () => setCurrentPage('organization-user'));
     router.addRoute('/settings/organization-profile', () => setCurrentPage('organization-profile'));
-    router.addRoute('/settings/organization-users/new', () => setCurrentPage('organization-user-new'));
-    router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('organization-user-new'));
+    router.addRoute('/settings/organization-users/new', () => setCurrentPage('company-settings'));
+    router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('company-settings'));
     
     // Organizations routes
     router.addRoute('/organizations', () => setCurrentPage('manage-organizations'));

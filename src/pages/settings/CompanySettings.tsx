@@ -11,12 +11,33 @@ import {
 } from 'lucide-react';
 import OrganizationUser from './OrganizationUser';
 import OrganizationProfileView from './OrganizationProfileView';
+import OrganizationUserNew from './OrganizationUserNew';
 
 export default function CompanySettings() {
   const { getPreviousPage } = usePreviousPage();
   const { currentCompany } = useCompanyStore();
   const [activeSection, setActiveSection] = useState<string>('organization-user');
   const [activeTab, setActiveTab] = useState<string>('general');
+  const [currentRoute, setCurrentRoute] = useState<string>(window.location.pathname);
+
+  // Monitor route changes to detect when we're in new/edit user mode
+  useEffect(() => {
+    const updateRoute = () => {
+      setCurrentRoute(window.location.pathname);
+    };
+    
+    // Check route on mount
+    updateRoute();
+    
+    // Listen for route changes
+    const interval = setInterval(updateRoute, 100);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Determine if we're in add/edit user mode
+  const isAddEditUserMode = currentRoute.includes('/settings/organization-users/new') || 
+                            currentRoute.match(/\/settings\/organization-users\/edit\/[^/]+/);
 
   // Handle ESC key to close settings and return to previous page
   useEffect(() => {
@@ -77,6 +98,11 @@ export default function CompanySettings() {
   };
 
   const renderTabContent = () => {
+    // If we're in add/edit user mode, show OrganizationUserNew embedded
+    if (isAddEditUserMode) {
+      return <OrganizationUserNew embedded={true} />;
+    }
+
     if (activeSection === 'organization-user') {
       return <OrganizationUser />;
     }
@@ -139,12 +165,21 @@ export default function CompanySettings() {
           <nav className="px-4 pt-6 pb-4">
             <ul className="space-y-1">
               {settingsMenu.map((item) => {
-                const isActive = activeSection === item.id;
+                // Highlight organization-user if we're in add/edit mode
+                const isActive = isAddEditUserMode 
+                  ? item.id === 'organization-user'
+                  : activeSection === item.id;
                 return (
                   <li key={item.id}>
                     <button
-                      onClick={() => handleSectionChange(item.id)}
-                      className={`w-full flex items-center justify-between px-4 py-2 text-left rounded transition-colors ${
+                      onClick={() => {
+                        if (isAddEditUserMode) {
+                          router.navigate('/settings/organization-user');
+                        } else {
+                          handleSectionChange(item.id);
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-4 py-2 text-left transition-colors ${
                         isActive
                           ? 'bg-primary text-white shadow-sm'
                           : 'text-gray-700 hover:bg-gray-50'
@@ -198,17 +233,19 @@ export default function CompanySettings() {
           {/* Settings Content */}
           <div className="flex-1 p-8 overflow-auto">
             <div className="max-w-6xl">
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  {settingsMenu.find(item => item.id === activeSection)?.label}
-                  {currentTabs.length > 0 && activeTab &&
-                    ` - ${currentTabs.find(tab => tab.id === activeTab)?.label}`
-                  }
-                </h2>
-                <p className="text-sm text-gray-600">
-                  Configure and manage your {settingsMenu.find(item => item.id === activeSection)?.label.toLowerCase()} settings and content.
-                </p>
-              </div>
+              {!isAddEditUserMode && (
+                <div className="mb-6">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                    {settingsMenu.find(item => item.id === activeSection)?.label}
+                    {currentTabs.length > 0 && activeTab &&
+                      ` - ${currentTabs.find(tab => tab.id === activeTab)?.label}`
+                    }
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    Configure and manage your {settingsMenu.find(item => item.id === activeSection)?.label.toLowerCase()} settings and content.
+                  </p>
+                </div>
+              )}
               {renderTabContent()}
             </div>
           </div>

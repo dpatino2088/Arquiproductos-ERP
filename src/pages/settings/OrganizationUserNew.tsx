@@ -32,7 +32,11 @@ interface OrganizationUser {
   email?: string;
 }
 
-export default function OrganizationUserNew() {
+interface OrganizationUserNewProps {
+  embedded?: boolean; // If true, this component is embedded within Settings
+}
+
+export default function OrganizationUserNew({ embedded = false }: OrganizationUserNewProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -350,30 +354,45 @@ export default function OrganizationUserNew() {
     );
   }
 
-  return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.navigate('/settings/organization-profile')}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-xl font-semibold text-foreground">
-              {userId ? 'Edit Organization User' : 'Add Organization User'}
-            </h1>
-            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-              {userId ? 'Update user role and permissions' : 'Invite a new user to your organization'}
-            </p>
+  // If embedded, don't show the outer padding/container - Settings will handle that
+  const content = (
+    <>
+      {/* Header - only show if not embedded */}
+      {!embedded && (
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.navigate('/settings/organization-user')}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-semibold text-foreground">
+                {userId ? 'Edit Organization User' : 'Add Organization User'}
+              </h1>
+              <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+                {userId ? 'Update user role and permissions' : 'Invite a new user to your organization'}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Embedded header - simpler version when inside Settings */}
+      {embedded && (
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            {userId ? 'Edit Organization User' : 'Add Organization User'}
+          </h2>
+          <p className="text-sm text-gray-600">
+            {userId ? 'Update user role and permissions' : 'Invite a new user to your organization'}
+          </p>
+        </div>
+      )}
 
       {/* Form */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
+      <div className="bg-white border border-gray-200 p-6">
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
           {/* Name Field */}
           <div>
@@ -444,14 +463,14 @@ export default function OrganizationUserNew() {
 
           {/* Error Message */}
           {saveError && (
-            <div className="bg-red-50 border border-red-200 rounded-md p-3">
+            <div className="bg-red-50 border border-red-200 p-3">
               <p className="text-sm text-red-800">{saveError}</p>
             </div>
           )}
 
           {/* Read Only Message */}
           {isReadOnly && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+            <div className="bg-yellow-50 border border-yellow-200 p-3">
               <p className="text-sm text-yellow-800">
                 You only have read permissions (viewer role). You cannot create or edit users.
               </p>
@@ -462,8 +481,8 @@ export default function OrganizationUserNew() {
           <div className="flex gap-3 pt-4 border-t border-gray-200">
             <button
               type="button"
-              onClick={() => router.navigate('/settings/organization-profile')}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-sm"
+              onClick={() => router.navigate('/settings/organization-user')}
+              className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm"
               disabled={isSaving}
             >
               Cancel
@@ -471,7 +490,7 @@ export default function OrganizationUserNew() {
             <button
               type="submit"
               disabled={isSaving || isReadOnly}
-              className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+              className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
               {isSaving ? (
@@ -486,7 +505,15 @@ export default function OrganizationUserNew() {
           </div>
         </form>
       </div>
-    </div>
+    </>
   );
+
+  // If embedded, return content without outer wrapper
+  if (embedded) {
+    return content;
+  }
+
+  // If not embedded, wrap in container with padding
+  return <div className="p-6">{content}</div>;
 }
 
