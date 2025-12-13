@@ -4,6 +4,7 @@ import { useCompany } from '../hooks/useCompany';
 import { useCompanyStore } from '../stores/company-store';
 import { router } from '../lib/router';
 import { supabase } from '../lib/supabase/client';
+import { useOrganizationContext } from '../context/OrganizationContext';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
@@ -124,10 +125,44 @@ function Layout({ children }: LayoutProps) {
   const { logout, user } = useAuth();
   const { currentCompany, availableCompanies, canSwitchCompany, switchCompany, isLoading } = useCompany();
   const { clearCompanies } = useCompanyStore();
+  const { activeOrganizationId } = useOrganizationContext();
+  const [currentCustomerName, setCurrentCustomerName] = useState<string | null>(null);
   const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
+
+  // Fetch customer name from DirectoryCustomers based on organization_id
+  useEffect(() => {
+    const fetchCustomerName = async () => {
+      if (!activeOrganizationId) {
+        setCurrentCustomerName(null);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('DirectoryCustomers')
+          .select('company_name')
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching customer name:', error);
+          setCurrentCustomerName(null);
+          return;
+        }
+
+        setCurrentCustomerName(data?.company_name || null);
+      } catch (err) {
+        console.error('Error fetching customer name:', err);
+        setCurrentCustomerName(null);
+      }
+    };
+
+    fetchCustomerName();
+  }, [activeOrganizationId]);
   
   // Use UI store for sidebar and view mode state
   const { 
@@ -690,70 +725,24 @@ function Layout({ children }: LayoutProps) {
                       </div>
                     )}
 
-                    {/* Company Section */}
+                    {/* Customer Name Section */}
                     <div className="py-1 border-b border-gray-100">
                       <div className="px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        {availableCompanies.length > 1 ? 'Switch Company' : 'Company'}
+                        Customer Name
                       </div>
-                      {availableCompanies.length === 0 ? (
+                      {!currentCustomerName ? (
                         <div className="px-4 py-2">
-                          <div className="text-sm text-gray-500 mb-1">No companies associated</div>
+                          <div className="text-sm text-gray-500 mb-1">No customer associated</div>
                           <div className="text-xs text-gray-400">
-                            Contact your administrator to be added to a company
+                            No customer found for this organization
                           </div>
                         </div>
                       ) : (
-                        availableCompanies.map((companyUser) => {
-                          const isCurrent = currentCompany?.id === companyUser.company_id;
-                          return (
-                            <button
-                              key={companyUser.id}
-                              className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between gap-2 ${
-                                isCurrent ? 'bg-gray-50' : 'text-gray-700'
-                              }`}
-                              onClick={async () => {
-                                if (!isCurrent && companyUser.company && availableCompanies.length > 1) {
-                                  setIsUserMenuOpen(false);
-                                  await switchCompany(companyUser.company_id);
-                                }
-                              }}
-                              role="menuitem"
-                              aria-label={`${isCurrent ? 'Current company' : 'Switch to'} ${companyUser.company?.name || 'company'}`}
-                              disabled={isCurrent || availableCompanies.length === 1}
-                            >
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <Building2 
-                                  style={{ 
-                                    width: '16px', 
-                                    height: '16px',
-                                    color: isCurrent ? 'var(--primary-brand-hex)' : 'var(--gray-600)',
-                                    flexShrink: 0
-                                  }} 
-                                  aria-hidden="true" 
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className={`font-medium truncate ${isCurrent ? 'text-primary' : 'text-gray-900'}`}>
-                                    {companyUser.company?.name || 'Unknown Company'}
-                                  </div>
-                                  <div className="text-xs text-gray-500 capitalize">
-                                    {companyUser.role.replace('_', ' ')}
-                                  </div>
-                                </div>
-                              </div>
-                              {isCurrent && (
-                                <Check 
-                                  style={{ 
-                                    width: '16px', 
-                                    height: '16px',
-                                    color: 'var(--primary-brand-hex)',
-                                    flexShrink: 0
-                                  }} 
-                                  aria-hidden="true" 
-                                />
-                              )}
-                            </button>
-                          );
-                        })
+                        <div className="px-4 py-2">
+                          <div className="text-sm font-medium text-gray-900">
+                            {currentCustomerName}
+                          </div>
+                        </div>
                       )}
                     </div>
 
