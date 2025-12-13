@@ -463,8 +463,7 @@ function App() {
         return <OrganizationUser />;
       case 'organization-profile':
         return <OrganizationUser />; // This route is handled by CompanySettings, but keep for backward compatibility
-      case 'organization-user-new':
-        return <OrganizationUserNew />;
+      // Note: 'organization-user-new' routes now render CompanySettings which handles the embedded form
       case 'manage-organizations':
         return <ManageOrganizations />;
       

@@ -331,7 +331,7 @@ export default function OrganizationUser() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Organization Profile</h1>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Accounts and User</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
             {`Manage ${filteredUsers.length} organization users${filteredUsers.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>

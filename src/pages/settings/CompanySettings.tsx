@@ -18,21 +18,28 @@ export default function CompanySettings() {
   const { currentCompany } = useCompanyStore();
   const [activeSection, setActiveSection] = useState<string>('organization-user');
   const [activeTab, setActiveTab] = useState<string>('general');
-  const [currentRoute, setCurrentRoute] = useState<string>(window.location.pathname);
+  const [currentRoute, setCurrentRoute] = useState<string>(router.getCurrentRoute() || window.location.pathname);
 
   // Monitor route changes to detect when we're in new/edit user mode
   useEffect(() => {
     const updateRoute = () => {
-      setCurrentRoute(window.location.pathname);
+      const route = router.getCurrentRoute() || window.location.pathname;
+      setCurrentRoute(route);
     };
     
     // Check route on mount
     updateRoute();
     
-    // Listen for route changes
+    // Listen for popstate events (browser back/forward)
+    window.addEventListener('popstate', updateRoute);
+    
+    // Listen for route changes via interval (fallback for programmatic navigation)
     const interval = setInterval(updateRoute, 100);
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('popstate', updateRoute);
+    };
   }, []);
 
   // Determine if we're in add/edit user mode
