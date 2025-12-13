@@ -140,6 +140,9 @@ function Layout({ children }: LayoutProps) {
   // Ensure viewMode is always valid, default to 'manager'
   const viewMode = storeViewMode || 'manager';
 
+  // Check if we're in Settings pages - if so, hide the main sidebar
+  const isSettingsRoute = currentRoute.includes('/settings');
+
   // Scroll to top when route changes
   useEffect(() => {
     const routeFromRouter = router.getCurrentRoute();
@@ -372,10 +375,11 @@ function Layout({ children }: LayoutProps) {
     [isCollapsed]
   );
 
-  const mainMarginLeft = useMemo(() => 
-    isCollapsed ? '3.5rem' : '15rem', 
-    [isCollapsed]
-  );
+  const mainMarginLeft = useMemo(() => {
+    // If we're in Settings, don't add sidebar margin
+    if (isSettingsRoute) return '0px';
+    return isCollapsed ? '3.5rem' : '15rem';
+  }, [isCollapsed, isSettingsRoute]);
 
   const mainPaddingTop = useMemo(() => {
     const hasSecondaryNav = submoduleTabs.length > 0 || breadcrumbs.length > 0;
@@ -456,7 +460,8 @@ function Layout({ children }: LayoutProps) {
       </div>
       
       <div className="flex">
-        {/* Sidebar Navigation */}
+        {/* Sidebar Navigation - Hide when in Settings */}
+        {!isSettingsRoute && (
         <nav 
           id="main-navigation"
           className={`min-h-screen fixed left-0 top-0 bottom-0 overflow-y-auto transition-all duration-300 z-50 border-r ${
@@ -584,8 +589,10 @@ function Layout({ children }: LayoutProps) {
             </div>
           </div>
         </nav>
+        )}
 
-        {/* Main Navigation Bar */}
+        {/* Main Navigation Bar - Hide when in Settings */}
+        {!isSettingsRoute && (
         <header 
           className="bg-white border-b fixed top-0 right-0 z-40 transition-all duration-300"
           style={{
@@ -742,9 +749,10 @@ function Layout({ children }: LayoutProps) {
             </div>
           </div>
         </header>
+        )}
 
         {/* Secondary Navigation Bar for Submodules */}
-        {(submoduleTabs.length > 0 || breadcrumbs.length > 0) && (
+        {!isSettingsRoute && (submoduleTabs.length > 0 || breadcrumbs.length > 0) && (
           <div 
             className="border-b fixed right-0 z-30 transition-all duration-300"
             style={{
@@ -818,10 +826,10 @@ function Layout({ children }: LayoutProps) {
           id="main-content"
           className="flex-1 transition-all duration-300"
           style={{
-            marginLeft: mainMarginLeft,
-            paddingTop: mainPaddingTop,
-            padding: `${mainPaddingTop} 1.5rem 1.5rem`,
-            backgroundColor: 'var(--gray-200)'
+            marginLeft: isSettingsRoute ? '0px' : mainMarginLeft,
+            paddingTop: isSettingsRoute ? '0px' : mainPaddingTop,
+            padding: isSettingsRoute ? '0' : `${mainPaddingTop} 1.5rem 1.5rem`,
+            backgroundColor: isSettingsRoute ? 'transparent' : 'var(--gray-200)'
           }}
           role="main"
           tabIndex={-1}

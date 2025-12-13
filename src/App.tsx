@@ -359,8 +359,8 @@ function App() {
     // Settings routes
     router.addRoute('/settings', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
-    router.addRoute('/settings/organization-user', () => setCurrentPage('organization-user'));
-    router.addRoute('/settings/organization-profile', () => setCurrentPage('organization-profile'));
+    router.addRoute('/settings/organization-user', () => setCurrentPage('company-settings'));
+    router.addRoute('/settings/organization-profile', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/organization-users/new', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('company-settings'));
     
