@@ -25,8 +25,15 @@ export function useContacts() {
 
         const { data, error: queryError } = await supabase
           .from('DirectoryContacts')
-          .select('*')
+          .select(`
+            *,
+            DirectoryCustomers:customer_id (
+              id,
+              company_name
+            )
+          `)
           .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
           .order('created_at', { ascending: false });
 
         if (queryError) {
@@ -37,12 +44,12 @@ export function useContacts() {
         }
 
         // Transform data to match frontend interface
-        const transformedContacts = (data || []).map((contact) => ({
+        const transformedContacts = (data || []).map((contact: any) => ({
           id: contact.id,
           firstName: contact.customer_name || '',
           lastName: '',
           email: contact.email || '',
-          company: '', // Will be populated from join if needed
+          company: contact.DirectoryCustomers?.company_name || '', // Customer name from join
           customer_id: contact.customer_id || null,
           category: contact.contact_type ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : 'Architect',
           status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',

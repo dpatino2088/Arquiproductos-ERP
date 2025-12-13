@@ -820,7 +820,7 @@ export default function Contacts() {
                       onClick={() => handleSort('company')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Company
+                      Customer
                       {sortBy === 'company' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
@@ -951,7 +951,7 @@ export default function Contacts() {
                       <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">
                         {contact.firstName}
                       </h3>
-                      {contact.category === 'Individual' && contact.company && (
+                      {contact.company && (
                         <p className="text-xs text-gray-600 truncate">{contact.company}</p>
                       )}
                       <div className="mt-1">
