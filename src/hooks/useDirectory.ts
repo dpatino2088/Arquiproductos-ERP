@@ -43,7 +43,7 @@ export function useContacts() {
           lastName: '',
           email: contact.email || '',
           company: '', // Will be populated from join if needed
-          company_id: contact.company_id || null,
+          customer_id: contact.customer_id || null,
           category: contact.contact_type ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : 'Architect',
           status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
           location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',

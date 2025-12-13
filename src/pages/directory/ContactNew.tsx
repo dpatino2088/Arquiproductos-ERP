@@ -27,7 +27,7 @@ const CONTACT_TYPE_OPTIONS = [
 
 // Unified schema for contacts
 const contactSchema = z.object({
-  company_id: z.string().optional(), // Optional: Contacts can exist without a Company
+  customer_id: z.string().uuid('Customer is required').min(1, 'Customer is required'),
   contact_type: z.enum(['architect', 'interior_designer', 'project_manager', 'consultant', 'dealer', 'reseller', 'partner']),
   title_id: z.string().optional(),
   customer_name: z.string().min(1, 'Customer name is required'),
@@ -52,7 +52,7 @@ const contactSchema = z.object({
 
 type ContactFormData = z.infer<typeof contactSchema>;
 
-interface Company {
+interface Customer {
   id: string;
   company_name: string;
 }
@@ -62,8 +62,8 @@ export default function ContactNew() {
   const [isLoading, setIsLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [contactId, setContactId] = useState<string | null>(null);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [loadingCompanies, setLoadingCompanies] = useState(true);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
   const { activeOrganizationId } = useOrganizationContext();
   
   // Get current user's role and permissions (uses active organization)
@@ -86,20 +86,20 @@ export default function ContactNew() {
     resolver: zodResolver(contactSchema),
     defaultValues: {
       contact_type: 'architect',
-      company_id: '',
+      customer_id: '',
     },
   });
 
-  // Load companies for the current organization
+  // Load customers for the current organization
   useEffect(() => {
-    const loadCompanies = async () => {
+    const loadCustomers = async () => {
       if (!activeOrganizationId) {
-        setLoadingCompanies(false);
+        setLoadingCustomers(false);
         return;
       }
 
       try {
-        setLoadingCompanies(true);
+        setLoadingCustomers(true);
         const { data, error } = await supabase
           .from('DirectoryCustomers')
           .select('id, company_name')
@@ -109,26 +109,26 @@ export default function ContactNew() {
           .order('company_name', { ascending: true });
 
         if (error) {
-          console.error('Error loading companies:', error);
+          console.error('Error loading customers:', error);
         } else if (data) {
-          setCompanies(data);
+          setCustomers(data);
         }
       } catch (err) {
-        console.error('Error loading companies:', err);
+        console.error('Error loading customers:', err);
       } finally {
-        setLoadingCompanies(false);
+        setLoadingCustomers(false);
       }
     };
 
-    loadCompanies();
+    loadCustomers();
   }, [activeOrganizationId]);
 
-  // Check for companyId in URL params (when coming from customer context)
+  // Check for customerId in URL params (when coming from customer context)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const companyIdFromUrl = urlParams.get('companyId');
-    if (companyIdFromUrl && !contactId) {
-      form.setValue('company_id', companyIdFromUrl, { shouldValidate: true });
+    const customerIdFromUrl = urlParams.get('customerId');
+    if (customerIdFromUrl && !contactId) {
+      form.setValue('customer_id', customerIdFromUrl, { shouldValidate: true });
     }
   }, [contactId, form]);
 
@@ -155,7 +155,7 @@ export default function ContactNew() {
 
       if (data) {
         form.reset({
-          company_id: data.company_id || '',
+          customer_id: data.customer_id || '',
           contact_type: (data.contact_type || 'architect') as any,
           title_id: data.title_id || undefined,
           customer_name: data.customer_name || '',
@@ -202,7 +202,7 @@ export default function ContactNew() {
       const errors = form.formState.errors;
       const missingFields: string[] = [];
       
-      if (errors.company_id) missingFields.push('Company');
+      if (errors.customer_id) missingFields.push('Customer');
       if (errors.customer_name) missingFields.push('Customer Name');
       if (errors.street_address_line_1) missingFields.push('Street Address');
       if (errors.city) missingFields.push('City');
@@ -228,7 +228,7 @@ export default function ContactNew() {
 
       const contactData = {
         organization_id: activeOrganizationId,
-        company_id: formData.company_id && formData.company_id.trim() ? formData.company_id : null,
+        customer_id: formData.customer_id,
         contact_type: formData.contact_type,
         title_id: formData.title_id && formData.title_id !== 'not_selected' ? formData.title_id : null,
         customer_name: formData.customer_name,
@@ -460,27 +460,38 @@ export default function ContactNew() {
               </div>
             </div>
 
-            {/* Row 3: Company */}
+            {/* Row 3: Customer */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-4">
-                <Label htmlFor="company_id" className="text-xs">Company</Label>
+                <Label htmlFor="customer_id" className="text-xs" required>Customer</Label>
                 <SelectShadcn
-                  value={form.watch('company_id') || 'none'}
-                  onValueChange={(value) => form.setValue('company_id', value === 'none' ? undefined : value, { shouldValidate: false })}
-                  disabled={loadingCompanies || isReadOnly}
+                  value={form.watch('customer_id') || ''}
+                  onValueChange={(value) => form.setValue('customer_id', value, { shouldValidate: true })}
+                  disabled={loadingCustomers || isReadOnly}
                 >
-                  <SelectTrigger className="text-xs">
-                    <SelectValue placeholder={loadingCompanies ? "Loading companies..." : companies.length === 0 ? "No companies available" : "Select company"} />
+                  <SelectTrigger className={`text-xs ${form.formState.errors.customer_id ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectValue placeholder={loadingCustomers ? "Loading customers..." : customers.length === 0 ? "No customers available" : "Select customer"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {companies.map((company) => (
-                      <SelectItem key={company.id} value={company.id}>
-                        {company.company_name}
-                      </SelectItem>
-                    ))}
+                    {customers.length === 0 ? (
+                      <div className="px-2 py-1.5 text-xs text-gray-500">
+                        {loadingCustomers ? "Loading..." : "No customers available. Please create a customer first."}
+                      </div>
+                    ) : (
+                      customers.map((customer) => (
+                        <SelectItem key={customer.id} value={customer.id}>
+                          {customer.company_name}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </SelectShadcn>
+                {form.formState.errors.customer_id && (
+                  <p className="mt-1 text-xs text-red-600">{form.formState.errors.customer_id.message}</p>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  A contact must belong to a customer. Select the customer this contact is associated with.
+                </p>
               </div>
             </div>
 
