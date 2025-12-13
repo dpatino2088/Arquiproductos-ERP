@@ -78,17 +78,16 @@ export function OrganizationSwitcher() {
     );
   }
 
-  // No organizations
+  // No organizations - organizations are created directly in Supabase
   if (organizations.length === 0) {
     return (
-      <button
-        onClick={() => router.navigate('/organizations/manage')}
-        className="flex items-center gap-2 px-3 py-1.5 text-sm text-yellow-600 bg-yellow-50 rounded-md border border-yellow-200 hover:bg-yellow-100 transition-colors"
-        title="Click to manage organizations"
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 text-sm text-yellow-600 bg-yellow-50 rounded-md border border-yellow-200"
+        title="No organizations available - contact administrator"
       >
         <AlertCircle className="w-4 h-4" />
-        <span>No organizations - Click to manage</span>
-      </button>
+        <span>No organizations available</span>
+      </div>
     );
   }
 
