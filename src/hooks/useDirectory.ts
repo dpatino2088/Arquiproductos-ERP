@@ -111,6 +111,7 @@ export function useCustomers() {
           .from('DirectoryCustomers')
           .select('*')
           .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
           .order('created_at', { ascending: false });
 
         if (queryError) {
@@ -121,6 +122,7 @@ export function useCustomers() {
         }
 
         // Transform data to match frontend interface
+        // Note: We already filter by deleted = false in the query, so all customers here are active
         const transformedCustomers = (data || []).map((customer) => ({
           id: customer.id,
           companyName: customer.company_name || '',
@@ -133,6 +135,8 @@ export function useCustomers() {
           location: [customer.city, customer.state, customer.country].filter(Boolean).join(', ') || 'N/A',
           dateAdded: customer.created_at ? new Date(customer.created_at).toISOString().split('T')[0] : '',
           totalRevenue: 0, // Not in schema yet
+          // Include deleted flag for filtering (though it should always be false here)
+          deleted: customer.deleted || false,
         }));
 
         setCustomers(transformedCustomers);
