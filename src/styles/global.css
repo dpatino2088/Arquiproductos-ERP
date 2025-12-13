@@ -141,7 +141,7 @@
     --border: 210 17% 96%;                   /* HSL for new gray-200 #f5f7fa */
     --input: 210 17% 96%;                    /* HSL for new gray-200 #f5f7fa */
     --ring: var(--brand-primary);            /* Focus ring - primary green HSL */
-    --radius: 0.5rem;
+    --radius: 0;
 
     /* Sidebar colors */
     --sidebar-light-background: var(--gray-50);
@@ -201,11 +201,11 @@
   * { @apply border-border; }
   body { @apply bg-background text-foreground; font-family: var(--font-family); font-size: var(--font-size-body); line-height: 1.5; }
 
-  .btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: 8px; @apply inline-flex items-center justify-center font-medium transition-colors; }
+  .btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: 0; @apply inline-flex items-center justify-center font-medium transition-colors; }
   .btn-primary { @apply bg-primary text-primary-foreground hover:bg-primary/90; }
   .btn-secondary { @apply bg-background border border-border text-foreground hover:bg-muted; }
 
-  .icon-btn { width: 32px; height: 32px; @apply inline-flex items-center justify-center rounded hover:bg-muted transition-colors; }
+  .icon-btn { width: 32px; height: 32px; @apply inline-flex items-center justify-center hover:bg-muted transition-colors; }
 
   .text-body { font-size: var(--font-size-body); }
   .text-small { font-size: var(--font-size-small); }
@@ -425,4 +425,24 @@
   .bg-status-blue-10 { background-color: var(--blue-100); }
   .bg-status-amber-10 { background-color: var(--orange-100); }
   .bg-neutral-gray-10 { background-color: var(--gray-100); }
+
+  /* Override all Tailwind rounded utilities to 0 - Square corners everywhere */
+  .rounded,
+  .rounded-sm,
+  .rounded-md,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-2xl,
+  .rounded-3xl,
+  .rounded-full,
+  .rounded-t,
+  .rounded-r,
+  .rounded-b,
+  .rounded-l,
+  .rounded-tl,
+  .rounded-tr,
+  .rounded-br,
+  .rounded-bl {
+    border-radius: 0 !important;
+  }
 }
