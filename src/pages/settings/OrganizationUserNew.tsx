@@ -62,11 +62,11 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   
   // State to track selected customer and available contacts for that customer
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const [availableContactsForCustomer, setAvailableContactsForCustomer] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([]);
+  const [availableContactsForCustomer, setAvailableContactsForCustomer] = useState<Array<{ id: string; firstName: string; lastName: string; fullName: string; email: string }>>([]);
 
   // Filter customers to only show active, non-deleted
   const availableCustomers = customers.filter(
-    (customer) => !customer.deleted && !customer.archived
+    (customer) => customer.status !== 'Archived'
   );
 
   // Get user ID from URL if in edit mode
@@ -244,11 +244,17 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         .maybeSingle();
 
       if (!contactError && contactData) {
+        // Construir nombre completo: first_name + last_name, o customer_name si no hay first_name
+        const fullName = contactData.first_name && contactData.last_name
+          ? `${contactData.first_name} ${contactData.last_name}`.trim()
+          : contactData.customer_name || contactData.first_name || contactData.last_name || '';
+
         // Transform to match the interface
         const contact = {
           id: contactData.id,
-          firstName: contactData.first_name || contactData.customer_name || '',
+          firstName: contactData.first_name || '',
           lastName: contactData.last_name || '',
+          fullName: fullName,
           email: contactData.email || '',
         };
         
@@ -261,7 +267,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
           form.setValue('contact_id', contactData.id);
           // Auto-fill name and email (only when creating new user)
           if (!userId) {
-            form.setValue('name', contact.firstName);
+            form.setValue('name', contact.fullName);
             form.setValue('email', contact.email);
           }
         }
@@ -301,7 +307,11 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
 
     if (selectedContact && !userId) {
       // Auto-fill name and email from contact (only when creating new user)
-      form.setValue('name', selectedContact.firstName || '');
+      // Usar fullName si existe, sino construir desde firstName + lastName
+      const fullName = selectedContact.fullName || 
+        `${selectedContact.firstName || ''} ${selectedContact.lastName || ''}`.trim() || 
+        selectedContact.firstName || '';
+      form.setValue('name', fullName);
       form.setValue('email', selectedContact.email || '');
     }
   };
@@ -625,7 +635,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                 ) : (
                   availableContactsForCustomer.map((contact) => (
                     <SelectItem key={contact.id} value={contact.id}>
-                      {(contact.firstName || '')} {(contact.lastName || '')} {contact.email ? `(${contact.email})` : ''}
+                      {contact.fullName || `${contact.firstName || ''} ${contact.lastName || ''}`.trim()} {contact.email ? `(${contact.email})` : ''}
                     </SelectItem>
                   ))
                 )}
@@ -648,13 +658,14 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               id="name"
               type="text"
               {...form.register('name')}
-              disabled={isReadOnly}
-              className="py-1 text-xs"
+              disabled={true}
+              className="py-1 text-xs bg-gray-50"
               error={form.formState.errors.name?.message}
               placeholder="John Doe"
+              readOnly
             />
             <p className="mt-1 text-xs text-gray-400">
-              Auto-filled from selected contact (you can edit if needed)
+              Automatically filled from selected contact's name (read-only - comes from Contact)
             </p>
           </div>
 
@@ -667,13 +678,14 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               id="email"
               type="email"
               {...form.register('email')}
-              disabled={isReadOnly || !!userId} // Disable if read-only or editing
-              className="py-1 text-xs"
+              disabled={true}
+              className="py-1 text-xs bg-gray-50"
               error={form.formState.errors.email?.message}
               placeholder="user@example.com"
+              readOnly
             />
             <p className="mt-1 text-xs text-gray-400">
-              Auto-filled from selected contact {userId ? '(cannot be changed)' : '(you can edit if needed)'}
+              Automatically filled from selected contact (cannot be edited)
             </p>
           </div>
 

@@ -91,6 +91,12 @@ export default function CompanySettings() {
   };
 
   const handleCloseSettings = (): void => {
+    // Si estamos en modo add/edit, volver a organization-user, no al dashboard
+    if (isAddEditUserMode) {
+      router.navigate('/settings/organization-user');
+      return;
+    }
+    
     const previousPage = getPreviousPage();
     // Si no hay página anterior, ir al dashboard de management
     const targetPage = previousPage || '/dashboard';

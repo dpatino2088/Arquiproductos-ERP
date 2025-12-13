@@ -308,48 +308,11 @@ function App() {
   console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
   }
 
-  // Setup routing - Auth routes are always available
+  // Setup routing - Register ALL routes first, then initialize router
   useEffect(() => {
-    // Auth routes (available without authentication)
-    router.addRoute('/login', () => setCurrentPage('login'));
-    router.addRoute('/auth/login', () => setCurrentPage('login'));
-    router.addRoute('/signup', () => setCurrentPage('signup'));
-    router.addRoute('/auth/signup', () => setCurrentPage('signup'));
-    router.addRoute('/company-registration', () => setCurrentPage('company-registration'));
-    router.addRoute('/auth/company-registration', () => setCurrentPage('company-registration'));
-    router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
-    router.addRoute('/auth/reset-password', () => setCurrentPage('auth-reset-password'));
-    router.addRoute('/auth/callback', () => setCurrentPage('auth-callback'));
-    router.addRoute('/new-password', () => setCurrentPage('new-password'));
-    router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
-
-    // Initialize router (always, even if not authenticated, so auth routes work)
-    router.init();
-    
-    // Add listener for route changes to sync with current page
-    const unsubscribe = router.addListener(() => {
-      // This ensures the UI updates when router redirects
-      const currentRoute = router.getCurrentRoute();
-      if (import.meta.env.DEV) {
-        console.log('Route changed to:', currentRoute);
-      }
-    });
-    
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, []); // Empty dependency array - only run once on mount
-
-  // Setup authenticated routes when user is authenticated
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
     // Initialize router view mode to match UI store
     const { viewMode } = useUIStore.getState();
     router.setViewMode(viewMode);
-    if (import.meta.env.DEV) {
-      console.log('Router initialized with view mode:', viewMode);
-    }
     
     // Set up view mode change handler to sync router changes with UI store
     router.setViewModeChangeHandler((newViewMode) => {
@@ -366,11 +329,21 @@ function App() {
       }
       setCurrentPage('management-dashboard');
     });
+
+    // Auth routes (available without authentication)
+    router.addRoute('/login', () => setCurrentPage('login'));
+    router.addRoute('/auth/login', () => setCurrentPage('login'));
+    router.addRoute('/signup', () => setCurrentPage('signup'));
+    router.addRoute('/auth/signup', () => setCurrentPage('signup'));
+    router.addRoute('/company-registration', () => setCurrentPage('company-registration'));
+    router.addRoute('/auth/company-registration', () => setCurrentPage('company-registration'));
+    router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
+    router.addRoute('/auth/reset-password', () => setCurrentPage('auth-reset-password'));
+    router.addRoute('/auth/callback', () => setCurrentPage('auth-callback'));
+    router.addRoute('/new-password', () => setCurrentPage('new-password'));
+    router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
     
-    // Set up routes - default route goes to management dashboard
-    router.addRoute('/', () => setCurrentPage('management-dashboard'));
-    
-    // Error routes
+    // Error routes (always available)
     router.addRoute('/400', () => setCurrentPage('bad-request'));
     router.addRoute('/401', () => setCurrentPage('unauthorized'));
     router.addRoute('/403', () => setCurrentPage('forbidden'));
@@ -380,48 +353,221 @@ function App() {
     router.addRoute('/503', () => setCurrentPage('service-unavailable'));
     router.addRoute('/504', () => setCurrentPage('gateway-timeout'));
     
-    // 404 route handler for unknown routes
-    router.addRoute('*', () => setCurrentPage('not-found'));
-    // Inbox route
-    router.addRoute('/inbox', () => setCurrentPage('inbox'));
+    // 404 route handler for unknown routes (must be last)
+    router.addRoute('*', () => {
+      // Only show 404 for authenticated routes if user is authenticated
+      // For unauthenticated users trying to access protected routes, redirect to login
+      const currentPath = window.location.pathname;
+      const isAuthRoute = currentPath.startsWith('/login') || 
+                         currentPath.startsWith('/signup') || 
+                         currentPath.startsWith('/auth/') ||
+                         currentPath.startsWith('/reset-password') ||
+                         currentPath.startsWith('/company-registration');
+      
+      if (!isAuthenticated && !isAuthRoute) {
+        setCurrentPage('login');
+      } else {
+        setCurrentPage('not-found');
+      }
+    });
     
-    // Dashboard route
-    router.addRoute('/dashboard', () => setCurrentPage('management-dashboard'));
-    router.addRoute('/', () => setCurrentPage('management-dashboard'));
+    // Authenticated routes - these check authentication before executing
+    router.addRoute('/', () => {
+      if (isAuthenticated) {
+        setCurrentPage('management-dashboard');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
-    // Branches routes
-    router.addRoute('/branches', () => setCurrentPage('branches'));
+    router.addRoute('/dashboard', () => {
+      if (isAuthenticated) {
+        setCurrentPage('management-dashboard');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    router.addRoute('/inbox', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inbox');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    router.addRoute('/branches', () => {
+      if (isAuthenticated) {
+        setCurrentPage('branches');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
     // Directory routes
-    router.addRoute('/directory/contacts', () => setCurrentPage('directory-contacts'));
-    router.addRoute('/directory/contacts/new', () => setCurrentPage('directory-contact-new'));
-    router.addRoute('/directory/contacts/edit/:id', () => setCurrentPage('directory-contact-new'));
-    router.addRoute('/directory/customers', () => setCurrentPage('directory-customers'));
-    router.addRoute('/directory/customers/new', () => setCurrentPage('directory-customer-new'));
-    router.addRoute('/directory/vendors', () => setCurrentPage('directory-vendors'));
-    router.addRoute('/directory/vendors/new', () => setCurrentPage('directory-vendor-new'));
-    router.addRoute('/directory/vendors/:id', () => setCurrentPage('directory-vendor-new'));
-    router.addRoute('/directory/vendors/edit/:id', () => setCurrentPage('directory-vendor-new'));
-    router.addRoute('/directory/test', () => setCurrentPage('test-directory'));
-    router.addRoute('/directory', () => setCurrentPage('directory-contacts')); // Default to contacts
-    
-    // Time & Attendance routes - REMOVED (no longer using employees table)
+    router.addRoute('/directory/contacts', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-contacts');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/contacts/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-contact-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/contacts/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-contact-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/customers', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-customers');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/customers/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-customer-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/vendors', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-vendors');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/vendors/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-vendor-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/vendors/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-vendor-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/vendors/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-vendor-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory/test', () => {
+      if (isAuthenticated) {
+        setCurrentPage('test-directory');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/directory', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-contacts');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
     // Reports routes
-    router.addRoute('/reports', () => setCurrentPage('company-reports'));
-    router.addRoute('/reports/company-reports', () => setCurrentPage('company-reports'));
+    router.addRoute('/reports', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-reports');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/reports/company-reports', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-reports');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
-    // Settings routes
-    router.addRoute('/settings', () => setCurrentPage('company-settings'));
-    router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
-    router.addRoute('/settings/organization-user', () => setCurrentPage('company-settings'));
-    router.addRoute('/settings/organization-profile', () => setCurrentPage('company-settings'));
-    router.addRoute('/settings/organization-users/new', () => setCurrentPage('company-settings'));
-    router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('company-settings'));
+    // Settings routes - CRITICAL: These must work on refresh
+    router.addRoute('/settings', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/company-settings', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/organization-user', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/organization-profile', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/organization-users/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/organization-users/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
-    // Other routes - redirect to management dashboard
-    router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
-  }, [isAuthenticated, setViewMode]);
+    // Other routes
+    router.addRoute('/time-tracking', () => {
+      if (isAuthenticated) {
+        setCurrentPage('management-dashboard');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+
+    // Initialize router AFTER all routes are registered
+    // This ensures refresh works correctly
+    router.init();
+    
+    // Add listener for route changes to sync with current page
+    const unsubscribe = router.addListener(() => {
+      const currentRoute = router.getCurrentRoute();
+      if (import.meta.env.DEV) {
+        console.log('Route changed to:', currentRoute);
+      }
+    });
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [isAuthenticated, setViewMode]); // Re-register routes when auth state changes
 
   // Monitor URL changes and trigger router navigation (for direct navigation like tests)
   useEffect(() => {
