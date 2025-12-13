@@ -115,7 +115,6 @@ NavigationItem.displayName = 'NavigationItem';
 
 const baseNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: Home }, // Will be handled dynamically based on view mode
-  { name: 'Time & Attendance', href: '/time-and-attendance/whos-working', icon: Clock },
 ];
 
 
@@ -300,9 +299,6 @@ function Layout({ children }: LayoutProps) {
       case 'My Info':
         // My Info is active if we're on any my-info route
         return currentRoute.includes('/my-info');
-      case 'Time & Attendance':
-        // Time & Attendance is active if we're on any time-and-attendance route
-        return currentRoute.includes('/time-and-attendance');
       case 'Reports':
         // Reports is active if we're on any reports route
         return currentRoute.includes('/reports');

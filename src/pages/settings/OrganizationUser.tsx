@@ -34,7 +34,7 @@ interface OrganizationUser {
   email?: string;
 }
 
-export default function OrganizationProfile() {
+export default function OrganizationUser() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId, loading: orgLoading, hasOrganizations } = useOrganizationContext();
   const { user } = useAuthStore();
@@ -56,7 +56,7 @@ export default function OrganizationProfile() {
 
   useEffect(() => {
     registerSubmodules('Settings', [
-      { id: 'organization-profile', label: 'Organization Profile', href: '/settings/organization-profile' },
+      { id: 'organization-user', label: 'Organization User', href: '/settings/organization-user' },
     ]);
   }, [registerSubmodules]);
 

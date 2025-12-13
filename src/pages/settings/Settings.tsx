@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import Members from './Members';
-import OrganizationProfile from './OrganizationProfile';
+import OrganizationUser from './OrganizationUser';
 
 export default function Settings() {
   const { getPreviousPage } = usePreviousPage();
@@ -64,7 +64,7 @@ export default function Settings() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'organization-profile':
-        return <OrganizationProfile />;
+        return <OrganizationUser />;
       case 'members':
         if (!isOwnerOrAdmin) return null;
         return <Members />;
@@ -87,7 +87,7 @@ export default function Settings() {
           </div>
         );
       default:
-        return <OrganizationProfile />;
+        return <OrganizationUser />;
     }
   };
 

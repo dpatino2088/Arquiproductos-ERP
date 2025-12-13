@@ -74,7 +74,7 @@ export default function OrganizationUserNew() {
         title: 'No organization selected',
         message: 'Please select an organization first.',
       });
-      router.navigate('/settings/organization-profile');
+      router.navigate('/settings/organization-user');
       return;
     }
 
@@ -217,7 +217,7 @@ export default function OrganizationUserNew() {
           message: 'User role has been updated successfully.',
         });
 
-        router.navigate('/settings/organization-profile');
+        router.navigate('/settings/organization-user');
       } else {
         // Create new Organization User directly (sin Edge Function, sin enviar email)
         const normalizedEmail = data.email.trim().toLowerCase();
@@ -263,7 +263,7 @@ export default function OrganizationUserNew() {
             message: 'El usuario ha sido reactivado en la organización.',
           });
 
-          router.navigate('/settings/organization-profile');
+          router.navigate('/settings/organization-user');
           return;
         }
 
@@ -304,7 +304,7 @@ export default function OrganizationUserNew() {
           message: 'El usuario ha sido agregado a la organización. El usuario deberá registrarse para acceder al sistema.',
         });
 
-        router.navigate('/settings/organization-profile');
+        router.navigate('/settings/organization-user');
       }
     } catch (err: any) {
       console.error('Error saving user:', err);

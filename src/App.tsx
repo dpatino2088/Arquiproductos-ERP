@@ -128,9 +128,9 @@ const OrganizationUsers = lazy(() => {
   return import('./pages/settings/OrganizationUsers');
 });
 
-const OrganizationProfile = lazy(() => {
-  logger.debug('Loading Organization Profile component');
-  return import('./pages/settings/OrganizationProfile');
+const OrganizationUser = lazy(() => {
+  logger.debug('Loading Organization User component');
+  return import('./pages/settings/OrganizationUser');
 });
 
 const OrganizationUserNew = lazy(() => {
@@ -359,6 +359,7 @@ function App() {
     // Settings routes
     router.addRoute('/settings', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/company-settings', () => setCurrentPage('company-settings'));
+    router.addRoute('/settings/organization-user', () => setCurrentPage('organization-user'));
     router.addRoute('/settings/organization-profile', () => setCurrentPage('organization-profile'));
     router.addRoute('/settings/organization-users/new', () => setCurrentPage('organization-user-new'));
     router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('organization-user-new'));
@@ -458,8 +459,10 @@ function App() {
         return <CompanySettings />;
       case 'organization-users':
         return <OrganizationUsers organizationId={null} />;
+      case 'organization-user':
+        return <OrganizationUser />;
       case 'organization-profile':
-        return <OrganizationProfile />;
+        return <OrganizationUser />; // This route is handled by CompanySettings, but keep for backward compatibility
       case 'organization-user-new':
         return <OrganizationUserNew />;
       case 'manage-organizations':
