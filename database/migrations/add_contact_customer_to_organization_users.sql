@@ -15,7 +15,7 @@ CREATE INDEX IF NOT EXISTS idx_organization_users_customer_id ON "OrganizationUs
 
 -- Step 4: Add comments
 COMMENT ON COLUMN "OrganizationUsers".contact_id IS 'References DirectoryContacts. Required for new users.';
-COMMENT ON COLUMN "OrganizationUsers".customer_id IS 'References DirectoryCustomers. Required for new users. Must be a Customer where the Contact is the primary_contact.';
+COMMENT ON COLUMN "OrganizationUsers".customer_id IS 'References DirectoryCustomers. Required for new users. The Contact must belong to this Customer (via DirectoryContacts.customer_id).';
 
 -- Step 5: For existing records, try to auto-link based on email matching
 -- This attempts to find Contacts and Customers for existing OrganizationUsers
@@ -45,6 +45,7 @@ WHERE ou.id = subq.org_user_id
   AND subq.customer_id IS NOT NULL;
 
 -- Step 6: Create a function to validate customer-contact relationship
+-- Updated: A Contact belongs to a Customer via customer_id (not primary_contact_id)
 CREATE OR REPLACE FUNCTION validate_organization_user_customer_contact()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -52,13 +53,13 @@ BEGIN
   IF NEW.contact_id IS NOT NULL AND NEW.customer_id IS NOT NULL THEN
     IF NOT EXISTS (
       SELECT 1 
-      FROM "DirectoryCustomers" dc
-      WHERE dc.id = NEW.customer_id
-        AND dc.primary_contact_id = NEW.contact_id
+      FROM "DirectoryContacts" dc
+      WHERE dc.id = NEW.contact_id
+        AND dc.customer_id = NEW.customer_id
         AND dc.organization_id = NEW.organization_id
         AND dc.deleted = false
     ) THEN
-      RAISE EXCEPTION 'Customer must have the selected Contact as its primary_contact_id';
+      RAISE EXCEPTION 'The selected Contact must belong to the selected Customer (via customer_id)';
     END IF;
   END IF;
   RETURN NEW;

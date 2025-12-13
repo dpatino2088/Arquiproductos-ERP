@@ -219,78 +219,85 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     }
   };
 
-  // Helper function to load contacts for a customer
+  // Helper function to load ALL contacts for a customer
   const loadContactsForCustomer = async (customerId: string, preselectedContactId?: string) => {
     if (!activeOrganizationId) return;
 
     try {
-      // Get the customer to find its primary_contact_id
-      const { data: customerData, error: customerError } = await supabase
-        .from('DirectoryCustomers')
-        .select('primary_contact_id')
-        .eq('id', customerId)
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
-        .maybeSingle();
-
-      if (customerError || !customerData) {
-        setAvailableContactsForCustomer([]);
-        form.setValue('contact_id', '');
-        return;
-      }
-
-      // Get the primary contact for this customer
-      const primaryContactId = customerData.primary_contact_id;
-      
-      if (!primaryContactId) {
-        setAvailableContactsForCustomer([]);
-        form.setValue('contact_id', '');
-        return;
-      }
-
-      // Get the contact details
-      const { data: contactData, error: contactError } = await supabase
+      // Get ALL contacts that belong to this customer
+      const { data: contactsData, error: contactsError } = await supabase
         .from('DirectoryContacts')
         .select('id, customer_name, email, first_name, last_name')
-        .eq('id', primaryContactId)
+        .eq('customer_id', customerId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
-        .maybeSingle();
+        .order('created_at', { ascending: false });
 
-      if (!contactError && contactData) {
+      if (contactsError) {
+        console.error('Error loading contacts for customer:', contactsError);
+        setAvailableContactsForCustomer([]);
+        form.setValue('contact_id', '');
+        return;
+      }
+
+      if (!contactsData || contactsData.length === 0) {
+        setAvailableContactsForCustomer([]);
+        form.setValue('contact_id', '');
+        // Clear name and email if no contacts
+        if (!userId) {
+          form.setValue('name', '');
+          form.setValue('email', '');
+        }
+        return;
+      }
+
+      // Transform all contacts to match the interface
+      const transformedContacts = contactsData.map((contactData) => {
         // Construir nombre completo: first_name + last_name, o customer_name si no hay first_name
         const fullName = contactData.first_name && contactData.last_name
           ? `${contactData.first_name} ${contactData.last_name}`.trim()
           : contactData.customer_name || contactData.first_name || contactData.last_name || '';
 
-        // Transform to match the interface
-        const contact = {
+        return {
           id: contactData.id,
           firstName: contactData.first_name || '',
           lastName: contactData.last_name || '',
           fullName: fullName,
           email: contactData.email || '',
         };
-        
-        setAvailableContactsForCustomer([contact]);
+      });
+      
+      setAvailableContactsForCustomer(transformedContacts);
 
-        // Auto-select the primary contact
-        if (preselectedContactId) {
-          form.setValue('contact_id', preselectedContactId);
-        } else {
-          form.setValue('contact_id', contactData.id);
-          // Auto-fill name and email (only when creating new user)
-          if (!userId) {
-            form.setValue('name', contact.fullName);
-            form.setValue('email', contact.email);
-          }
+      // Auto-select: If there's a preselected contact, use it
+      // Otherwise, if there's exactly one contact, auto-select it
+      // If multiple contacts, don't auto-select (user must choose)
+      if (preselectedContactId) {
+        form.setValue('contact_id', preselectedContactId);
+        // Auto-fill name and email from preselected contact
+        const preselectedContact = transformedContacts.find(c => c.id === preselectedContactId);
+        if (preselectedContact && !userId) {
+          form.setValue('name', preselectedContact.fullName);
+          form.setValue('email', preselectedContact.email);
+        }
+      } else if (transformedContacts.length === 1 && transformedContacts[0]) {
+        // Auto-select if only one contact
+        const singleContact = transformedContacts[0];
+        form.setValue('contact_id', singleContact.id);
+        if (!userId) {
+          form.setValue('name', singleContact.fullName);
+          form.setValue('email', singleContact.email);
         }
       } else {
-        setAvailableContactsForCustomer([]);
+        // Multiple contacts - user must select one
         form.setValue('contact_id', '');
+        if (!userId) {
+          form.setValue('name', '');
+          form.setValue('email', '');
+        }
       }
     } catch (err) {
-      console.error('Error finding contact for customer:', err);
+      console.error('Error loading contacts for customer:', err);
       setAvailableContactsForCustomer([]);
       form.setValue('contact_id', '');
     }
@@ -668,7 +675,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               <p className="mt-1 text-xs text-red-600">{form.formState.errors.contact_id.message}</p>
             )}
             <p className="mt-1 text-xs text-gray-500">
-              Contact is automatically loaded from the customer's primary contact. Email and name will be auto-filled.
+              Select a contact that belongs to the selected customer. Email and name will be auto-filled from the selected contact.
             </p>
           </div>
 
