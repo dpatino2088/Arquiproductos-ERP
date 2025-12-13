@@ -198,11 +198,6 @@ const OrganizationUserNew = lazy(() => {
   return import('./pages/settings/OrganizationUserNew');
 });
 
-const ManageOrganizations = lazy(() => {
-  logger.debug('Loading Manage Organizations component');
-  return import('./pages/organizations/ManageOrganizations');
-});
-
 // Auth pages
 const Login = lazy(() => {
   logger.debug('Loading Login component');
@@ -424,10 +419,6 @@ function App() {
     router.addRoute('/settings/organization-users/new', () => setCurrentPage('company-settings'));
     router.addRoute('/settings/organization-users/edit/:id', () => setCurrentPage('company-settings'));
     
-    // Organizations routes
-    router.addRoute('/organizations', () => setCurrentPage('manage-organizations'));
-    router.addRoute('/organizations/manage', () => setCurrentPage('manage-organizations'));
-    
     // Other routes - redirect to management dashboard
     router.addRoute('/time-tracking', () => setCurrentPage('management-dashboard'));
   }, [isAuthenticated, setViewMode]);
@@ -524,8 +515,6 @@ function App() {
       case 'organization-profile':
         return <OrganizationUser />; // This route is handled by CompanySettings, but keep for backward compatibility
       // Note: 'organization-user-new' routes now render CompanySettings which handles the embedded form
-      case 'manage-organizations':
-        return <ManageOrganizations />;
       
       // Auth pages
       case 'login':

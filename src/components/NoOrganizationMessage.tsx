@@ -1,4 +1,4 @@
-import { Building2, Mail, AlertCircle, Plus } from 'lucide-react';
+import { Building2, Mail, AlertCircle } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 import { router } from '../lib/router';
 
@@ -35,15 +35,6 @@ export function NoOrganizationMessage() {
         </div>
 
         <div className="space-y-3">
-          <button
-            onClick={() => router.navigate('/organizations/manage')}
-            className="w-full px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-          >
-            <Plus className="w-4 h-4" />
-            Manage Organizations
-          </button>
-          
           <a
             href={`mailto:support@example.com?subject=Organization Access Request&body=Hi, I need to be added to an organization. My email is: ${user?.email || ''}`}
             className="block w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"

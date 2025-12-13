@@ -706,10 +706,10 @@ function Layout({ children }: LayoutProps) {
                           router.navigate('/settings/organization-user');
                         }}
                         role="menuitem"
-                        aria-label="Manage organizations"
+                        aria-label="Organization User"
                       >
                         <Building2 style={{ width: '16px', height: '16px' }} aria-hidden="true" />
-                        Manage Organizations
+                        Organization User
                       </button>
                       
                       <button
