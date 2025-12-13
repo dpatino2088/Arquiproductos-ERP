@@ -89,7 +89,7 @@ export class CircuitBreaker {
         if (this.failures >= this.config.failureThreshold) {
           this.state = CircuitState.OPEN;
           this.lastFailureTime = now;
-          logger.error('Circuit breaker OPENED - service failing', {
+          logger.error('Circuit breaker OPENED - service failing', undefined, {
             timestamp: new Date().toISOString(),
             failures: this.failures,
             threshold: this.config.failureThreshold,

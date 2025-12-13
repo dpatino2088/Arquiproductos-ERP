@@ -89,7 +89,6 @@ export const useCompanyStore = create<CompanyState>()(
               error.code === 'PGRST116' || // No rows returned
               error.code === '42501' || // Permission denied (RLS)
               error.code === '42P01' || // Relation does not exist
-              error.status === 404 || // Table not found
               error.message?.includes('relation') || 
               error.message?.includes('does not exist') ||
               error.message?.includes('permission denied') ||
