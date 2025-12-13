@@ -20,7 +20,8 @@ import {
   Grid3X3,
   SortAsc,
   SortDesc,
-  Calendar
+  Calendar,
+  Building
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 import { useAuthStore } from '../../stores/auth-store';
@@ -32,6 +33,9 @@ interface OrganizationUser {
   user_id: string;
   name?: string;
   email?: string;
+  contact_id?: string;
+  customer_id?: string;
+  customer_name?: string;
 }
 
 export default function OrganizationUser() {
@@ -89,14 +93,34 @@ export default function OrganizationUser() {
       // First, try direct query (simpler and faster if RLS allows it)
       const { data: directData, error: directError } = await supabase
         .from('OrganizationUsers')
-        .select('id, role, created_at, user_id, name, email, invited_by')
+        .select(`
+          id, 
+          role, 
+          created_at, 
+          user_id, 
+          name, 
+          email, 
+          invited_by,
+          contact_id,
+          customer_id,
+          DirectoryCustomers:customer_id (
+            id,
+            company_name
+          )
+        `)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .order('created_at', { ascending: false });
 
       if (!directError && directData) {
+        // Transform data to include customer_name
+        const transformedData = directData.map((user: any) => ({
+          ...user,
+          customer_name: user.DirectoryCustomers?.company_name || 'N/A',
+        }));
+        
         // Success with direct query
-        setUsers(directData);
+        setUsers(transformedData);
         setIsLoading(false);
         return;
       }
@@ -552,7 +576,7 @@ export default function OrganizationUser() {
               <tbody className="divide-y divide-gray-200">
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-12 text-center">
+                    <td colSpan={5} className="py-12 text-center">
                       <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No users found</p>
                       <p className="text-sm text-gray-500">
@@ -580,6 +604,12 @@ export default function OrganizationUser() {
                               <div className="text-xs text-gray-500">{orgUser.email}</div>
                             )}
                           </div>
+                        </div>
+                      </td>
+                      <td className="py-4 px-4 text-gray-900 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Building className="w-4 h-4 text-gray-400" />
+                          <span className="font-medium">{orgUser.customer_name || 'N/A'}</span>
                         </div>
                       </td>
                       <td className="py-4 px-4">

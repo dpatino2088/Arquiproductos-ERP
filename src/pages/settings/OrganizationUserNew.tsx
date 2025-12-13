@@ -13,12 +13,15 @@ import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
+import { useContacts } from '../../hooks/useDirectory';
 
 // Schema for organization user
 const organizationUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   email: z.string().email('Invalid email address').min(1, 'Email is required'),
   role: z.enum(['owner', 'admin', 'member', 'viewer']),
+  contact_id: z.string().uuid('Contact is required').min(1, 'Contact is required'),
+  customer_id: z.string().uuid('Customer is required').min(1, 'Customer is required'),
 });
 
 type OrganizationUserFormData = z.infer<typeof organizationUserSchema>;
@@ -30,6 +33,8 @@ interface OrganizationUser {
   user_id: string;
   name?: string;
   email?: string;
+  contact_id?: string;
+  customer_id?: string;
 }
 
 interface OrganizationUserNewProps {
@@ -51,6 +56,18 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   // Determine if form should be read-only
   const isReadOnly = isViewer || !canManageUsers;
 
+  // Load contacts for selection
+  const { contacts, isLoading: contactsLoading } = useContacts();
+  
+  // State to track selected contact and available customers
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [availableCustomersForContact, setAvailableCustomersForContact] = useState<Array<{ id: string; company_name: string }>>([]);
+
+  // Filter contacts to only show active, non-deleted contacts
+  const availableContacts = contacts.filter(
+    (contact) => !contact.status || contact.status !== 'Archived'
+  );
+
   // Get user ID from URL if in edit mode
   useEffect(() => {
     const path = window.location.pathname;
@@ -67,6 +84,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       name: '',
       email: '',
       role: 'member',
+      contact_id: '',
+      customer_id: '',
     },
   });
 
@@ -87,7 +106,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       // Primero intentar query directo (más rápido y confiable)
       const { data: directData, error: directError } = await supabase
         .from('OrganizationUsers')
-        .select('id, role, created_at, user_id, name, email, invited_by')
+        .select('id, role, created_at, user_id, name, email, invited_by, contact_id, customer_id')
         .eq('organization_id', activeOrganizationId)
         .eq('id', id)  // Buscar por id del registro, no user_id
         .eq('deleted', false)
@@ -95,11 +114,23 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
 
       if (!directError && directData) {
         setExistingUser(directData);
+        const contactId = directData.contact_id || '';
+        const customerId = directData.customer_id || '';
+        
         form.reset({
           name: directData.name || '',
           email: directData.email || '',
           role: directData.role,
+          contact_id: contactId,
+          customer_id: customerId,
         });
+
+        // Load available customers for the contact if contact_id exists
+        if (contactId) {
+          setSelectedContactId(contactId);
+          await loadCustomersForContact(contactId, customerId);
+        }
+        
         setIsLoading(false);
         return;
       }
@@ -134,11 +165,42 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         
         if (foundUser) {
           setExistingUser(foundUser);
+          const contactId = foundUser.contact_id || '';
+          const customerId = foundUser.customer_id || '';
+          
           form.reset({
             name: foundUser.name || '',
             email: foundUser.email || '',
             role: foundUser.role,
+            contact_id: contactId,
+            customer_id: customerId,
           });
+
+          // Load available customers for the contact if contact_id exists
+          if (contactId) {
+            setSelectedContactId(contactId);
+            // Load customers for this contact
+            try {
+              const { data: customerData } = await supabase
+                .from('DirectoryCustomers')
+                .select('id, company_name')
+                .eq('primary_contact_id', contactId)
+                .eq('organization_id', activeOrganizationId)
+                .eq('deleted', false);
+              
+              if (customerData && customerData.length > 0) {
+                setAvailableCustomersForContact(customerData);
+                if (customerId) {
+                  form.setValue('customer_id', customerId);
+                } else if (customerData.length === 1 && customerData[0]) {
+                  form.setValue('customer_id', customerData[0].id);
+                }
+              }
+            } catch (err) {
+              console.error('Error loading customers:', err);
+            }
+          }
+          
           setIsLoading(false);
           return;
         }
@@ -158,6 +220,68 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       // No redirigir automáticamente, permitir que el usuario intente de nuevo
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Helper function to load customers for a contact
+  const loadCustomersForContact = async (contactId: string, preselectedCustomerId?: string) => {
+    if (!activeOrganizationId) return;
+
+    try {
+      const { data: customerData, error: customerError } = await supabase
+        .from('DirectoryCustomers')
+        .select('id, company_name')
+        .eq('primary_contact_id', contactId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false);
+
+      if (!customerError && customerData && customerData.length > 0) {
+        setAvailableCustomersForContact(customerData);
+
+        // If there's exactly one customer, auto-select it (unless we have a preselected one)
+        if (preselectedCustomerId) {
+          form.setValue('customer_id', preselectedCustomerId);
+        } else if (customerData.length === 1 && customerData[0]) {
+          form.setValue('customer_id', customerData[0].id);
+        } else if (customerData.length > 1) {
+          // Multiple customers - user must select one
+          form.setValue('customer_id', '');
+        }
+      } else {
+        // No customer found for this contact
+        setAvailableCustomersForContact([]);
+        form.setValue('customer_id', '');
+      }
+    } catch (err) {
+      console.error('Error finding customer for contact:', err);
+      setAvailableCustomersForContact([]);
+      form.setValue('customer_id', '');
+    }
+  };
+
+  // Handler for when contact is selected
+  const handleContactChange = async (contactId: string) => {
+    form.setValue('contact_id', contactId, { shouldValidate: true });
+    setSelectedContactId(contactId);
+
+    // Find the selected contact
+    const selectedContact = availableContacts.find((c) => c.id === contactId);
+
+    if (selectedContact) {
+      // Auto-fill name and email from contact (only when creating new user)
+      if (!userId) {
+        const contactName = selectedContact.firstName || '';
+        const contactEmail = selectedContact.email || '';
+        form.setValue('name', contactName);
+        form.setValue('email', contactEmail);
+      }
+
+      // Load customers for this contact
+      await loadCustomersForContact(contactId);
+    } else {
+      // Contact not found, clear customer selection
+      setAvailableCustomersForContact([]);
+      form.setValue('customer_id', '');
     }
   };
 
@@ -189,6 +313,15 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     setSaveError(null);
 
     try {
+      // Validate that both contact_id and customer_id are set
+      if (!data.contact_id || !data.customer_id) {
+        const errorMsg = 'Contact and Customer are required. Please select a contact that is linked to a customer.';
+        setSaveError(errorMsg);
+        form.setError('contact_id', { type: 'manual', message: 'Contact is required' });
+        form.setError('customer_id', { type: 'manual', message: 'Customer is required' });
+        return;
+      }
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       if (!supabaseUrl) {
         throw new Error('VITE_SUPABASE_URL is not configured');
@@ -200,13 +333,15 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       }
 
       if (userId && existingUser) {
-        // Update existing user role and name
+        // Update existing user role, name, contact_id, and customer_id
         // Usar id del registro, no user_id
         const { error } = await supabase
           .from('OrganizationUsers')
           .update({ 
             role: data.role,
             name: data.name.trim(),
+            contact_id: data.contact_id,
+            customer_id: data.customer_id,
             updated_at: new Date().toISOString() 
           })
           .eq('id', userId)  // Usar id del registro
@@ -252,6 +387,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               role: data.role,
               name: userName,
               email: normalizedEmail,
+              contact_id: data.contact_id,
+              customer_id: data.customer_id,
               deleted: false,
               updated_at: new Date().toISOString(),
             })
@@ -286,6 +423,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
           role: data.role,
           name: userName,
           email: normalizedEmail,
+          contact_id: data.contact_id,
+          customer_id: data.customer_id,
           invited_by: user.id,
           deleted: false,
         };
@@ -394,7 +533,92 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       {/* Form */}
       <div className="bg-white border border-gray-200 p-6">
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-          {/* Name Field */}
+          {/* Contact Field */}
+          <div>
+            <Label htmlFor="contact_id" className="text-xs" required>
+              Contact
+            </Label>
+            <SelectShadcn
+              value={form.watch('contact_id') || ''}
+              onValueChange={handleContactChange}
+              disabled={isReadOnly || !!userId} // Disable if editing (can't change contact)
+            >
+              <SelectTrigger className={`py-1 text-xs ${form.formState.errors.contact_id ? 'border-red-300 bg-red-50' : ''}`}>
+                <SelectValue placeholder={contactsLoading ? "Loading contacts..." : "Select a contact"} />
+              </SelectTrigger>
+              <SelectContent>
+                {availableContacts.length === 0 ? (
+                  <SelectItem value="" disabled>
+                    {contactsLoading ? "Loading..." : "No contacts available. Please create a contact first in the Directory module."}
+                  </SelectItem>
+                ) : (
+                  availableContacts.map((contact) => (
+                    <SelectItem key={contact.id} value={contact.id}>
+                      {(contact.firstName || '')} {(contact.lastName || '')} {contact.email ? `(${contact.email})` : ''}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </SelectShadcn>
+            {form.formState.errors.contact_id && (
+              <p className="mt-1 text-xs text-red-600">{form.formState.errors.contact_id.message}</p>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              {userId 
+                ? 'Contact cannot be changed for existing users'
+                : 'Select an existing contact. The contact must be the primary contact of a customer.'}
+            </p>
+            {availableContacts.length === 0 && !contactsLoading && (
+              <p className="mt-1 text-xs text-yellow-600">
+                ⚠️ No contacts found. Please create a contact in the Directory module before creating a user.
+              </p>
+            )}
+          </div>
+
+          {/* Customer Field */}
+          <div>
+            <Label htmlFor="customer_id" className="text-xs" required>
+              Customer
+            </Label>
+            <SelectShadcn
+              value={form.watch('customer_id') || ''}
+              onValueChange={(value) => form.setValue('customer_id', value, { shouldValidate: true })}
+              disabled={isReadOnly || !selectedContactId || availableCustomersForContact.length === 0}
+            >
+              <SelectTrigger className={`py-1 text-xs ${form.formState.errors.customer_id ? 'border-red-300 bg-red-50' : ''}`}>
+                <SelectValue placeholder={
+                  !selectedContactId 
+                    ? "Select a contact first" 
+                    : availableCustomersForContact.length === 0 
+                      ? "No customer found for this contact"
+                      : availableCustomersForContact.length === 1 && availableCustomersForContact[0]
+                        ? availableCustomersForContact[0].company_name
+                        : "Select a customer"
+                } />
+              </SelectTrigger>
+              <SelectContent>
+                {availableCustomersForContact.length === 0 ? (
+                  <SelectItem value="" disabled>
+                    No customer available. The selected contact must be the primary contact of a customer.
+                  </SelectItem>
+                ) : (
+                  availableCustomersForContact.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.company_name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </SelectShadcn>
+            {form.formState.errors.customer_id && (
+              <p className="mt-1 text-xs text-red-600">{form.formState.errors.customer_id.message}</p>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              Customer is automatically selected based on the contact. If multiple customers use this contact, select the correct one.
+            </p>
+          </div>
+
+          {/* Name Field - AUTO-FILLED FROM CONTACT */}
           <div>
             <Label htmlFor="name" className="text-xs" required>
               Name
@@ -408,9 +632,12 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               error={form.formState.errors.name?.message}
               placeholder="John Doe"
             />
+            <p className="mt-1 text-xs text-gray-400">
+              Auto-filled from selected contact (you can edit if needed)
+            </p>
           </div>
 
-          {/* Email Field */}
+          {/* Email Field - AUTO-FILLED FROM CONTACT */}
           <div>
             <Label htmlFor="email" className="text-xs" required>
               Email
@@ -419,19 +646,17 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               id="email"
               type="email"
               {...form.register('email')}
-              disabled={isReadOnly || !!userId} // Disable if read-only or editing (can't change email)
+              disabled={isReadOnly || !!userId} // Disable if read-only or editing
               className="py-1 text-xs"
               error={form.formState.errors.email?.message}
               placeholder="user@example.com"
             />
-            {userId && (
-              <p className="mt-1 text-xs text-gray-500">
-                Email cannot be changed for existing users
-              </p>
-            )}
+            <p className="mt-1 text-xs text-gray-400">
+              Auto-filled from selected contact {userId ? '(cannot be changed)' : '(you can edit if needed)'}
+            </p>
           </div>
 
-          {/* Role Field */}
+          {/* Role Field - ONLY FIELD USER NEEDS TO SET */}
           <div>
             <Label htmlFor="role" className="text-xs" required>
               Role

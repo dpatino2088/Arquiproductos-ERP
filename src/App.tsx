@@ -75,33 +75,93 @@ const Branches = lazy(() => {
 
 // Directory module pages
 const DirectoryContacts = lazy(() => {
-  logger.debug('Loading Directory Contacts component');
-  return import('./pages/directory/Contacts');
+  try {
+    if (import.meta.env.DEV) {
+      logger.debug('Loading Directory Contacts component');
+    }
+    return import('./pages/directory/Contacts').catch((error) => {
+      console.error('Failed to load DirectoryContacts:', error);
+      throw error;
+    });
+  } catch (error) {
+    console.error('Error in DirectoryContacts lazy import:', error);
+    throw error;
+  }
 });
 
 const DirectoryContactNew = lazy(() => {
-  logger.debug('Loading Directory Contact New component');
-  return import('./pages/directory/ContactNew');
+  try {
+    if (import.meta.env.DEV) {
+      logger.debug('Loading Directory Contact New component');
+    }
+    return import('./pages/directory/ContactNew').catch((error) => {
+      console.error('Failed to load DirectoryContactNew:', error);
+      throw error;
+    });
+  } catch (error) {
+    console.error('Error in DirectoryContactNew lazy import:', error);
+    throw error;
+  }
 });
 
 const DirectoryCustomers = lazy(() => {
-  logger.debug('Loading Directory Customers component');
-  return import('./pages/directory/Customers');
+  try {
+    if (import.meta.env.DEV) {
+      logger.debug('Loading Directory Customers component');
+    }
+    return import('./pages/directory/Customers').catch((error) => {
+      console.error('Failed to load DirectoryCustomers:', error);
+      throw error;
+    });
+  } catch (error) {
+    console.error('Error in DirectoryCustomers lazy import:', error);
+    throw error;
+  }
 });
 
 const DirectoryCustomerNew = lazy(() => {
-  logger.debug('Loading Directory Customer New component');
-  return import('./pages/directory/CustomerNew');
+  try {
+    if (import.meta.env.DEV) {
+      logger.debug('Loading Directory Customer New component');
+    }
+    return import('./pages/directory/CustomerNew').catch((error) => {
+      console.error('Failed to load DirectoryCustomerNew:', error);
+      throw error;
+    });
+  } catch (error) {
+    console.error('Error in DirectoryCustomerNew lazy import:', error);
+    throw error;
+  }
 });
 
 const DirectoryVendors = lazy(() => {
-  logger.debug('Loading Directory Vendors component');
-  return import('./pages/directory/Vendors');
+  try {
+    if (import.meta.env.DEV) {
+      logger.debug('Loading Directory Vendors component');
+    }
+    return import('./pages/directory/Vendors').catch((error) => {
+      console.error('Failed to load DirectoryVendors:', error);
+      throw error;
+    });
+  } catch (error) {
+    console.error('Error in DirectoryVendors lazy import:', error);
+    throw error;
+  }
 });
 
 const DirectoryVendorNew = lazy(() => {
-  logger.debug('Loading Directory Vendor New component');
-  return import('./pages/directory/VendorNew');
+  try {
+    if (import.meta.env.DEV) {
+      logger.debug('Loading Directory Vendor New component');
+    }
+    return import('./pages/directory/VendorNew').catch((error) => {
+      console.error('Failed to load DirectoryVendorNew:', error);
+      throw error;
+    });
+  } catch (error) {
+    console.error('Error in DirectoryVendorNew lazy import:', error);
+    throw error;
+  }
 });
 
 const TestDirectory = lazy(() => {
@@ -525,16 +585,18 @@ function App() {
             <Layout>
               <ErrorBoundary>
                 <SupabaseStatusBanner />
-                <Suspense fallback={
-                  <div className="flex items-center justify-center min-h-[400px]">
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                      <p className="text-sm text-muted-foreground">Loading...</p>
+                <ErrorBoundary>
+                  <Suspense fallback={
+                    <div className="flex items-center justify-center min-h-[400px]">
+                      <div className="flex flex-col items-center gap-4">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                        <p className="text-sm text-muted-foreground">Loading...</p>
+                      </div>
                     </div>
-                  </div>
-                }>
-                  {renderPage()}
-                </Suspense>
+                  }>
+                    {renderPage()}
+                  </Suspense>
+                </ErrorBoundary>
               </ErrorBoundary>
             </Layout>
           </SubmoduleNavProvider>
