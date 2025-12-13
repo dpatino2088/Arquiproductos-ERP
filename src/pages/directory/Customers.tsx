@@ -308,17 +308,16 @@ export default function Customers() {
     );
   };
 
-  // Navigate to customer detail page (placeholder)
+  // Navigate to customer detail/view page
   const handleViewCustomer = (customer: CustomerItem) => {
-    // Store customer data in sessionStorage for the Customer Info page
-    sessionStorage.setItem('selectedCustomer', JSON.stringify(customer));
-    
-    // Create slug from company name
-    const slug = customer.companyName.toLowerCase().replace(/\s+/g, '-');
-    
-    // Navigate to customer detail (you can create this page later)
-    // router.navigate(`/directory/customers/${slug}`);
-    console.log('View customer:', customer);
+    // Navigate to customer view/edit page
+    router.navigate(`/directory/customers/edit/${customer.id}`);
+  };
+
+  // Navigate to customer edit page
+  const handleEditCustomer = (customer: CustomerItem, e?: React.MouseEvent) => {
+    e?.stopPropagation(); // Prevent row click event
+    router.navigate(`/directory/customers/edit/${customer.id}`);
   };
 
   const getStatusBadge = (status: string) => {
@@ -812,11 +811,11 @@ export default function Customers() {
                       onClick={() => handleSort('companyName')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Customer
+                      Customer Name
                       {sortBy === 'companyName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>Contact</th>
+                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>Primary Contact</th>
                   <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>
                     <button
                       onClick={() => handleSort('industry')}
@@ -886,17 +885,20 @@ export default function Customers() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{customer.contactName}</td>
+                      <td className="py-4 text-gray-700 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{customer.contactName || 'N/A'}</td>
                       <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{customer.industry}</td>
                       <td className="py-4" style={{ paddingLeft: '0.618rem', paddingRight: '0.618rem' }}>{getCustomerTypeBadge(customer.customerType)}</td>
                       <td className="py-4" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>{getStatusBadge(customer.status)}</td>
                       <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.65rem', paddingRight: '0.65rem' }}>{customer.location}</td>
                       <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>{new Date(customer.dateAdded).toLocaleDateString()}</td>
                       <td className="py-2" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>
-                        <div className="flex items-center">
+                        <div className="flex items-center gap-1">
                           <button 
-                            onClick={() => handleViewCustomer(customer)}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewCustomer(customer);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-600 hover:text-primary"
                             aria-label={`View ${customer.companyName}`}
                             title={`View ${customer.companyName}`}
                           >
@@ -904,21 +906,12 @@ export default function Customers() {
                           </button>
                           {canEditCustomers && (
                             <button 
-                              onClick={() => handleViewCustomer(customer)}
-                              className="p-1 hover:bg-gray-100 rounded transition-colors"
+                              onClick={(e) => handleEditCustomer(customer, e)}
+                              className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-600 hover:text-primary"
                               aria-label={`Edit ${customer.companyName}`}
                               title={`Edit ${customer.companyName}`}
                             >
                               <Edit className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canEditCustomers && (
-                            <button 
-                              className="p-1 hover:bg-gray-100 rounded transition-colors"
-                              aria-label={`More options for ${customer.companyName}`}
-                              title={`More options for ${customer.companyName}`}
-                            >
-                              <MoreVertical className="w-4 h-4" />
                             </button>
                           )}
                         </div>
@@ -977,22 +970,38 @@ export default function Customers() {
                       <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">
                         {customer.companyName}
                       </h3>
-                      <p className="text-xs text-gray-600 truncate">{customer.contactName}</p>
+                      <p className="text-xs text-gray-600 truncate">{customer.contactName || 'N/A'}</p>
                       <div className="mt-1 flex gap-1">
                         {getStatusBadge(customer.status)}
                         {getCustomerTypeBadge(customer.customerType)}
                       </div>
                     </div>
-                    {canEditCustomers && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
-                        onClick={() => handleViewCustomer(customer)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
-                        aria-label={`Edit ${customer.companyName}`}
-                        title={`Edit ${customer.companyName}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewCustomer(customer);
+                        }}
+                        className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-primary"
+                        aria-label={`View ${customer.companyName}`}
+                        title={`View ${customer.companyName}`}
                       >
-                        <Edit className="w-4 h-4" />
+                        <Eye className="w-4 h-4" />
                       </button>
-                    )}
+                      {canEditCustomers && (
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditCustomer(customer);
+                          }}
+                          className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-400 hover:text-primary"
+                          aria-label={`Edit ${customer.companyName}`}
+                          title={`Edit ${customer.companyName}`}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Customer Info */}

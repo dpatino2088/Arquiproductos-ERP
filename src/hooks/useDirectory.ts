@@ -116,7 +116,13 @@ export function useCustomers() {
 
         const { data, error: queryError } = await supabase
           .from('DirectoryCustomers')
-          .select('*')
+          .select(`
+            *,
+            DirectoryContacts:primary_contact_id (
+              id,
+              customer_name
+            )
+          `)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
@@ -130,10 +136,10 @@ export function useCustomers() {
 
         // Transform data to match frontend interface
         // Note: We already filter by deleted = false in the query, so all customers here are active
-        const transformedCustomers = (data || []).map((customer) => ({
+        const transformedCustomers = (data || []).map((customer: any) => ({
           id: customer.id,
           companyName: customer.company_name || '',
-          contactName: '',
+          contactName: customer.DirectoryContacts?.customer_name || '',
           email: customer.email || '',
           phone: customer.company_phone || '',
           industry: 'N/A', // Not in schema yet
