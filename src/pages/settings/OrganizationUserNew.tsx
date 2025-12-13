@@ -57,14 +57,28 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   const isReadOnly = isViewer || !canManageUsers;
 
   // Load customers and contacts for selection
-  const { customers, isLoading: customersLoading } = useCustomers();
+  const { customers, isLoading: customersLoading, error: customersError } = useCustomers();
   const { contacts, isLoading: contactsLoading } = useContacts();
   
   // State to track selected customer and available contacts for that customer
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [availableContactsForCustomer, setAvailableContactsForCustomer] = useState<Array<{ id: string; firstName: string; lastName: string; fullName: string; email: string }>>([]);
 
-  // Filter customers to only show active, non-deleted
+  // Debug: Log customers loading state
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('OrganizationUserNew - Customers state:', {
+        customersCount: customers.length,
+        customersLoading,
+        customersError,
+        activeOrganizationId,
+        availableCustomersCount: customers.filter((c) => c.status !== 'Archived').length
+      });
+    }
+  }, [customers, customersLoading, customersError, activeOrganizationId]);
+
+  // Filter customers to only show active, non-archived
+  // Note: deleted customers are already filtered in the query
   const availableCustomers = customers.filter(
     (customer) => customer.status !== 'Archived'
   );
@@ -602,6 +616,15 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             {availableCustomers.length === 0 && !customersLoading && (
               <p className="mt-1 text-xs text-yellow-600">
                 ⚠️ No customers found. Please create a customer in the Directory module before creating a user.
+                {import.meta.env.DEV && customersError && (
+                  <span className="block mt-1 text-red-600">Error: {customersError}</span>
+                )}
+                {import.meta.env.DEV && !customersError && customers.length === 0 && (
+                  <span className="block mt-1 text-blue-600">Debug: Total customers loaded: 0 (check organization and database)</span>
+                )}
+                {import.meta.env.DEV && customers.length > 0 && (
+                  <span className="block mt-1 text-blue-600">Debug: {customers.length} customers loaded, {availableCustomers.length} available after filter</span>
+                )}
               </p>
             )}
           </div>
