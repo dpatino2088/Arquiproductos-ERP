@@ -548,9 +548,9 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               </SelectTrigger>
               <SelectContent>
                 {availableContacts.length === 0 ? (
-                  <SelectItem value="" disabled>
+                  <div className="px-2 py-1.5 text-xs text-gray-500">
                     {contactsLoading ? "Loading..." : "No contacts available. Please create a contact first in the Directory module."}
-                  </SelectItem>
+                  </div>
                 ) : (
                   availableContacts.map((contact) => (
                     <SelectItem key={contact.id} value={contact.id}>
@@ -598,9 +598,9 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               </SelectTrigger>
               <SelectContent>
                 {availableCustomersForContact.length === 0 ? (
-                  <SelectItem value="" disabled>
+                  <div className="px-2 py-1.5 text-xs text-gray-500">
                     No customer available. The selected contact must be the primary contact of a customer.
-                  </SelectItem>
+                  </div>
                 ) : (
                   availableCustomersForContact.map((customer) => (
                     <SelectItem key={customer.id} value={customer.id}>
