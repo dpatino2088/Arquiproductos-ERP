@@ -13,6 +13,23 @@ export default function ManagementDashboard() {
     ]);
   }, [registerSubmodules]);
 
+  // Mejorar experiencia: Scroll al top y limpiar estado cuando se monta el Dashboard
+  useEffect(() => {
+    // Scroll suave al top cuando se carga el Dashboard
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // También asegurar que el main content esté en el top
+    const mainElement = document.querySelector('main[role="main"]');
+    if (mainElement) {
+      mainElement.scrollTop = 0;
+    }
+    
+    // Limpiar cualquier foco residual
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  }, []);
+
   const managementStats = [
     { title: 'Total Employees', value: '247', change: '+12', changeType: 'positive', icon: Users },
     { title: 'Open Positions', value: '8', change: '+3', changeType: 'neutral', icon: AlertTriangle },

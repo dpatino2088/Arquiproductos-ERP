@@ -60,9 +60,10 @@ serve(async (req) => {
     // Get organization users (now includes name and email directly from table)
     const { data: orgUsers, error: orgUsersError } = await supabaseClient
       .from('OrganizationUsers')
-      .select('id, role, created_at, user_id, name, email, invited_by')
+      .select('id, role, created_at, user_id, user_name, email, invited_by')
       .eq('organization_id', organizationId)
       .eq('deleted', false)
+      .eq('is_system', false)
       .order('created_at', { ascending: false });
 
     if (orgUsersError) {
@@ -71,14 +72,14 @@ serve(async (req) => {
 
     // If name or email are missing, try to get them from auth.users as fallback
     const usersWithData = await Promise.all((orgUsers || []).map(async (orgUser) => {
-      // If we already have name and email, use them
-      if (orgUser.name && orgUser.email) {
+      // If we already have user_name and email, use them
+      if (orgUser.user_name && orgUser.email) {
         return {
           id: orgUser.id,
           role: orgUser.role,
           created_at: orgUser.created_at,
           user_id: orgUser.user_id,
-          name: orgUser.name,
+          name: orgUser.user_name,
           email: orgUser.email,
           invited_by: orgUser.invited_by || undefined,
         };
@@ -89,14 +90,14 @@ serve(async (req) => {
         const { data: authUser, error: getUserError } = await supabaseAdmin.auth.admin.getUserById(orgUser.user_id);
         
         if (!getUserError && authUser?.user) {
-          const name = orgUser.name || authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || '';
+          const userName = orgUser.user_name || authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || '';
           const email = orgUser.email || authUser.user.email || '';
           
-          // Update OrganizationUsers with name and email if missing
-          if (!orgUser.name || !orgUser.email) {
+          // Update OrganizationUsers with user_name and email if missing
+          if (!orgUser.user_name || !orgUser.email) {
             await supabaseClient
               .from('OrganizationUsers')
-              .update({ name, email })
+              .update({ user_name: userName, email })
               .eq('id', orgUser.id);
           }
           
@@ -105,7 +106,7 @@ serve(async (req) => {
             role: orgUser.role,
             created_at: orgUser.created_at,
             user_id: orgUser.user_id,
-            name,
+            name: userName,
             email,
             invited_by: orgUser.invited_by || undefined,
           };
@@ -120,7 +121,7 @@ serve(async (req) => {
         role: orgUser.role,
         created_at: orgUser.created_at,
         user_id: orgUser.user_id,
-        name: orgUser.name || '',
+        name: orgUser.user_name || '',
         email: orgUser.email || '',
         invited_by: orgUser.invited_by || undefined,
       };

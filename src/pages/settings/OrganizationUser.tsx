@@ -42,7 +42,7 @@ export default function OrganizationUser() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId, loading: orgLoading, hasOrganizations } = useOrganizationContext();
   const { user } = useAuthStore();
-  const { canManageUsers, loading: roleLoading, role } = useCurrentOrgRole();
+  const { canManageUsers, loading: roleLoading, role, isAdmin, isSuperAdmin } = useCurrentOrgRole();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -98,25 +98,26 @@ export default function OrganizationUser() {
           role, 
           created_at, 
           user_id, 
-          name, 
+          user_name, 
           email, 
           invited_by,
           contact_id,
           customer_id,
           DirectoryCustomers:customer_id (
             id,
-            company_name
+            customer_name
           )
         `)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
+        .eq('is_system', false)
         .order('created_at', { ascending: false });
 
       if (!directError && directData) {
         // Transform data to include customer_name
         const transformedData = directData.map((user: any) => ({
           ...user,
-          customer_name: user.DirectoryCustomers?.company_name || 'N/A',
+          customer_name: user.DirectoryCustomers?.customer_name || 'N/A',
         }));
         
         // Success with direct query
@@ -209,7 +210,7 @@ export default function OrganizationUser() {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
-        (user.name || '').toLowerCase().includes(searchLower) ||
+        (user.user_name || '').toLowerCase().includes(searchLower) ||
         (user.email || '').toLowerCase().includes(searchLower) ||
         (user.user_id || '').toLowerCase().includes(searchLower) ||
         (user.role || '').toLowerCase().includes(searchLower)
@@ -599,8 +600,8 @@ export default function OrganizationUser() {
                             <User className="w-4 h-4 text-gray-600" />
                           </div>
                           <div>
-                            <div className="font-medium">{orgUser.name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}</div>
-                            {orgUser.name && orgUser.email && (
+                            <div className="font-medium">{orgUser.user_name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}</div>
+                            {orgUser.user_name && orgUser.email && (
                               <div className="text-xs text-gray-500">{orgUser.email}</div>
                             )}
                           </div>
@@ -672,9 +673,9 @@ export default function OrganizationUser() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors truncate">
-                        {orgUser.name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}
+                        {orgUser.user_name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}
                       </h3>
-                      {orgUser.name && orgUser.email && (
+                      {orgUser.user_name && orgUser.email && (
                         <p className="text-xs text-gray-500 truncate">{orgUser.email}</p>
                       )}
                       <div className="mt-1">

@@ -1,8 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useVendors } from '../../hooks/useDirectory';
+import { useVendors, useDeleteVendor } from '../../hooks/useDirectory';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { supabase } from '../../lib/supabase/client';
+import { useUIStore } from '../../stores/ui-store';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { 
   Store, 
   Search, 
@@ -23,7 +26,10 @@ import {
   Calendar,
   Edit,
   Globe,
-  DollarSign
+  DollarSign,
+  Copy,
+  Archive,
+  Trash2
 } from 'lucide-react';
 
 interface VendorItem {
@@ -118,11 +124,14 @@ export default function Vendors() {
 
   // Get active organization
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+  
+  // Get role and permissions
+  const { canEditVendors, isViewer, loading: roleLoading } = useCurrentOrgRole();
 
   // Prevent hook execution without org
   if (!orgLoading && !activeOrganizationId) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
           <p className="text-sm text-yellow-700 mt-1">Please select an organization to view vendors.</p>
@@ -132,7 +141,8 @@ export default function Vendors() {
   }
 
   // Get vendors from Supabase
-  const { data: vendorsData, isLoading: vendorsLoading, isError: vendorsIsError, error: vendorsError } = useVendors();
+  const { data: vendorsData, isLoading: vendorsLoading, isError: vendorsIsError, error: vendorsError, refetch } = useVendors();
+  const { deleteVendor, isDeleting } = useDeleteVendor();
 
   const filteredVendors = useMemo(() => {
     const filtered = vendorsData.filter(vendor => {
@@ -286,9 +296,76 @@ export default function Vendors() {
     );
   };
 
-  // Navigate to vendor detail page
-  const handleViewVendor = (vendor: VendorItem) => {
+  // Navigate to vendor edit page
+  const handleEditVendor = (vendor: VendorItem, e: React.MouseEvent) => {
+    e.stopPropagation();
     router.navigate(`/directory/vendors/edit/${vendor.id}`);
+  };
+
+  // Handle duplicate vendor
+  const handleDuplicateVendor = async (vendor: VendorItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.navigate(`/directory/vendors/new?duplicate=${vendor.id}`);
+  };
+
+  // Handle archive vendor
+  const handleArchiveVendor = async (vendor: VendorItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!confirm(`¿Estás seguro de que deseas archivar "${vendor.vendorName}"?`)) {
+      return;
+    }
+
+    try {
+      if (!activeOrganizationId) return;
+      
+      const { error } = await supabase
+        .from('DirectoryVendors')
+        .update({ archived: true })
+        .eq('id', vendor.id)
+        .eq('organization_id', activeOrganizationId);
+
+      if (error) throw error;
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Vendor archivado',
+        message: 'El vendor ha sido archivado correctamente.',
+      });
+      
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al archivar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
+  };
+
+  // Handle delete vendor
+  const handleDeleteVendor = async (vendor: VendorItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!confirm(`¿Estás seguro de que deseas eliminar "${vendor.vendorName}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      await deleteVendor(vendor.id);
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Vendor eliminado',
+        message: 'El vendor ha sido eliminado correctamente.',
+      });
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al eliminar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -327,9 +404,9 @@ export default function Vendors() {
   };
 
   // Show loading state
-  if (orgLoading || vendorsLoading) {
+  if (orgLoading || vendorsLoading || roleLoading) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
@@ -343,7 +420,7 @@ export default function Vendors() {
   // Show error state
   if (vendorsIsError && vendorsError) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-800 font-medium mb-2">Error loading vendors</p>
           <p className="text-sm text-red-700">{vendorsError}</p>
@@ -353,7 +430,7 @@ export default function Vendors() {
   }
 
   return (
-    <div className="p-6">
+    <div className="py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -363,18 +440,27 @@ export default function Vendors() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
-            <Upload style={{ width: '14px', height: '14px' }} />
-            Import
-          </button>
-          <button
-            onClick={() => router.navigate('/directory/vendors/new')}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-          >
-            <Plus style={{ width: '14px', height: '14px' }} />
-            Add Vendor
-          </button>
+          {canEditVendors && (
+            <>
+              <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
+                <Upload style={{ width: '14px', height: '14px' }} />
+                Import
+              </button>
+              <button
+                onClick={() => router.navigate('/directory/vendors/new')}
+                className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                <Plus style={{ width: '14px', height: '14px' }} />
+                Add Vendor
+              </button>
+            </>
+          )}
+          {!canEditVendors && (
+            <span className="text-xs text-gray-500 italic">
+              {isViewer ? '(Solo lectura)' : 'No tienes permisos para gestionar vendors'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -663,19 +749,10 @@ export default function Vendors() {
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
-              <colgroup>
-                <col style={{ width: '20%' }} /> {/* Vendor - base width */}
-                <col style={{ width: '12%' }} /> {/* Vendor ID - base * 0.618 */}
-                <col style={{ width: '15%' }} /> {/* Phone - base * 0.75 */}
-                <col style={{ width: '18%' }} /> {/* Email - base * 0.9 */}
-                <col style={{ width: '15%' }} /> {/* Country - base * 0.75 */}
-                <col style={{ width: '10%' }} /> {/* Currency - base * 0.5 */}
-                <col style={{ width: '5%' }} />  {/* Actions - fixed small */}
-              </colgroup>
+            <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '1.5rem', paddingRight: '1rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('vendorName')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -684,7 +761,7 @@ export default function Vendors() {
                       {sortBy === 'vendorName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.618rem', paddingRight: '0.618rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('vendorId')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -693,9 +770,9 @@ export default function Vendors() {
                       {sortBy === 'vendorId' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>Phone</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.9rem', paddingRight: '0.9rem' }}>Email</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Phone</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('country')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -704,7 +781,7 @@ export default function Vendors() {
                       {sortBy === 'country' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('currency')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -713,13 +790,13 @@ export default function Vendors() {
                       {sortBy === 'currency' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>Actions</th>
+                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredVendors.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center">
+                    <td colSpan={7} className="py-12 px-6 text-center">
                       <Store className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No vendors found</p>
                       <p className="text-sm text-gray-500">
@@ -732,7 +809,7 @@ export default function Vendors() {
                 ) : (
                   paginatedVendors.map((vendor) => (
                     <tr key={vendor.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '1.5rem', paddingRight: '1rem' }}>
+                      <td className="py-4 px-6 text-gray-900 text-sm">
                         <div className="flex items-center gap-3">
                           <div className="relative">
                             <div 
@@ -763,32 +840,56 @@ export default function Vendors() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.618rem', paddingRight: '0.618rem' }}>{vendor.vendorId}</td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{vendor.phone}</td>
-                      <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.9rem', paddingRight: '0.9rem' }}>
+                      <td className="py-4 px-6 text-gray-900 text-sm">{vendor.vendorId}</td>
+                      <td className="py-4 px-6 text-gray-900 text-sm">{vendor.phone}</td>
+                      <td className="py-4 px-6 text-gray-600 text-sm">
                         <div className="truncate" title={vendor.email}>
                           {vendor.email}
                         </div>
                       </td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{vendor.country}</td>
-                      <td className="py-4 text-gray-900 text-sm font-medium" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>{vendor.currency}</td>
-                      <td className="py-2" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>
-                        <div className="flex items-center">
-                          <button 
-                            onClick={() => handleViewVendor(vendor)}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            aria-label={`View ${vendor.vendorName}`}
-                            title={`View ${vendor.vendorName}`}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button 
-                            className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            aria-label={`More options for ${vendor.vendorName}`}
-                            title={`More options for ${vendor.vendorName}`}
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </button>
+                      <td className="py-4 px-6 text-gray-900 text-sm">{vendor.country}</td>
+                      <td className="py-4 px-6 text-gray-900 text-sm font-medium">{vendor.currency}</td>
+                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 justify-end">
+                          {canEditVendors ? (
+                            <>
+                              <button 
+                                onClick={(e) => handleEditVendor(vendor, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label={`Editar ${vendor.vendorName}`}
+                                title={`Editar ${vendor.vendorName}`}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => handleDuplicateVendor(vendor, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label={`Duplicar ${vendor.vendorName}`}
+                                title={`Duplicar ${vendor.vendorName}`}
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => handleArchiveVendor(vendor, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label={`Archivar ${vendor.vendorName}`}
+                                title={`Archivar ${vendor.vendorName}`}
+                              >
+                                <Archive className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => handleDeleteVendor(vendor, e)}
+                                disabled={isDeleting}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                                aria-label={`Eliminar ${vendor.vendorName}`}
+                                title={`Eliminar ${vendor.vendorName}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">Solo lectura</span>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -850,14 +951,19 @@ export default function Vendors() {
                         {getStatusBadge(vendor.status)}
                       </div>
                     </div>
-                    <button 
-                      onClick={() => handleViewVendor(vendor)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
-                      aria-label={`Edit ${vendor.vendorName}`}
-                      title={`Edit ${vendor.vendorName}`}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
+                    {canEditVendors && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditVendor(vendor, e);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
+                        aria-label={`Editar ${vendor.vendorName}`}
+                        title={`Editar ${vendor.vendorName}`}
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Vendor Info */}

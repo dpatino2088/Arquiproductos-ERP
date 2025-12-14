@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useContacts } from '../../hooks/useDirectory';
+import { useContacts, useDeleteContact } from '../../hooks/useDirectory';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { supabase } from '../../lib/supabase/client';
+import { useUIStore } from '../../stores/ui-store';
 import { 
   Contact, 
   Search, 
@@ -22,15 +24,18 @@ import {
   MapPin,
   Calendar,
   Edit,
-  Building
+  Building,
+  Copy,
+  Archive,
+  Trash2
 } from 'lucide-react';
 
 interface ContactItem {
   id: string;
-  firstName: string; // This will contain customer_name for compatibility
+  firstName: string; // This will contain contact_name for compatibility
   lastName: string; // This will be empty for unified model
   email: string;
-  company: string; // This will contain customer_name for company type
+  company: string; // This will contain customer_name from DirectoryCustomers for company type
   category: string;
   status: 'Active' | 'Inactive' | 'Archived';
   location: string;
@@ -41,14 +46,14 @@ interface ContactItem {
 }
 
 // Function to generate avatar initials (100% reliable, works everywhere)
-const generateAvatarInitials = (customerName: string) => {
-  // For unified model, use first two characters of customer_name
-  if (!customerName) return '??';
-  const words = customerName.trim().split(/\s+/);
+const generateAvatarInitials = (contactName: string) => {
+  // For unified model, use first two characters of contact_name
+  if (!contactName) return '??';
+  const words = contactName.trim().split(/\s+/);
   if (words.length >= 2 && words[0] && words[1]) {
     return `${words[0].charAt(0)}${words[1].charAt(0)}`.toUpperCase();
   }
-  return customerName.substring(0, 2).toUpperCase();
+  return contactName.substring(0, 2).toUpperCase();
 };
 
 // Function to generate a consistent background color based on name
@@ -167,7 +172,7 @@ export default function Contacts() {
   // Prevent hook execution without org
   if (!orgLoading && !activeOrganizationId) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
           <p className="text-sm text-yellow-700 mt-1">Please select an organization to view contacts.</p>
@@ -177,7 +182,8 @@ export default function Contacts() {
   }
   
   // Get contacts from Supabase
-  const { data: contactsData, isLoading: contactsLoading, isError: contactsIsError, error: contactsError } = useContacts();
+  const { data: contactsData, isLoading: contactsLoading, isError: contactsIsError, error: contactsError, refetch } = useContacts();
+  const { deleteContact, isDeleting } = useDeleteContact();
 
   // Debug log
   useEffect(() => {
@@ -370,17 +376,76 @@ export default function Contacts() {
     );
   };
 
-  // Navigate to contact detail page (placeholder)
-  const handleViewContact = (contact: ContactItem) => {
-    // Store contact data in sessionStorage for the Contact Info page
-    sessionStorage.setItem('selectedContact', JSON.stringify(contact));
+  // Navigate to contact edit page
+  const handleEditContact = (contact: ContactItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.navigate(`/directory/contacts/edit/${contact.id}`);
+  };
+
+  // Handle duplicate contact
+  const handleDuplicateContact = async (contact: ContactItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.navigate(`/directory/contacts/new?duplicate=${contact.id}`);
+  };
+
+  // Handle archive contact
+  const handleArchiveContact = async (contact: ContactItem, e: React.MouseEvent) => {
+    e.stopPropagation();
     
-    // Create slug from contact name - safely handle null/undefined
-    const slug = (contact.firstName || 'contact').toLowerCase().replace(/\s+/g, '-');
+    if (!confirm(`¿Estás seguro de que deseas archivar "${contact.firstName}"?`)) {
+      return;
+    }
+
+    try {
+      if (!activeOrganizationId) return;
+      
+      const { error } = await supabase
+        .from('DirectoryContacts')
+        .update({ archived: true })
+        .eq('id', contact.id)
+        .eq('organization_id', activeOrganizationId);
+
+      if (error) throw error;
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Contacto archivado',
+        message: 'El contacto ha sido archivado correctamente.',
+      });
+      
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al archivar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
+  };
+
+  // Handle delete contact
+  const handleDeleteContact = async (contact: ContactItem, e: React.MouseEvent) => {
+    e.stopPropagation();
     
-    // Navigate to contact detail (you can create this page later)
-    // router.navigate(`/directory/contacts/${slug}`);
-    console.log('View contact:', contact);
+    if (!confirm(`¿Estás seguro de que deseas eliminar "${contact.firstName}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      await deleteContact(contact.id);
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Contacto eliminado',
+        message: 'El contacto ha sido eliminado correctamente.',
+      });
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al eliminar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -415,7 +480,7 @@ export default function Contacts() {
   // Show loading state
   if (orgLoading || contactsLoading) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
@@ -429,7 +494,7 @@ export default function Contacts() {
   // Show error state
   if (contactsIsError && contactsError) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-800 font-medium mb-2">Error loading contacts</p>
           <p className="text-sm text-red-700">{contactsError}</p>
@@ -448,7 +513,7 @@ export default function Contacts() {
   }
 
   return (
-    <div className="p-6">
+    <div className="py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -806,7 +871,7 @@ export default function Contacts() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('firstName')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -815,7 +880,7 @@ export default function Contacts() {
                       {sortBy === 'firstName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('company')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -824,12 +889,12 @@ export default function Contacts() {
                       {sortBy === 'company' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Primary Phone</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Email</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Country</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">City</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Contact Type</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Phone</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Type</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -838,12 +903,13 @@ export default function Contacts() {
                       {sortBy === 'dateAdded' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
+                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredContacts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center">
+                    <td colSpan={9} className="py-12 px-6 text-center">
                       <Contact className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No contacts found</p>
                       <p className="text-sm text-gray-500">
@@ -857,46 +923,82 @@ export default function Contacts() {
                   paginatedContacts.map((contact) => (
                     <tr 
                       key={contact.id} 
-                      onClick={() => router.navigate(`/directory/contacts/edit/${contact.id}`)}
-                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
-                      <td className="py-4 px-4 text-gray-900 text-sm">
+                      <td className="py-4 px-6 text-gray-900 text-sm">
                         <div className="font-medium">{contact.firstName}</div>
                       </td>
-                      <td className="py-4 px-4 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
                         {contact.company || 'N/A'}
                       </td>
-                      <td className="py-4 px-4 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
                         <div className="flex items-center gap-1">
                           <Phone className="w-3 h-3 text-gray-400" />
                           {(contact as any).primary_phone || contact.phone || 'N/A'}
                         </div>
                       </td>
-                      <td className="py-4 px-4 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
                         <div className="flex items-center gap-1">
                           <Mail className="w-3 h-3 text-gray-400" />
                           {contact.email || 'N/A'}
                         </div>
                       </td>
-                      <td className="py-4 px-4 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
                         {(contact as any).country || contact.location?.split(', ').pop() || 'N/A'}
                       </td>
-                      <td className="py-4 px-4 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
                         {(contact as any).city || contact.location?.split(', ')[0] || 'N/A'}
                       </td>
-                      <td className="py-4 px-4">
+                      <td className="py-4 px-6">
                         <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${
                           getContactTypeBadgeColor((contact as any).contact_type || '')
                         }`}>
                           {formatContactTypeLabel((contact as any).contact_type || 'architect')}
                         </span>
                       </td>
-                      <td className="py-4 px-4 text-gray-600 text-sm">
+                      <td className="py-4 px-6 text-gray-600 text-sm">
                         {(contact as any).created_at 
                           ? new Date((contact as any).created_at).toLocaleDateString() 
                           : contact.dateAdded 
                             ? new Date(contact.dateAdded).toLocaleDateString() 
                             : 'N/A'}
+                      </td>
+                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 justify-end">
+                          <button 
+                            onClick={(e) => handleEditContact(contact, e)}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                            aria-label={`Editar ${contact.firstName}`}
+                            title={`Editar ${contact.firstName}`}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={(e) => handleDuplicateContact(contact, e)}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                            aria-label={`Duplicar ${contact.firstName}`}
+                            title={`Duplicar ${contact.firstName}`}
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={(e) => handleArchiveContact(contact, e)}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                            aria-label={`Archivar ${contact.firstName}`}
+                            title={`Archivar ${contact.firstName}`}
+                          >
+                            <Archive className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={(e) => handleDeleteContact(contact, e)}
+                            disabled={isDeleting}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                            aria-label={`Eliminar ${contact.firstName}`}
+                            title={`Eliminar ${contact.firstName}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -959,10 +1061,13 @@ export default function Contacts() {
                       </div>
                     </div>
                     <button 
-                      onClick={() => handleViewContact(contact)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditContact(contact, e);
+                      }}
                       className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
-                      aria-label={`Edit ${contact.firstName}`}
-                      title={`Edit ${contact.firstName}`}
+                      aria-label={`Editar ${contact.firstName}`}
+                      title={`Editar ${contact.firstName}`}
                     >
                       <Edit className="w-4 h-4" />
                     </button>

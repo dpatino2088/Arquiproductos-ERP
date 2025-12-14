@@ -9,7 +9,7 @@ interface DirectoryContact {
 
 interface DirectoryCustomer {
   id: string;
-  company_name: string | null;
+  customer_name: string | null;
   email: string | null;
   city: string | null;
   primary_contact_id: string | null;
@@ -31,7 +31,7 @@ export default function TestDirectory() {
           .from('DirectoryCustomers')
           .select(`
             id,
-            company_name,
+            customer_name,
             email,
             city,
             primary_contact_id,

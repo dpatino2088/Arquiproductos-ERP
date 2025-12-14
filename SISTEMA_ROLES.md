@@ -22,11 +22,13 @@ El sistema soporta los siguientes roles:
 | **Cambiar Roles de Usuarios** | ✅ | ✅ | ❌ | ❌ | ❌ |
 | **Crear Cotizaciones** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Ver Cotizaciones** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Editar Customers** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Editar Customers** | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **Ver Customers** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Crear Contacts** | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Editar Contacts** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Crear Contacts** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Editar Contacts** | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **Ver Contacts** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Editar Vendors** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Ver Vendors** | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## 🎯 Hook `useCurrentOrgRole`
 
@@ -75,7 +77,9 @@ function MyComponent({ organizationId }: { organizationId: string }) {
 - `canManageUsers`: `owner`, `admin` y `superadmin`
 - `canCreateQuotes`: `owner`, `admin`, `member` y `superadmin`
 - `canViewQuotes`: Cualquier rol (incluyendo `viewer`)
-- `canEditCustomers`: `owner`, `admin`, `member` y `superadmin` (no `viewer`)
+- `canEditCustomers`: `owner`, `admin` y `superadmin` (no `member` ni `viewer`)
+- `canEditContacts`: `owner`, `admin` y `superadmin` (no `member` ni `viewer`)
+- `canEditVendors`: `owner`, `admin` y `superadmin` (no `member` ni `viewer`)
 
 ## 📝 Ejemplos de Uso
 
@@ -229,13 +233,14 @@ superadmin > owner > admin > member > viewer
 #### **admin**
 - Puede gestionar usuarios (invitar, pero no cambiar roles)
 - Puede crear y editar cotizaciones
-- Puede crear y editar customers y contacts
+- Puede crear y editar customers, contacts y vendors
 - No puede cambiar roles de otros usuarios
 - No puede gestionar la organización (configuración)
 
 #### **member**
-- Puede crear cotizaciones y clientes
-- Puede editar customers y contacts
+- Puede crear cotizaciones
+- Puede ver customers, contacts y vendors (solo lectura)
+- No puede editar customers, contacts o vendors
 - No puede invitar usuarios
 - No puede ver/editar configuración de organización
 
@@ -244,12 +249,48 @@ superadmin > owner > admin > member > viewer
 - Todo en modo read-only
 - No puede crear, editar o eliminar nada
 
+## 🛡️ Componente RouteGuard
+
+Componente reutilizable para proteger rutas basadas en roles y permisos.
+
+### Uso Básico
+
+```typescript
+import RouteGuard from '@/components/RouteGuard';
+
+// Proteger ruta que requiere permiso de editar customers
+<RouteGuard requiredPermission="canEditCustomers">
+  <CustomerEditPage />
+</RouteGuard>
+
+// Proteger ruta que requiere rol específico
+<RouteGuard requiredRole="owner">
+  <OrganizationSettings />
+</RouteGuard>
+
+// Con redirección personalizada
+<RouteGuard 
+  requiredPermission="canManageUsers"
+  redirectTo="/dashboard"
+>
+  <OrganizationUsersPage />
+</RouteGuard>
+```
+
+### Props
+
+- `requiredPermission`: Permiso requerido (`canManageOrganization`, `canManageUsers`, `canCreateQuotes`, `canViewQuotes`, `canEditCustomers`, `canEditContacts`, `canEditVendors`)
+- `requiredRole`: Rol requerido (`superadmin`, `owner`, `admin`, `member`, `viewer`)
+- `fallback`: Componente personalizado a mostrar si no se cumple el requisito
+- `redirectTo`: Ruta a la que redirigir si no se cumple el requisito (opcional)
+
 ## 📦 Archivos Creados
 
 1. **`src/types/roles.ts`**: Tipo TypeScript para roles
 2. **`src/hooks/useCurrentOrgRole.ts`**: Hook principal para obtener rol y permisos
-3. **`src/components/examples/NewQuoteButton.tsx`**: Ejemplo de botón con permisos
-4. **`src/components/examples/CustomerActions.tsx`**: Ejemplo de acciones condicionadas
+3. **`src/components/RouteGuard.tsx`**: Componente para proteger rutas basadas en roles
+4. **`src/components/examples/NewQuoteButton.tsx`**: Ejemplo de botón con permisos
+5. **`src/components/examples/CustomerActions.tsx`**: Ejemplo de acciones condicionadas
 
 ## 🗄️ Migraciones SQL Creadas
 
@@ -284,6 +325,19 @@ El sistema ya está implementado en:
    - Todos los campos se deshabilitan cuando `isReadOnly` es `true`
    - Botón "Save" se deshabilita y muestra "Read Only" para viewers
    - Usa `canEditCustomers` y `isViewer` del hook
+
+5. **`src/pages/directory/Vendors.tsx`**
+   - Botón "Add Vendor" se oculta si `!canEditVendors`
+   - Botones de acción (editar, duplicar, archivar, eliminar) solo se muestran si `canEditVendors`
+   - Muestra mensaje "Solo lectura" para usuarios sin permisos
+   - Usa `canEditVendors` y `isViewer` del hook
+
+6. **`src/pages/directory/VendorNew.tsx`**
+   - Formulario en modo solo lectura para `viewer` y usuarios sin permisos
+   - Todos los campos se deshabilitan cuando `isReadOnly` es `true`
+   - Botón "Save and Close" se deshabilita y muestra "Read Only" para usuarios sin permisos
+   - Muestra mensaje de error si el usuario intenta acceder sin permisos
+   - Usa `canEditVendors` y `isViewer` del hook
 
 3. **`src/pages/directory/Customers.tsx`**
    - Botón "Add Customer" se oculta si `!canEditCustomers`

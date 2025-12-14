@@ -8,6 +8,7 @@ export function useContacts() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
@@ -29,7 +30,7 @@ export function useContacts() {
             *,
             DirectoryCustomers:customer_id (
               id,
-              company_name
+              customer_name
             )
           `)
           .eq('organization_id', activeOrganizationId)
@@ -46,10 +47,10 @@ export function useContacts() {
         // Transform data to match frontend interface
         const transformedContacts = (data || []).map((contact: any) => ({
           id: contact.id,
-          firstName: contact.customer_name || '',
+          firstName: contact.contact_name || '',
           lastName: '',
           email: contact.email || '',
-          company: contact.DirectoryCustomers?.company_name || '', // Customer name from join
+          company: contact.DirectoryCustomers?.customer_name || '', // Customer name from join
           customer_id: contact.customer_id || null,
           category: contact.contact_type ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : 'Architect',
           status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
@@ -78,7 +79,7 @@ export function useContacts() {
     }
 
     fetchContacts();
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, refreshTrigger]);
 
   return {
     data: contacts,
@@ -88,8 +89,8 @@ export function useContacts() {
     loading, // Alias for backward compatibility
     isError: !!error,
     refetch: () => {
-      // Trigger re-fetch by setting loading state
-      setLoading(true);
+      // Trigger re-fetch by incrementing refresh trigger
+      setRefreshTrigger(prev => prev + 1);
     },
   };
 }
@@ -99,6 +100,7 @@ export function useCustomers() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
@@ -114,36 +116,79 @@ export function useCustomers() {
         setLoading(true);
         setError(null);
 
+        console.log('🔍 useCustomers - Iniciando fetch:', {
+          activeOrganizationId,
+          hasOrgId: !!activeOrganizationId
+        });
+
         const { data, error: queryError } = await supabase
           .from('DirectoryCustomers')
-          .select(`
-            *,
-            DirectoryContacts:primary_contact_id (
-              id,
-              customer_name
-            )
-          `)
+          .select('*')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
+        console.log('📊 useCustomers - Resultado query:', {
+          dataCount: data?.length || 0,
+          error: queryError,
+          rawData: data,
+          firstCustomer: data?.[0] ? {
+            id: data[0].id,
+            customer_name: data[0].customer_name,
+            organization_id: data[0].organization_id
+          } : null
+        });
+
         if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('Error fetching Customers:', queryError);
-          }
+          console.error('❌ Error fetching Customers:', {
+            error: queryError,
+            code: queryError.code,
+            message: queryError.message,
+            details: queryError.details
+          });
           throw queryError;
+        }
+
+        // Get all primary contact IDs and customer type IDs
+        const primaryContactIds = (data || [])
+          .map((customer: any) => customer.primary_contact_id)
+          .filter(Boolean);
+        
+        // Fetch all primary contacts in one query
+        let contactsMap: Record<string, string> = {};
+        if (primaryContactIds.length > 0) {
+          try {
+            const { data: contactsData } = await supabase
+              .from('DirectoryContacts')
+              .select('id, contact_name')
+              .in('id', primaryContactIds)
+              .eq('organization_id', activeOrganizationId)
+              .eq('deleted', false);
+
+            if (contactsData) {
+              contactsMap = contactsData.reduce((acc: Record<string, string>, contact: any) => {
+                acc[contact.id] = contact.contact_name || '';
+                return acc;
+              }, {});
+            }
+          } catch (err) {
+            // Silently fail if contact fetch fails
+            if (import.meta.env.DEV) {
+              console.warn('Could not fetch primary contacts:', err);
+            }
+          }
         }
 
         // Transform data to match frontend interface
         // Note: We already filter by deleted = false in the query, so all customers here are active
         const transformedCustomers = (data || []).map((customer: any) => ({
           id: customer.id,
-          companyName: customer.company_name || '',
-          contactName: customer.DirectoryContacts?.customer_name || '',
+          companyName: customer.customer_name || '',
+          contactName: customer.primary_contact_id ? (contactsMap[customer.primary_contact_id] || '') : '',
           email: customer.email || '',
           phone: customer.company_phone || '',
           industry: 'N/A', // Not in schema yet
-          customerType: 'Customer',
+          customerType: customer.customer_type_name || 'N/A',
           status: customer.archived ? 'Archived' : 'Active' as 'Active' | 'On Hold' | 'Archived',
           location: [customer.city, customer.state, customer.country].filter(Boolean).join(', ') || 'N/A',
           dateAdded: customer.created_at ? new Date(customer.created_at).toISOString().split('T')[0] : '',
@@ -165,7 +210,7 @@ export function useCustomers() {
     }
 
     fetchCustomers();
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, refreshTrigger]);
 
   return {
     data: customers,
@@ -175,7 +220,7 @@ export function useCustomers() {
     loading, // Alias for backward compatibility
     isError: !!error,
     refetch: () => {
-      setLoading(true);
+      setRefreshTrigger(prev => prev + 1);
     },
   };
 }
@@ -185,6 +230,7 @@ export function useVendors() {
   const [vendors, setVendors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
@@ -217,8 +263,8 @@ export function useVendors() {
         // Transform data to match frontend interface
         const transformedVendors = (data || []).map((vendor) => ({
           id: vendor.id,
-          vendorName: vendor.name || vendor.vendor_name || '',
-          vendorId: vendor.ein || '',
+          vendorName: vendor.vendor_name || '',
+          vendorId: vendor.identification_number || '',
           phone: vendor.work_phone || '',
           email: vendor.email || '',
           country: vendor.country || '',
@@ -241,7 +287,7 @@ export function useVendors() {
     }
 
     fetchVendors();
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, refreshTrigger]);
 
   return {
     data: vendors,
@@ -251,7 +297,7 @@ export function useVendors() {
     loading, // Alias for backward compatibility
     isError: !!error,
     refetch: () => {
-      setLoading(true);
+      setRefreshTrigger(prev => prev + 1);
     },
   };
 }
@@ -289,6 +335,149 @@ export function useVendorById(options: { id?: string | null; organizationId?: st
   return {
     vendor: query.data,
     ...query,
+  };
+}
+
+// Hook para borrar un contacto (soft delete)
+export function useDeleteContact() {
+  const { activeOrganizationId } = useOrganizationContext();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const deleteContact = async (contactId: string) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      const { error: deleteError } = await supabase
+        .from('DirectoryContacts')
+        .update({ deleted: true })
+        .eq('id', contactId)
+        .eq('organization_id', activeOrganizationId);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      return { success: true };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error deleting contact';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return {
+    deleteContact,
+    isDeleting,
+    error,
+  };
+}
+
+// Hook para borrar un customer (soft delete)
+export function useDeleteCustomer() {
+  const { activeOrganizationId } = useOrganizationContext();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const deleteCustomer = async (customerId: string) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      // Verificar si hay contactos asociados
+      const { data: contacts, error: checkError } = await supabase
+        .from('DirectoryContacts')
+        .select('id')
+        .eq('customer_id', customerId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .limit(1);
+
+      if (checkError) {
+        throw checkError;
+      }
+
+      if (contacts && contacts.length > 0) {
+        throw new Error('Cannot delete customer with associated contacts. Please delete or reassign contacts first.');
+      }
+
+      const { error: deleteError } = await supabase
+        .from('DirectoryCustomers')
+        .update({ deleted: true })
+        .eq('id', customerId)
+        .eq('organization_id', activeOrganizationId);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      return { success: true };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error deleting customer';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return {
+    deleteCustomer,
+    isDeleting,
+    error,
+  };
+}
+
+// Hook para borrar un vendor (soft delete)
+export function useDeleteVendor() {
+  const { activeOrganizationId } = useOrganizationContext();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const deleteVendor = async (vendorId: string) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      const { error: deleteError } = await supabase
+        .from('DirectoryVendors')
+        .update({ deleted: true })
+        .eq('id', vendorId)
+        .eq('organization_id', activeOrganizationId);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      return { success: true };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error deleting vendor';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return {
+    deleteVendor,
+    isDeleting,
+    error,
   };
 }
 

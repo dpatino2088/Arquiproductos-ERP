@@ -18,7 +18,7 @@ export interface DirectoryContact {
   organization_id: string;
   contact_type: DirectoryContactType;
   title_id?: string | null;
-  customer_name: string;
+  contact_name: string;
   identification_number?: string | null;
   primary_phone?: string | null;
   cell_phone?: string | null;

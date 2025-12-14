@@ -6,7 +6,8 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRY_OPTIONS, COUNTRIES } from '../../lib/constants';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
+import { useDeleteCustomer } from '../../hooks/useDirectory';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -15,12 +16,20 @@ import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 
+// Customer type ENUM values (matching PostgreSQL ENUM directory_customer_type_name)
+const CUSTOMER_TYPE_OPTIONS = [
+  { value: 'VIP', label: 'VIP' },
+  { value: 'Partner', label: 'Partner' },
+  { value: 'Reseller', label: 'Reseller' },
+  { value: 'Distributor', label: 'Distributor' },
+] as const;
+
 // Schema for Customer
 const customerSchema = z.object({
-  customer_type_id: z.string().min(1, 'Customer type is required').refine((val) => val !== 'not_selected', {
-    message: 'Customer type is required',
+  customer_type_name: z.enum(['VIP', 'Partner', 'Reseller', 'Distributor'], {
+    errorMap: () => ({ message: 'Customer type is required' }),
   }),
-  company_name: z.string().min(1, 'Company name is required'),
+  customer_name: z.string().min(1, 'Customer name is required'),
   identification_number: z.string().optional(),
   website: z.string().url('Invalid URL').optional().or(z.literal('')),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
@@ -56,14 +65,9 @@ const customerSchema = z.object({
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
 
-interface CustomerType {
-  id: string;
-  name: string;
-}
-
 interface Contact {
   id: string;
-  customer_name: string;
+  contact_name: string;
   identification_number?: string;
   contact_type: 'individual' | 'company';
 }
@@ -72,11 +76,11 @@ export default function CustomerNew() {
   const [activeTab, setActiveTab] = useState<'details' | 'billing'>('details');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [customerTypes, setCustomerTypes] = useState<CustomerType[]>([]);
-  const [loadingTypes, setLoadingTypes] = useState(true);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const { activeOrganizationId } = useOrganizationContext();
+  const { deleteCustomer, isDeleting } = useDeleteCustomer();
   
   // Get current user's role and permissions (uses active organization)
   const { canEditCustomers, isViewer, loading: roleLoading } = useCurrentOrgRole();
@@ -94,11 +98,82 @@ export default function CustomerNew() {
   } = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
+      customer_type_name: 'VIP',
       billing_same_as_location: true,
     },
   });
 
-  // Watch billing checkbox and address fields
+  // Get customer ID from URL if in edit mode
+  useEffect(() => {
+    const path = window.location.pathname;
+    const match = path.match(/\/directory\/customers\/edit\/([^/]+)/);
+    if (match && match[1]) {
+      setCustomerId(match[1]);
+    }
+  }, []);
+
+  // Load customer data when in edit mode
+  useEffect(() => {
+    const loadCustomerData = async () => {
+      if (!customerId || !activeOrganizationId) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('DirectoryCustomers')
+          .select('*')
+          .eq('id', customerId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading customer:', error);
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error loading customer',
+            message: 'Could not load customer data. Please try again.',
+          });
+          return;
+        }
+
+        if (data) {
+          // Populate form with customer data
+          setValue('customer_type_name', data.customer_type_name || 'VIP');
+          setValue('customer_name', data.customer_name || '');
+          setValue('identification_number', data.identification_number || '');
+          setValue('website', data.website || '');
+          setValue('email', data.email || '');
+          setValue('company_phone', data.company_phone || '');
+          setValue('alt_phone', data.alt_phone || '');
+          setValue('primary_contact_id', data.primary_contact_id || '');
+          setValue('street_address_line_1', data.street_address_line_1 || '');
+          setValue('street_address_line_2', data.street_address_line_2 || '');
+          setValue('city', data.city || '');
+          setValue('state', data.state || '');
+          setValue('zip_code', data.zip_code || '');
+          setValue('country', data.country || '');
+          setValue('billing_same_as_location', 
+            data.billing_street_address_line_1 === data.street_address_line_1 &&
+            data.billing_city === data.city &&
+            data.billing_state === data.state &&
+            data.billing_country === data.country
+          );
+          setValue('billing_street_address_line_1', data.billing_street_address_line_1 || '');
+          setValue('billing_street_address_line_2', data.billing_street_address_line_2 || '');
+          setValue('billing_city', data.billing_city || '');
+          setValue('billing_state', data.billing_state || '');
+          setValue('billing_zip_code', data.billing_zip_code || '');
+          setValue('billing_country', data.billing_country || '');
+        }
+      } catch (err) {
+        console.error('Error loading customer data:', err);
+      }
+    };
+
+    loadCustomerData();
+  }, [customerId, activeOrganizationId, setValue]);
+
+  // Watch billing checkbox and address fields (MUST be before early returns)
   const billingSame = watch('billing_same_as_location');
   const street1 = watch('street_address_line_1');
   const street2 = watch('street_address_line_2');
@@ -107,53 +182,19 @@ export default function CustomerNew() {
   const zip = watch('zip_code');
   const country = watch('country');
 
-  // Show message if no organization is selected
-  if (!activeOrganizationId) {
-    return (
-      <div className="p-6">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800">
-            Select an organization to continue.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Load CustomerTypes from Supabase
+  // Hook to copy address → billing when checkbox is active (MUST be before early returns)
   useEffect(() => {
-    const loadCustomerTypes = async () => {
-      if (!activeOrganizationId) {
-        setLoadingTypes(false);
-        return;
-      }
+    if (billingSame) {
+      setValue('billing_street_address_line_1', street1 || '');
+      setValue('billing_street_address_line_2', street2 || '');
+      setValue('billing_city', city || '');
+      setValue('billing_state', state || '');
+      setValue('billing_zip_code', zip || '');
+      setValue('billing_country', country || '');
+    }
+  }, [billingSame, street1, street2, city, state, zip, country, setValue]);
 
-      try {
-        setLoadingTypes(true);
-        const { data, error } = await supabase
-          .from('CustomerTypes')
-          .select('id, name')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .eq('archived', false)
-          .order('name', { ascending: true });
-
-        if (error) {
-          console.error('Error loading customer types', error);
-        } else if (data) {
-          setCustomerTypes(data);
-        }
-      } catch (err) {
-        console.error('Error loading customer types', err);
-      } finally {
-        setLoadingTypes(false);
-      }
-    };
-
-    loadCustomerTypes();
-  }, [activeOrganizationId]);
-
-  // Load Contacts from Supabase for primary_contact_id dropdown
+  // Load Contacts from Supabase for primary_contact_id dropdown (MUST be before early returns)
   useEffect(() => {
     const loadContacts = async () => {
       if (!activeOrganizationId) {
@@ -165,12 +206,12 @@ export default function CustomerNew() {
         setLoadingContacts(true);
         const { data, error } = await supabase
           .from('DirectoryContacts')
-          .select('id, customer_name, identification_number, contact_type')
+          .select('id, contact_name, identification_number, contact_type')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .eq('archived', false)
           .order('contact_type', { ascending: true })
-          .order('customer_name', { ascending: true });
+          .order('contact_name', { ascending: true });
 
         if (error) {
           console.error('Error loading contacts', error);
@@ -187,17 +228,18 @@ export default function CustomerNew() {
     loadContacts();
   }, [activeOrganizationId]);
 
-  // Hook to copy address → billing when checkbox is active
-  useEffect(() => {
-    if (billingSame) {
-      setValue('billing_street_address_line_1', street1 || '');
-      setValue('billing_street_address_line_2', street2 || '');
-      setValue('billing_city', city || '');
-      setValue('billing_state', state || '');
-      setValue('billing_zip_code', zip || '');
-      setValue('billing_country', country || '');
-    }
-  }, [billingSame, street1, street2, city, state, zip, country, setValue]);
+  // Show message if no organization is selected
+  if (!activeOrganizationId) {
+    return (
+      <div className="py-6 px-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800">
+            Select an organization to continue.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const onSubmit = async (values: CustomerFormValues) => {
     if (!activeOrganizationId) {
@@ -214,8 +256,8 @@ export default function CustomerNew() {
     if (!isValid) {
       const missingFields: string[] = [];
       
-      if (errors.company_name) missingFields.push('Company Name');
-      if (errors.customer_type_id) missingFields.push('Customer Type');
+      if (errors.customer_name) missingFields.push('Customer Name');
+        if (errors.customer_type_name) missingFields.push('Customer Type');
       if (errors.primary_contact_id) missingFields.push('Primary Contact');
       if (errors.street_address_line_1) missingFields.push('Street Address');
       if (errors.city) missingFields.push('City');
@@ -254,17 +296,6 @@ export default function CustomerNew() {
         billing_country: values.billing_country,
       };
 
-      // Validate customer_type_id is required
-      if (!values.customer_type_id || values.customer_type_id === 'not_selected') {
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Missing Required Information',
-          message: 'Customer Type is required.',
-        });
-        setIsSaving(false);
-        return;
-      }
-
       if (!activeOrganizationId) {
         useUIStore.getState().addNotification({
           type: 'error',
@@ -275,11 +306,10 @@ export default function CustomerNew() {
         return;
       }
 
-      const customerData = {
+      const customerData: any = {
         organization_id: activeOrganizationId,
-        customer_type_id: values.customer_type_id,
-        company_name: values.company_name,
-        identification_number: values.identification_number || null,
+        customer_type_name: values.customer_type_name,
+        customer_name: values.customer_name,
         website: values.website || null,
         email: values.email || null,
         company_phone: values.company_phone || null,
@@ -301,14 +331,75 @@ export default function CustomerNew() {
         archived: false,
       };
 
-      const { data, error } = await supabase
+      // Only include identification_number if it has a value (column may not exist in all schemas)
+      if (values.identification_number && values.identification_number.trim()) {
+        customerData.identification_number = values.identification_number.trim();
+      }
+
+      let result;
+      if (customerId) {
+        // Update existing customer
+        result = await supabase
+          .from('DirectoryCustomers')
+          .update(customerData)
+          .eq('id', customerId)
+          .eq('organization_id', activeOrganizationId)
+          .select()
+          .single();
+      } else {
+        // Create new customer
+        customerData.created_at = new Date().toISOString();
+        result = await supabase
         .from('DirectoryCustomers')
         .insert([customerData])
         .select()
         .single();
+      }
+
+      const { data, error } = result;
 
       if (error) {
         console.error('Error saving customer:', error);
+        
+        // If error is about identification_number column not existing, try again without it
+        if (error.message?.includes('identification_number') && customerData.identification_number) {
+          delete customerData.identification_number;
+          
+          let retryResult;
+          if (customerId) {
+            retryResult = await supabase
+              .from('DirectoryCustomers')
+              .update(customerData)
+              .eq('id', customerId)
+              .eq('organization_id', activeOrganizationId)
+              .select()
+              .single();
+          } else {
+            retryResult = await supabase
+              .from('DirectoryCustomers')
+              .insert([customerData])
+              .select()
+              .single();
+          }
+          
+          if (retryResult.error) {
+            throw retryResult.error;
+          }
+          
+          // Success on retry
+          const retryData = retryResult.data;
+          console.log('Customer saved successfully (without identification_number):', retryData);
+          
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Customer saved successfully',
+            message: `The customer has been ${customerId ? 'updated' : 'saved'} and is now available in your directory.`,
+          });
+          
+          router.navigate('/directory/customers');
+          return;
+        }
+        
         throw error;
       }
 
@@ -318,7 +409,7 @@ export default function CustomerNew() {
       useUIStore.getState().addNotification({
         type: 'success',
         title: 'Customer saved successfully',
-        message: 'The customer has been saved and is now available in your directory.',
+        message: `The customer has been ${customerId ? 'updated' : 'saved'} and is now available in your directory.`,
       });
       
       // Navigate back to customers list
@@ -340,7 +431,7 @@ export default function CustomerNew() {
   };
 
   return (
-    <div className="p-6">
+    <div className="py-6 px-6">
       {/* Header - Matching Contacts page layout */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -348,7 +439,7 @@ export default function CustomerNew() {
             Customer Details
           </h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Create a new customer
+            {customerId ? 'Edit customer information' : 'Create a new customer'}
           </p>
         </div>
         
@@ -357,14 +448,14 @@ export default function CustomerNew() {
           <button
             type="button"
             onClick={() => router.navigate('/directory/customers')}
-            className="text-gray-500 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
             title="Close"
           >
-            <X style={{ width: '18px', height: '18px' }} />
+            Close
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             onClick={handleSubmit(onSubmit)}
             disabled={isSaving || isReadOnly}
@@ -442,7 +533,7 @@ export default function CustomerNew() {
         </div>
 
         {/* Form Body - Matching Contacts content structure */}
-        <div className="p-4">
+        <div className="py-6 px-6">
           {activeTab === 'billing' ? (
             <>
               {/* Billing Address Section */}
@@ -552,12 +643,12 @@ export default function CustomerNew() {
             {/* Customer Mode - Top Section */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-6">
-                <Label htmlFor="company_name" className="text-xs" required>Company Name</Label>
+                <Label htmlFor="customer_name" className="text-xs" required>Customer Name</Label>
                 <Input 
-                  id="company_name" 
-                  {...register('company_name')}
+                  id="customer_name" 
+                  {...register('customer_name')}
                       className="py-1 text-xs"
-                  error={errors.company_name?.message}
+                  error={errors.customer_name?.message}
                   disabled={isReadOnly}
                 />
               </div>
@@ -571,27 +662,27 @@ export default function CustomerNew() {
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="customer_type_id" className="text-xs" required>Customer Type</Label>
+                <Label htmlFor="customer_type_name" className="text-xs" required>Customer Type</Label>
                 <SelectShadcn
-                  value={watch('customer_type_id') || ''}
+                  value={watch('customer_type_name') || ''}
                   onValueChange={(value) => {
-                    setValue('customer_type_id', value, { shouldValidate: true });
+                    setValue('customer_type_name', value as 'VIP' | 'Partner' | 'Reseller' | 'Distributor', { shouldValidate: true });
                   }}
-                  disabled={loadingTypes || isReadOnly}
+                  disabled={isReadOnly}
                 >
-                  <SelectTrigger className={`py-1 text-xs ${errors.customer_type_id ? 'border-red-300 bg-red-50' : ''}`}>
-                    <SelectValue placeholder={loadingTypes ? "Loading customer types..." : customerTypes.length === 0 ? "No customer types found" : "Select customer type"} />
+                  <SelectTrigger className={`py-1 text-xs ${errors.customer_type_name ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectValue placeholder="Select customer type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {customerTypes.map((ct) => (
-                      <SelectItem key={ct.id} value={ct.id}>
-                        {ct.name}
+                    {CUSTOMER_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </SelectShadcn>
-                {errors.customer_type_id && (
-                  <p className="text-xs text-red-600 mt-1">{errors.customer_type_id.message}</p>
+                {errors.customer_type_name && (
+                  <p className="text-xs text-red-600 mt-1">{errors.customer_type_name.message}</p>
                 )}
               </div>
             </div>
@@ -652,9 +743,9 @@ export default function CustomerNew() {
                     <SelectValue placeholder={loadingContacts ? "Loading contacts..." : contacts.length === 0 ? "No contacts found" : "Select primary contact"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {contacts.map((contact) => (
+                    {contacts.filter(c => c.id).map((contact) => (
                       <SelectItem key={contact.id} value={contact.id}>
-                        {contact.customer_name || 'Unnamed Contact'}
+                        {contact.contact_name || 'Unnamed Contact'}
                         {contact.identification_number && (
                           <span className="text-xs text-gray-500 ml-2">({contact.identification_number})</span>
                         )}

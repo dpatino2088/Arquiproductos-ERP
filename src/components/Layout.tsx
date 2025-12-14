@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase/client';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
+import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { 
   getSidebarStyles, 
@@ -40,7 +41,12 @@ import {
   CalendarCheck,
   Box,
   Check,
-  BookOpen
+  BookOpen,
+  ShoppingBag,
+  Book,
+  Package,
+  Wrench,
+  DollarSign
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -128,6 +134,7 @@ function Layout({ children }: LayoutProps) {
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
+  const { isMember } = useCurrentOrgRole();
   
   // Use UI store for sidebar and view mode state
   const { 
@@ -201,6 +208,14 @@ function Layout({ children }: LayoutProps) {
           .maybeSingle(); // Use maybeSingle to handle no results gracefully
 
         if (error) {
+          // Log all errors for debugging
+          console.error('Error loading organization in Layout:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+          
           // Handle expected errors silently (user may not have organizations yet)
           const isExpectedError = 
             error.code === 'PGRST116' || // No rows returned
@@ -211,6 +226,15 @@ function Layout({ children }: LayoutProps) {
             error.message?.includes('permission denied') ||
             error.message?.includes('row-level security');
 
+          // Handle column does not exist error (42703) - this is a schema issue
+          if (error.code === '42703' || (error.message?.includes('does not exist') && error.message?.includes('column'))) {
+            console.error('❌ Layout - Error de columna no encontrada. Verifica que las migraciones se hayan aplicado correctamente:', {
+              code: error.code,
+              message: error.message,
+              details: error.details
+            });
+          }
+
           if (!isExpectedError && import.meta.env.DEV) {
             console.error('Error loading organization:', error);
           }
@@ -218,10 +242,10 @@ function Layout({ children }: LayoutProps) {
           return;
         }
 
-        // Handle response - the organization data might be nested differently
+        // Handle response - organization_id becomes an object with the nested data
         if (orgUser) {
-          // Try different response structures
-          const org = (orgUser as any).organization_id || (orgUser as any).Organizations;
+          // In Supabase nested select, organization_id is replaced with the nested object
+          const org = (orgUser as any).organization_id;
           
           if (org && typeof org === 'object' && org.id && org.organization_name) {
             setCurrentOrganization({
@@ -229,6 +253,14 @@ function Layout({ children }: LayoutProps) {
               name: org.organization_name || 'Organization',
             });
             return;
+          }
+          
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ Layout - organization_id no tiene el formato esperado:', {
+              orgUser,
+              organization_id: org,
+              type: typeof org
+            });
           }
           
           // If we have organization_id but no nested data, fetch it separately
@@ -296,6 +328,21 @@ function Layout({ children }: LayoutProps) {
       case 'Directory':
         // Directory is active if we're on any directory route
         return currentRoute.includes('/directory');
+      case 'Sales':
+        // Sales is active if we're on any sales route
+        return currentRoute.includes('/sales');
+      case 'Catalog':
+        // Catalog is active if we're on any catalog route
+        return currentRoute.includes('/catalog');
+      case 'Inventory':
+        // Inventory is active if we're on any inventory route
+        return currentRoute.includes('/inventory');
+      case 'Manufacturing':
+        // Manufacturing is active if we're on any manufacturing route
+        return currentRoute.includes('/manufacturing');
+      case 'Financials':
+        // Financials is active if we're on any financials route
+        return currentRoute.includes('/financials');
       case 'Branches':
         // Branches is active if we're on any branches route
         return currentRoute.includes('/branches');
@@ -316,13 +363,28 @@ function Layout({ children }: LayoutProps) {
 
   // Memoized navigation items for management view
   const navigation = useMemo(() => {
-    // Create base navigation with Directory and Branches inserted after Dashboard
+    // Create base navigation with new tabs according to design
     const dashboardItem = baseNavigation[0]; // Dashboard
-    const restOfBase = baseNavigation.slice(1); // Everything after Dashboard
     
+    // Navigation items in order: Directory, Sales, Catalog, Inventory, Manufacturing, Financials, Reports
     const directoryItem = { name: 'Directory', href: '/directory', icon: BookOpen };
-    const branchesItem = { name: 'Branches', href: '/branches', icon: Building2 };
-    return [dashboardItem, directoryItem, branchesItem, ...restOfBase, { name: 'Reports', href: '/reports/company-reports', icon: Printer }];
+    const salesItem = { name: 'Sales', href: '/sales', icon: ShoppingBag };
+    const catalogItem = { name: 'Catalog', href: '/catalog', icon: Book };
+    const inventoryItem = { name: 'Inventory', href: '/inventory', icon: Package };
+    const manufacturingItem = { name: 'Manufacturing', href: '/manufacturing', icon: Wrench };
+    const financialsItem = { name: 'Financials', href: '/financials', icon: DollarSign };
+    const reportsItem = { name: 'Reports', href: '/reports/company-reports', icon: Printer };
+    
+    return [
+      dashboardItem, 
+      directoryItem, 
+      salesItem, 
+      catalogItem, 
+      inventoryItem, 
+      manufacturingItem, 
+      financialsItem, 
+      reportsItem
+    ];
   }, []);
 
   const dashboardItem = useMemo(() => 
@@ -361,6 +423,26 @@ function Layout({ children }: LayoutProps) {
       setCurrentRoute(actualPath);
     } else if (path === '/directory') {
       const actualPath = '/directory/contacts';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/sales') {
+      const actualPath = '/sales/orders';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/catalog') {
+      const actualPath = '/catalog/items';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/inventory') {
+      const actualPath = '/inventory/warehouse';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/manufacturing') {
+      const actualPath = '/manufacturing/production-orders';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/financials') {
+      const actualPath = '/financials';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
@@ -559,8 +641,8 @@ function Layout({ children }: LayoutProps) {
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
-              {/* Settings Button */}
-              {(() => {
+              {/* Settings Button - Oculto para Members */}
+              {!isMember && (() => {
                 const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
                 return (
               <button
@@ -687,30 +769,33 @@ function Layout({ children }: LayoutProps) {
                       )}
                     </div>
 
-                    {/* Organization Section */}
-                    {currentOrganization && (
+                    {/* Organization Section - OCULTO */}
+                    {/* {currentOrganization && (
                       <div className="py-1 border-b border-gray-100">
                         <div className="px-4 py-2">
                           <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">ORGANIZATION</div>
                           <div className="text-sm text-gray-900 font-medium">{currentOrganization.name}</div>
                         </div>
                       </div>
-                    )}
+                    )} */}
 
                     {/* Menu Items */}
                     <div className="py-1">
-                      <button
-                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          router.navigate('/settings/organization-user');
-                        }}
-                        role="menuitem"
-                        aria-label="Organization User"
-                      >
-                        <Building2 style={{ width: '16px', height: '16px' }} aria-hidden="true" />
-                        Organization User
-                      </button>
+                      {/* Organization User - Solo visible para Superadmin y Admin */}
+                      {!isMember && (
+                        <button
+                          className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            router.navigate('/settings/organization-user');
+                          }}
+                          role="menuitem"
+                          aria-label="Organization User"
+                        >
+                          <Building2 style={{ width: '16px', height: '16px' }} aria-hidden="true" />
+                          Organization User
+                        </button>
+                      )}
                       
                       <button
                         className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"

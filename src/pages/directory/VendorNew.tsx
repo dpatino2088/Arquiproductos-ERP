@@ -4,17 +4,22 @@ import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
+import { useDeleteVendor } from '../../hooks/useDirectory';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Label from '../../components/ui/Label';
 import { useVendorById } from '../../hooks/useDirectory';
 import { queryClient } from '../../lib/query-client';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 
 export default function VendorNew() {
   const { activeOrganizationId } = useOrganizationContext();
+  const { canEditVendors, isViewer, loading: roleLoading } = useCurrentOrgRole();
   const [vendorId, setVendorId] = useState<string | null>(null);
+  const { deleteVendor, isDeleting } = useDeleteVendor();
   const [activeTab, setActiveTab] = useState<'details' | 'billing'>('details');
+  const isReadOnly = isViewer || !canEditVendors;
   const [billingSameAsStreet, setBillingSameAsStreet] = useState(false);
   const [vendorName, setVendorName] = useState('');
   const [identificationNumber, setIdentificationNumber] = useState('');
@@ -34,7 +39,11 @@ export default function VendorNew() {
   const [billingState, setBillingState] = useState('');
   const [billingZip, setBillingZip] = useState('');
   const [billingCountry, setBillingCountry] = useState('');
+  const [primaryContactId, setPrimaryContactId] = useState<string>('');
+  const [contacts, setContacts] = useState<Array<{ id: string; contact_name: string; identification_number?: string }>>([]);
+  const [loadingContacts, setLoadingContacts] = useState(true);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
   // Get vendor ID from URL if in edit mode
   useEffect(() => {
@@ -51,56 +60,45 @@ export default function VendorNew() {
     organizationId: activeOrganizationId,
   });
 
-  // Show message if no organization is selected
+  // Load contacts from Supabase for primary_contact_id dropdown
+  useEffect(() => {
+    const loadContacts = async () => {
   if (!activeOrganizationId) {
-    return (
-      <div className="p-6">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
-          <p className="text-sm text-yellow-700 mt-1">Please select an organization to {vendorId ? 'edit' : 'create'} a vendor.</p>
-        </div>
-      </div>
-    );
-  }
+        setLoadingContacts(false);
+        return;
+      }
 
-  // Show loading state while fetching vendor data
-  if (vendorId && isLoadingVendor) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading vendor...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+      try {
+        setLoadingContacts(true);
+        const { data, error } = await supabase
+          .from('DirectoryContacts')
+          .select('id, contact_name, identification_number')
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .eq('archived', false)
+          .order('contact_name', { ascending: true });
 
-  // Show error state if failed to load vendor
-  if (vendorId && isErrorVendor) {
-    return (
-      <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error loading vendor</p>
-          <p className="text-sm text-red-700">Could not load the vendor. Please try again.</p>
-          <button
-            onClick={() => router.navigate('/directory/vendors')}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:opacity-90"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
-  }
+        if (error) {
+          console.error('Error loading contacts', error);
+        } else if (data) {
+          setContacts(data);
+        }
+      } catch (err) {
+        console.error('Error loading contacts', err);
+      } finally {
+        setLoadingContacts(false);
+      }
+    };
+
+    loadContacts();
+  }, [activeOrganizationId]);
 
   // Load vendor data when vendor is fetched
   useEffect(() => {
     if (vendor) {
-      // Map name field (prioritize 'name' as it's the NOT NULL column, fallback to vendor_name)
-      setVendorName(vendor.name || vendor.vendor_name || '');
-      setIdentificationNumber(vendor.ein || '');
+      // Map vendor_name field
+      setVendorName(vendor.vendor_name || '');
+      setIdentificationNumber(vendor.identification_number || '');
       setWebsite(vendor.website || '');
       setEmail(vendor.email || '');
       setWorkPhone(vendor.work_phone || '');
@@ -117,6 +115,7 @@ export default function VendorNew() {
       setBillingState(vendor.billing_state || '');
       setBillingZip(vendor.billing_zip_code || '');
       setBillingCountry(vendor.billing_country || '');
+      setPrimaryContactId((vendor as any).primary_contact_id || '');
       setBillingSameAsStreet(
         vendor.billing_street_address_line_1 === vendor.street_address_line_1 &&
         vendor.billing_city === vendor.city &&
@@ -138,9 +137,83 @@ export default function VendorNew() {
     }
   }, [billingSameAsStreet, street1, street2, city, state, zip, country]);
 
-  const [saving, setSaving] = useState(false);
+  // Show message if no organization is selected
+  if (!activeOrganizationId) {
+    return (
+      <div className="py-6 px-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to {vendorId ? 'edit' : 'create'} a vendor.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show message if user doesn't have permissions
+  if (!roleLoading && !canEditVendors) {
+    return (
+      <div className="py-6 px-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium">Acceso denegado</p>
+          <p className="text-sm text-red-700 mt-1">
+            {isViewer 
+              ? 'No tienes permisos para editar vendors. Tu rol es "viewer" (solo lectura).'
+              : 'No tienes permisos para gestionar vendors. Solo los roles "owner" y "admin" pueden editar vendors.'}
+          </p>
+          <button
+            onClick={() => router.navigate('/directory/vendors')}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:opacity-90 text-sm"
+          >
+            Volver a Vendors
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state while fetching vendor data or role
+  if ((vendorId && isLoadingVendor) || roleLoading) {
+    return (
+      <div className="py-6 px-6">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading vendor...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if failed to load vendor
+  if (vendorId && isErrorVendor) {
+    return (
+      <div className="py-6 px-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading vendor</p>
+          <p className="text-sm text-red-700">Could not load the vendor. Please try again.</p>
+          <button
+            onClick={() => router.navigate('/directory/vendors')}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:opacity-90"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleSave = async () => {
+    // Check permissions
+    if (isReadOnly) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Sin permisos',
+        message: 'No tienes permisos para guardar vendors.',
+      });
+      return;
+    }
+
     // Validate required fields
     const errors: Record<string, string> = {};
     const missingFields: string[] = [];
@@ -148,6 +221,10 @@ export default function VendorNew() {
     if (!vendorName.trim()) {
       errors.vendor_name = 'Vendor name is required';
       missingFields.push('Vendor Name');
+    }
+    if (!primaryContactId.trim()) {
+      errors.primary_contact_id = 'Primary Contact is required';
+      missingFields.push('Primary Contact');
     }
     if (!street1.trim()) {
       errors.street_address_line_1 = 'Street address is required';
@@ -204,7 +281,8 @@ export default function VendorNew() {
         organization_id: activeOrganizationId,
         name: vendorName.trim(), // Use 'name' as required by DB schema
         vendor_name: vendorName.trim(), // Keep for backward compatibility if needed
-        ein: identificationNumber.trim() || null,
+        primary_contact_id: primaryContactId.trim(), // Required field
+        identification_number: identificationNumber.trim() || null,
         website: website.trim() || null,
         email: email.trim() || null,
         work_phone: workPhone.trim() || null,
@@ -285,7 +363,7 @@ export default function VendorNew() {
   };
 
   return (
-    <div className="p-6">
+    <div className="py-6 px-6">
       {/* Header - Matching Contacts page layout */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -302,18 +380,20 @@ export default function VendorNew() {
           <button
             type="button"
             onClick={() => router.navigate('/directory/vendors')}
-            className="text-gray-500 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
             title="Close"
           >
-            <X style={{ width: '18px', height: '18px' }} />
+            Close
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90"
+            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             onClick={handleSave}
+            disabled={isReadOnly}
+            title={isReadOnly ? 'No tienes permisos para guardar vendors' : undefined}
           >
-            Save and Close
+            {isReadOnly ? 'Read Only' : 'Save and Close'}
           </button>
         </div>
       </div>
@@ -379,7 +459,7 @@ export default function VendorNew() {
         </div>
 
         {/* Form Body - Matching Contacts content structure */}
-        <div className="p-4">
+        <div className="py-6 px-6">
           {activeTab === 'billing' ? (
             <>
               {/* Billing Address Section */}
@@ -394,6 +474,7 @@ export default function VendorNew() {
                     checked={billingSameAsStreet}
                     onChange={(e) => setBillingSameAsStreet(e.target.checked)}
                     className="h-4 w-4"
+                    disabled={isReadOnly}
                   />
                   <label htmlFor="billing_same_as_street" className="text-sm">
                     Billing address is the same as street address
@@ -410,7 +491,7 @@ export default function VendorNew() {
                       value={billingStreet1}
                       onChange={(e) => setBillingStreet1(e.target.value)}
                       className="py-1 text-xs"
-                      disabled={billingSameAsStreet}
+                      disabled={billingSameAsStreet || isReadOnly}
                     />
                   </div>
 
@@ -422,7 +503,7 @@ export default function VendorNew() {
                       value={billingStreet2}
                       onChange={(e) => setBillingStreet2(e.target.value)}
                       className="py-1 text-xs"
-                      disabled={billingSameAsStreet}
+                      disabled={billingSameAsStreet || isReadOnly}
                     />
                   </div>
 
@@ -434,7 +515,7 @@ export default function VendorNew() {
                       value={billingCity}
                       onChange={(e) => setBillingCity(e.target.value)}
                       className="py-1 text-xs"
-                      disabled={billingSameAsStreet}
+                      disabled={billingSameAsStreet || isReadOnly}
                     />
                   </div>
 
@@ -446,7 +527,7 @@ export default function VendorNew() {
                       value={billingState}
                       onChange={(e) => setBillingState(e.target.value)}
                       className="py-1 text-xs"
-                      disabled={billingSameAsStreet}
+                      disabled={billingSameAsStreet || isReadOnly}
                     />
                   </div>
 
@@ -458,7 +539,7 @@ export default function VendorNew() {
                       value={billingZip}
                       onChange={(e) => setBillingZip(e.target.value)}
                       className="py-1 text-xs"
-                      disabled={billingSameAsStreet}
+                      disabled={billingSameAsStreet || isReadOnly}
                     />
                   </div>
 
@@ -467,7 +548,7 @@ export default function VendorNew() {
                     <SelectShadcn
                       value={billingCountry}
                       onValueChange={(value: string) => setBillingCountry(value)}
-                      disabled={billingSameAsStreet}
+                      disabled={billingSameAsStreet || isReadOnly}
                     >
                       <SelectTrigger className="py-1 text-xs">
                         <SelectValue placeholder="Select billing country" />
@@ -491,7 +572,7 @@ export default function VendorNew() {
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-6">
                 <Label htmlFor="vendor_name" className="text-xs" required>Vendor Name</Label>
-                <Input 
+                  <Input 
                   id="vendor_name" 
                   name="vendor_name" 
                   value={vendorName}
@@ -503,6 +584,7 @@ export default function VendorNew() {
                   }}
                   className="py-1 text-xs"
                   error={validationErrors.vendor_name}
+                  disabled={isReadOnly}
                 />
               </div>
               <div className="col-span-3">
@@ -512,7 +594,8 @@ export default function VendorNew() {
                   name="identification_number" 
                   value={identificationNumber}
                   onChange={(e) => setIdentificationNumber(e.target.value)}
-                  className="py-1 text-xs" 
+                  className="py-1 text-xs"
+                  disabled={isReadOnly}
                 />
               </div>
               <div className="col-span-3">
@@ -523,7 +606,8 @@ export default function VendorNew() {
                   type="url" 
                   value={website}
                   onChange={(e) => setWebsite(e.target.value)}
-                  className="py-1 text-xs" 
+                  className="py-1 text-xs"
+                  disabled={isReadOnly}
                 />
               </div>
             </div>
@@ -537,7 +621,8 @@ export default function VendorNew() {
                   type="email" 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="py-1 text-xs" 
+                  className="py-1 text-xs"
+                  disabled={isReadOnly}
                 />
               </div>
               <div className="col-span-3">
@@ -548,7 +633,8 @@ export default function VendorNew() {
                   type="tel" 
                   value={workPhone}
                   onChange={(e) => setWorkPhone(e.target.value)}
-                  className="py-1 text-xs" 
+                  className="py-1 text-xs"
+                  disabled={isReadOnly}
                 />
               </div>
               <div className="col-span-3">
@@ -559,8 +645,45 @@ export default function VendorNew() {
                   type="tel" 
                   value={fax}
                   onChange={(e) => setFax(e.target.value)}
-                  className="py-1 text-xs" 
+                  className="py-1 text-xs"
+                  disabled={isReadOnly}
                 />
+              </div>
+              <div className="col-span-3">
+                <Label htmlFor="primary_contact_id" className="text-xs" required>Primary Contact</Label>
+                <SelectShadcn
+                  value={primaryContactId}
+                  onValueChange={(value) => {
+                    setPrimaryContactId(value);
+                    if (validationErrors.primary_contact_id) {
+                      setValidationErrors(prev => ({ ...prev, primary_contact_id: '' }));
+                    }
+                  }}
+                  disabled={loadingContacts || isReadOnly}
+                >
+                  <SelectTrigger className={`py-1 text-xs ${validationErrors.primary_contact_id ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectValue placeholder={loadingContacts ? "Loading contacts..." : contacts.length === 0 ? "No contacts found" : "Select primary contact"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {contacts.length === 0 ? (
+                      <div className="px-2 py-1.5 text-xs text-gray-500">
+                        {loadingContacts ? "Loading..." : "No contacts available. Please create a contact first."}
+                      </div>
+                    ) : (
+                      contacts.filter(c => c.id).map((contact) => (
+                        <SelectItem key={contact.id} value={contact.id}>
+                          {contact.contact_name || 'Unnamed Contact'}
+                          {contact.identification_number && (
+                            <span className="text-xs text-gray-500 ml-2">({contact.identification_number})</span>
+                          )}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </SelectShadcn>
+                {validationErrors.primary_contact_id && (
+                  <p className="mt-1 text-xs text-red-600">{validationErrors.primary_contact_id}</p>
+                )}
               </div>
             </div>
 
@@ -582,6 +705,7 @@ export default function VendorNew() {
                     }}
                     className="py-1 text-xs"
                     error={validationErrors.street_address_line_1}
+                    disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-6">
@@ -593,7 +717,8 @@ export default function VendorNew() {
                     name="street_address_line_2" 
                     value={street2} 
                     onChange={(e) => setStreet2(e.target.value)} 
-                    className="py-1 text-xs" 
+                    className="py-1 text-xs"
+                    disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
@@ -610,6 +735,7 @@ export default function VendorNew() {
                     }}
                     className="py-1 text-xs"
                     error={validationErrors.city}
+                    disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
@@ -626,6 +752,7 @@ export default function VendorNew() {
                     }}
                     className="py-1 text-xs"
                     error={validationErrors.state}
+                    disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
@@ -635,7 +762,8 @@ export default function VendorNew() {
                     name="zip_code" 
                     value={zip} 
                     onChange={(e) => setZip(e.target.value)} 
-                    className="py-1 text-xs" 
+                    className="py-1 text-xs"
+                    disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
@@ -648,6 +776,7 @@ export default function VendorNew() {
                         setValidationErrors(prev => ({ ...prev, country: '' }));
                       }
                     }}
+                    disabled={isReadOnly}
                   >
                     <SelectTrigger className={`py-1 text-xs ${validationErrors.country ? 'border-red-300 bg-red-50' : ''}`}>
                       <SelectValue placeholder="Select country" />

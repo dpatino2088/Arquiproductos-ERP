@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
 import { usePreviousPage } from '../../hooks/usePreviousPage';
 import { useCompanyStore } from '../../stores/company-store';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import {
   Building,
   Users,
@@ -16,6 +17,7 @@ import OrganizationUserNew from './OrganizationUserNew';
 export default function CompanySettings() {
   const { getPreviousPage } = usePreviousPage();
   const { currentCompany } = useCompanyStore();
+  const { isMember, loading: roleLoading } = useCurrentOrgRole();
   const [activeSection, setActiveSection] = useState<string>('organization-user');
   const [activeTab, setActiveTab] = useState<string>('general');
   const [currentRoute, setCurrentRoute] = useState<string>(router.getCurrentRoute() || window.location.pathname);
@@ -45,6 +47,19 @@ export default function CompanySettings() {
   // Determine if we're in add/edit user mode
   const isAddEditUserMode = currentRoute.includes('/settings/organization-users/new') || 
                             currentRoute.match(/\/settings\/organization-users\/edit\/[^/]+/);
+
+  // Proteger Settings: Members no pueden acceder - redirigir inmediatamente sin mostrar error
+  useEffect(() => {
+    if (!roleLoading && isMember) {
+      // Redirigir inmediatamente al dashboard sin mostrar mensaje
+      router.navigate('/dashboard');
+    }
+  }, [isMember, roleLoading]);
+
+  // Si es Member, redirigir inmediatamente (no mostrar nada)
+  if (!roleLoading && isMember) {
+    return null; // No renderizar nada, la redirección ya está en curso
+  }
 
   // Handle ESC key to close settings and return to previous page
   useEffect(() => {

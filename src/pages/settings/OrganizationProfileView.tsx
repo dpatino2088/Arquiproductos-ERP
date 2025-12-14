@@ -43,7 +43,7 @@ export default function OrganizationProfileView() {
         // Fetch organization data
         const { data: orgData, error: orgError } = await supabase
           .from('Organizations')
-          .select('id, name, legal_name, tax_id, country, main_email, owner_user_id')
+          .select('id, organization_name, legal_name, tax_id, country, main_email, owner_user_id')
           .eq('id', activeOrganizationId)
           .eq('deleted', false)
           .single();
@@ -74,22 +74,22 @@ export default function OrganizationProfileView() {
           // Get from OrganizationUsers (has cached name/email)
           const { data: orgUserData } = await supabase
             .from('OrganizationUsers')
-            .select('name, email')
+            .select('user_name, email')
             .eq('user_id', orgData.owner_user_id)
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false)
             .maybeSingle();
 
           if (orgUserData) {
-            ownerName = orgUserData.name || null;
+            ownerName = orgUserData.user_name || null;
             ownerEmail = orgUserData.email || null;
           }
         }
 
         // Set organization data
         setOrganizationData({
-          name: orgData.name || null,
-          legal_name: orgData.legal_name || orgData.name || null, // Fallback to name if legal_name doesn't exist
+          name: orgData.organization_name || null,
+          legal_name: orgData.legal_name || orgData.organization_name || null, // Fallback to organization_name if legal_name doesn't exist
           tax_id: orgData.tax_id || null,
           country: orgData.country || null,
           main_email: orgData.main_email || ownerEmail || null, // Use main_email or fallback to owner email

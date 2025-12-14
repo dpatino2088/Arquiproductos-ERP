@@ -44,14 +44,71 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       setError(null);
 
       // 1) Get current user
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+      let user = null;
+      let userError = null;
+      
+      try {
+        const result = await supabase.auth.getUser();
+        user = result.data?.user || null;
+        userError = result.error;
+      } catch (err: any) {
+        userError = err;
+      }
 
-      if (userError) throw userError;
+      // Manejar error de sesión faltante
+      if (userError) {
+        if (userError.message?.includes('session') || userError.message?.includes('Auth session missing')) {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ OrganizationContext - Sesión de autenticación faltante, intentando refrescar...');
+          }
+          
+          // Intentar refrescar la sesión
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError || !session) {
+            if (import.meta.env.DEV) {
+              console.warn('⚠️ OrganizationContext - No hay sesión disponible. El usuario necesita hacer login.');
+            }
+            // No establecer error aquí, simplemente retornar sin organizaciones
+            // El usuario verá el mensaje de "No organizations available" que es correcto
+            setOrganizations([]);
+            setActiveOrganizationIdState(null);
+            setLoading(false);
+            return; // No establecer error, solo retornar silenciosamente
+          }
+          
+          // Si tenemos sesión, intentar obtener el usuario nuevamente
+          const { data: { user: retryUser }, error: retryError } = await supabase.auth.getUser();
+          
+          if (retryError || !retryUser) {
+            if (import.meta.env.DEV) {
+              console.error('❌ OrganizationContext - No se pudo obtener usuario después de refrescar sesión:', retryError);
+            }
+            setOrganizations([]);
+            setActiveOrganizationIdState(null);
+            setLoading(false);
+            setError('Please log in to view organizations');
+            return;
+          }
+          
+          // Continuar con el usuario obtenido
+          user = retryUser;
+        } else {
+          if (import.meta.env.DEV) {
+            console.error('❌ OrganizationContext - Error obteniendo usuario:', userError);
+          }
+          setOrganizations([]);
+          setActiveOrganizationIdState(null);
+          setLoading(false);
+          setError(userError.message || 'Error loading organizations');
+          return;
+        }
+      }
 
       if (!user) {
+        if (import.meta.env.DEV) {
+          console.warn('⚠️ OrganizationContext - No hay usuario autenticado');
+        }
         setOrganizations([]);
         setActiveOrganizationIdState(null);
         setLoading(false);
@@ -59,6 +116,9 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       }
 
       // 2) Query OrganizationUsers joined with Organizations
+      console.log('🔍 OrganizationContext - Buscando organizaciones para user_id:', user.id);
+      
+      // Query OrganizationUsers with nested Organizations data
       const { data: orgUsers, error: orgError } = await supabase
         .from('OrganizationUsers')
         .select(`
@@ -71,27 +131,107 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         `)
         .eq('user_id', user.id)
         .eq('deleted', false);
+        // NOTA: No filtramos por is_system aquí porque el usuario necesita ver su organización
+        // El filtro is_system solo se usa para ocultar usuarios en las LISTAS, no para ocultar organizaciones
+      
+      // Always log this to debug the issue
+      console.log('📊 OrganizationContext - Resultado query:', {
+        orgUsersCount: orgUsers?.length || 0,
+        error: orgError,
+        firstOrg: orgUsers?.[0],
+        allOrgs: orgUsers,
+        rawData: JSON.stringify(orgUsers, null, 2)
+      });
 
       if (orgError) {
+        // Log detailed error information
+        console.error('❌ OrganizationContext - Error en query:', {
+          error: orgError,
+          code: orgError.code,
+          message: orgError.message,
+          details: orgError.details,
+          hint: orgError.hint,
+          user_id: user.id
+        });
+        
         // Handle expected errors gracefully
         if (orgError.code === 'PGRST116' || orgError.code === '42P01') {
-          // No rows or table doesn't exist
+          // No rows or table doesn't exist - esto es normal si no hay organizaciones
+          if (import.meta.env.DEV) {
+            console.log('ℹ️ OrganizationContext - No hay organizaciones (esto es normal)');
+          }
           setOrganizations([]);
           setActiveOrganizationIdState(null);
           setLoading(false);
           return;
         }
-        throw orgError;
+        
+        // Handle column does not exist error (42703)
+        if (orgError.code === '42703' || orgError.message?.includes('does not exist') || orgError.message?.includes('column')) {
+          console.error('❌ OrganizationContext - Error de columna no encontrada:', {
+            code: orgError.code,
+            message: orgError.message,
+            details: orgError.details,
+            hint: orgError.hint
+          });
+          setError(`Database schema error: ${orgError.message}. Please check if migrations were applied correctly.`);
+          setOrganizations([]);
+          setActiveOrganizationIdState(null);
+          setLoading(false);
+          return;
+        }
+        
+        // Para errores de RLS o permisos, no mostrar error al usuario
+        // Solo loguear en desarrollo
+        if (orgError.code === '42501' || orgError.message?.includes('permission') || orgError.message?.includes('policy')) {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ OrganizationContext - Error de permisos/RLS:', orgError.message);
+          }
+          setOrganizations([]);
+          setActiveOrganizationIdState(null);
+          setLoading(false);
+          return;
+        }
+        
+        // Para otros errores, mostrar información detallada
+        console.error('❌ OrganizationContext - Error desconocido:', {
+          code: orgError.code,
+          message: orgError.message,
+          details: orgError.details,
+          hint: orgError.hint
+        });
+        setError(orgError.message || 'Error loading organizations');
+        setOrganizations([]);
+        setActiveOrganizationIdState(null);
+        setLoading(false);
+        return;
       }
 
       // 3) Map result into OrganizationSummary[]
+      // In Supabase nested select, organization_id becomes an object with the nested data
       const orgs: OrganizationSummary[] = (orgUsers || [])
-        .filter((ou: any) => ou.organization_id && typeof ou.organization_id === 'object')
-        .map((ou: any) => ({
-          id: ou.organization_id.id,
-          name: ou.organization_id.organization_name || 'Unnamed Organization',
-          role: (ou.role as OrgRole) || null,
-        }))
+        .map((ou: any) => {
+          // organization_id should be an object with id and organization_name
+          const org = ou.organization_id;
+          
+          if (!org || typeof org !== 'object' || !org.id) {
+            if (import.meta.env.DEV) {
+              console.warn('⚠️ OrganizationContext - organization_id no es un objeto válido:', {
+                raw: ou,
+                organization_id: org,
+                type: typeof org
+              });
+            }
+            return null;
+          }
+          
+          return {
+            id: org.id,
+            name: org.organization_name || 'Unnamed Organization',
+            role: (ou.role as OrgRole) || null,
+          };
+        })
+        .filter((org): org is OrganizationSummary => org !== null)
         .sort((a, b) => {
           // Sort by role priority, then by name
           const roleOrder: Record<string, number> = {
@@ -106,6 +246,12 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
           return a.name.localeCompare(b.name);
         });
 
+      console.log('📋 OrganizationContext - Organizaciones mapeadas:', {
+        count: orgs.length,
+        orgs: orgs,
+        rawOrgUsers: orgUsers
+      });
+      
       setOrganizations(orgs);
 
       // 4) Determine active organization
@@ -138,15 +284,40 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    loadOrganizations();
+    // Verificar primero si hay una sesión antes de cargar organizaciones
+    const checkSessionAndLoad = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        // Solo cargar organizaciones si hay una sesión válida
+        loadOrganizations();
+      } else {
+        // No hay sesión, establecer estado vacío sin error
+        if (import.meta.env.DEV) {
+          console.log('ℹ️ OrganizationContext - No hay sesión, no se cargarán organizaciones');
+        }
+        setOrganizations([]);
+        setActiveOrganizationIdState(null);
+        setLoading(false);
+      }
+    };
+
+    checkSessionAndLoad();
 
     // Listen for auth state changes - OPTIMIZED: Solo recargar en eventos críticos
     // Esto evita recargas innecesarias en cada TOKEN_REFRESHED
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       // Solo recargar en eventos importantes, no en cada cambio de token
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
+      if (event === 'SIGNED_IN' && session) {
+        loadOrganizations();
+      } else if (event === 'SIGNED_OUT') {
+        // Limpiar organizaciones al cerrar sesión
+        setOrganizations([]);
+        setActiveOrganizationIdState(null);
+        setLoading(false);
+      } else if (event === 'USER_UPDATED' && session) {
         loadOrganizations();
       }
       // Ignorar: TOKEN_REFRESHED, PASSWORD_RECOVERY, etc. para reducir peticiones

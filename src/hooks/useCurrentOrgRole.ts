@@ -25,6 +25,9 @@ type UseCurrentOrgRoleResult = {
   canCreateQuotes: boolean;
   canViewQuotes: boolean;
   canEditCustomers: boolean;
+  canEditContacts: boolean;
+  canEditVendors: boolean;
+  canViewOwnData: boolean;
 };
 
 export function useCurrentOrgRole(
@@ -126,19 +129,26 @@ export function useCurrentOrgRole(
     };
   }, [effectiveOrgId]);
 
-  // flags de rol (incluyendo superadmin como nivel más alto)
+  // flags de rol (solo 3 roles: superadmin, admin, member)
   const isSuperAdmin = role === 'superadmin';
-  const isOwner = role === 'owner' || isSuperAdmin;
-  const isAdmin = role === 'admin' || isOwner || isSuperAdmin;
+  const isAdmin = role === 'admin' || isSuperAdmin;
   const isMember = role === 'member';
-  const isViewer = role === 'viewer';
+  // Mantener isOwner e isViewer para compatibilidad con código existente, pero siempre false
+  const isOwner = false; // Ya no existe el rol 'owner'
+  const isViewer = false; // Ya no existe el rol 'viewer'
 
-  // permisos derivados — aquí definimos la política funcional
-  const canManageOrganization = isOwner || isSuperAdmin;
-  const canManageUsers = isOwner || isAdmin || isSuperAdmin; // admin también puede gestionar usuarios
-  const canCreateQuotes = isOwner || isAdmin || isMember || isSuperAdmin;
-  const canViewQuotes = !!role || isSuperAdmin;
-  const canEditCustomers = isOwner || isAdmin || isMember || isSuperAdmin;
+  // permisos derivados — según especificación:
+  // Superadmin: Puede hacer TODO (incluyendo crear/borrar usuarios)
+  // Admin: Puede ver todas las cotizaciones y hacer todo EXCEPTO crear/borrar usuarios
+  // Member: Solo puede ver/editar/borrar sus propias cotizaciones
+  const canManageOrganization = isSuperAdmin; // Solo superadmin puede gestionar organización
+  const canManageUsers = isSuperAdmin; // Solo superadmin puede crear/borrar usuarios
+  const canCreateQuotes = isSuperAdmin || isAdmin || isMember; // Todos pueden crear quotes
+  const canViewQuotes = !!role || isSuperAdmin; // Todos pueden ver quotes (pero Member solo las suyas)
+  const canEditCustomers = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar customers
+  const canEditContacts = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar contacts
+  const canEditVendors = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar vendors
+  const canViewOwnData = !!role || isSuperAdmin; // Todos pueden ver sus propios datos
 
   return {
     role,
@@ -154,5 +164,8 @@ export function useCurrentOrgRole(
     canCreateQuotes,
     canViewQuotes,
     canEditCustomers,
+    canEditContacts,
+    canEditVendors,
+    canViewOwnData,
   };
 }

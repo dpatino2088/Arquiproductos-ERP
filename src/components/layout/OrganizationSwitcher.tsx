@@ -68,14 +68,32 @@ export function OrganizationSwitcher() {
     );
   }
 
-  // Error state
-  if (error) {
+  // Error state - solo mostrar si realmente hay un error crítico
+  // La mayoría de errores son esperados (no hay organizaciones, RLS, etc.)
+  if (error && import.meta.env.DEV) {
+    // Solo mostrar error en desarrollo para debugging
     return (
       <div className="flex items-center gap-2 px-3 py-1.5 text-sm text-red-600">
         <AlertCircle className="w-4 h-4" />
-        <span>Error loading organizations</span>
+        <span>Error loading organizations (dev only)</span>
       </div>
     );
+  }
+  
+  // En producción, si hay error pero no es crítico, mostrar "No organizations" en lugar de error
+  if (error && !import.meta.env.DEV) {
+    // Tratar como "no organizations" en lugar de error
+    if (organizations.length === 0) {
+      return (
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 text-sm text-yellow-600 bg-yellow-50 rounded-md border border-yellow-200"
+          title="No organizations available - contact administrator"
+        >
+          <AlertCircle className="w-4 h-4" />
+          <span>No organizations available</span>
+        </div>
+      );
+    }
   }
 
   // No organizations - organizations are created directly in Supabase

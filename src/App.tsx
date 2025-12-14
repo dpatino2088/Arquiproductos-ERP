@@ -178,6 +178,62 @@ const CompanyReports = lazy(() => {
   return import('./pages/reports/CompanyReports');
 });
 
+// New module pages
+const Sales = lazy(() => {
+  logger.debug('Loading Sales component');
+  return import('./pages/sales/Sales');
+});
+
+const Orders = lazy(() => {
+  logger.debug('Loading Orders component');
+  return import('./pages/sales/Orders');
+});
+
+const Quotes = lazy(() => {
+  logger.debug('Loading Quotes component');
+  return import('./pages/sales/Quotes');
+});
+
+const QuoteNew = lazy(() => {
+  logger.debug('Loading QuoteNew component');
+  return import('./pages/sales/QuoteNew');
+});
+
+const Catalog = lazy(() => {
+  logger.debug('Loading Catalog component');
+  return import('./pages/catalog/Catalog');
+});
+
+const Items = lazy(() => {
+  logger.debug('Loading Items component');
+  return import('./pages/catalog/Items');
+});
+
+const CatalogItemNew = lazy(() => {
+  logger.debug('Loading CatalogItemNew component');
+  return import('./pages/catalog/CatalogItemNew');
+});
+
+const Inventory = lazy(() => {
+  logger.debug('Loading Inventory component');
+  return import('./pages/inventory/Inventory');
+});
+
+const Warehouse = lazy(() => {
+  logger.debug('Loading Warehouse component');
+  return import('./pages/inventory/Warehouse');
+});
+
+const Manufacturing = lazy(() => {
+  logger.debug('Loading Manufacturing component');
+  return import('./pages/manufacturing/Manufacturing');
+});
+
+const Financials = lazy(() => {
+  logger.debug('Loading Financials component');
+  return import('./pages/financials/Financials');
+});
+
 const CompanySettings = lazy(() => {
   logger.debug('Loading Company Settings component');
   return import('./pages/settings/CompanySettings');
@@ -440,6 +496,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/directory/customers/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('directory-customer-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/directory/vendors', () => {
       if (isAuthenticated) {
         setCurrentPage('directory-vendors');
@@ -478,6 +541,177 @@ function App() {
     router.addRoute('/directory', () => {
       if (isAuthenticated) {
         setCurrentPage('directory-contacts');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    // Sales routes
+    router.addRoute('/sales', () => {
+      if (isAuthenticated) {
+        setCurrentPage('sales');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('orders');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/quotes', () => {
+      if (isAuthenticated) {
+        setCurrentPage('quotes');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/quotes/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('quote-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/quotes/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('quote-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    // Catalog routes
+    router.addRoute('/catalog', () => {
+      if (isAuthenticated) {
+        setCurrentPage('catalog');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/items', () => {
+      if (isAuthenticated) {
+        setCurrentPage('items');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/items/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('catalog-item-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/items/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('catalog-item-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/collections', () => {
+      if (isAuthenticated) {
+        setCurrentPage('catalog');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    // Inventory routes
+    router.addRoute('/inventory', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/warehouse', () => {
+      if (isAuthenticated) {
+        setCurrentPage('warehouse');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/purchase-orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/receipts', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/transactions', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/adjustments', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    // Manufacturing routes
+    router.addRoute('/manufacturing', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/production-orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/work-orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/bill-of-materials', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/routing', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/work-centers', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
+    // Financials routes
+    router.addRoute('/financials', () => {
+      if (isAuthenticated) {
+        setCurrentPage('financials');
       } else {
         setCurrentPage('login');
       }
@@ -647,6 +881,30 @@ function App() {
         return <DirectoryVendorNew />;
       case 'test-directory':
         return <TestDirectory />;
+      
+      // New module pages
+      case 'sales':
+        return <Sales />;
+      case 'orders':
+        return <Orders />;
+      case 'quotes':
+        return <Quotes />;
+      case 'quote-new':
+        return <QuoteNew />;
+      case 'catalog':
+        return <Catalog />;
+      case 'items':
+        return <Items />;
+      case 'catalog-item-new':
+        return <CatalogItemNew />;
+      case 'inventory':
+        return <Inventory />;
+      case 'warehouse':
+        return <Warehouse />;
+      case 'manufacturing':
+        return <Manufacturing />;
+      case 'financials':
+        return <Financials />;
 
       case 'reports':
         return <CompanyReports />;

@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useCustomers } from '../../hooks/useDirectory';
+import { useCustomers, useDeleteCustomer } from '../../hooks/useDirectory';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { supabase } from '../../lib/supabase/client';
+import { useUIStore } from '../../stores/ui-store';
 import { 
   Users, 
   Search, 
@@ -24,7 +26,10 @@ import {
   Calendar,
   Edit,
   Building,
-  DollarSign
+  DollarSign,
+  Copy,
+  Archive,
+  Trash2
 } from 'lucide-react';
 
 interface CustomerItem {
@@ -128,7 +133,7 @@ export default function Customers() {
   // Prevent hook execution without org
   if (!orgLoading && !activeOrganizationId) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
           <p className="text-sm text-yellow-700 mt-1">Please select an organization to view customers.</p>
@@ -138,7 +143,8 @@ export default function Customers() {
   }
 
   // Get customers from Supabase
-  const { data: customersData, isLoading: customersLoading, isError: customersIsError, error: customersError } = useCustomers();
+  const { data: customersData, isLoading: customersLoading, isError: customersIsError, error: customersError, refetch } = useCustomers();
+  const { deleteCustomer, isDeleting } = useDeleteCustomer();
 
   const filteredCustomers = useMemo(() => {
     const filtered = customersData.filter(customer => {
@@ -292,7 +298,8 @@ export default function Customers() {
   };
 
   const getFilteredCustomerTypeOptions = () => {
-    const customerTypeOptions = ['Enterprise', 'SMB', 'Startup', 'Individual'];
+    // Customer type ENUM values: VIP, Partner, Reseller, Distributor
+    const customerTypeOptions = ['VIP', 'Partner', 'Reseller', 'Distributor'];
     if (!customerTypeSearchTerm) return customerTypeOptions;
     return customerTypeOptions.filter(type => 
       type.toLowerCase().includes(customerTypeSearchTerm.toLowerCase())
@@ -316,8 +323,74 @@ export default function Customers() {
 
   // Navigate to customer edit page
   const handleEditCustomer = (customer: CustomerItem, e?: React.MouseEvent) => {
-    e?.stopPropagation(); // Prevent row click event
+    e?.stopPropagation();
     router.navigate(`/directory/customers/edit/${customer.id}`);
+  };
+
+  // Handle duplicate customer
+  const handleDuplicateCustomer = async (customer: CustomerItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.navigate(`/directory/customers/new?duplicate=${customer.id}`);
+  };
+
+  // Handle archive customer
+  const handleArchiveCustomer = async (customer: CustomerItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!confirm(`¿Estás seguro de que deseas archivar "${customer.companyName}"?`)) {
+      return;
+    }
+
+    try {
+      if (!activeOrganizationId) return;
+      
+      const { error } = await supabase
+        .from('DirectoryCustomers')
+        .update({ archived: true })
+        .eq('id', customer.id)
+        .eq('organization_id', activeOrganizationId);
+
+      if (error) throw error;
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Customer archivado',
+        message: 'El customer ha sido archivado correctamente.',
+      });
+      
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al archivar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
+  };
+
+  // Handle delete customer
+  const handleDeleteCustomer = async (customer: CustomerItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!confirm(`¿Estás seguro de que deseas eliminar "${customer.companyName}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      await deleteCustomer(customer.id);
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Customer eliminado',
+        message: 'El customer ha sido eliminado correctamente.',
+      });
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al eliminar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -403,7 +476,7 @@ export default function Customers() {
   // Show loading state
   if (orgLoading || customersLoading) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
@@ -417,7 +490,7 @@ export default function Customers() {
   // Show error state
   if (customersIsError && customersError) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-800 font-medium mb-2">Error loading customers</p>
           <p className="text-sm text-red-700">{customersError}</p>
@@ -432,7 +505,7 @@ export default function Customers() {
   }
 
   return (
-    <div className="p-6">
+    <div className="py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -793,20 +866,10 @@ export default function Customers() {
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
-              <colgroup>
-                <col style={{ width: '20%' }} /> {/* Customer - base width */}
-                <col style={{ width: '15%' }} /> {/* Contact - base * 0.75 */}
-                <col style={{ width: '15%' }} /> {/* Industry - base * 0.75 */}
-                <col style={{ width: '12%' }} /> {/* Customer Type - base * 0.618 */}
-                <col style={{ width: '10%' }} /> {/* Status - base * 0.5 */}
-                <col style={{ width: '13%' }} /> {/* Location - base * 0.65 */}
-                <col style={{ width: '10%' }} /> {/* Date Added - base * 0.5 */}
-                <col style={{ width: '5%' }} />  {/* Actions - fixed small */}
-              </colgroup>
+            <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '1.5rem', paddingRight: '1rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('companyName')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -815,8 +878,8 @@ export default function Customers() {
                       {sortBy === 'companyName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>Primary Contact</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Contact</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('industry')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -825,10 +888,10 @@ export default function Customers() {
                       {sortBy === 'industry' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.618rem', paddingRight: '0.618rem' }}>Customer Type</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>Status</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.65rem', paddingRight: '0.65rem' }}>Location</th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Customer Type</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Status</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Location</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -837,13 +900,13 @@ export default function Customers() {
                       {sortBy === 'dateAdded' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 font-medium text-gray-900 text-xs" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>Actions</th>
+                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center">
+                    <td colSpan={8} className="py-12 px-6 text-center">
                       <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No customers found</p>
                       <p className="text-sm text-gray-500">
@@ -856,7 +919,7 @@ export default function Customers() {
                 ) : (
                   paginatedCustomers.map((customer) => (
                     <tr key={customer.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '1.5rem', paddingRight: '1rem' }}>
+                      <td className="py-4 px-6 text-gray-900 text-sm">
                         <div className="flex items-center gap-3">
                           <div className="relative">
                             <div 
@@ -885,34 +948,50 @@ export default function Customers() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 text-gray-700 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{customer.contactName || 'N/A'}</td>
-                      <td className="py-4 text-gray-900 text-sm" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>{customer.industry}</td>
-                      <td className="py-4" style={{ paddingLeft: '0.618rem', paddingRight: '0.618rem' }}>{getCustomerTypeBadge(customer.customerType)}</td>
-                      <td className="py-4" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>{getStatusBadge(customer.status)}</td>
-                      <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.65rem', paddingRight: '0.65rem' }}>{customer.location}</td>
-                      <td className="py-4 text-gray-600 text-sm" style={{ paddingLeft: '0.5rem', paddingRight: '0.5rem' }}>{new Date(customer.dateAdded).toLocaleDateString()}</td>
-                      <td className="py-2" style={{ paddingLeft: '0.382rem', paddingRight: '0.382rem' }}>
-                        <div className="flex items-center gap-1">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewCustomer(customer);
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-600 hover:text-primary"
-                            aria-label={`View ${customer.companyName}`}
-                            title={`View ${customer.companyName}`}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                      <td className="py-4 px-6 text-gray-700 text-sm">{customer.contactName || 'N/A'}</td>
+                      <td className="py-4 px-6 text-gray-900 text-sm">{customer.industry}</td>
+                      <td className="py-4 px-6">{getCustomerTypeBadge(customer.customerType)}</td>
+                      <td className="py-4 px-6">{getStatusBadge(customer.status)}</td>
+                      <td className="py-4 px-6 text-gray-600 text-sm">{customer.location}</td>
+                      <td className="py-4 px-6 text-gray-600 text-sm">{new Date(customer.dateAdded).toLocaleDateString()}</td>
+                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 justify-end">
                           {canEditCustomers && (
+                            <>
                             <button 
                               onClick={(e) => handleEditCustomer(customer, e)}
-                              className="p-1 hover:bg-gray-100 rounded transition-colors text-gray-600 hover:text-primary"
-                              aria-label={`Edit ${customer.companyName}`}
-                              title={`Edit ${customer.companyName}`}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label={`Editar ${customer.companyName}`}
+                                title={`Editar ${customer.companyName}`}
                             >
                               <Edit className="w-4 h-4" />
                             </button>
+                              <button 
+                                onClick={(e) => handleDuplicateCustomer(customer, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label={`Duplicar ${customer.companyName}`}
+                                title={`Duplicar ${customer.companyName}`}
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => handleArchiveCustomer(customer, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label={`Archivar ${customer.companyName}`}
+                                title={`Archivar ${customer.companyName}`}
+                              >
+                                <Archive className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => handleDeleteCustomer(customer, e)}
+                                disabled={isDeleting}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                                aria-label={`Eliminar ${customer.companyName}`}
+                                title={`Eliminar ${customer.companyName}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>

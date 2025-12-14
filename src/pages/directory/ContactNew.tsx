@@ -6,7 +6,6 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
-import { X } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -27,10 +26,10 @@ const CONTACT_TYPE_OPTIONS = [
 
 // Unified schema for contacts
 const contactSchema = z.object({
-  customer_id: z.string().uuid('Customer is required').min(1, 'Customer is required'),
+  customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
   contact_type: z.enum(['architect', 'interior_designer', 'project_manager', 'consultant', 'dealer', 'reseller', 'partner']),
   title_id: z.string().optional(),
-  customer_name: z.string().min(1, 'Customer name is required'),
+  contact_name: z.string().min(1, 'Contact name is required'),
   identification_number: z.string().optional(),
   primary_phone: z.string().optional(),
   cell_phone: z.string().optional(),
@@ -54,7 +53,7 @@ type ContactFormData = z.infer<typeof contactSchema>;
 
 interface Customer {
   id: string;
-  company_name: string;
+  customer_name: string;
 }
 
 export default function ContactNew() {
@@ -102,11 +101,11 @@ export default function ContactNew() {
         setLoadingCustomers(true);
         const { data, error } = await supabase
           .from('DirectoryCustomers')
-          .select('id, company_name')
+          .select('id, customer_name')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .eq('archived', false)
-          .order('company_name', { ascending: true });
+          .order('customer_name', { ascending: true });
 
         if (error) {
           console.error('Error loading customers:', error);
@@ -158,7 +157,7 @@ export default function ContactNew() {
           customer_id: data.customer_id || '',
           contact_type: (data.contact_type || 'architect') as any,
           title_id: data.title_id || undefined,
-          customer_name: data.customer_name || '',
+          contact_name: data.contact_name || '',
           identification_number: data.identification_number || '',
           primary_phone: data.primary_phone || '',
           cell_phone: data.cell_phone || '',
@@ -202,8 +201,7 @@ export default function ContactNew() {
       const errors = form.formState.errors;
       const missingFields: string[] = [];
       
-      if (errors.customer_id) missingFields.push('Customer');
-      if (errors.customer_name) missingFields.push('Customer Name');
+      if (errors.contact_name) missingFields.push('Contact Name');
       if (errors.street_address_line_1) missingFields.push('Street Address');
       if (errors.city) missingFields.push('City');
       if (errors.state) missingFields.push('State');
@@ -228,10 +226,10 @@ export default function ContactNew() {
 
       const contactData = {
         organization_id: activeOrganizationId,
-        customer_id: formData.customer_id,
+        customer_id: formData.customer_id && formData.customer_id.trim() ? formData.customer_id : null,
         contact_type: formData.contact_type,
         title_id: formData.title_id && formData.title_id !== 'not_selected' ? formData.title_id : null,
-        customer_name: formData.customer_name,
+        contact_name: formData.contact_name,
         identification_number: formData.identification_number || null,
         primary_phone: formData.primary_phone || null,
         cell_phone: formData.cell_phone || null,
@@ -307,9 +305,9 @@ export default function ContactNew() {
   const handleSubmit = form.handleSubmit(handleSave);
 
   return (
-    <div className="p-6">
+    <div className="py-6">
       {/* Header - Matching Contacts page layout */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6" style={{ paddingLeft: '1.1875rem', paddingRight: '1.1875rem' }}>
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">
             Contact Details
@@ -324,14 +322,14 @@ export default function ContactNew() {
           <button
             type="button"
             onClick={() => router.navigate('/directory/contacts')}
-            className="text-gray-500 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
             title="Close"
           >
-            <X style={{ width: '18px', height: '18px' }} />
+            Close
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             onClick={handleSubmit}
             disabled={isSaving || isReadOnly}
@@ -343,15 +341,17 @@ export default function ContactNew() {
       </div>
 
       {saveError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+        <div className="mb-4" style={{ paddingLeft: '1.1875rem', paddingRight: '1.1875rem' }}>
+          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
           {saveError}
+          </div>
         </div>
       )}
 
       {/* Main Content Card - Matching Contacts table structure exactly */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4" style={{ marginLeft: '1.1875rem', marginRight: '1.1875rem' }}>
         {/* Form Body - Matching Contacts content structure */}
-        <div className="p-4">
+        <div className="py-6" style={{ paddingLeft: '1.1875rem', paddingRight: '1.1875rem' }}>
           <div className="grid grid-cols-12 gap-x-4 gap-y-4">
             {/* Row 1: Identity fields */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
@@ -372,12 +372,12 @@ export default function ContactNew() {
                 />
               </div>
               <div className="col-span-4">
-                <Label htmlFor="customer_name" className="text-xs" required>Customer Name</Label>
+                <Label htmlFor="contact_name" className="text-xs" required>Contact Name</Label>
                 <Input 
-                  id="customer_name" 
-                  {...form.register('customer_name')}
+                  id="contact_name" 
+                  {...form.register('contact_name')}
                   className="py-1 text-xs"
-                  error={form.formState.errors.customer_name?.message}
+                  error={form.formState.errors.contact_name?.message}
                   disabled={isReadOnly}
                 />
               </div>
@@ -463,24 +463,29 @@ export default function ContactNew() {
             {/* Row 3: Customer */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-4">
-                <Label htmlFor="customer_id" className="text-xs" required>Customer</Label>
+                <Label htmlFor="customer_id" className="text-xs">Customer Related</Label>
                 <SelectShadcn
-                  value={form.watch('customer_id') || ''}
-                  onValueChange={(value) => form.setValue('customer_id', value, { shouldValidate: true })}
+                  value={form.watch('customer_id') || '__none__'}
+                  onValueChange={(value) => {
+                    // Convert "__none__" to empty string for the form
+                    const actualValue = value === '__none__' ? '' : value;
+                    form.setValue('customer_id', actualValue, { shouldValidate: true });
+                  }}
                   disabled={loadingCustomers || isReadOnly}
                 >
                   <SelectTrigger className={`text-xs ${form.formState.errors.customer_id ? 'border-red-300 bg-red-50' : ''}`}>
-                    <SelectValue placeholder={loadingCustomers ? "Loading customers..." : customers.length === 0 ? "No customers available" : "Select customer"} />
+                    <SelectValue placeholder={loadingCustomers ? "Loading customers..." : customers.length === 0 ? "No customers available" : "Select customer (optional)"} />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">None (Standalone Contact)</SelectItem>
                     {customers.length === 0 ? (
                       <div className="px-2 py-1.5 text-xs text-gray-500">
-                        {loadingCustomers ? "Loading..." : "No customers available. Please create a customer first."}
+                        {loadingCustomers ? "Loading..." : "No customers available"}
                       </div>
                     ) : (
                       customers.map((customer) => (
                         <SelectItem key={customer.id} value={customer.id}>
-                          {customer.company_name}
+                          {customer.customer_name}
                         </SelectItem>
                       ))
                     )}
@@ -490,7 +495,7 @@ export default function ContactNew() {
                   <p className="mt-1 text-xs text-red-600">{form.formState.errors.customer_id.message}</p>
                 )}
                 <p className="mt-1 text-xs text-gray-500">
-                  A contact must belong to a customer. Select the customer this contact is associated with.
+                  Optional: Select a customer to associate this contact with. A contact can exist independently.
                 </p>
               </div>
             </div>

@@ -318,7 +318,7 @@ serve(async (req) => {
           .from('OrganizationUsers')
           .update({
             role: role,
-            name: userName,
+            user_name: userName,
             email: userEmail,
             deleted: false,
             updated_at: new Date().toISOString(),
@@ -348,7 +348,7 @@ serve(async (req) => {
         organization_id: organizationId, // ✅ Siempre usar el organizationId del request
         user_id: userId,
         role: role,
-        name: userName,
+        user_name: userName,
         email: userEmail,
         invited_by: invitedByUserId,
         deleted: false,
