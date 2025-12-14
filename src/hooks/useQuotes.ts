@@ -155,18 +155,32 @@ export function useCreateQuote() {
 
 export function useUpdateQuote() {
   const [isUpdating, setIsUpdating] = useState(false);
+  const { activeOrganizationId } = useOrganizationContext();
 
   const updateQuote = async (id: string, quoteData: Partial<Quote>) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+
     setIsUpdating(true);
     try {
       const { data, error } = await supabase
         .from('Quotes')
         .update(quoteData)
         .eq('id', id)
+        .eq('organization_id', activeOrganizationId)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error updating quote:', error);
+        throw error;
+      }
+      
+      if (!data) {
+        throw new Error('Quote not found or you do not have permission to update it');
+      }
+      
       return data;
     } finally {
       setIsUpdating(false);

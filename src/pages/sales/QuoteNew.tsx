@@ -99,10 +99,49 @@ export default function QuoteNew() {
     },
   });
 
-  // Generate quote number
+  // Get quote ID from URL if in edit mode - MUST run first
+  useEffect(() => {
+    const getQuoteIdFromUrl = () => {
+      const path = window.location.pathname;
+      const match = path.match(/\/sales\/quotes\/edit\/([^/]+)/);
+      if (match && match[1]) {
+        const id = match[1];
+        console.log('Quote ID from URL:', id);
+        setQuoteId(id);
+        return id;
+      } else {
+        setQuoteId(null);
+        return null;
+      }
+    };
+
+    getQuoteIdFromUrl();
+
+    // Also listen for route changes
+    const handleRouteChange = () => {
+      getQuoteIdFromUrl();
+    };
+
+    // Check on mount and when pathname changes
+    window.addEventListener('popstate', handleRouteChange);
+    
+    return () => {
+      window.removeEventListener('popstate', handleRouteChange);
+    };
+  }, []);
+
+  // Generate quote number - only if NOT editing
   useEffect(() => {
     const generateQuoteNo = async () => {
-      if (!activeOrganizationId || quoteId) return; // Don't generate if editing
+      // Don't generate if editing or if no organization
+      if (!activeOrganizationId || quoteId) {
+        return;
+      }
+
+      // Only generate if quote_no is not already set
+      if (quoteNo) {
+        return;
+      }
 
       try {
         // Get the last quote number for this organization
@@ -143,15 +182,6 @@ export default function QuoteNew() {
 
     generateQuoteNo();
   }, [activeOrganizationId, quoteId, setValue]);
-
-  // Get quote ID from URL if in edit mode
-  useEffect(() => {
-    const path = window.location.pathname;
-    const match = path.match(/\/sales\/quotes\/edit\/([^/]+)/);
-    if (match && match[1]) {
-      setQuoteId(match[1]);
-    }
-  }, []);
 
   // Load quote data when in edit mode
   useEffect(() => {
@@ -270,6 +300,16 @@ export default function QuoteNew() {
 
     loadCustomersAndContacts();
   }, [activeOrganizationId]);
+
+  // Update customer search term when quote is loaded and customers are available
+  useEffect(() => {
+    if (quoteId && customers.length > 0 && watch('customer_id')) {
+      const selectedCustomer = customers.find(c => c.id === watch('customer_id'));
+      if (selectedCustomer && !customerSearchTerm) {
+        setCustomerSearchTerm(selectedCustomer.customer_name);
+      }
+    }
+  }, [quoteId, customers, watch('customer_id'), customerSearchTerm]);
 
   // Filter customers and contacts based on search term
   const filteredCustomers = useMemo(() => {
@@ -398,9 +438,27 @@ export default function QuoteNew() {
         },
       };
 
-      if (quoteId) {
+      // Check if we have a quoteId - this determines if we're editing or creating
+      // Also check URL to be sure
+      const path = window.location.pathname;
+      const urlMatch = path.match(/\/sales\/quotes\/edit\/([^/]+)/);
+      const editQuoteId = urlMatch ? urlMatch[1] : null;
+      
+      const finalQuoteId = quoteId || editQuoteId;
+      
+      console.log('Quote submission:', {
+        quoteId,
+        editQuoteId,
+        finalQuoteId,
+        path,
+        isEdit: !!finalQuoteId
+      });
+      
+      if (finalQuoteId) {
         // Update existing quote
-        await updateQuote(quoteId, quoteData);
+        console.log('Updating quote with ID:', finalQuoteId);
+        const updated = await updateQuote(finalQuoteId, quoteData);
+        console.log('Quote updated:', updated);
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Quote updated',
@@ -408,7 +466,9 @@ export default function QuoteNew() {
         });
       } else {
         // Create new quote
-        await createQuote(quoteData);
+        console.log('Creating new quote - no quoteId found');
+        const created = await createQuote(quoteData);
+        console.log('Quote created:', created);
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Quote created',
