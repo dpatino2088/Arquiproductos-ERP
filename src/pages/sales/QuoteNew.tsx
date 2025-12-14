@@ -158,7 +158,7 @@ export default function QuoteNew() {
         }
 
         let nextNumber = 1;
-        if (data && data.length > 0) {
+        if (data && data.length > 0 && data[0]?.quote_no) {
           // Extract number from quote_no (assuming format like "QT-000001" or "000001")
           const lastQuoteNo = data[0].quote_no;
           const match = lastQuoteNo.match(/\d+/);

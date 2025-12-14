@@ -26,9 +26,10 @@ const CUSTOMER_TYPE_OPTIONS = [
 
 // Schema for Customer
 const customerSchema = z.object({
-  customer_type_name: z.enum(['VIP', 'Partner', 'Reseller', 'Distributor'], {
-    errorMap: () => ({ message: 'Customer type is required' }),
-  }),
+  customer_type_name: z.enum(['VIP', 'Partner', 'Reseller', 'Distributor']).refine(
+    (val) => val !== undefined && val !== null,
+    { message: 'Customer type is required' }
+  ),
   customer_name: z.string().min(1, 'Customer name is required'),
   identification_number: z.string().optional(),
   website: z.string().url('Invalid URL').optional().or(z.literal('')),

@@ -28,11 +28,12 @@ import { useAuthStore } from '../../stores/auth-store';
 
 interface OrganizationUser {
   id: string;
-  role: 'owner' | 'admin' | 'member' | 'viewer';
+  role: 'superadmin' | 'admin' | 'member';
   created_at: string;
   user_id: string;
   name?: string;
   email?: string;
+  user_name?: string; // From DirectoryContacts via contact_id
   contact_id?: string;
   customer_id?: string;
   customer_name?: string;
@@ -98,7 +99,6 @@ export default function OrganizationUser() {
           role, 
           created_at, 
           user_id, 
-          user_name, 
           email, 
           invited_by,
           contact_id,
@@ -106,6 +106,10 @@ export default function OrganizationUser() {
           DirectoryCustomers:customer_id (
             id,
             customer_name
+          ),
+          DirectoryContacts:contact_id (
+            id,
+            contact_name
           )
         `)
         .eq('organization_id', activeOrganizationId)
@@ -114,10 +118,11 @@ export default function OrganizationUser() {
         .order('created_at', { ascending: false });
 
       if (!directError && directData) {
-        // Transform data to include customer_name
+        // Transform data to include customer_name and user_name from contact
         const transformedData = directData.map((user: any) => ({
           ...user,
           customer_name: user.DirectoryCustomers?.customer_name || 'N/A',
+          user_name: user.DirectoryContacts?.contact_name || null,
         }));
         
         // Success with direct query
