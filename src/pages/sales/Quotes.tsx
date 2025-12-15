@@ -87,11 +87,11 @@ export default function Quotes() {
     if (!quotes) return [];
     return quotes.map(quote => ({
       id: quote.id,
-      quoteNo: quote.quote_no,
+      quoteNo: (quote as any).quote_number || (quote as any).quote_no || 'N/A',
       status: quote.status,
       customerName: (quote as any).DirectoryCustomers?.customer_name || 'N/A',
       subtotal: quote.totals?.subtotal || 0,
-      tax: quote.totals?.tax || 0,
+      tax: quote.totals?.tax_total || quote.totals?.tax || 0,
       total: quote.totals?.total || 0,
       currency: quote.currency || 'USD',
       createdAt: quote.created_at,

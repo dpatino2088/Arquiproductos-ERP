@@ -69,7 +69,12 @@ export function useQuoteLines(quoteId: string | null) {
   const [lines, setLines] = useState<QuoteLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+
+  const refetch = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
 
   useEffect(() => {
     async function fetchLines() {
@@ -118,9 +123,9 @@ export function useQuoteLines(quoteId: string | null) {
     }
 
     fetchLines();
-  }, [activeOrganizationId, quoteId]);
+  }, [activeOrganizationId, quoteId, refreshTrigger]);
 
-  return { lines, loading, error };
+  return { lines, loading, error, refetch };
 }
 
 export function useCreateQuote() {

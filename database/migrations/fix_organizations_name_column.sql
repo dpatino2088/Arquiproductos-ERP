@@ -75,3 +75,5 @@ SELECT
     ELSE '✅ No old name column found'
   END as old_column_status;
 
+
+

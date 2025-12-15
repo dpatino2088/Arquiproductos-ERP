@@ -10,9 +10,11 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
-import { useCreateQuote, useUpdateQuote, useQuotes } from '../../hooks/useQuotes';
-import { QuoteStatus } from '../../types/catalog';
-import { Search, X } from 'lucide-react';
+import { useCreateQuote, useUpdateQuote, useQuotes, useQuoteLines } from '../../hooks/useQuotes';
+import { QuoteStatus, MeasureBasis } from '../../types/catalog';
+import { Search, X, Plus, Edit, Trash2 } from 'lucide-react';
+import CurtainConfigurator, { CurtainConfiguration } from './CurtainConfigurator';
+import { computeComputedQty } from '../../lib/catalog/computeComputedQty';
 
 // Quote status options
 const QUOTE_STATUS_OPTIONS = [
@@ -20,7 +22,6 @@ const QUOTE_STATUS_OPTIONS = [
   { value: 'sent', label: 'Sent' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
-  { value: 'cancelled', label: 'Cancelled' },
 ] as const;
 
 // Currency options
@@ -34,9 +35,9 @@ const CURRENCY_OPTIONS = [
 
 // Schema for Quote
 const quoteSchema = z.object({
-  quote_no: z.string().min(1, 'Quote number is required'),
+  quote_number: z.string().min(1, 'Quote number is required'),
   customer_id: z.string().uuid('Customer is required'),
-  status: z.enum(['draft', 'sent', 'approved', 'rejected', 'cancelled']),
+  status: z.enum(['draft', 'sent', 'approved', 'rejected']),
   currency: z.string().min(1, 'Currency is required'),
   notes: z.string().optional(),
 });
@@ -73,10 +74,12 @@ export default function QuoteNew() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState<string>('');
+  const [showConfigurator, setShowConfigurator] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
   const { createQuote, isCreating } = useCreateQuote();
   const { updateQuote, isUpdating } = useUpdateQuote();
   const { quotes } = useQuotes();
+  const { lines: quoteLines, loading: loadingLines, refetch: refetchLines } = useQuoteLines(quoteId);
   
   // Get current user's role and permissions
   const { canEditCustomers, loading: roleLoading } = useCurrentOrgRole();
@@ -147,7 +150,7 @@ export default function QuoteNew() {
         // Get the last quote number for this organization
         const { data, error } = await supabase
           .from('Quotes')
-          .select('quote_no')
+          .select('quote_number')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false })
@@ -158,25 +161,27 @@ export default function QuoteNew() {
         }
 
         let nextNumber = 1;
-        if (data && data.length > 0 && data[0]?.quote_no) {
-          // Extract number from quote_no (assuming format like "QT-000001" or "000001")
-          const lastQuoteNo = data[0].quote_no;
-          const match = lastQuoteNo.match(/\d+/);
-          if (match) {
-            nextNumber = parseInt(match[0], 10) + 1;
+        if (data && data.length > 0) {
+          // Try quote_number first, then quote_no for backward compatibility
+          const lastQuoteNo = (data[0] as any).quote_number || (data[0] as any).quote_no;
+          if (lastQuoteNo) {
+            const match = lastQuoteNo.match(/\d+/);
+            if (match) {
+              nextNumber = parseInt(match[0], 10) + 1;
+            }
           }
         }
 
         // Format as QT-000001, QT-000002, etc.
         const formattedNo = `QT-${String(nextNumber).padStart(6, '0')}`;
         setQuoteNo(formattedNo);
-        setValue('quote_no', formattedNo, { shouldValidate: true });
+        setValue('quote_number', formattedNo, { shouldValidate: true });
       } catch (err) {
         console.error('Error generating quote number:', err);
         // Fallback to timestamp-based number
         const fallbackNo = `QT-${Date.now().toString().slice(-6)}`;
         setQuoteNo(fallbackNo);
-        setValue('quote_no', fallbackNo, { shouldValidate: true });
+        setValue('quote_number', fallbackNo, { shouldValidate: true });
       }
     };
 
@@ -208,8 +213,9 @@ export default function QuoteNew() {
         }
 
         if (data) {
-          setQuoteNo(data.quote_no);
-          setValue('quote_no', data.quote_no || '');
+          const quoteNumber = (data as any).quote_number || (data as any).quote_no || '';
+          setQuoteNo(quoteNumber);
+          setValue('quote_number', quoteNumber);
           setValue('customer_id', data.customer_id || '');
           setValue('status', data.status || 'draft');
           setValue('currency', data.currency || 'USD');
@@ -355,6 +361,193 @@ export default function QuoteNew() {
     }
   }, [watch('customer_id')]);
 
+  // Refetch quote lines when quoteId changes
+  useEffect(() => {
+    if (quoteId) {
+      // Lines will be fetched automatically by useQuoteLines hook
+    }
+  }, [quoteId]);
+
+  // Handle curtain configuration completion
+  const handleCurtainConfigComplete = async (config: CurtainConfiguration) => {
+    if (!quoteId || !activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Quote must be saved first before adding lines',
+      });
+      return;
+    }
+
+    try {
+      // Find or create a catalog item based on configuration
+      const sku = `CURTAIN-${config.productType || 'GENERIC'}-${Date.now()}`;
+      
+      let catalogItemId: string;
+      
+      // Try to find existing item with similar configuration
+      const { data: existingItem } = await supabase
+        .from('CatalogItems')
+        .select('id, unit_price, cost_price, measure_basis, uom, roll_width_m, fabric_pricing_mode, is_fabric')
+        .eq('organization_id', activeOrganizationId)
+        .eq('measure_basis', 'area')
+        .eq('active', true)
+        .eq('deleted', false)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingItem) {
+        catalogItemId = existingItem.id;
+      } else {
+        // Create a new catalog item for this configuration
+        const insertData: any = {
+          organization_id: activeOrganizationId,
+          sku: sku,
+          name: `Curtain - ${config.productType || 'Generic'}`,
+          description: `Configured curtain: ${config.productType || 'Generic'}`,
+          measure_basis: 'area',
+          uom: 'sqm',
+          unit_price: 0,
+          cost_price: 0,
+          is_fabric: false,
+          active: true,
+        };
+
+        const { data: newItem, error: itemError } = await supabase
+          .from('CatalogItems')
+          .insert(insertData)
+          .select()
+          .single();
+
+        if (itemError) {
+          console.error('Error creating catalog item:', itemError);
+          throw new Error(`Failed to create catalog item: ${itemError.message}`);
+        }
+        
+        if (!newItem) {
+          throw new Error('Failed to create catalog item: No data returned');
+        }
+        
+        catalogItemId = newItem.id;
+      }
+
+      // Calculate dimensions in meters
+      const width_m = config.width_mm ? config.width_mm / 1000 : null;
+      const height_m = config.height_mm ? config.height_mm / 1000 : null;
+
+      if (!width_m || !height_m) {
+        throw new Error('Width and height are required to create a quote line');
+      }
+
+      // Get item details for calculation
+      const { data: itemDetails, error: detailsError } = await supabase
+        .from('CatalogItems')
+        .select('measure_basis, roll_width_m, fabric_pricing_mode, unit_price, cost_price')
+        .eq('id', catalogItemId)
+        .single();
+
+      if (detailsError) {
+        console.error('Error fetching item details:', detailsError);
+        throw new Error(`Failed to fetch catalog item details: ${detailsError.message}`);
+      }
+
+      if (!itemDetails) {
+        throw new Error('Catalog item not found after creation');
+      }
+
+      // Calculate computed quantity
+      const computedQty = computeComputedQty(
+        itemDetails.measure_basis as MeasureBasis,
+        1,
+        width_m,
+        height_m,
+        itemDetails.roll_width_m || undefined,
+        itemDetails.fabric_pricing_mode || undefined
+      );
+
+      const lineTotal = (itemDetails.unit_price || 0) * computedQty;
+
+      // Add accessories to line total
+      const accessoriesTotal = config.accessories?.reduce((sum: number, acc: any) => sum + (acc.price * acc.qty), 0) || 0;
+      const finalLineTotal = lineTotal + accessoriesTotal;
+
+      // Create QuoteLine
+      const { data: newLine, error: lineError } = await supabase
+        .from('QuoteLines')
+        .insert({
+          organization_id: activeOrganizationId,
+          quote_id: quoteId,
+          catalog_item_id: catalogItemId,
+          qty: 1,
+          width_m: width_m,
+          height_m: height_m,
+          measure_basis_snapshot: itemDetails.measure_basis as MeasureBasis,
+          roll_width_m_snapshot: itemDetails.roll_width_m || null,
+          fabric_pricing_mode_snapshot: itemDetails.fabric_pricing_mode || null,
+          computed_qty: computedQty,
+          unit_price_snapshot: itemDetails.unit_price || 0,
+          unit_cost_snapshot: itemDetails.cost_price || 0,
+          line_total: finalLineTotal,
+        })
+        .select()
+        .single();
+
+      if (lineError) {
+        console.error('Error creating quote line:', lineError);
+        throw new Error(`Failed to create quote line: ${lineError.message}`);
+      }
+
+      if (!newLine) {
+        throw new Error('Failed to create quote line: No data returned');
+      }
+
+      // Update quote totals
+      const { data: allLines } = await supabase
+        .from('QuoteLines')
+        .select('line_total')
+        .eq('quote_id', quoteId)
+        .eq('deleted', false);
+
+      const currentSubtotal = (allLines || []).reduce((sum, line) => sum + (line.line_total || 0), 0);
+      const tax = currentSubtotal * 0.1;
+      const total = currentSubtotal + tax;
+
+      await supabase
+        .from('Quotes')
+        .update({
+          totals: {
+            subtotal: currentSubtotal,
+            tax: tax,
+            total: total,
+          },
+        })
+        .eq('id', quoteId)
+        .eq('organization_id', activeOrganizationId);
+
+      refetchLines();
+
+      setShowConfigurator(false);
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Line added',
+        message: 'Curtain configuration added to quote successfully',
+      });
+    } catch (error) {
+      console.error('Error adding line:', error);
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : typeof error === 'object' && error !== null && 'message' in error
+        ? String(error.message)
+        : 'Failed to add line to quote';
+      
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: `Failed to add line to quote: ${errorMessage}`,
+      });
+    }
+  };
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -406,7 +599,7 @@ export default function QuoteNew() {
     if (!isValid) {
       const missingFields: string[] = [];
       
-      if (errors.quote_no) missingFields.push('Quote Number');
+      if (errors.quote_number) missingFields.push('Quote Number');
       if (errors.customer_id) missingFields.push('Customer');
       if (errors.status) missingFields.push('Status');
       if (errors.currency) missingFields.push('Currency');
@@ -426,14 +619,14 @@ export default function QuoteNew() {
 
     try {
       const quoteData: any = {
-        quote_no: values.quote_no.trim(),
+        quote_number: values.quote_number.trim(),
         customer_id: values.customer_id,
         status: values.status,
         currency: values.currency,
         notes: values.notes?.trim() || null,
         totals: {
           subtotal: 0,
-          tax: 0,
+          tax_total: 0,
           total: 0,
         },
       };
@@ -552,12 +745,12 @@ export default function QuoteNew() {
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               {/* Quote Number */}
               <div className="col-span-3">
-                <Label htmlFor="quote_no" className="text-xs" required>Quote Number</Label>
+                <Label htmlFor="quote_number" className="text-xs" required>Quote Number</Label>
                 <Input 
-                  id="quote_no" 
-                  {...register('quote_no')}
+                  id="quote_number" 
+                  {...register('quote_number')}
                   className="py-1 text-xs"
-                  error={errors.quote_no?.message}
+                  error={errors.quote_number?.message}
                   disabled={isReadOnly}
                   placeholder="QT-000001"
                 />
@@ -725,10 +918,10 @@ export default function QuoteNew() {
                 <div className="w-full">
                   <Label htmlFor="status" className="text-xs" required>Status</Label>
                   <SelectShadcn
-                    value={watch('status') || 'draft'}
-                    onValueChange={(value) => {
-                      setValue('status', value as QuoteStatus, { shouldValidate: true });
-                    }}
+                  value={watch('status') || 'draft'}
+                  onValueChange={(value) => {
+                    setValue('status', value as 'draft' | 'sent' | 'approved' | 'rejected', { shouldValidate: true });
+                  }}
                     disabled={isReadOnly}
                   >
                     <SelectTrigger className={`py-1 text-xs ${errors.status ? 'border-red-300 bg-red-50' : ''}`}>
@@ -792,6 +985,153 @@ export default function QuoteNew() {
           </div>
         </div>
       </div>
+
+      {/* Quote Lines Section */}
+      {quoteId && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+          <div className="py-4 px-6 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Quote Lines</h2>
+                <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+                  {loadingLines ? 'Loading...' : `${quoteLines.length} line${quoteLines.length !== 1 ? 's' : ''}`}
+                </p>
+              </div>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  onClick={() => setShowConfigurator(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
+                  style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                >
+                  <Plus style={{ width: '14px', height: '14px' }} />
+                  Add Line
+                </button>
+              )}
+            </div>
+          </div>
+
+          {loadingLines ? (
+            <div className="py-12 text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-sm text-gray-600">Loading quote lines...</p>
+            </div>
+          ) : quoteLines.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-sm text-gray-600 mb-2">No lines added yet</p>
+              <p className="text-xs text-gray-500">Click "Add Line" to configure a curtain</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Item</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Dimensions</th>
+                    <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Qty</th>
+                    <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Unit Price</th>
+                    <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Line Total</th>
+                    {!isReadOnly && (
+                      <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {quoteLines.map((line) => {
+                    const item = (line as any).CatalogItems;
+                    return (
+                      <tr key={line.id} className="hover:bg-gray-50">
+                        <td className="py-4 px-6">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">
+                              {item?.name || 'Unknown Item'}
+                            </p>
+                            <p className="text-xs text-gray-500">{item?.sku || 'N/A'}</p>
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-sm text-gray-700">
+                          {line.width_m && line.height_m
+                            ? `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)} mm`
+                            : 'N/A'}
+                        </td>
+                        <td className="py-4 px-6 text-right text-sm text-gray-900">
+                          {line.computed_qty.toFixed(2)}
+                        </td>
+                        <td className="py-4 px-6 text-right text-sm text-gray-700">
+                          €{line.unit_price_snapshot.toFixed(2)}
+                        </td>
+                        <td className="py-4 px-6 text-right text-sm font-medium text-gray-900">
+                          €{line.line_total.toFixed(2)}
+                        </td>
+                        {!isReadOnly && (
+                          <td className="py-4 px-6">
+                            <div className="flex items-center gap-1 justify-end">
+                              <button
+                                onClick={() => {
+                                  // TODO: Implement edit functionality
+                                  useUIStore.getState().addNotification({
+                                    type: 'info',
+                                    title: 'Coming soon',
+                                    message: 'Edit functionality will be available soon',
+                                  });
+                                }}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                title="Edit line"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Are you sure you want to delete this line?')) return;
+                                  try {
+                                    await supabase
+                                      .from('QuoteLines')
+                                      .update({ deleted: true })
+                                      .eq('id', line.id);
+                                    refetchLines();
+                                    useUIStore.getState().addNotification({
+                                      type: 'success',
+                                      title: 'Line deleted',
+                                      message: 'Quote line has been removed',
+                                    });
+                                  } catch (error) {
+                                    useUIStore.getState().addNotification({
+                                      type: 'error',
+                                      title: 'Error',
+                                      message: 'Failed to delete line',
+                                    });
+                                  }
+                                }}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                title="Delete line"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Curtain Configurator Modal */}
+      {showConfigurator && quoteId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg w-full h-full max-w-7xl m-4 overflow-hidden">
+            <CurtainConfigurator
+              quoteId={quoteId}
+              onComplete={handleCurtainConfigComplete}
+              onClose={() => setShowConfigurator(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
