@@ -5,6 +5,7 @@ import { useCatalogItems, useDeleteCatalogItem } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import ImportCatalog from './ImportCatalog';
 import { 
   Search, 
   Filter,
@@ -20,22 +21,53 @@ import {
   Trash2,
   Archive,
   User,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Package,
+  Building2,
+  FolderTree,
+  Book,
+  Palette
 } from 'lucide-react';
 
 interface Item {
   id: string;
   sku: string;
   itemName: string;
-  manufacturer: string;
-  category: string;
-  family: string;
+  description?: string;
+  item_type?: string;
+  measure_basis?: string;
+  uom?: string;
+  is_fabric?: boolean;
+  unit_price?: number;
+  cost_price?: number;
+  active?: boolean;
+  discontinued?: boolean;
+  manufacturer?: string;
+  category?: string;
+  family?: string;
   image?: string;
 }
 
 export default function Items() {
   const { registerSubmodules } = useSubmoduleNav();
   const { items, loading, error, refetch } = useCatalogItems();
+
+  useEffect(() => {
+    // Register Catalog submodules when this component mounts
+    const currentPath = window.location.pathname;
+    if (currentPath.startsWith('/catalog')) {
+      registerSubmodules('Catalog', [
+        { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
+        { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
+        { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
+        { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
+        { id: 'variants', label: 'Variants', href: '/catalog/variants', icon: Palette },
+      ]);
+      if (import.meta.env.DEV) {
+        console.log('✅ Items.tsx: Registered Catalog submodules');
+      }
+    }
+  }, [registerSubmodules]);
   const { activeOrganizationId } = useOrganizationContext();
   const { deleteItem, isDeleting } = useDeleteCatalogItem();
   const [searchTerm, setSearchTerm] = useState('');
@@ -43,18 +75,15 @@ export default function Items() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  const [sortBy, setSortBy] = useState<'manufacturer' | 'sku' | 'itemName' | 'category' | 'family'>('sku');
+  const [sortBy, setSortBy] = useState<'manufacturer' | 'sku' | 'itemName' | 'item_type' | 'measure_basis' | 'unit_price' | 'active' | 'category' | 'family'>('sku');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedManufacturer, setSelectedManufacturer] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string[]>([]);
-
-  useEffect(() => {
-    registerSubmodules('Catalog', [
-      { id: 'items', label: 'Items', href: '/catalog/items' },
-      { id: 'collections', label: 'Collections', href: '/catalog/collections' },
-    ]);
-  }, [registerSubmodules]);
+  const [selectedItemType, setSelectedItemType] = useState<string[]>([]);
+  const [selectedMeasureBasis, setSelectedMeasureBasis] = useState<string[]>([]);
+  const [selectedActive, setSelectedActive] = useState<string[]>([]);
+  const [showImportModal, setShowImportModal] = useState(false);
 
 
   // Transform catalog items to display format
@@ -64,6 +93,15 @@ export default function Items() {
       id: item.id,
       sku: item.sku,
       itemName: item.name,
+      description: item.description,
+      item_type: item.item_type,
+      measure_basis: item.measure_basis,
+      uom: item.uom,
+      is_fabric: item.is_fabric,
+      unit_price: item.unit_price,
+      cost_price: item.cost_price,
+      active: item.active,
+      discontinued: item.discontinued,
       manufacturer: item.metadata?.manufacturer || 'Not specified',
       category: item.metadata?.category || 'Not specified',
       family: item.metadata?.family || 'Not specified',
@@ -82,6 +120,10 @@ export default function Items() {
       const matchesSearch = !searchTerm || (
         item.sku.toLowerCase().includes(searchLower) ||
         item.itemName.toLowerCase().includes(searchLower) ||
+        (item.description || '').toLowerCase().includes(searchLower) ||
+        (item.item_type || '').toLowerCase().includes(searchLower) ||
+        (item.measure_basis || '').toLowerCase().includes(searchLower) ||
+        (item.uom || '').toLowerCase().includes(searchLower) ||
         item.manufacturer.toLowerCase().includes(searchLower) ||
         item.category.toLowerCase().includes(searchLower) ||
         item.family.toLowerCase().includes(searchLower)
@@ -96,7 +138,16 @@ export default function Items() {
       // Family filter
       const matchesFamily = selectedFamily.length === 0 || selectedFamily.includes(item.family);
 
-      return matchesSearch && matchesManufacturer && matchesCategory && matchesFamily;
+      // Item Type filter
+      const matchesItemType = selectedItemType.length === 0 || (item.item_type && selectedItemType.includes(item.item_type));
+
+      // Measure Basis filter
+      const matchesMeasureBasis = selectedMeasureBasis.length === 0 || (item.measure_basis && selectedMeasureBasis.includes(item.measure_basis));
+
+      // Active filter
+      const matchesActive = selectedActive.length === 0 || (item.active !== undefined && selectedActive.includes(item.active ? 'Active' : 'Inactive'));
+
+      return matchesSearch && matchesManufacturer && matchesCategory && matchesFamily && matchesItemType && matchesMeasureBasis && matchesActive;
     });
 
     // Apply sorting
@@ -125,16 +176,42 @@ export default function Items() {
           aValue = a.family.toLowerCase();
           bValue = b.family.toLowerCase();
           break;
+        case 'item_type':
+          aValue = (a.item_type || '').toLowerCase();
+          bValue = (b.item_type || '').toLowerCase();
+          break;
+        case 'measure_basis':
+          aValue = (a.measure_basis || '').toLowerCase();
+          bValue = (b.measure_basis || '').toLowerCase();
+          break;
+        case 'unit_price':
+          aValue = String(a.unit_price || 0);
+          bValue = String(b.unit_price || 0);
+          break;
+        case 'active':
+          aValue = String(a.active ? 1 : 0);
+          bValue = String(b.active ? 1 : 0);
+          break;
         default:
           aValue = a.sku.toLowerCase();
           bValue = b.sku.toLowerCase();
       }
 
+      // For numeric fields, compare as numbers
+      if (sortBy === 'unit_price' || sortBy === 'active') {
+        const aNum = parseFloat(aValue);
+        const bNum = parseFloat(bValue);
+        if (aNum < bNum) return sortOrder === 'asc' ? -1 : 1;
+        if (aNum > bNum) return sortOrder === 'asc' ? 1 : -1;
+        return 0;
+      }
+      
+      // For string fields, compare as strings
       if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
       if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [searchTerm, itemsData, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedFamily]);
+  }, [searchTerm, itemsData, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedFamily, selectedItemType, selectedMeasureBasis, selectedActive]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
@@ -186,6 +263,9 @@ export default function Items() {
     setSelectedManufacturer([]);
     setSelectedCategory([]);
     setSelectedFamily([]);
+    setSelectedItemType([]);
+    setSelectedMeasureBasis([]);
+    setSelectedActive([]);
     setSearchTerm('');
   };
 
@@ -257,8 +337,12 @@ export default function Items() {
   const manufacturerOptions = Array.from(new Set(displayItems.map(item => item.manufacturer).filter(Boolean)));
   const categoryOptions = Array.from(new Set(displayItems.map(item => item.category).filter(Boolean)));
   const familyOptions = Array.from(new Set(displayItems.map(item => item.family).filter(Boolean)));
+  const itemTypeOptions = Array.from(new Set(displayItems.map(item => item.item_type).filter(Boolean)));
+  const measureBasisOptions = Array.from(new Set(displayItems.map(item => item.measure_basis).filter(Boolean)));
+  const activeOptions = ['Active', 'Inactive'];
 
-  const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedFamily.length;
+  const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedFamily.length + 
+                             selectedItemType.length + selectedMeasureBasis.length + selectedActive.length;
 
   return (
     <div className="py-6">
@@ -270,6 +354,7 @@ export default function Items() {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <Upload className="w-4 h-4" />
@@ -293,7 +378,7 @@ export default function Items() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search items by name, SKU, manufacturer, category, or family..."
+                placeholder="Search items by SKU, name, description, type, measure basis, UOM, manufacturer, category, or family..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -343,6 +428,119 @@ export default function Items() {
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-200">
               <div className="grid grid-cols-3 gap-4 mb-4">
+                {/* Item Type Filter */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Item Type</span>
+                    {selectedItemType.length > 0 && (
+                      <button
+                        onClick={() => setSelectedItemType([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                      >
+                        Clear ({selectedItemType.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {itemTypeOptions.map((itemType) => (
+                      <div
+                        key={itemType}
+                        onClick={() => {
+                          setSelectedItemType(prev => 
+                            prev.includes(itemType) 
+                              ? prev.filter(t => t !== itemType)
+                              : [...prev, itemType]
+                          );
+                        }}
+                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedItemType.includes(itemType)}
+                          readOnly
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm text-gray-700">{itemType}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Measure Basis Filter */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Measure Basis</span>
+                    {selectedMeasureBasis.length > 0 && (
+                      <button
+                        onClick={() => setSelectedMeasureBasis([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                      >
+                        Clear ({selectedMeasureBasis.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {measureBasisOptions.map((measureBasis) => (
+                      <div
+                        key={measureBasis}
+                        onClick={() => {
+                          setSelectedMeasureBasis(prev => 
+                            prev.includes(measureBasis) 
+                              ? prev.filter(m => m !== measureBasis)
+                              : [...prev, measureBasis]
+                          );
+                        }}
+                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedMeasureBasis.includes(measureBasis)}
+                          readOnly
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm text-gray-700">{measureBasis}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Active Status Filter */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Status</span>
+                    {selectedActive.length > 0 && (
+                      <button
+                        onClick={() => setSelectedActive([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                      >
+                        Clear ({selectedActive.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {activeOptions.map((status) => (
+                      <div
+                        key={status}
+                        onClick={() => {
+                          setSelectedActive(prev => 
+                            prev.includes(status) 
+                              ? prev.filter(s => s !== status)
+                              : [...prev, status]
+                          );
+                        }}
+                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedActive.includes(status)}
+                          readOnly
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm text-gray-700">{status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 {/* Manufacturer Filter */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -459,16 +657,7 @@ export default function Items() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('manufacturer')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Manufacturer
-                      {sortBy === 'manufacturer' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('sku')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -477,41 +666,60 @@ export default function Items() {
                       {sortBy === 'sku' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('itemName')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Item Name
+                      Name
                       {sortBy === 'itemName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Image</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
-                      onClick={() => handleSort('category')}
+                      onClick={() => handleSort('item_type')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Category
-                      {sortBy === 'category' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                      Type
+                      {sortBy === 'item_type' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
-                      onClick={() => handleSort('family')}
+                      onClick={() => handleSort('measure_basis')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Family
-                      {sortBy === 'family' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                      Measure Basis
+                      {sortBy === 'measure_basis' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">UOM</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('unit_price')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Unit Price
+                      {sortBy === 'unit_price' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Cost Price</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('active')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Status
+                      {sortBy === 'active' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 px-6 text-center">
+                    <td colSpan={9} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                           <Search className="w-6 h-6 text-gray-400" />
@@ -531,45 +739,53 @@ export default function Items() {
                       key={item.id} 
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {item.manufacturer}
-                      </td>
-                      <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                      <td className="py-3 px-4 text-gray-900 text-xs font-medium">
                         {item.sku}
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
+                      <td className="py-3 px-4 text-gray-700 text-xs">
                         {item.itemName}
                       </td>
-                      <td className="py-4 px-6 text-gray-400 text-sm">
-                        {item.image ? (
-                          <img src={item.image} alt={item.itemName} className="w-10 h-10 object-cover rounded" />
-                        ) : (
-                          <span className="flex items-center justify-center w-10 h-10 bg-gray-100 rounded">
-                            <ImageIcon className="w-4 h-4 text-gray-400" />
-                          </span>
-                        )}
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                          {item.item_type || 'N/A'}
+                        </span>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {item.category}
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        {item.measure_basis || 'N/A'}
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {item.family}
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        {item.uom || 'N/A'}
                       </td>
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        ${item.unit_price?.toFixed(2) || '0.00'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        ${item.cost_price?.toFixed(2) || '0.00'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          item.active 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {item.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
                           <button 
                             onClick={(e) => handleEditItem(item, e)}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Editar ${item.itemName}`}
-                            title={`Editar ${item.itemName}`}
+                            aria-label={`Edit ${item.itemName}`}
+                            title={`Edit ${item.itemName}`}
                           >
                             <Edit className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={(e) => handleArchiveItem(item, e)}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Archivar ${item.itemName}`}
-                            title={`Archivar ${item.itemName}`}
+                            aria-label={`Archive ${item.itemName}`}
+                            title={`Archive ${item.itemName}`}
                           >
                             <Archive className="w-4 h-4" />
                           </button>
@@ -577,8 +793,8 @@ export default function Items() {
                             onClick={(e) => handleDeleteItem(item, e)}
                             disabled={isDeleting}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                            aria-label={`Eliminar ${item.itemName}`}
-                            title={`Eliminar ${item.itemName}`}
+                            aria-label={`Delete ${item.itemName}`}
+                            title={`Delete ${item.itemName}`}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -636,6 +852,16 @@ export default function Items() {
           </div>
         </div>
       </div>
+
+      {/* Import Modal */}
+      <ImportCatalog
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={() => {
+          setShowImportModal(false);
+          refetch();
+        }}
+      />
     </div>
   );
 }

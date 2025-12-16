@@ -1,10 +1,11 @@
 import { CurtainConfiguration } from '../CurtainConfigurator';
+import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 
 interface ProductStepProps {
-  config: CurtainConfiguration;
-  onUpdate: (updates: Partial<CurtainConfiguration>) => void;
+  config: CurtainConfiguration | ProductConfig;
+  onUpdate: (updates: Partial<CurtainConfiguration | ProductConfig>) => void;
 }
 
 const PRODUCT_TYPES = [
@@ -42,7 +43,7 @@ const PRODUCT_TYPES = [
     ]
   },
   { 
-    id: 'drapery-wave', 
+    id: 'drapery', 
     name: 'Drapery Wave / Rippel Fold',
     maxWidth: 3500,
     maxHeight: 4500,
@@ -64,7 +65,7 @@ const PRODUCT_TYPES = [
     ]
   },
   { 
-    id: 'window-films', 
+    id: 'window-film', 
     name: 'Window Films',
     maxWidth: 2000,
     maxHeight: 3000,
@@ -74,25 +75,24 @@ const PRODUCT_TYPES = [
       'Easy installation'
     ]
   },
+  { 
+    id: 'accessories', 
+    name: 'Accessories',
+    maxWidth: 0,
+    maxHeight: 0,
+    variations: 'Individual Items',
+    additionalInfo: [
+      'Controls, clutches, supports, and other accessories',
+      'Items sold separately from main products'
+    ],
+    isAccessoriesOnly: true
+  },
 ];
 
 export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        {/* Position */}
-        <div className="mb-6">
-          <Label htmlFor="position" className="text-sm font-medium mb-2">POSITION</Label>
-          <Input
-            id="position"
-            type="text"
-            value={config.position || ''}
-            onChange={(e) => onUpdate({ position: e.target.value })}
-            className="w-32"
-            placeholder=""
-          />
-        </div>
-
         {/* Product Type */}
         <div className="relative">
           <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
@@ -103,11 +103,21 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                 <div key={product.id} className="relative">
                   {/* Product Card */}
                   <button
-                    onClick={() => onUpdate({ productType: isSelected ? undefined : product.id })}
-                    className={`w-full p-4 border-2 rounded-lg text-left transition-all ${
+                    type="button"
+                    onClick={() => {
+                      // Toggle selection: if selected, deselect; if not selected, select
+                      if (isSelected) {
+                        // Clicking selected product closes overlay by deselecting
+                        onUpdate({ productType: undefined });
+                      } else {
+                        // Select new product
+                        onUpdate({ productType: product.id });
+                      }
+                    }}
+                    className={`w-full p-[5px] border-2 rounded-lg text-left transition-all ${
                       isSelected
                         ? 'border-gray-400 bg-gray-600 text-white'
-                        : 'border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
+                        : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -155,8 +165,8 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
               ? 'calc(33.333% + 5.33px)'
               : 'calc(66.666% + 10.67px)';
             
-            // Card height: p-4 (16px top + 16px bottom) + text content (~20px) = ~52px
-            const cardHeight = 52;
+            // Card height: p-[5px] (5px top + 5px bottom) + text content (~20px) = ~30px
+            const cardHeight = 30;
             const topOffset = `${56 + row * (cardHeight + gap) + cardHeight}px`; // Label height + rows above + current card height
 
             return (
@@ -171,20 +181,33 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                 {/* Details Content */}
                 <div className="space-y-3">
                   {/* Max Width x Height */}
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
-                    <p className="text-sm font-bold text-gray-900">
-                      {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
-                    </p>
-                  </div>
+                  {!selectedProduct.isAccessoriesOnly && (
+                    <>
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
+                        <p className="text-sm font-bold text-gray-900">
+                          {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
+                        </p>
+                      </div>
+                      
+                      {/* Variations Available */}
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
+                        <p className="text-sm font-bold text-gray-900">
+                          {selectedProduct.variations}
+                        </p>
+                      </div>
+                    </>
+                  )}
                   
-                  {/* Variations Available */}
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
-                    <p className="text-sm font-bold text-gray-900">
-                      {selectedProduct.variations}
-                    </p>
-                  </div>
+                  {selectedProduct.isAccessoriesOnly && (
+                    <div>
+                      <p className="text-xs text-gray-600 mb-1">Type:</p>
+                      <p className="text-sm font-bold text-gray-900">
+                        {selectedProduct.variations}
+                      </p>
+                    </div>
+                  )}
                   
                   {/* Divider */}
                   <div className="border-t border-gray-300 pt-3">

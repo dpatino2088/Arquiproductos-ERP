@@ -23,17 +23,16 @@ export function computeComputedQty(
     case 'unit':
       return qty;
 
-    case 'width_linear':
-      if (widthM == null) {
-        throw new Error('width_m is required for width_linear measure basis');
+    case 'linear_m':
+      // For linear items, use width_m if available, otherwise height_m
+      // This covers both cases: tubes (width) and side channels (height)
+      if (widthM != null) {
+        return qty * widthM;
+      } else if (heightM != null) {
+        return qty * heightM;
+      } else {
+        throw new Error('width_m or height_m is required for linear_m measure basis');
       }
-      return qty * widthM;
-
-    case 'height_linear':
-      if (heightM == null) {
-        throw new Error('height_m is required for height_linear measure basis');
-      }
-      return qty * heightM;
 
     case 'area':
       if (widthM == null || heightM == null) {

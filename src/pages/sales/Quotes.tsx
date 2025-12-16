@@ -76,26 +76,41 @@ export default function Quotes() {
   const [selectedStatus, setSelectedStatus] = useState<QuoteStatus[]>([]);
 
   useEffect(() => {
-    registerSubmodules('Sales', [
-      { id: 'quotes', label: 'Quotes', href: '/sales/quotes' },
-      { id: 'orders', label: 'Orders', href: '/sales/orders' },
-    ]);
+    // Only register Sales submodules if we're actually in the Sales module
+    const currentPath = window.location.pathname;
+    if (currentPath.startsWith('/sales')) {
+      registerSubmodules('Sales', [
+        { id: 'quotes', label: 'Quotes', href: '/sales/quotes' },
+        { id: 'orders', label: 'Orders', href: '/sales/orders' },
+      ]);
+    }
   }, [registerSubmodules]);
 
   // Transform quotes to display format
   const quotesData: QuoteItem[] = useMemo(() => {
     if (!quotes) return [];
-    return quotes.map(quote => ({
-      id: quote.id,
-      quoteNo: (quote as any).quote_number || (quote as any).quote_no || 'N/A',
-      status: quote.status,
-      customerName: (quote as any).DirectoryCustomers?.customer_name || 'N/A',
-      subtotal: quote.totals?.subtotal || 0,
-      tax: quote.totals?.tax_total || quote.totals?.tax || 0,
-      total: quote.totals?.total || 0,
-      currency: quote.currency || 'USD',
-      createdAt: quote.created_at,
-    }));
+    return quotes.map(quote => {
+      // Calculate total from QuoteLines (sum of all line_total)
+      const quoteLines = (quote as any).QuoteLines || [];
+      const linesTotal = quoteLines
+        .filter((line: any) => !line.deleted)
+        .reduce((sum: number, line: any) => sum + (line.line_total || 0), 0);
+      
+      // Use calculated total from lines (sum of all line_total), or fallback to quote.totals
+      const calculatedTotal = linesTotal > 0 ? linesTotal : (quote.totals?.total || 0);
+      
+      return {
+        id: quote.id,
+        quoteNo: (quote as any).quote_no || 'N/A',
+        status: quote.status,
+        customerName: (quote as any).DirectoryCustomers?.customer_name || 'N/A',
+        subtotal: calculatedTotal, // Subtotal is the same as total (sum of line_total)
+        tax: 0, // Tax is included in line_total if applicable
+        total: calculatedTotal, // Total is the sum of all line_total
+        currency: quote.currency || 'USD',
+        createdAt: quote.created_at,
+      };
+    });
   }, [quotes]);
 
   // Filter and sort quotes

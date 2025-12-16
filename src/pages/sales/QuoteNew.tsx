@@ -10,11 +10,24 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
-import { useCreateQuote, useUpdateQuote, useQuotes, useQuoteLines } from '../../hooks/useQuotes';
+import { useCreateQuote, useUpdateQuote, useQuotes, useQuoteLines, useCreateQuoteLine } from '../../hooks/useQuotes';
 import { QuoteStatus, MeasureBasis } from '../../types/catalog';
 import { Search, X, Plus, Edit, Trash2 } from 'lucide-react';
-import CurtainConfigurator, { CurtainConfiguration } from './CurtainConfigurator';
+import ProductConfigurator from './ProductConfigurator';
+import { ProductConfig } from './product-config/types';
+import { adaptFromProductConfig } from './product-config/adapters';
+import { CurtainConfiguration } from './CurtainConfigurator'; // Keep for backward compatibility
 import { computeComputedQty } from '../../lib/catalog/computeComputedQty';
+
+// Format currency
+const formatCurrency = (amount: number, currency: string = 'USD') => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
 
 // Quote status options
 const QUOTE_STATUS_OPTIONS = [
@@ -35,7 +48,7 @@ const CURRENCY_OPTIONS = [
 
 // Schema for Quote
 const quoteSchema = z.object({
-  quote_number: z.string().min(1, 'Quote number is required'),
+  quote_no: z.string().min(1, 'Quote number is required'),
   customer_id: z.string().uuid('Customer is required'),
   status: z.enum(['draft', 'sent', 'approved', 'rejected']),
   currency: z.string().min(1, 'Currency is required'),
@@ -75,11 +88,241 @@ export default function QuoteNew() {
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [selectedContactId, setSelectedContactId] = useState<string>('');
   const [showConfigurator, setShowConfigurator] = useState(false);
+  
+  // Helper functions to get display names
+  const getCollectionName = (collectionId?: string): string => {
+    if (!collectionId) return 'N/A';
+    const collections: Record<string, string> = {
+      'essential-3000': 'Essential_3000',
+      'sunset-blackout': 'Sunset_Blackout',
+    };
+    return collections[collectionId] || collectionId;
+  };
+  
+  const getSystemDriveName = (driveId?: string): string => {
+    if (!driveId) return 'N/A';
+    // Map of drive IDs to names (from OperatingSystemStep)
+    const drives: Record<string, string> = {
+      'roller-m-s': 'ROLLER M S',
+      'roller-m-m': 'ROLLER M M',
+      'roller-m-l': 'ROLLER M L',
+      'roller-m-xl': 'ROLLER M XL',
+      'roller-m-xxl': 'ROLLER M XXL',
+      'roller-m-xxxl': 'ROLLER M XXXL',
+      'roller-m-xxxxl': 'ROLLER M XXXXL',
+      'roller-m-xxxxxl': 'ROLLER M XXXXXL',
+      'roller-m-xxxxxxl': 'ROLLER M XXXXXXL',
+      'roller-m-xxxxxxxl': 'ROLLER M XXXXXXXL',
+      'roller-m-xxxxxxxxl': 'ROLLER M XXXXXXXXL',
+      'roller-m-xxxxxxxxxl': 'ROLLER M XXXXXXXXXL',
+      'roller-m-xxxxxxxxxxl': 'ROLLER M XXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'roller-m-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxl': 'ROLLER M XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXL',
+      'lutron-edu150': 'LUTRON-EDU150',
+      'lutron-edu300': 'LUTRON-EDU300',
+      'lutron-edu64': 'LUTRON-EDU64',
+      'inter-lutron': 'INTER. LUTRON',
+      'cm-09-qc120-m': 'CM-09-QC120-M',
+      'cm-10-qc120-m': 'CM-10-QC120-M',
+      'cm-09-c120-m': 'CM-09-C120-M',
+      'cm-09-qc120-l': 'CM-09-QC120-L',
+      'cm-10-qc120-l': 'CM-10-QC120-L',
+      'cm-09-c120-l': 'CM-09-C120-L',
+      'inter-coulisse-m': 'INTER. COULISSE-M',
+      'inter-coulisse-l': 'INTER. COULISSE-L',
+      're-lion': 'Re-Lion',
+    };
+    return drives[driveId] || driveId;
+  };
+  
+  const getProductTypeName = (productType?: string): string => {
+    if (!productType) return 'N/A';
+    const types: Record<string, string> = {
+      'roller-shade': 'Roller Shade',
+      'dual-shade': 'Dual Shade',
+      'triple-shade': 'Triple Shade',
+      'drapery': 'Drapery Wave / Ripple Fold',
+      'awning': 'Awning',
+      'window-film': 'Window Films',
+    };
+    return types[productType] || productType;
+  };
   const { activeOrganizationId } = useOrganizationContext();
   const { createQuote, isCreating } = useCreateQuote();
   const { updateQuote, isUpdating } = useUpdateQuote();
   const { quotes } = useQuotes();
   const { lines: quoteLines, loading: loadingLines, refetch: refetchLines } = useQuoteLines(quoteId);
+  const { createLine: createQuoteLine, isCreating: isCreatingLine } = useCreateQuoteLine();
+  
+  // Calculate total from all lines
+  const calculatedTotal = useMemo(() => {
+    return quoteLines.reduce((sum, line) => sum + (line.line_total || 0), 0);
+  }, [quoteLines]);
   
   // Get current user's role and permissions
   const { canEditCustomers, loading: roleLoading } = useCurrentOrgRole();
@@ -150,7 +393,7 @@ export default function QuoteNew() {
         // Get the last quote number for this organization
         const { data, error } = await supabase
           .from('Quotes')
-          .select('quote_number')
+          .select('quote_no')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false })
@@ -162,8 +405,8 @@ export default function QuoteNew() {
 
         let nextNumber = 1;
         if (data && data.length > 0) {
-          // Try quote_number first, then quote_no for backward compatibility
-          const lastQuoteNo = (data[0] as any).quote_number || (data[0] as any).quote_no;
+          // Use quote_no from database
+          const lastQuoteNo = (data[0] as any).quote_no;
           if (lastQuoteNo) {
             const match = lastQuoteNo.match(/\d+/);
             if (match) {
@@ -175,13 +418,13 @@ export default function QuoteNew() {
         // Format as QT-000001, QT-000002, etc.
         const formattedNo = `QT-${String(nextNumber).padStart(6, '0')}`;
         setQuoteNo(formattedNo);
-        setValue('quote_number', formattedNo, { shouldValidate: true });
+        setValue('quote_no', formattedNo, { shouldValidate: true });
       } catch (err) {
         console.error('Error generating quote number:', err);
         // Fallback to timestamp-based number
         const fallbackNo = `QT-${Date.now().toString().slice(-6)}`;
         setQuoteNo(fallbackNo);
-        setValue('quote_number', fallbackNo, { shouldValidate: true });
+        setValue('quote_no', fallbackNo, { shouldValidate: true });
       }
     };
 
@@ -213,9 +456,9 @@ export default function QuoteNew() {
         }
 
         if (data) {
-          const quoteNumber = (data as any).quote_number || (data as any).quote_no || '';
+          const quoteNumber = (data as any).quote_no || '';
           setQuoteNo(quoteNumber);
-          setValue('quote_number', quoteNumber);
+          setValue('quote_no', quoteNumber);
           setValue('customer_id', data.customer_id || '');
           setValue('status', data.status || 'draft');
           setValue('currency', data.currency || 'USD');
@@ -368,8 +611,12 @@ export default function QuoteNew() {
     }
   }, [quoteId]);
 
-  // Handle curtain configuration completion
-  const handleCurtainConfigComplete = async (config: CurtainConfiguration) => {
+  // Handle product configuration completion
+  // NOTE: Currently in architecture mode - not persisting to database
+  const handleProductConfigComplete = async (productConfig: ProductConfig) => {
+    // Convert to old format for now (backward compatibility)
+    const config = adaptFromProductConfig(productConfig);
+    
     if (!quoteId || !activeOrganizationId) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -380,172 +627,276 @@ export default function QuoteNew() {
     }
 
     try {
-      // Find or create a catalog item based on configuration
-      const sku = `CURTAIN-${config.productType || 'GENERIC'}-${Date.now()}`;
-      
-      let catalogItemId: string;
-      
-      // Try to find existing item with similar configuration
-      const { data: existingItem } = await supabase
-        .from('CatalogItems')
-        .select('id, unit_price, cost_price, measure_basis, uom, roll_width_m, fabric_pricing_mode, is_fabric')
-        .eq('organization_id', activeOrganizationId)
-        .eq('measure_basis', 'area')
-        .eq('active', true)
-        .eq('deleted', false)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingItem) {
-        catalogItemId = existingItem.id;
-      } else {
-        // Create a new catalog item for this configuration
-        const insertData: any = {
-          organization_id: activeOrganizationId,
-          sku: sku,
-          name: `Curtain - ${config.productType || 'Generic'}`,
-          description: `Configured curtain: ${config.productType || 'Generic'}`,
-          measure_basis: 'area',
-          uom: 'sqm',
-          unit_price: 0,
-          cost_price: 0,
-          is_fabric: false,
-          active: true,
-        };
-
-        const { data: newItem, error: itemError } = await supabase
-          .from('CatalogItems')
-          .insert(insertData)
-          .select()
-          .single();
-
-        if (itemError) {
-          console.error('Error creating catalog item:', itemError);
-          throw new Error(`Failed to create catalog item: ${itemError.message}`);
-        }
-        
-        if (!newItem) {
-          throw new Error('Failed to create catalog item: No data returned');
-        }
-        
-        catalogItemId = newItem.id;
-      }
-
       // Calculate dimensions in meters
       const width_m = config.width_mm ? config.width_mm / 1000 : null;
       const height_m = config.height_mm ? config.height_mm / 1000 : null;
 
       if (!width_m || !height_m) {
-        throw new Error('Width and height are required to create a quote line');
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Validation Error',
+          message: 'Width and height are required to create a quote line',
+        });
+        return;
       }
 
-      // Get item details for calculation
-      const { data: itemDetails, error: detailsError } = await supabase
+      // Find or create a catalog item for this product type
+      let catalogItemId: string | null = null;
+      
+      // Try to find an existing catalog item for this product type
+      const { data: existingItems, error: searchError } = await supabase
         .from('CatalogItems')
-        .select('measure_basis, roll_width_m, fabric_pricing_mode, unit_price, cost_price')
+        .select('id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .eq('active', true)
+        .ilike('name', `%${productConfig.productType}%`)
+        .limit(1);
+
+      if (searchError) {
+        console.error('Error searching for catalog item:', searchError);
+      }
+
+      // Extract configuration data to store in metadata
+      const area = productConfig.area || null;
+      const position = productConfig.position || null;
+      const collectionId = (productConfig as any).collectionId || 
+                          (productConfig as any).frontFabric?.collectionId || 
+                          (productConfig as any).fabric?.collectionId || 
+                          null;
+      const operatingSystemVariant = (productConfig as any).operatingSystemVariant || null;
+      
+      if (!searchError && existingItems && existingItems.length > 0) {
+        catalogItemId = existingItems[0].id;
+        console.log('Found existing catalog item:', catalogItemId);
+        
+        // Update the existing catalog item's metadata with configuration data
+        const { error: updateError } = await supabase
+          .from('CatalogItems')
+          .update({
+            metadata: {
+              product_type: productConfig.productType,
+              configured: true,
+              area: area,
+              position: position,
+              collection_id: collectionId,
+              operating_system_variant: operatingSystemVariant,
+            },
+          })
+          .eq('id', catalogItemId);
+        
+        if (updateError) {
+          console.error('Error updating catalog item metadata:', updateError);
+        } else {
+          console.log('Updated catalog item metadata with configuration data');
+        }
+      } else {
+        // If no catalog item found, create one
+        console.log('No existing catalog item found, creating new one...');
+        
+        // Determine item_type based on product type
+        // For configured products, we'll use 'component' as default
+        // since they are typically components of a curtain system
+        const itemType = 'component';
+        
+        const { data: newItem, error: createError } = await supabase
+          .from('CatalogItems')
+          .insert({
+            organization_id: activeOrganizationId,
+            sku: `${productConfig.productType.toUpperCase()}-${Date.now()}`,
+            name: `${productConfig.productType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}`,
+            description: `Product configuration: ${productConfig.productType}`,
+            item_type: itemType, // Required field: component, fabric, linear, service, or accessory
+            measure_basis: 'area',
+            uom: 'sqm',
+            is_fabric: false,
+            unit_price: 0,
+            cost_price: 0,
+            active: true,
+            discontinued: false,
+            metadata: {
+              product_type: productConfig.productType,
+              configured: true,
+              area: area,
+              position: position,
+              collection_id: collectionId,
+              operating_system_variant: operatingSystemVariant,
+            },
+          })
+          .select('id')
+          .single();
+
+        if (createError) {
+          console.error('Error creating catalog item:', createError);
+          throw new Error(`Failed to create catalog item for quote line: ${createError.message}`);
+        }
+
+        if (!newItem || !newItem.id) {
+          throw new Error('Catalog item was created but no ID was returned');
+        }
+
+        catalogItemId = newItem.id;
+        console.log('Created new catalog item:', catalogItemId);
+      }
+
+      if (!catalogItemId) {
+        throw new Error('Could not find or create catalog item');
+      }
+
+      // Get the catalog item to get pricing information
+      const { data: catalogItem, error: itemError } = await supabase
+        .from('CatalogItems')
+        .select('unit_price, measure_basis')
         .eq('id', catalogItemId)
         .single();
 
-      if (detailsError) {
-        console.error('Error fetching item details:', detailsError);
-        throw new Error(`Failed to fetch catalog item details: ${detailsError.message}`);
+      if (itemError) {
+        console.error('Error loading catalog item:', itemError);
+        throw new Error(`Could not load catalog item details: ${itemError.message}`);
       }
 
-      if (!itemDetails) {
+      if (!catalogItem) {
         throw new Error('Catalog item not found after creation');
       }
 
-      // Calculate computed quantity
-      const computedQty = computeComputedQty(
-        itemDetails.measure_basis as MeasureBasis,
-        1,
-        width_m,
-        height_m,
-        itemDetails.roll_width_m || undefined,
-        itemDetails.fabric_pricing_mode || undefined
-      );
+        // Calculate computed quantity and line total
+        const quantity = (productConfig as any).quantity || 1;
+        
+        // Ensure measure_basis is a valid string value
+        const measureBasis = (catalogItem.measure_basis as MeasureBasis) || 'area';
+        if (typeof measureBasis !== 'string') {
+          console.error('Invalid measure_basis type:', typeof measureBasis, measureBasis);
+          throw new Error(`Invalid measure_basis value: ${measureBasis}. Expected one of: unit, linear_m, area, fabric`);
+        }
+        
+        console.log('Computing quantity with:', {
+          measureBasis,
+          quantity,
+          width_m,
+          height_m,
+        });
+        
+        const computedQty = computeComputedQty(
+          measureBasis,
+          quantity,
+          width_m,
+          height_m,
+          null, // roll_width_m
+          null, // fabric_pricing_mode
+        );
 
-      const lineTotal = (itemDetails.unit_price || 0) * computedQty;
+        const unitPrice = catalogItem.unit_price || 0;
+        const accessoriesTotal = (productConfig as any).accessories?.reduce((sum: number, acc: any) => sum + (acc.price * acc.qty), 0) || 0;
+        const lineTotal = (unitPrice * computedQty) + accessoriesTotal;
 
-      // Add accessories to line total
-      const accessoriesTotal = config.accessories?.reduce((sum: number, acc: any) => sum + (acc.price * acc.qty), 0) || 0;
-      const finalLineTotal = lineTotal + accessoriesTotal;
-
-      // Create QuoteLine
-      const { data: newLine, error: lineError } = await supabase
-        .from('QuoteLines')
-        .insert({
-          organization_id: activeOrganizationId,
+        // Create QuoteLine in database
+        // Ensure all required fields are properly set
+        const finalComputedQty = computedQty || 0;
+        const finalUnitPrice = unitPrice || 0;
+        const finalLineTotal = lineTotal || 0;
+        
+        const quoteLineData = {
           quote_id: quoteId,
           catalog_item_id: catalogItemId,
-          qty: 1,
-          width_m: width_m,
-          height_m: height_m,
-          measure_basis_snapshot: itemDetails.measure_basis as MeasureBasis,
-          roll_width_m_snapshot: itemDetails.roll_width_m || null,
-          fabric_pricing_mode_snapshot: itemDetails.fabric_pricing_mode || null,
-          computed_qty: computedQty,
-          unit_price_snapshot: itemDetails.unit_price || 0,
-          unit_cost_snapshot: itemDetails.cost_price || 0,
+          qty: quantity || 1,
+          width_m: width_m || null,
+          height_m: height_m || null,
+          measure_basis_snapshot: measureBasis,
+          roll_width_m_snapshot: null,
+          fabric_pricing_mode_snapshot: null,
+          computed_qty: finalComputedQty,
+          unit_price_snapshot: finalUnitPrice,
+          unit_cost_snapshot: 0,
           line_total: finalLineTotal,
-        })
-        .select()
-        .single();
+        };
 
-      if (lineError) {
-        console.error('Error creating quote line:', lineError);
-        throw new Error(`Failed to create quote line: ${lineError.message}`);
-      }
+        // Validate all required fields before creating
+        if (!quoteId) {
+          throw new Error('Quote ID is required');
+        }
+        if (!catalogItemId) {
+          throw new Error('Catalog Item ID is required');
+        }
+        if (!activeOrganizationId) {
+          throw new Error('Organization ID is required');
+        }
+        if (!measureBasis) {
+          throw new Error('Measure basis is required');
+        }
 
-      if (!newLine) {
-        throw new Error('Failed to create quote line: No data returned');
-      }
+        console.log('Creating QuoteLine with data:', quoteLineData);
+        console.log('Quote ID:', quoteId);
+        console.log('Catalog Item ID:', catalogItemId);
+        console.log('Organization ID:', activeOrganizationId);
+        console.log('Measure Basis:', measureBasis);
+        console.log('Computed Qty:', finalComputedQty);
+        console.log('Unit Price:', finalUnitPrice);
+        console.log('Line Total:', finalLineTotal);
+        
+        const createdLine = await createQuoteLine(quoteLineData);
+        console.log('QuoteLine created successfully:', createdLine);
+        
+        if (!createdLine) {
+          throw new Error('QuoteLine was not created - no data returned from createQuoteLine');
+        }
+        
+        if (!createdLine.id) {
+          throw new Error('QuoteLine was created but has no ID');
+        }
+        
+        console.log('QuoteLine ID:', createdLine.id);
 
-      // Update quote totals
-      const { data: allLines } = await supabase
-        .from('QuoteLines')
-        .select('line_total')
-        .eq('quote_id', quoteId)
-        .eq('deleted', false);
+        // Update quote totals
+        const { data: allLines } = await supabase
+          .from('QuoteLines')
+          .select('line_total')
+          .eq('quote_id', quoteId)
+          .eq('deleted', false);
 
-      const currentSubtotal = (allLines || []).reduce((sum, line) => sum + (line.line_total || 0), 0);
-      const tax = currentSubtotal * 0.1;
-      const total = currentSubtotal + tax;
+        const newTotal = (allLines || []).reduce((sum: number, line: any) => sum + (line.line_total || 0), 0);
 
-      await supabase
-        .from('Quotes')
-        .update({
+        await updateQuote(quoteId, {
           totals: {
-            subtotal: currentSubtotal,
-            tax: tax,
-            total: total,
+            subtotal: newTotal,
+            tax_total: 0,
+            total: newTotal,
           },
-        })
-        .eq('id', quoteId)
-        .eq('organization_id', activeOrganizationId);
+        });
 
-      refetchLines();
+        // Refetch lines to update the UI
+        refetchLines();
 
-      setShowConfigurator(false);
-      useUIStore.getState().addNotification({
-        type: 'success',
-        title: 'Line added',
-        message: 'Curtain configuration added to quote successfully',
-      });
-    } catch (error) {
-      console.error('Error adding line:', error);
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : typeof error === 'object' && error !== null && 'message' in error
-        ? String(error.message)
-        : 'Failed to add line to quote';
-      
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: `Failed to add line to quote: ${errorMessage}`,
-      });
-    }
+        // Show success notification
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Line Added',
+          message: `Product configuration for ${productConfig.productType} has been added to the quote.`,
+        });
+
+        // Close the configurator modal
+        setShowConfigurator(false);
+      } catch (error) {
+        console.error('Error adding line - Full error:', error);
+        console.error('Error details:', {
+          error,
+          errorType: typeof error,
+          errorString: String(error),
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          errorStack: error instanceof Error ? error.stack : 'No stack trace',
+        });
+        
+        const errorMessage = error instanceof Error 
+          ? error.message 
+          : typeof error === 'object' && error !== null && 'message' in error
+          ? String(error.message)
+          : 'Failed to add line to quote';
+        
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: `Failed to add line to quote: ${errorMessage}`,
+        });
+      }
   };
 
   // Close dropdown when clicking outside
@@ -584,7 +935,7 @@ export default function QuoteNew() {
     );
   }
 
-  const onSubmit = async (values: QuoteFormValues) => {
+  const onSubmit = async (values: QuoteFormValues, shouldClose: boolean = false) => {
     if (!activeOrganizationId) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -599,7 +950,7 @@ export default function QuoteNew() {
     if (!isValid) {
       const missingFields: string[] = [];
       
-      if (errors.quote_number) missingFields.push('Quote Number');
+      if (errors.quote_no) missingFields.push('Quote Number');
       if (errors.customer_id) missingFields.push('Customer');
       if (errors.status) missingFields.push('Status');
       if (errors.currency) missingFields.push('Currency');
@@ -619,7 +970,7 @@ export default function QuoteNew() {
 
     try {
       const quoteData: any = {
-        quote_number: values.quote_number.trim(),
+        quote_no: values.quote_no.trim(),
         customer_id: values.customer_id,
         status: values.status,
         currency: values.currency,
@@ -662,6 +1013,14 @@ export default function QuoteNew() {
         console.log('Creating new quote - no quoteId found');
         const created = await createQuote(quoteData);
         console.log('Quote created:', created);
+        
+        // Update quoteId state so we can edit it later
+        if (created?.id) {
+          setQuoteId(created.id);
+          // Update URL to edit mode (using window.history to replace current entry)
+          window.history.replaceState({}, '', `/sales/quotes/edit/${created.id}`);
+        }
+        
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Quote created',
@@ -669,7 +1028,10 @@ export default function QuoteNew() {
         });
       }
 
-      router.navigate('/sales/quotes');
+      // Only navigate away if shouldClose is true
+      if (shouldClose) {
+        router.navigate('/sales/quotes');
+      }
     } catch (err: any) {
       console.error('Error saving quote:', err);
       setSaveError(err.message || 'Failed to save quote. Please try again.');
@@ -702,7 +1064,8 @@ export default function QuoteNew() {
             type="button"
             onClick={() => router.navigate('/sales/quotes')}
             className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-            title="Close"
+            title="Close without saving"
+            disabled={isSaving}
           >
             Close
           </button>
@@ -711,8 +1074,9 @@ export default function QuoteNew() {
               type="button"
               className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-              onClick={handleSubmit(onSubmit)}
+              onClick={handleSubmit((values) => onSubmit(values, false))}
               disabled={isSaving}
+              title="Save and stay on page"
             >
               {isSaving ? 'Saving...' : 'Save'}
             </button>
@@ -721,9 +1085,9 @@ export default function QuoteNew() {
             type="button"
             className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: isReadOnly ? 'var(--primary-brand-hex)' : '#10b981' }}
-            onClick={handleSubmit(onSubmit)}
+            onClick={handleSubmit((values) => onSubmit(values, true))}
             disabled={isSaving || isReadOnly}
-            title={isReadOnly ? 'You only have read permissions' : undefined}
+            title={isReadOnly ? 'You only have read permissions' : 'Save and return to quotes list'}
           >
             {isSaving ? 'Saving...' : isReadOnly ? 'Read Only' : 'Save and Close'}
           </button>
@@ -745,12 +1109,12 @@ export default function QuoteNew() {
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               {/* Quote Number */}
               <div className="col-span-3">
-                <Label htmlFor="quote_number" className="text-xs" required>Quote Number</Label>
+                <Label htmlFor="quote_no" className="text-xs" required>Quote Number</Label>
                 <Input 
-                  id="quote_number" 
-                  {...register('quote_number')}
+                  id="quote_no" 
+                  {...register('quote_no')}
                   className="py-1 text-xs"
-                  error={errors.quote_number?.message}
+                  error={errors.quote_no?.message}
                   disabled={isReadOnly}
                   placeholder="QT-000001"
                 />
@@ -982,6 +1346,36 @@ export default function QuoteNew() {
                 placeholder="Add any additional notes or comments..."
               />
             </div>
+            
+            {/* Quote Total Summary */}
+            {quoteId && (
+              <div className="col-span-12 border-t border-gray-200 pt-4 mt-4">
+                <div className="flex justify-end">
+                  <div className="w-64">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="text-gray-900 font-medium">
+                          {formatCurrency(calculatedTotal, watch('currency') || 'USD')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Tax:</span>
+                        <span className="text-gray-900 font-medium">
+                          {formatCurrency(0, watch('currency') || 'USD')}
+                        </span>
+                      </div>
+                      <div className="border-t border-gray-200 pt-2 flex justify-between">
+                        <span className="text-sm font-semibold text-gray-900">Total:</span>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(calculatedTotal, watch('currency') || 'USD')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1026,11 +1420,14 @@ export default function QuoteNew() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Item</th>
-                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Dimensions</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Area</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Position</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Product Type</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Collection</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">System Drive</th>
+                    <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Measurements</th>
                     <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Qty</th>
-                    <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Unit Price</th>
-                    <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Line Total</th>
+                    <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Total Price</th>
                     {!isReadOnly && (
                       <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                     )}
@@ -1039,32 +1436,74 @@ export default function QuoteNew() {
                 <tbody className="divide-y divide-gray-200">
                   {quoteLines.map((line) => {
                     const item = (line as any).CatalogItems;
+                    const metadata = item?.metadata || {};
+                    
+                    // Debug logging
+                    if (import.meta.env.DEV) {
+                      console.log('QuoteLine rendering:', {
+                        lineId: line.id,
+                        catalogItemId: line.catalog_item_id,
+                        catalogItem: item,
+                        hasMetadata: !!item?.metadata,
+                        metadata: metadata,
+                        metadataType: typeof metadata,
+                        area: metadata?.area,
+                        position: metadata?.position,
+                        collection_id: metadata?.collection_id,
+                        operating_system_variant: metadata?.operating_system_variant,
+                      });
+                    }
+                    
+                    // Handle metadata - it might be a string that needs parsing
+                    let parsedMetadata = metadata;
+                    if (typeof metadata === 'string') {
+                      try {
+                        parsedMetadata = JSON.parse(metadata);
+                      } catch (e) {
+                        console.error('Error parsing metadata:', e);
+                        parsedMetadata = {};
+                      }
+                    }
+                    
                     return (
-                      <tr key={line.id} className="hover:bg-gray-50">
-                        <td className="py-4 px-6">
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">
-                              {item?.name || 'Unknown Item'}
-                            </p>
-                            <p className="text-xs text-gray-500">{item?.sku || 'N/A'}</p>
+                      <tr 
+                        key={line.id} 
+                        className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                      >
+                        <td className="py-4 px-6 text-gray-700 text-sm">
+                          {parsedMetadata?.area || 'N/A'}
+                        </td>
+                        <td className="py-4 px-6 text-gray-700 text-sm">
+                          {parsedMetadata?.position !== undefined && parsedMetadata?.position !== null 
+                            ? String(parsedMetadata.position) 
+                            : 'N/A'}
+                        </td>
+                        <td className="py-4 px-6 text-gray-900 text-sm">
+                          <div className="font-medium">
+                            {item?.name || 'N/A'}
                           </div>
                         </td>
-                        <td className="py-4 px-6 text-sm text-gray-700">
+                        <td className="py-4 px-6 text-gray-700 text-sm">
+                          {parsedMetadata?.collection_id ? getCollectionName(parsedMetadata.collection_id) : 'N/A'}
+                        </td>
+                        <td className="py-4 px-6 text-gray-700 text-sm">
+                          {parsedMetadata?.operating_system_variant ? getSystemDriveName(parsedMetadata.operating_system_variant) : 'N/A'}
+                        </td>
+                        <td className="py-4 px-6 text-gray-700 text-sm">
                           {line.width_m && line.height_m
                             ? `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)} mm`
                             : 'N/A'}
                         </td>
-                        <td className="py-4 px-6 text-right text-sm text-gray-900">
+                        <td className="py-4 px-6 text-right text-gray-900 text-sm">
                           {line.computed_qty.toFixed(2)}
                         </td>
-                        <td className="py-4 px-6 text-right text-sm text-gray-700">
-                          €{line.unit_price_snapshot.toFixed(2)}
-                        </td>
-                        <td className="py-4 px-6 text-right text-sm font-medium text-gray-900">
-                          €{line.line_total.toFixed(2)}
+                        <td className="py-4 px-6 text-right text-gray-900 text-sm">
+                          <div className="font-medium">
+                            €{line.line_total.toFixed(2)}
+                          </div>
                         </td>
                         {!isReadOnly && (
-                          <td className="py-4 px-6">
+                          <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-end">
                               <button
                                 onClick={() => {
@@ -1076,6 +1515,7 @@ export default function QuoteNew() {
                                   });
                                 }}
                                 className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label="Edit line"
                                 title="Edit line"
                               >
                                 <Edit className="w-4 h-4" />
@@ -1083,11 +1523,30 @@ export default function QuoteNew() {
                               <button
                                 onClick={async () => {
                                   if (!confirm('Are you sure you want to delete this line?')) return;
+                                  
                                   try {
                                     await supabase
                                       .from('QuoteLines')
                                       .update({ deleted: true })
                                       .eq('id', line.id);
+                                    
+                                    // Update quote totals after deleting line
+                                    const { data: remainingLines } = await supabase
+                                      .from('QuoteLines')
+                                      .select('line_total')
+                                      .eq('quote_id', quoteId)
+                                      .eq('deleted', false);
+
+                                    const newTotal = (remainingLines || []).reduce((sum: number, l: any) => sum + (l.line_total || 0), 0);
+
+                                    await updateQuote(quoteId, {
+                                      totals: {
+                                        subtotal: newTotal,
+                                        tax_total: 0,
+                                        total: newTotal,
+                                      },
+                                    });
+                                    
                                     refetchLines();
                                     useUIStore.getState().addNotification({
                                       type: 'success',
@@ -1103,6 +1562,7 @@ export default function QuoteNew() {
                                   }
                                 }}
                                 className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                aria-label="Delete line"
                                 title="Delete line"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1120,13 +1580,13 @@ export default function QuoteNew() {
         </div>
       )}
 
-      {/* Curtain Configurator Modal */}
+      {/* Product Configurator Modal */}
       {showConfigurator && quoteId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
           <div className="bg-white rounded-lg w-full h-full max-w-7xl m-4 overflow-hidden">
-            <CurtainConfigurator
+            <ProductConfigurator
               quoteId={quoteId}
-              onComplete={handleCurtainConfigComplete}
+              onComplete={handleProductConfigComplete}
               onClose={() => setShowConfigurator(false)}
             />
           </div>

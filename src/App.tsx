@@ -209,6 +209,26 @@ const Items = lazy(() => {
   return import('./pages/catalog/Items');
 });
 
+const Manufacturers = lazy(() => {
+  logger.debug('Loading Manufacturers component');
+  return import('./pages/catalog/Manufacturers');
+});
+
+const Categories = lazy(() => {
+  logger.debug('Loading Categories component');
+  return import('./pages/catalog/Categories');
+});
+
+const Collections = lazy(() => {
+  logger.debug('Loading Collections component');
+  return import('./pages/catalog/Collections');
+});
+
+const Variants = lazy(() => {
+  logger.debug('Loading Variants component');
+  return import('./pages/catalog/Variants');
+});
+
 const CatalogItemNew = lazy(() => {
   logger.debug('Loading CatalogItemNew component');
   return import('./pages/catalog/CatalogItemNew');
@@ -612,9 +632,30 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/catalog/manufacturers', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturers');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/categories', () => {
+      if (isAuthenticated) {
+        setCurrentPage('categories');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/catalog/collections', () => {
       if (isAuthenticated) {
-        setCurrentPage('catalog');
+        setCurrentPage('collections');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/variants', () => {
+      if (isAuthenticated) {
+        setCurrentPage('variants');
       } else {
         setCurrentPage('login');
       }
@@ -897,6 +938,14 @@ function App() {
         return <Items />;
       case 'catalog-item-new':
         return <CatalogItemNew />;
+      case 'manufacturers':
+        return <Manufacturers />;
+      case 'categories':
+        return <Categories />;
+      case 'collections':
+        return <Collections />;
+      case 'variants':
+        return <Variants />;
       case 'inventory':
         return <Inventory />;
       case 'warehouse':

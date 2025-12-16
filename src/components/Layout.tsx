@@ -150,11 +150,47 @@ function Layout({ children }: LayoutProps) {
   // Check if we're in Settings pages - if so, hide the main sidebar
   const isSettingsRoute = currentRoute.includes('/settings');
 
-  // Scroll to top when route changes
+  // Helper functions to get/set last visited route for a module
+  const getLastRouteForModule = useCallback((modulePath: string): string | null => {
+    try {
+      return sessionStorage.getItem(`lastRoute_${modulePath}`);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const setLastRouteForModule = useCallback((modulePath: string, route: string) => {
+    try {
+      sessionStorage.setItem(`lastRoute_${modulePath}`, route);
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
+
+  // Helper function to save current route for module persistence
+  const saveCurrentRouteForModule = useCallback((route: string) => {
+    if (route.startsWith('/directory')) {
+      setLastRouteForModule('/directory', route);
+    } else if (route.startsWith('/sales')) {
+      setLastRouteForModule('/sales', route);
+    } else if (route.startsWith('/catalog')) {
+      setLastRouteForModule('/catalog', route);
+    } else if (route.startsWith('/inventory')) {
+      setLastRouteForModule('/inventory', route);
+    } else if (route.startsWith('/manufacturing')) {
+      setLastRouteForModule('/manufacturing', route);
+    } else if (route.startsWith('/financials')) {
+      setLastRouteForModule('/financials', route);
+    }
+  }, [setLastRouteForModule]);
+
+  // Scroll to top when route changes and save route for module persistence
   useEffect(() => {
     const routeFromRouter = router.getCurrentRoute();
     if (routeFromRouter !== currentRoute) {
       setCurrentRoute(routeFromRouter);
+      // Save current route for module persistence
+      saveCurrentRouteForModule(routeFromRouter);
       // Additional scroll to top to ensure it works
       window.scrollTo(0, 0);
       // Also scroll the main content area if it exists
@@ -163,7 +199,7 @@ function Layout({ children }: LayoutProps) {
         mainElement.scrollTop = 0;
       }
     }
-  }, [currentRoute]);
+  }, [currentRoute, saveCurrentRouteForModule]);
 
   // Update current route when router changes
   useEffect(() => {
@@ -416,40 +452,46 @@ function Layout({ children }: LayoutProps) {
       saveCurrentPageBeforeSettings();
     }
     
-    // Handle dynamic navigation
+    // Handle dynamic navigation - use last visited route if available
     if (path === '/dashboard') {
       const actualPath = '/dashboard';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/directory') {
-      const actualPath = '/directory/contacts';
+      const lastRoute = getLastRouteForModule('/directory');
+      const actualPath = lastRoute || '/directory/contacts';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/sales') {
-      const actualPath = '/sales/orders';
+      const lastRoute = getLastRouteForModule('/sales');
+      const actualPath = lastRoute || '/sales/quotes';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/catalog') {
-      const actualPath = '/catalog/items';
+      const lastRoute = getLastRouteForModule('/catalog');
+      const actualPath = lastRoute || '/catalog/items';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/inventory') {
-      const actualPath = '/inventory/warehouse';
+      const lastRoute = getLastRouteForModule('/inventory');
+      const actualPath = lastRoute || '/inventory/warehouse';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/manufacturing') {
-      const actualPath = '/manufacturing/production-orders';
+      const lastRoute = getLastRouteForModule('/manufacturing');
+      const actualPath = lastRoute || '/manufacturing/production-orders';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/financials') {
-      const actualPath = '/financials';
+      const lastRoute = getLastRouteForModule('/financials');
+      const actualPath = lastRoute || '/financials';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
       router.navigate(path);
       setCurrentRoute(path);
     }
-  }, [saveCurrentPageBeforeSettings]);
+  }, [saveCurrentPageBeforeSettings, getLastRouteForModule]);
 
   // Memoized sidebar width calculations
   const sidebarWidth = useMemo(() => 

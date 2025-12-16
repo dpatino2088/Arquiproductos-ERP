@@ -48,13 +48,17 @@ export default function Warehouse() {
   const [selectedStockLevel, setSelectedStockLevel] = useState<string[]>([]);
 
   useEffect(() => {
-    registerSubmodules('Inventory', [
-      { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
-      { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
-      { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
-      { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
-      { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
-    ]);
+    // Only register Inventory submodules if we're actually in the Inventory module
+    const currentPath = window.location.pathname;
+    if (currentPath.startsWith('/inventory')) {
+      registerSubmodules('Inventory', [
+        { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
+        { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
+        { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
+        { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
+        { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
+      ]);
+    }
   }, [registerSubmodules]);
 
   // Mock data - Replace with actual data fetching

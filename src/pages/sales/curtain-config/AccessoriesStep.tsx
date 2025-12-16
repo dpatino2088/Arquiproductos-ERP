@@ -1,56 +1,38 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
-import { Plus, Minus } from 'lucide-react';
+import { Plus, Minus, Search, X } from 'lucide-react';
+import { useCatalogItems } from '../../../hooks/useCatalog';
+import { CatalogItem } from '../../../types/catalog';
 
 interface AccessoriesStepProps {
   config: CurtainConfiguration;
   onUpdate: (updates: Partial<CurtainConfiguration>) => void;
 }
 
-const ACCESSORY_CATEGORIES = [
-  {
-    id: 'mounting',
-    name: 'Mounting Material',
-    items: [
-      { id: 'clip-f1-wall', name: 'Mounting Clip F1 (Wall)', price: 0.40 },
-      { id: 'plates-3mm', name: 'Mounting Plates 3mm, On-/Both-Sided For C1, C2, R1', price: 0.40 },
-      { id: 'tabs-a1-d1', name: 'Mounting Tabs A1-D1 (For C1), A2-D2 (For C2)', price: 0.40 },
-      { id: 'clip-f1-ceiling', name: 'Mounting Clip F1 (Ceiling)', price: 0.40 },
-    ],
-  },
-  {
-    id: 'tapes',
-    name: 'Tapes',
-    items: [
-      { id: 'tape-1', name: 'Tape Type 1', price: 0.20 },
-      { id: 'tape-2', name: 'Tape Type 2', price: 0.25 },
-    ],
-  },
-  {
-    id: 'spare',
-    name: 'Spare And Small Parts, Assembly Accessories',
-    items: [
-      { id: 'spare-1', name: 'Spare Part 1', price: 0.10 },
-    ],
-  },
-];
-
 export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepProps) {
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['mounting']));
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [selectedSearchItem, setSelectedSearchItem] = useState<CatalogItem | null>(null);
+  const [searchRef, setSearchRef] = useState<HTMLDivElement | null>(null);
+  const { items: catalogItems, loading: catalogLoading } = useCatalogItems();
 
-  const toggleCategory = (categoryId: string) => {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(categoryId)) {
-        next.delete(categoryId);
-      } else {
-        next.add(categoryId);
+  // Close search results when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef && !searchRef.contains(event.target as Node)) {
+        setShowSearchResults(false);
       }
-      return next;
-    });
-  };
+    };
+
+    if (showSearchResults) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showSearchResults, searchRef]);
 
   const updateAccessoryQty = (itemId: string, name: string, price: number, delta: number) => {
     if (!itemId || !name) return;
@@ -83,93 +65,198 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
     onUpdate({ accessories: updated });
   };
 
-  const getAccessoryQty = (itemId: string) => {
-    return config.accessories?.find(a => a.id === itemId)?.qty || 0;
+
+  // Filter catalog items for accessories/components that can be sold separately
+  const searchableCatalogItems = useMemo(() => {
+    return catalogItems.filter(item => {
+      // Filter items that are accessories or components
+      const itemType = (item.metadata as any)?.item_type || item.metadata?.item_type_inferred;
+      const isAccessoryOrComponent = itemType === 'accessory' || itemType === 'component' || 
+                                      item.measure_basis === 'unit'; // Items sold by unit
+      return isAccessoryOrComponent && item.active && !item.deleted;
+    });
+  }, [catalogItems]);
+
+  // Filter search results
+  const filteredSearchResults = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    
+    const searchLower = searchTerm.toLowerCase();
+    return searchableCatalogItems.filter(item => 
+      item.name.toLowerCase().includes(searchLower) ||
+      item.sku.toLowerCase().includes(searchLower) ||
+      (item.description && item.description.toLowerCase().includes(searchLower))
+    ).slice(0, 10); // Limit to 10 results
+  }, [searchTerm, searchableCatalogItems]);
+
+  const handleSearchItemSelect = (item: CatalogItem) => {
+    setSelectedSearchItem(item);
+    setSearchTerm(item.name);
+    setShowSearchResults(false);
+    // Add item to accessories with quantity 1
+    updateAccessoryQty(item.id, item.name, item.unit_price, 1);
   };
 
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <Label className="text-sm font-medium mb-4 block">ALL ACCESSORIES</Label>
-        <div className="space-y-4">
-          {ACCESSORY_CATEGORIES.map((category) => {
-            const isExpanded = expandedCategories.has(category.id);
-            return (
-              <div key={category.id} className="border border-gray-200 rounded-lg">
+        <Label className="text-sm font-medium mb-4 block">ACCESSORIES</Label>
+        
+        {/* Search field for catalog items */}
+        <div className="mb-6">
+          <Label className="text-sm font-medium mb-2 block">Search Catalog Items</Label>
+          <div className="relative" ref={setSearchRef}>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search for controls, clutches, supports, etc..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setShowSearchResults(true);
+                  if (selectedSearchItem && e.target.value !== selectedSearchItem.name) {
+                    setSelectedSearchItem(null);
+                  }
+                }}
+                onFocus={() => setShowSearchResults(true)}
+                className="pl-10 pr-10"
+              />
+              {searchTerm && (
                 <button
-                  onClick={() => toggleCategory(category.id)}
-                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setShowSearchResults(false);
+                    setSelectedSearchItem(null);
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
-                  <span className="text-sm font-medium text-gray-900">{category.name}</span>
-                  <span className="text-gray-400">{isExpanded ? '▼' : '▶'}</span>
+                  <X className="w-4 h-4" />
                 </button>
-                {isExpanded && (
-                  <div className="border-t border-gray-200">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-left py-2 px-4 text-xs font-medium text-gray-700">Item Name</th>
-                          <th className="text-center py-2 px-4 text-xs font-medium text-gray-700">Quantity</th>
-                          <th className="text-right py-2 px-4 text-xs font-medium text-gray-700">Price</th>
-                          <th className="text-right py-2 px-4 text-xs font-medium text-gray-700">Total Price</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {category.items.map((item) => {
-                          const qty = getAccessoryQty(item.id);
-                          const isSelected = qty > 0;
-                          return (
-                            <tr key={item.id} className={isSelected ? 'bg-primary/5' : ''}>
-                              <td className="py-2 px-4">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="radio"
-                                    checked={isSelected}
-                                    onChange={() => {
-                                      if (!isSelected) {
-                                        updateAccessoryQty(item.id, item.name, item.price, 1);
-                                      }
-                                    }}
-                                    className="w-4 h-4 text-primary"
-                                  />
-                                  <span className="text-sm text-gray-900">{item.name}</span>
-                                </div>
-                              </td>
-                              <td className="py-2 px-4 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => updateAccessoryQty(item.id, item.name, item.price, -1)}
-                                    disabled={qty === 0}
-                                    className="p-1 hover:bg-gray-200 rounded disabled:opacity-50"
-                                  >
-                                    <Minus className="w-3 h-3" />
-                                  </button>
-                                  <span className="text-sm font-medium w-8">{qty}</span>
-                                  <button
-                                    onClick={() => updateAccessoryQty(item.id, item.name, item.price, 1)}
-                                    className="p-1 hover:bg-gray-200 rounded"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </td>
-                              <td className="py-2 px-4 text-right text-sm text-gray-700">
-                                €{item.price.toFixed(2)}
-                              </td>
-                              <td className="py-2 px-4 text-right text-sm font-medium text-gray-900">
-                                €{(item.price * qty).toFixed(2)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+              )}
+            </div>
+            
+            {/* Search Results Dropdown */}
+            {showSearchResults && filteredSearchResults.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {filteredSearchResults.map((item) => {
+                  const isSelected = config.accessories?.some(a => a.id === item.id);
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleSearchItemSelect(item)}
+                      disabled={isSelected}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors ${
+                        isSelected ? 'bg-gray-100 opacity-50 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                          <p className="text-xs text-gray-500">SKU: {item.sku}</p>
+                          {item.description && (
+                            <p className="text-xs text-gray-400 mt-1 line-clamp-1">{item.description}</p>
+                          )}
+                        </div>
+                        <div className="text-right ml-4">
+                          <p className="text-sm font-medium text-gray-900">€{item.unit_price.toFixed(2)}</p>
+                          {isSelected && (
+                            <p className="text-xs text-green-600">Added</p>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            );
-          })}
+            )}
+            
+            {showSearchResults && searchTerm && filteredSearchResults.length === 0 && !catalogLoading && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-4">
+                <p className="text-sm text-gray-500 text-center">No items found</p>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Display selected catalog items */}
+        {config.accessories && config.accessories.length > 0 && (
+          <div className="mt-6">
+            <Label className="text-sm font-medium mb-4 block">SELECTED ITEMS</Label>
+            <div className="border border-gray-200 rounded-lg">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left py-2 px-4 text-xs font-medium text-gray-700">Item Name</th>
+                    <th className="text-center py-2 px-4 text-xs font-medium text-gray-700">Quantity</th>
+                    <th className="text-right py-2 px-4 text-xs font-medium text-gray-700">Price</th>
+                    <th className="text-right py-2 px-4 text-xs font-medium text-gray-700">Total Price</th>
+                    <th className="text-center py-2 px-4 text-xs font-medium text-gray-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {config.accessories.map((accessory) => {
+                      const catalogItem = searchableCatalogItems.find(ci => ci.id === accessory.id);
+                      const qty = accessory.qty;
+                      return (
+                        <tr key={accessory.id} className="bg-primary/5">
+                          <td className="py-2 px-4">
+                            <div>
+                              <span className="text-sm text-gray-900">{accessory.name}</span>
+                              {catalogItem?.sku && (
+                                <p className="text-xs text-gray-500">SKU: {catalogItem.sku}</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 px-4 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => updateAccessoryQty(accessory.id, accessory.name, accessory.price, -1)}
+                                disabled={qty === 0}
+                                className="p-1 hover:bg-gray-200 rounded disabled:opacity-50"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="text-sm font-medium w-8">{qty}</span>
+                              <button
+                                onClick={() => updateAccessoryQty(accessory.id, accessory.name, accessory.price, 1)}
+                                className="p-1 hover:bg-gray-200 rounded"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-2 px-4 text-right text-sm text-gray-700">
+                            €{accessory.price.toFixed(2)}
+                          </td>
+                          <td className="py-2 px-4 text-right text-sm font-medium text-gray-900">
+                            €{(accessory.price * qty).toFixed(2)}
+                          </td>
+                          <td className="py-2 px-4 text-center">
+                            <button
+                              onClick={() => {
+                                const currentAccessories = config.accessories || [];
+                                const updated = currentAccessories.filter(a => a.id !== accessory.id);
+                                onUpdate({ accessories: updated });
+                                if (selectedSearchItem?.id === accessory.id) {
+                                  setSelectedSearchItem(null);
+                                  setSearchTerm('');
+                                }
+                              }}
+                              className="p-1 hover:bg-red-100 rounded text-red-600"
+                              title="Remove item"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

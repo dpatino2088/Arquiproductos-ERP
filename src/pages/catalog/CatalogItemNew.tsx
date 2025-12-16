@@ -16,8 +16,7 @@ import { supabase } from '../../lib/supabase/client';
 // Measure basis options
 const MEASURE_BASIS_OPTIONS = [
   { value: 'unit', label: 'Unit' },
-  { value: 'width_linear', label: 'Width Linear' },
-  { value: 'height_linear', label: 'Height Linear' },
+  { value: 'linear_m', label: 'Metro Lineal' },
   { value: 'area', label: 'Area' },
   { value: 'fabric', label: 'Fabric' },
 ] as const;
@@ -28,12 +27,22 @@ const FABRIC_PRICING_MODE_OPTIONS = [
   { value: 'per_sqm', label: 'Per Square Meter' },
 ] as const;
 
+// Item type options
+const ITEM_TYPE_OPTIONS = [
+  { value: 'component', label: 'Component' },
+  { value: 'fabric', label: 'Fabric' },
+  { value: 'linear', label: 'Linear' },
+  { value: 'service', label: 'Service' },
+  { value: 'accessory', label: 'Accessory' },
+] as const;
+
 // Schema for CatalogItem
 const catalogItemSchema = z.object({
   sku: z.string().min(1, 'SKU is required'),
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
-  measure_basis: z.enum(['unit', 'width_linear', 'height_linear', 'area', 'fabric']),
+  item_type: z.enum(['component', 'fabric', 'linear', 'service', 'accessory']),
+  measure_basis: z.enum(['unit', 'linear_m', 'area', 'fabric']),
   uom: z.string().min(1, 'Unit of measure is required'),
   is_fabric: z.boolean(),
   roll_width_m: z.number().optional().nullable(),
@@ -88,6 +97,7 @@ export default function CatalogItemNew() {
   } = useForm<CatalogItemFormValues>({
     resolver: zodResolver(catalogItemSchema),
     defaultValues: {
+      item_type: 'component',
       measure_basis: 'unit',
       uom: 'unit',
       is_fabric: false,
@@ -101,6 +111,19 @@ export default function CatalogItemNew() {
   const isFabric = watch('is_fabric');
   const measureBasis = watch('measure_basis');
   const fabricPricingMode = watch('fabric_pricing_mode');
+  const itemType = watch('item_type');
+
+  // Auto-update item_type based on is_fabric and measure_basis
+  useEffect(() => {
+    if (isFabric) {
+      setValue('item_type', 'fabric', { shouldValidate: true });
+    } else if (measureBasis === 'linear_m') {
+      setValue('item_type', 'linear', { shouldValidate: true });
+    } else if (measureBasis === 'unit' && itemType === 'fabric') {
+      // If user unchecks is_fabric, reset to component
+      setValue('item_type', 'component', { shouldValidate: true });
+    }
+  }, [isFabric, measureBasis, itemType, setValue]);
 
   // Get item ID from URL if in edit mode
   useEffect(() => {
@@ -139,6 +162,7 @@ export default function CatalogItemNew() {
           setValue('sku', data.sku || '');
           setValue('name', data.name || '');
           setValue('description', data.description || '');
+          setValue('item_type', (data as any).item_type || 'component');
           setValue('measure_basis', data.measure_basis);
           setValue('uom', data.uom || 'unit');
           setValue('is_fabric', data.is_fabric || false);
@@ -188,6 +212,7 @@ export default function CatalogItemNew() {
         sku: values.sku.trim(),
         name: values.name.trim(),
         description: values.description?.trim() || null,
+        item_type: values.item_type,
         measure_basis: values.measure_basis,
         uom: values.uom.trim(),
         is_fabric: values.is_fabric,
@@ -380,8 +405,33 @@ export default function CatalogItemNew() {
                 />
               </div>
 
-              {/* Measurement */}
+              {/* Item Type and Measurement */}
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
+                <div className="col-span-4">
+                  <Label htmlFor="item_type" className="text-xs" required>Item Type</Label>
+                  <SelectShadcn
+                    value={watch('item_type') || 'component'}
+                    onValueChange={(value) => {
+                      setValue('item_type', value as 'component' | 'fabric' | 'linear' | 'service' | 'accessory', { shouldValidate: true });
+                    }}
+                    disabled={isReadOnly || isFabric} // Disable if is_fabric is checked (auto-set to fabric)
+                  >
+                    <SelectTrigger className={`py-1 text-xs ${errors.item_type ? 'border-red-300 bg-red-50' : ''}`}>
+                      <SelectValue placeholder="Select item type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ITEM_TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.item_type && (
+                    <p className="text-xs text-red-600 mt-1">{errors.item_type.message}</p>
+                  )}
+                </div>
+
                 <div className="col-span-4">
                   <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
                   <SelectShadcn

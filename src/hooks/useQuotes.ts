@@ -34,6 +34,11 @@ export function useQuotes() {
             DirectoryCustomers:customer_id (
               id,
               customer_name
+            ),
+            QuoteLines (
+              id,
+              line_total,
+              deleted
             )
           `)
           .eq('organization_id', activeOrganizationId)
@@ -96,7 +101,9 @@ export function useQuoteLines(quoteId: string | null) {
             CatalogItems:catalog_item_id (
               id,
               sku,
-              name
+              name,
+              metadata,
+              item_type
             )
           `)
           .eq('quote_id', quoteId)
@@ -206,17 +213,36 @@ export function useCreateQuoteLine() {
 
     setIsCreating(true);
     try {
+      const insertData = {
+        ...lineData,
+        organization_id: activeOrganizationId,
+      };
+      
+      console.log('useCreateQuoteLine - Inserting data:', insertData);
+      console.log('useCreateQuoteLine - Active organization ID:', activeOrganizationId);
+      
       const { data, error } = await supabase
         .from('QuoteLines')
-        .insert({
-          ...lineData,
-          organization_id: activeOrganizationId,
-        })
+        .insert(insertData)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('useCreateQuoteLine - Supabase error:', error);
+        console.error('useCreateQuoteLine - Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
+        throw error;
+      }
+      
+      console.log('useCreateQuoteLine - Success, created line:', data);
       return data;
+    } catch (err) {
+      console.error('useCreateQuoteLine - Exception caught:', err);
+      throw err;
     } finally {
       setIsCreating(false);
     }

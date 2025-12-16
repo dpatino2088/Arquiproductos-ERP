@@ -3,10 +3,9 @@
  */
 
 // ENUM types matching PostgreSQL ENUMs
-export type MeasureBasis = 
+export type MeasureBasis =
   | 'unit'
-  | 'width_linear'
-  | 'height_linear'
+  | 'linear_m'
   | 'area'
   | 'fabric';
 

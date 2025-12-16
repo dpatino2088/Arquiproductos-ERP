@@ -66,10 +66,14 @@ export default function Orders() {
   const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
 
   useEffect(() => {
-    registerSubmodules('Sales', [
-      { id: 'quotes', label: 'Quotes', href: '/sales/quotes' },
-      { id: 'orders', label: 'Orders', href: '/sales/orders' },
-    ]);
+    // Only register Sales submodules if we're actually in the Sales module
+    const currentPath = window.location.pathname;
+    if (currentPath.startsWith('/sales')) {
+      registerSubmodules('Sales', [
+        { id: 'quotes', label: 'Quotes', href: '/sales/quotes' },
+        { id: 'orders', label: 'Orders', href: '/sales/orders' },
+      ]);
+    }
   }, [registerSubmodules]);
 
   // Mock data - Replace with actual data fetching
