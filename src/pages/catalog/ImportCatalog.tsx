@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, FileSpreadsheet, FileText, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -55,6 +55,22 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
   const [isProcessing, setIsProcessing] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [currentStep, setCurrentStep] = useState<'upload' | 'preview' | 'result'>('upload');
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setFile(null);
+      setParsedData([]);
+      setValidationErrors([]);
+      setImportResult(null);
+      setCurrentStep('upload');
+      setIsProcessing(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -290,23 +306,32 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
       measureBasis = 'fabric';
     }
 
-    // Build metadata (including item_type for future compatibility if needed)
+    // Map item_type to valid enum values
+    const validItemTypes = ['component', 'fabric', 'linear', 'service', 'accessory'];
+    let itemType = row.item_type?.toLowerCase() || 'component';
+    if (!validItemTypes.includes(itemType)) {
+      // Auto-determine item_type
+      if (isFabric) {
+        itemType = 'fabric';
+      } else if (row.measure_basis?.toLowerCase() === 'linear_m') {
+        itemType = 'linear';
+      } else {
+        itemType = 'component';
+      }
+    }
+
+    // Build metadata
     const metadata: Record<string, any> = {};
     if (row.manufacturer) metadata.manufacturer = row.manufacturer;
     if (row.category) metadata.category = row.category;
-    if (row.family) metadata.family = row.family;
-    
-    // Store item_type in metadata if provided (for future use)
-    if (row.item_type) {
-      metadata.item_type = row.item_type.toLowerCase();
-    } else {
-      // Auto-determine item_type for metadata
-      if (isFabric) {
-        metadata.item_type = 'fabric';
-      } else if (row.measure_basis?.toLowerCase() === 'linear_m') {
-        metadata.item_type = 'linear';
-      } else {
-        metadata.item_type = 'component';
+    if (row.family) {
+      metadata.family = row.family;
+      // Parse compatible_product_types from family if it contains commas
+      if (row.family.includes(',')) {
+        const types = row.family.split(',').map(t => t.trim()).filter(t => t);
+        if (types.length > 0) {
+          metadata.compatible_product_types = types;
+        }
       }
     }
 
@@ -314,6 +339,7 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
       sku: row.sku.toString().trim(),
       name: row.name.toString().trim(),
       description: row.description?.toString().trim() || null,
+      item_type: itemType as any, // Add item_type column
       measure_basis: measureBasis as any,
       uom: row.uom?.toString().trim() || 'unit',
       is_fabric: isFabric,

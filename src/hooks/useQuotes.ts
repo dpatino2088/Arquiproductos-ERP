@@ -47,7 +47,7 @@ export function useQuotes() {
 
         if (queryError) {
           if (import.meta.env.DEV) {
-            console.error('Error fetching Quotes:', queryError);
+            console.error('Error fetching Quotes:', queryError.message);
           }
           throw queryError;
         }
@@ -56,7 +56,7 @@ export function useQuotes() {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading quotes';
         if (import.meta.env.DEV) {
-          console.error('Error fetching Quotes:', err);
+          console.error('Error fetching Quotes:', err instanceof Error ? err.message : String(err));
         }
         setError(errorMessage);
       } finally {
@@ -94,16 +94,24 @@ export function useQuoteLines(quoteId: string | null) {
         setLoading(true);
         setError(null);
 
-        const { data, error: queryError } = await supabase
+        // Use automatic JOINs with proper aliases to avoid collision
+        // Join CatalogItems twice: once for catalog_item_id, once for operating_system_drive_id
+        // Note: Collection JOIN may fail if FK doesn't exist, so we'll handle it separately
+        let { data, error: queryError } = await supabase
           .from('QuoteLines')
           .select(`
             *,
-            CatalogItems:catalog_item_id (
+            Item:catalog_item_id (
               id,
-              sku,
               name,
+              sku,
               metadata,
               item_type
+            ),
+            SystemDriveItem:operating_system_drive_id (
+              id,
+              name,
+              sku
             )
           `)
           .eq('quote_id', quoteId)
@@ -112,16 +120,44 @@ export function useQuoteLines(quoteId: string | null) {
 
         if (queryError) {
           if (import.meta.env.DEV) {
-            console.error('Error fetching QuoteLines:', queryError);
+            console.error('Error fetching QuoteLines:', queryError.message);
           }
           throw queryError;
+        }
+
+        // Manually fetch Collection and enrich data (FK may not be configured for automatic JOIN)
+        if (data && data.length > 0) {
+          const collectionIds = data
+            .map((line: any) => line.collection_id)
+            .filter((id: string | null) => id)
+            .filter((id: string, index: number, self: string[]) => self.indexOf(id) === index);
+          
+          if (collectionIds.length > 0) {
+            const { data: collectionsData } = await supabase
+              .from('CatalogCollections')
+              .select('id, name')
+              .in('id', collectionIds)
+              .eq('deleted', false);
+            
+            if (collectionsData) {
+              const collectionsMap = collectionsData.reduce((acc: Record<string, any>, coll: any) => {
+                acc[coll.id] = coll;
+                return acc;
+              }, {});
+              
+              data = data.map((line: any) => ({
+                ...line,
+                Collection: line.collection_id ? collectionsMap[line.collection_id] : null,
+              }));
+            }
+          }
         }
 
         setLines(data || []);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading quote lines';
         if (import.meta.env.DEV) {
-          console.error('Error fetching QuoteLines:', err);
+          console.error('Error fetching QuoteLines:', err instanceof Error ? err.message : String(err));
         }
         setError(errorMessage);
       } finally {
@@ -155,7 +191,16 @@ export function useCreateQuote() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // Provide more user-friendly error messages
+        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+          if (error.message?.includes('quote_no')) {
+            throw new Error(`Quote number "${(quoteData as any).quote_no}" already exists. Please use a different quote number.`);
+          }
+          throw new Error('This record already exists. Please check your input and try again.');
+        }
+        throw error;
+      }
       return data;
     } finally {
       setIsCreating(false);
@@ -185,7 +230,16 @@ export function useUpdateQuote() {
         .single();
 
       if (error) {
-        console.error('Error updating quote:', error);
+        if (import.meta.env.DEV) {
+          console.error('Error updating quote:', error.message);
+        }
+        // Provide more user-friendly error messages
+        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+          if (error.message?.includes('quote_no')) {
+            throw new Error(`Quote number "${(quoteData as any).quote_no}" already exists. Please use a different quote number.`);
+          }
+          throw new Error('This record already exists. Please check your input and try again.');
+        }
         throw error;
       }
       
@@ -218,9 +272,6 @@ export function useCreateQuoteLine() {
         organization_id: activeOrganizationId,
       };
       
-      console.log('useCreateQuoteLine - Inserting data:', insertData);
-      console.log('useCreateQuoteLine - Active organization ID:', activeOrganizationId);
-      
       const { data, error } = await supabase
         .from('QuoteLines')
         .insert(insertData)
@@ -228,20 +279,52 @@ export function useCreateQuoteLine() {
         .single();
 
       if (error) {
-        console.error('useCreateQuoteLine - Supabase error:', error);
-        console.error('useCreateQuoteLine - Error details:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code,
-        });
+        if (import.meta.env.DEV) {
+          console.error('Error creating QuoteLine:', error.message);
+        }
         throw error;
       }
       
-      console.log('useCreateQuoteLine - Success, created line:', data);
+      // Automatically create QuoteLineComponent for import tax calculation
+      if (data && data.catalog_item_id) {
+        try {
+          // Get catalog item cost_exw
+          const { data: catalogItem } = await supabase
+            .from('CatalogItems')
+            .select('id, cost_exw')
+            .eq('id', data.catalog_item_id)
+            .eq('deleted', false)
+            .single();
+
+          // Create component
+          await supabase
+            .from('QuoteLineComponents')
+            .insert({
+              organization_id: activeOrganizationId,
+              quote_line_id: data.id,
+              catalog_item_id: data.catalog_item_id,
+              qty: data.computed_qty || data.qty || 1,
+              unit_cost_exw: catalogItem?.cost_exw || null,
+            });
+
+          // Trigger cost recalculation (which will use the component)
+          await supabase.rpc('compute_quote_line_cost', {
+            p_quote_line_id: data.id,
+            p_options: {}
+          });
+        } catch (componentError) {
+          // Log but don't fail the quote line creation
+          if (import.meta.env.DEV) {
+            console.warn('Could not create QuoteLineComponent (non-critical):', componentError);
+          }
+        }
+      }
+      
       return data;
     } catch (err) {
-      console.error('useCreateQuoteLine - Exception caught:', err);
+      if (import.meta.env.DEV) {
+        console.error('Error creating QuoteLine:', err instanceof Error ? err.message : String(err));
+      }
       throw err;
     } finally {
       setIsCreating(false);
@@ -253,6 +336,7 @@ export function useCreateQuoteLine() {
 
 export function useUpdateQuoteLine() {
   const [isUpdating, setIsUpdating] = useState(false);
+  const { activeOrganizationId } = useOrganizationContext();
 
   const updateLine = async (id: string, lineData: Partial<QuoteLine>) => {
     setIsUpdating(true);
@@ -265,6 +349,67 @@ export function useUpdateQuoteLine() {
         .single();
 
       if (error) throw error;
+
+      // Update or create QuoteLineComponent if catalog_item_id or qty changed
+      if (data && (lineData.catalog_item_id !== undefined || lineData.qty !== undefined || lineData.computed_qty !== undefined)) {
+        try {
+          // Get current component
+          const { data: existingComponent } = await supabase
+            .from('QuoteLineComponents')
+            .select('id, catalog_item_id')
+            .eq('quote_line_id', id)
+            .eq('deleted', false)
+            .maybeSingle();
+
+          const catalogItemId = lineData.catalog_item_id || data.catalog_item_id;
+          const qty = lineData.computed_qty || lineData.qty || data.computed_qty || data.qty || 1;
+
+          if (catalogItemId) {
+            // Get catalog item cost_exw
+            const { data: catalogItem } = await supabase
+              .from('CatalogItems')
+              .select('id, cost_exw')
+              .eq('id', catalogItemId)
+              .eq('deleted', false)
+              .single();
+
+            if (existingComponent) {
+              // Update existing component
+              await supabase
+                .from('QuoteLineComponents')
+                .update({
+                  catalog_item_id: catalogItemId,
+                  qty,
+                  unit_cost_exw: catalogItem?.cost_exw || null,
+                })
+                .eq('id', existingComponent.id);
+            } else {
+              // Create new component
+              await supabase
+                .from('QuoteLineComponents')
+                .insert({
+                  organization_id: activeOrganizationId!,
+                  quote_line_id: id,
+                  catalog_item_id: catalogItemId,
+                  qty,
+                  unit_cost_exw: catalogItem?.cost_exw || null,
+                });
+            }
+
+            // Trigger cost recalculation
+            await supabase.rpc('compute_quote_line_cost', {
+              p_quote_line_id: id,
+              p_options: {}
+            });
+          }
+        } catch (componentError) {
+          // Log but don't fail the quote line update
+          if (import.meta.env.DEV) {
+            console.warn('Could not update QuoteLineComponent (non-critical):', componentError);
+          }
+        }
+      }
+
       return data;
     } finally {
       setIsUpdating(false);

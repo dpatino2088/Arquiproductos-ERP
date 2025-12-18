@@ -16,13 +16,15 @@ interface ProductConfiguratorProps {
   quoteId: string;
   onComplete: (config: ProductConfig) => Promise<void>;
   onClose: () => void;
+  initialConfig?: Partial<ProductConfig>; // Optional initial config for editing
 }
 
-export default function ProductConfigurator({ quoteId, onComplete, onClose }: ProductConfiguratorProps) {
-  const [productType, setProductType] = useState<ProductType | null>(null);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+export default function ProductConfigurator({ quoteId, onComplete, onClose, initialConfig }: ProductConfiguratorProps) {
+  const [productType, setProductType] = useState<ProductType | null>(initialConfig?.productType || null);
+  const [currentStepIndex, setCurrentStepIndex] = useState(initialConfig?.productType ? 1 : 0);
   const [config, setConfig] = useState<Partial<ProductConfig>>({
     position: '',
+    ...initialConfig, // Merge initial config if provided
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 

@@ -183,20 +183,20 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                   {/* Max Width x Height */}
                   {!selectedProduct.isAccessoriesOnly && (
                     <>
-                      <div>
-                        <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
-                        <p className="text-sm font-bold text-gray-900">
-                          {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
-                        </p>
-                      </div>
-                      
-                      {/* Variations Available */}
-                      <div>
-                        <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
-                        <p className="text-sm font-bold text-gray-900">
-                          {selectedProduct.variations}
-                        </p>
-                      </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
+                    <p className="text-sm font-bold text-gray-900">
+                      {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
+                    </p>
+                  </div>
+                  
+                  {/* Variations Available */}
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
+                    <p className="text-sm font-bold text-gray-900">
+                      {selectedProduct.variations}
+                    </p>
+                  </div>
                     </>
                   )}
                   

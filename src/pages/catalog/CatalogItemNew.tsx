@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,9 +9,11 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
-import { useCatalogItems, useCreateCatalogItem, useUpdateCatalogItem } from '../../hooks/useCatalog';
+import { useCatalogItems, useCreateCatalogItem, useUpdateCatalogItem, useLeafItemCategories, useItemCategories } from '../../hooks/useCatalog';
+import { useCategoryMargin } from '../../hooks/useCategoryMargins';
 import { MeasureBasis, FabricPricingMode } from '../../types/catalog';
 import { supabase } from '../../lib/supabase/client';
+import { Plus, Trash2, Edit, X } from 'lucide-react';
 
 // Measure basis options
 const MEASURE_BASIS_OPTIONS = [
@@ -41,12 +43,33 @@ const catalogItemSchema = z.object({
   sku: z.string().min(1, 'SKU is required'),
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
+  item_category_id: z.string().uuid().optional().nullable(),
   item_type: z.enum(['component', 'fabric', 'linear', 'service', 'accessory']),
   measure_basis: z.enum(['unit', 'linear_m', 'area', 'fabric']),
   uom: z.string().min(1, 'Unit of measure is required'),
   is_fabric: z.boolean(),
+  collection_name: z.string().optional().nullable(),
+  variant_name: z.string().optional().nullable(),
   roll_width_m: z.number().optional().nullable(),
   fabric_pricing_mode: z.enum(['per_linear_m', 'per_sqm']).optional().nullable(),
+  // Pricing fields
+  cost_exw: z.number().min(0, 'Cost EXW must be >= 0').optional().nullable(), // Base cost (EXW = Ex Works)
+  default_margin_pct: z.number().min(0).max(100, 'Margin must be between 0 and 100').optional().nullable(), // Default margin percentage
+  msrp: z.number().min(0, 'MSRP must be >= 0').optional().nullable(), // Manufacturer's Suggested Retail Price
+  // Labor costs
+  labor_cost_per_unit: z.number().min(0).optional().nullable(),
+  labor_cost_per_hour: z.number().min(0).optional().nullable(),
+  labor_hours_per_unit: z.number().min(0).optional().nullable(),
+  // Shipping costs
+  shipping_cost_base: z.number().min(0).optional().nullable(),
+  shipping_cost_per_kg: z.number().min(0).optional().nullable(),
+  shipping_cost_per_unit: z.number().min(0).optional().nullable(),
+  shipping_cost_percentage: z.number().min(0).max(100).optional().nullable(),
+  // Additional costs
+  import_tax_pct: z.number().min(0).max(100).optional().nullable(),
+  freight_cost: z.number().min(0).optional().nullable(),
+  handling_cost: z.number().min(0).optional().nullable(),
+  // Legacy fields (kept for compatibility)
   unit_price: z.number().min(0, 'Unit price must be >= 0'),
   cost_price: z.number().min(0, 'Cost price must be >= 0'),
   active: z.boolean(),
@@ -81,6 +104,8 @@ export default function CatalogItemNew() {
   const { activeOrganizationId } = useOrganizationContext();
   const { createItem, isCreating } = useCreateCatalogItem();
   const { updateItem, isUpdating } = useUpdateCatalogItem();
+  const { categories: leafCategories } = useLeafItemCategories();
+  const { categories: allCategories } = useItemCategories();
   
   // Get current user's role and permissions
   const { canEditCustomers, loading: roleLoading } = useCurrentOrgRole();
@@ -101,6 +126,23 @@ export default function CatalogItemNew() {
       measure_basis: 'unit',
       uom: 'unit',
       is_fabric: false,
+      cost_exw: null,
+      default_margin_pct: 35, // Default 35% margin
+      msrp: null,
+      item_category_id: null,
+      // Labor costs
+      labor_cost_per_unit: null,
+      labor_cost_per_hour: null,
+      labor_hours_per_unit: null,
+      // Shipping costs
+      shipping_cost_base: null,
+      shipping_cost_per_kg: null,
+      shipping_cost_per_unit: null,
+      shipping_cost_percentage: null,
+      // Additional costs
+      import_tax_pct: null,
+      freight_cost: null,
+      handling_cost: null,
       unit_price: 0,
       cost_price: 0,
       active: true,
@@ -112,6 +154,100 @@ export default function CatalogItemNew() {
   const measureBasis = watch('measure_basis');
   const fabricPricingMode = watch('fabric_pricing_mode');
   const itemType = watch('item_type');
+  const costExw = watch('cost_exw');
+  const defaultMarginPct = watch('default_margin_pct');
+  const itemCategoryId = watch('item_category_id');
+  const msrp = watch('msrp');
+
+  // Get category margin if category is selected
+  const { marginPercentage: categoryMarginPct, loading: categoryMarginLoading } = useCategoryMargin(itemCategoryId);
+
+  // Read URL parameters to pre-fill form (e.g., from Collections page)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const isFabricParam = urlParams.get('is_fabric');
+    const collectionNameParam = urlParams.get('collection_name');
+    const variantNameParam = urlParams.get('variant_name');
+    
+    if (isFabricParam === 'true') {
+      setValue('is_fabric', true, { shouldValidate: true });
+      setValue('item_type', 'fabric', { shouldValidate: true });
+      setValue('measure_basis', 'fabric', { shouldValidate: true });
+    }
+    
+    if (collectionNameParam) {
+      setValue('collection_name', collectionNameParam, { shouldValidate: false });
+    }
+    
+    if (variantNameParam) {
+      setValue('variant_name', variantNameParam, { shouldValidate: false });
+    }
+  }, [setValue]);
+
+  // Track if MSRP was manually edited to avoid overwriting user input
+  const [msrpManuallyEdited, setMsrpManuallyEdited] = useState(false);
+  const previousCostExw = useRef<number | null>(null);
+  const previousMarginPct = useRef<number | null>(null);
+  const lastCalculatedMsrp = useRef<number | null>(null);
+
+  // Auto-calculate MSRP when item-level pricing changes
+  // Note: Only uses cost_exw (item cost), not operational costs
+  // Priority: Category Margin > Item Default Margin > 35% fallback
+  useEffect(() => {
+    // Wait for category margin to load
+    if (categoryMarginLoading) return;
+
+    // Only calculate if we have cost_exw
+    if (costExw !== null && costExw !== undefined && costExw > 0) {
+      // Priority: Category Margin > Item Default Margin > 35% fallback
+      const marginToUse = categoryMarginPct !== null 
+        ? categoryMarginPct 
+        : (defaultMarginPct !== null && defaultMarginPct !== undefined ? defaultMarginPct : 35);
+      
+      // Calculate MSRP: cost_exw * (1 + margin/100)
+      // Only use item-level cost, operational costs are handled separately
+      const calculatedMsrp = costExw * (1 + marginToUse / 100);
+      
+      // Check if cost_exw or margin changed (user is actively editing)
+      const costChanged = previousCostExw.current !== costExw;
+      const marginChanged = previousMarginPct.current !== marginToUse;
+      
+      // If cost or margin changed, reset the manual edit flag to allow recalculation
+      if (costChanged || marginChanged) {
+        setMsrpManuallyEdited(false);
+      }
+      
+      // Auto-update MSRP if:
+      // 1. MSRP was not manually edited, AND
+      // 2. (MSRP is null/empty/zero, OR cost/margin changed, OR MSRP matches last calculation)
+      const shouldUpdate = !msrpManuallyEdited && (
+        msrp === null || 
+        msrp === undefined || 
+        msrp === 0 || 
+        costChanged ||
+        marginChanged ||
+        (lastCalculatedMsrp.current !== null && Math.abs(msrp - lastCalculatedMsrp.current) < 0.01)
+      );
+      
+      if (shouldUpdate) {
+        const roundedMsrp = Number(calculatedMsrp.toFixed(2));
+        setValue('msrp', roundedMsrp, { shouldValidate: false });
+        lastCalculatedMsrp.current = roundedMsrp;
+      }
+      
+      // Update refs to track changes
+      previousCostExw.current = costExw;
+      previousMarginPct.current = marginToUse;
+    }
+  }, [costExw, defaultMarginPct, categoryMarginPct, categoryMarginLoading, msrp, msrpManuallyEdited, setValue]);
+
+  // Track manual MSRP edits
+  const handleMsrpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = parseFloat(e.target.value) || null;
+    setMsrpManuallyEdited(true);
+    setValue('msrp', newValue, { shouldValidate: true });
+    lastCalculatedMsrp.current = null; // Clear last calculated value when manually edited
+  };
 
   // Auto-update item_type based on is_fabric and measure_basis
   useEffect(() => {
@@ -160,16 +296,36 @@ export default function CatalogItemNew() {
 
         if (data) {
           setValue('sku', data.sku || '');
-          setValue('name', data.name || '');
+          setValue('name', data.name || data.item_name || '');
           setValue('description', data.description || '');
           setValue('item_type', (data as any).item_type || 'component');
           setValue('measure_basis', data.measure_basis);
           setValue('uom', data.uom || 'unit');
           setValue('is_fabric', data.is_fabric || false);
+          setValue('collection_name', data.collection_name || null);
+          setValue('variant_name', data.variant_name || null);
           setValue('roll_width_m', data.roll_width_m);
           setValue('fabric_pricing_mode', data.fabric_pricing_mode);
+          // New pricing fields
+          setValue('cost_exw', data.cost_exw ?? null);
+          setValue('default_margin_pct', data.default_margin_pct ?? 35);
+          setValue('msrp', data.msrp ?? null);
+          // Labor costs
+          setValue('labor_cost_per_unit', data.labor_cost_per_unit ?? null);
+          setValue('labor_cost_per_hour', data.labor_cost_per_hour ?? null);
+          setValue('labor_hours_per_unit', data.labor_hours_per_unit ?? null);
+          // Shipping costs
+          setValue('shipping_cost_base', data.shipping_cost_base ?? null);
+          setValue('shipping_cost_per_kg', data.shipping_cost_per_kg ?? null);
+          setValue('shipping_cost_per_unit', data.shipping_cost_per_unit ?? null);
+          setValue('shipping_cost_percentage', data.shipping_cost_percentage ?? null);
+          // Additional costs (hidden from UI, kept for database compatibility)
+          setValue('import_tax_pct', data.import_tax_pct ?? null);
+          setValue('freight_cost', data.freight_cost ?? null);
+          setValue('handling_cost', data.handling_cost ?? null);
+          // Legacy pricing fields (hidden from UI, kept for database compatibility only)
           setValue('unit_price', data.unit_price || 0);
-          setValue('cost_price', data.cost_price || 0);
+          setValue('cost_price', data.cost_price || data.cost_exw || 0);
           setValue('active', data.active ?? true);
           setValue('discontinued', data.discontinued || false);
         }
@@ -211,19 +367,69 @@ export default function CatalogItemNew() {
       const itemData: any = {
         sku: values.sku.trim(),
         name: values.name.trim(),
+        item_name: values.name.trim(), // Map name to item_name for database
         description: values.description?.trim() || null,
+        item_category_id: values.item_category_id || null,
         item_type: values.item_type,
         measure_basis: values.measure_basis,
         uom: values.uom.trim(),
         is_fabric: values.is_fabric,
+        collection_name: values.collection_name?.trim() || null,
+        variant_name: values.variant_name?.trim() || null,
         roll_width_m: values.is_fabric && values.roll_width_m ? values.roll_width_m : null,
         fabric_pricing_mode: values.is_fabric ? values.fabric_pricing_mode : null,
+        // Legacy fields (hidden from UI, kept for database compatibility only)
         unit_price: values.unit_price,
-        cost_price: values.cost_price,
+        cost_price: values.cost_price ?? values.cost_exw ?? 0, // Map cost_exw to cost_price if not set
         active: values.active,
         discontinued: values.discontinued,
         metadata: {},
       };
+
+      // Only include new pricing fields if they have values (to avoid errors if columns don't exist yet)
+      // After running migrations 19 and 21, these fields will be available
+      if (values.cost_exw !== null && values.cost_exw !== undefined) {
+        itemData.cost_exw = values.cost_exw;
+      }
+      if (values.default_margin_pct !== null && values.default_margin_pct !== undefined) {
+        itemData.default_margin_pct = values.default_margin_pct;
+      }
+      if (values.msrp !== null && values.msrp !== undefined) {
+        itemData.msrp = values.msrp;
+      }
+      // Labor costs
+      if (values.labor_cost_per_unit !== null && values.labor_cost_per_unit !== undefined) {
+        itemData.labor_cost_per_unit = values.labor_cost_per_unit;
+      }
+      if (values.labor_cost_per_hour !== null && values.labor_cost_per_hour !== undefined) {
+        itemData.labor_cost_per_hour = values.labor_cost_per_hour;
+      }
+      if (values.labor_hours_per_unit !== null && values.labor_hours_per_unit !== undefined) {
+        itemData.labor_hours_per_unit = values.labor_hours_per_unit;
+      }
+      // Shipping costs
+      if (values.shipping_cost_base !== null && values.shipping_cost_base !== undefined) {
+        itemData.shipping_cost_base = values.shipping_cost_base;
+      }
+      if (values.shipping_cost_per_kg !== null && values.shipping_cost_per_kg !== undefined) {
+        itemData.shipping_cost_per_kg = values.shipping_cost_per_kg;
+      }
+      if (values.shipping_cost_per_unit !== null && values.shipping_cost_per_unit !== undefined) {
+        itemData.shipping_cost_per_unit = values.shipping_cost_per_unit;
+      }
+      if (values.shipping_cost_percentage !== null && values.shipping_cost_percentage !== undefined) {
+        itemData.shipping_cost_percentage = values.shipping_cost_percentage;
+      }
+      // Additional costs
+      if (values.import_tax_pct !== null && values.import_tax_pct !== undefined) {
+        itemData.import_tax_pct = values.import_tax_pct;
+      }
+      if (values.freight_cost !== null && values.freight_cost !== undefined) {
+        itemData.freight_cost = values.freight_cost;
+      }
+      if (values.handling_cost !== null && values.handling_cost !== undefined) {
+        itemData.handling_cost = values.handling_cost;
+      }
 
       if (itemId) {
         // Update existing item
@@ -235,12 +441,31 @@ export default function CatalogItemNew() {
         });
       } else {
         // Create new item
-        await createItem(itemData);
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Item created',
-          message: 'Catalog item has been created successfully.',
-        });
+        const newItem = await createItem(itemData);
+        if (newItem && newItem.id) {
+          if (import.meta.env.DEV) {
+            console.log('✅ Item created, setting itemId:', newItem.id);
+          }
+          setItemId(newItem.id);
+          // Update URL to edit mode so user can continue editing (without full page reload)
+          // Use replaceState to avoid triggering a navigation
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, '', `/catalog/items/edit/${newItem.id}`);
+          }
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Item created',
+            message: 'Catalog item has been created successfully.',
+          });
+          // Item created successfully
+          return;
+        } else {
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Item created',
+            message: 'Catalog item has been created successfully.',
+          });
+        }
       }
 
       router.navigate('/catalog/items');
@@ -405,6 +630,48 @@ export default function CatalogItemNew() {
                 />
               </div>
 
+              {/* Category Selection */}
+              <div className="col-span-12">
+                <Label htmlFor="item_category_id" className="text-xs">Category</Label>
+                <SelectShadcn
+                  value={watch('item_category_id') || '__none__'}
+                  onValueChange={(value) => {
+                    setValue('item_category_id', value === '__none__' ? null : value, { shouldValidate: true });
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <SelectTrigger className={`py-1 text-xs ${errors.item_category_id ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectValue placeholder="Select category (leaf categories only)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {leafCategories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name} {category.code && `(${category.code})`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+                {errors.item_category_id && (
+                  <p className="text-xs text-red-600 mt-1">{errors.item_category_id.message}</p>
+                )}
+                {/* Warning badge if category is a group */}
+                {watch('item_category_id') && (() => {
+                  const selectedCategory = allCategories.find(c => c.id === watch('item_category_id'));
+                  if (selectedCategory?.is_group) {
+                    return (
+                      <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <span className="text-xs text-yellow-800 font-medium">⚠️ Warning:</span>
+                        <span className="text-xs text-yellow-700">
+                          Category "{selectedCategory.name}" is a group. Please choose a specific subcategory.
+                        </span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+
               {/* Item Type and Measurement */}
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
                 <div className="col-span-4">
@@ -481,6 +748,28 @@ export default function CatalogItemNew() {
                 {isFabric && (
                   <>
                     <div className="col-span-4">
+                      <Label htmlFor="collection_name" className="text-xs">Collection Name</Label>
+                      <Input 
+                        id="collection_name" 
+                        {...register('collection_name')}
+                        className="py-1 text-xs"
+                        error={errors.collection_name?.message}
+                        disabled={isReadOnly}
+                        placeholder="Enter collection name"
+                      />
+                    </div>
+                    <div className="col-span-4">
+                      <Label htmlFor="variant_name" className="text-xs">Variant Name</Label>
+                      <Input 
+                        id="variant_name" 
+                        {...register('variant_name')}
+                        className="py-1 text-xs"
+                        error={errors.variant_name?.message}
+                        disabled={isReadOnly}
+                        placeholder="Enter variant/color name"
+                      />
+                    </div>
+                    <div className="col-span-4">
                       <Label htmlFor="roll_width_m" className="text-xs" required={fabricPricingMode === 'per_linear_m'}>Roll Width (m)</Label>
                       <Input 
                         id="roll_width_m" 
@@ -533,55 +822,115 @@ export default function CatalogItemNew() {
 
           {activeTab === 'rates' && (
             <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+              {/* Pricing Section (Item Level) */}
+              <div className="col-span-12">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="text-lg">$</span>
+                  Pricing (Item Level)
+                </h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  Product definition pricing. Operational and project costs are managed separately.
+                </p>
+              </div>
+              
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
                 <div className="col-span-4">
-                  <Label htmlFor="unit_price" className="text-xs" required>Unit Price</Label>
+                  <Label htmlFor="cost_exw" className="text-xs" required>Item Cost EXW</Label>
                   <Input 
-                    id="unit_price" 
+                    id="cost_exw" 
                     type="number"
                     step="0.01"
-                    {...register('unit_price', { valueAsNumber: true })}
+                    {...register('cost_exw', { valueAsNumber: true })}
                     className="py-1 text-xs"
-                    error={errors.unit_price?.message}
+                    error={errors.cost_exw?.message}
                     disabled={isReadOnly}
                     placeholder="0.00"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Base cost (Ex Works)</p>
                 </div>
                 <div className="col-span-4">
-                  <Label htmlFor="cost_price" className="text-xs" required>Cost Price</Label>
+                  <Label htmlFor="msrp" className="text-xs">Item Sale Price (MSRP)</Label>
                   <Input 
-                    id="cost_price" 
+                    id="msrp" 
                     type="number"
                     step="0.01"
-                    {...register('cost_price', { valueAsNumber: true })}
+                    {...register('msrp', { valueAsNumber: true })}
+                    onChange={(e) => {
+                      register('msrp').onChange(e);
+                      handleMsrpChange(e);
+                    }}
                     className="py-1 text-xs"
-                    error={errors.cost_price?.message}
+                    error={errors.msrp?.message}
                     disabled={isReadOnly}
                     placeholder="0.00"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Manufacturer's Suggested Retail Price (auto-calculated from cost + margin)
+                    {categoryMarginPct !== null && (
+                      <span className="block text-blue-600 font-medium mt-1">
+                        Using category margin: {categoryMarginPct.toFixed(2)}%
+                      </span>
+                    )}
+                    {categoryMarginPct === null && defaultMarginPct !== null && defaultMarginPct !== undefined && (
+                      <span className="block text-gray-600 mt-1">
+                        Using item margin: {defaultMarginPct.toFixed(2)}%
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="col-span-4">
-                  <div className="flex items-center gap-2 mt-6">
-                    <input
-                      type="checkbox"
-                      id="active"
-                      {...register('active')}
-                      className="h-4 w-4"
-                      disabled={isReadOnly}
-                    />
-                    <Label htmlFor="active" className="text-xs mb-0">Active</Label>
+                  <Label htmlFor="default_margin_pct" className="text-xs">
+                    Default Margin % 
+                    {categoryMarginPct !== null && (
+                      <span className="text-blue-600 text-xs ml-2">(Category margin overrides this)</span>
+                    )}
+                  </Label>
+                  <Input 
+                    id="default_margin_pct" 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    {...register('default_margin_pct', { valueAsNumber: true })}
+                    className="py-1 text-xs"
+                    error={errors.default_margin_pct?.message}
+                    disabled={isReadOnly}
+                    placeholder="35.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {categoryMarginPct !== null 
+                      ? 'Category margin is being used instead' 
+                      : 'Suggestion only (optional, used if no category margin)'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status fields */}
+              <div className="col-span-12 mt-6 pt-4 border-t border-gray-200">
+                <div className="grid grid-cols-12 gap-x-4 gap-y-3">
+                  <div className="col-span-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="active"
+                        {...register('active')}
+                        className="h-4 w-4"
+                        disabled={isReadOnly}
+                      />
+                      <Label htmlFor="active" className="text-xs mb-0">Active</Label>
+                    </div>
                   </div>
-                </div>
-                <div className="col-span-4">
-                  <div className="flex items-center gap-2 mt-6">
-                    <input
-                      type="checkbox"
-                      id="discontinued"
-                      {...register('discontinued')}
-                      className="h-4 w-4"
-                      disabled={isReadOnly}
-                    />
-                    <Label htmlFor="discontinued" className="text-xs mb-0">Discontinued</Label>
+                  <div className="col-span-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="discontinued"
+                        {...register('discontinued')}
+                        className="h-4 w-4"
+                        disabled={isReadOnly}
+                      />
+                      <Label htmlFor="discontinued" className="text-xs mb-0">Discontinued</Label>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -600,4 +949,5 @@ export default function CatalogItemNew() {
     </div>
   );
 }
+
 

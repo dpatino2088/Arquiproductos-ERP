@@ -24,47 +24,80 @@ export function useContacts() {
         setLoading(true);
         setError(null);
 
-        const { data, error: queryError } = await supabase
+        // Step 1: Fetch all contacts
+        const { data: contactsData, error: contactsError } = await supabase
           .from('DirectoryContacts')
-          .select(`
-            *,
-            DirectoryCustomers:customer_id (
-              id,
-              customer_name
-            )
-          `)
+          .select('*')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
-        if (queryError) {
+        if (contactsError) {
           if (import.meta.env.DEV) {
-            console.error('Error fetching Contacts:', queryError);
+            console.error('Error fetching Contacts:', contactsError);
           }
-          throw queryError;
+          throw contactsError;
         }
 
-        // Transform data to match frontend interface
-        const transformedContacts = (data || []).map((contact: any) => ({
-          id: contact.id,
-          firstName: contact.contact_name || '',
-          lastName: '',
-          email: contact.email || '',
-          company: contact.DirectoryCustomers?.customer_name || '', // Customer name from join
-          customer_id: contact.customer_id || null,
-          category: contact.contact_type ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : 'Architect',
-          status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
-          location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',
-          dateAdded: contact.created_at || '',
-          phone: contact.primary_phone || contact.cell_phone || '',
-          contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer',
-          // Additional fields for table display
-          primary_phone: contact.primary_phone || '',
-          city: contact.city || '',
-          country: contact.country || '',
-          contact_type: contact.contact_type || 'architect',
-          created_at: contact.created_at || '',
-        }));
+        // Step 2: Get all unique customer IDs (filter out nulls)
+        const customerIds = [...new Set(
+          (contactsData || [])
+            .map((c: any) => c.customer_id)
+            .filter((id: any) => id !== null && id !== undefined)
+        )];
+
+        // Step 3: Fetch customers in batch if there are any
+        let customersMap = new Map<string, string>();
+        if (customerIds.length > 0) {
+          const { data: customersData, error: customersError } = await supabase
+            .from('DirectoryCustomers')
+            .select('id, customer_name')
+            .in('id', customerIds)
+            .eq('deleted', false);
+
+          if (customersError) {
+            if (import.meta.env.DEV) {
+              console.error('Error fetching Customers for Contacts:', customersError);
+            }
+            // Don't throw, just log - we can still show contacts without customer names
+          } else if (customersData) {
+            // Create a map for quick lookup
+            customersMap = new Map(
+              customersData.map((c: any) => [c.id, c.customer_name || ''])
+            );
+          }
+        }
+
+        // Step 4: Transform data with manual customer mapping
+        const transformedContacts = (contactsData || []).map((contact: any) => {
+          // Get customer name from map
+          const customerName = contact.customer_id 
+            ? (customersMap.get(contact.customer_id) || '') 
+            : '';
+
+          return {
+            id: contact.id,
+            firstName: contact.contact_name || '',
+            lastName: '',
+            email: contact.email || '',
+            company: customerName, // Customer name from manual mapping
+            customer_id: contact.customer_id || null,
+            category: contact.contact_type 
+              ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) 
+              : 'Architect',
+            status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
+            location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',
+            dateAdded: contact.created_at || '',
+            phone: contact.primary_phone || contact.cell_phone || '',
+            contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer',
+            // Additional fields for table display
+            primary_phone: contact.primary_phone || '',
+            city: contact.city || '',
+            country: contact.country || '',
+            contact_type: contact.contact_type || 'architect',
+            created_at: contact.created_at || '',
+          };
+        });
 
         setContacts(transformedContacts);
       } catch (err) {
@@ -187,7 +220,6 @@ export function useCustomers() {
           contactName: customer.primary_contact_id ? (contactsMap[customer.primary_contact_id] || '') : '',
           email: customer.email || '',
           phone: customer.company_phone || '',
-          industry: 'N/A', // Not in schema yet
           customerType: customer.customer_type_name || 'N/A',
           status: customer.archived ? 'Archived' : 'Active' as 'Active' | 'On Hold' | 'Archived',
           location: [customer.city, customer.state, customer.country].filter(Boolean).join(', ') || 'N/A',

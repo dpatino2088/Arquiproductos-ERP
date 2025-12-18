@@ -5,6 +5,8 @@ import { Plus, Mail, MoreVertical, X } from 'lucide-react';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 
 interface Member {
   id: string;
@@ -25,6 +27,7 @@ const ROLES = [
 
 export default function Members() {
   const { currentCompany } = useCompanyStore();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [members, setMembers] = useState<Member[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -148,9 +151,20 @@ export default function Members() {
   };
 
   const handleRemove = async (memberId: string) => {
-    if (!currentCompany?.id || !confirm('Are you sure you want to remove this member?')) return;
+    if (!currentCompany?.id) return;
+
+    const confirmed = await showConfirm({
+      title: 'Eliminar Miembro',
+      message: '¿Estás seguro de que deseas eliminar este miembro?',
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       const { error } = await supabase
         .from('company_users')
         .update({ is_deleted: true })
@@ -163,9 +177,11 @@ export default function Members() {
       }
 
       // Reload members
-      await loadMembers();
+      await       loadMembers();
     } catch (error) {
       console.error('Error removing member:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -371,6 +387,19 @@ export default function Members() {
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </>
   );
 }

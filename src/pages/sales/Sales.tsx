@@ -15,9 +15,10 @@ export default function Sales() {
         { id: 'orders', label: 'Orders', href: '/sales/orders', icon: ShoppingBag },
       ]);
       
-      // Redirect to quotes by default (as per user request)
+      // Redirect to quotes list by default when navigating to Sales module
+      // Only redirect if we're on the base /sales route, not if we're already on a sub-route
       if (currentPath === '/sales' || currentPath === '/sales/') {
-        router.navigate('/sales/quotes');
+        router.navigate('/sales/quotes', false); // false = replace instead of push to avoid history issues
       }
     }
   }, [registerSubmodules]);

@@ -2,6 +2,9 @@ import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useCatalogVariantsCRUD, useCatalogCollections } from '../../hooks/useCatalog';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { router } from '../../lib/router';
 import { 
   Search, 
   Plus,
@@ -20,20 +23,29 @@ import {
 export default function Variants() {
   const { registerSubmodules } = useSubmoduleNav();
   const { collections } = useCatalogCollections();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
   useEffect(() => {
-    // Register Catalog submodules when this component mounts
+    // DEPRECATED: This component is deprecated. Redirect to collections.
+    // Variants functionality has been moved to CollectionsCatalog.
     const currentPath = window.location.pathname;
+    if (currentPath === '/catalog/variants' || currentPath.startsWith('/catalog/variants/')) {
+      // Redirect to collections page
+      router.navigate('/catalog/collections', true);
+      return;
+    }
+    
+    // Register Catalog submodules when this component mounts (without variants)
     if (currentPath.startsWith('/catalog')) {
       registerSubmodules('Catalog', [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
         { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
         { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
         { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
-        { id: 'variants', label: 'Variants', href: '/catalog/variants', icon: Palette },
+        // Variants removed - use CollectionsCatalog instead
       ]);
       if (import.meta.env.DEV) {
-        console.log('✅ Variants.tsx: Registered Catalog submodules');
+        console.log('✅ Variants.tsx: Registered Catalog submodules (variants removed)');
       }
     }
   }, [registerSubmodules]);
@@ -161,23 +173,32 @@ export default function Variants() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Variante',
+      message: `¿Estás seguro de que deseas eliminar "${name}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteVariant(id);
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Variant deleted',
-        message: 'Variant has been deleted successfully.',
+        title: 'Variante eliminada',
+        message: 'La variante ha sido eliminada correctamente.',
       });
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error deleting',
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        title: 'Error al eliminar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -543,6 +564,19 @@ export default function Variants() {
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

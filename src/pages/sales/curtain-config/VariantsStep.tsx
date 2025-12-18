@@ -3,7 +3,7 @@ import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/SelectShadcn';
 import Input from '../../../components/ui/Input';
-import { useCatalogCollections, useCatalogVariants, useManufacturers } from '../../../hooks/useCatalog';
+import { useCatalogCollections, useCatalogItems, useManufacturers } from '../../../hooks/useCatalog';
 
 interface VariantsStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -98,16 +98,70 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
   
   // Cargar datos del Catalog
   const { collections: catalogCollections, loading: loadingCollections, error: collectionsError } = useCatalogCollections();
+  const { items: catalogItems, loading: loadingItems, error: itemsError } = useCatalogItems();
   const currentCollectionId = getCollectionId();
-  const { variants: catalogVariants, loading: loadingVariants, error: variantsError } = useCatalogVariants(currentCollectionId || undefined);
+  
+  // Get current collection name to filter CatalogItems
+  const currentCollection = catalogCollections.find(c => c.id === currentCollectionId);
+  const currentCollectionName = currentCollection?.name || (currentCollection as any)?.collection_name;
+  
+  // Filter CatalogItems by collection_name and is_fabric=true to get variants
+  // Use the same logic as Collections.tsx
+  const allFabricItems = catalogItems.filter((item: any) => {
+    // Match items that:
+    // 1. Are fabrics (is_fabric = true)
+    // 2. Have a collection_name (not null/empty after trim)
+    // 3. Have a variant_name (not null/empty after trim)
+    // 4. Have a sku (not null/empty after trim)
+    // 5. Are not deleted
+    
+    const isFabric = item.is_fabric === true;
+    const collectionNameStr = item.collection_name ? String(item.collection_name).trim() : '';
+    const hasCollection = collectionNameStr.length > 0;
+    const variantNameStr = item.variant_name ? String(item.variant_name).trim() : '';
+    const hasVariant = variantNameStr.length > 0;
+    const skuStr = item.sku ? String(item.sku).trim() : '';
+    const hasSku = skuStr.length > 0;
+    const notDeleted = !item.deleted;
+    
+    return isFabric && hasCollection && hasVariant && hasSku && notDeleted;
+  });
+  
   const { manufacturers: catalogManufacturers, loading: loadingManufacturers } = useManufacturers();
   
   // Log errors for debugging
   if (collectionsError && import.meta.env.DEV) {
     console.error('VariantsStep - Collections error:', collectionsError);
   }
-  if (variantsError && import.meta.env.DEV) {
-    console.error('VariantsStep - Variants error:', variantsError);
+  if (itemsError && import.meta.env.DEV) {
+    console.error('VariantsStep - CatalogItems error:', itemsError);
+  }
+
+  // Debug: Log collection_name and variant_name data
+  if (import.meta.env.DEV) {
+    console.log('VariantsStep - Debug Info:');
+    console.log('  - catalogCollections count:', catalogCollections.length);
+    console.log('  - catalogItems count:', catalogItems.length);
+    console.log('  - allFabricItems count:', allFabricItems.length);
+    if (catalogItems.length > 0) {
+      const sampleItem = catalogItems[0];
+      console.log('  - Sample item:', {
+        id: sampleItem.id,
+        sku: sampleItem.sku,
+        collection_name: (sampleItem as any).collection_name,
+        variant_name: (sampleItem as any).variant_name,
+        is_fabric: (sampleItem as any).is_fabric,
+      });
+    }
+    if (allFabricItems.length > 0) {
+      const sampleFabric = allFabricItems[0];
+      console.log('  - Sample fabric item:', {
+        id: sampleFabric.id,
+        sku: sampleFabric.sku,
+        collection_name: (sampleFabric as any).collection_name,
+        variant_name: (sampleFabric as any).variant_name,
+      });
+    }
   }
   
   // Mapear manufacturers del Catalog a formato esperado
@@ -118,25 +172,20 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
   }));
   
   // Mapear collections del Catalog a formato esperado
-  // Nota: CatalogCollections no tiene manufacturer_id directo, 
-  // pero podemos usar metadata o relacionar por nombre
+  // Ahora las collections incluyen manufacturer_id directamente desde CatalogItems
   const collections = catalogCollections.map(c => {
-    // Intentar obtener manufacturer desde metadata o por nombre de collection
-    const collectionMetadata = (c as any).metadata || {};
-    const manufacturerFromMetadata = collectionMetadata.manufacturer;
-    
-    // Mapear manufacturer por nombre si está en metadata
+    // Obtener manufacturer_id directamente de la collection (ahora está disponible)
     let manufacturerId: string | undefined;
-    if (manufacturerFromMetadata) {
-      const mfg = manufacturers.find(m => 
-        m.name.toLowerCase() === manufacturerFromMetadata.toLowerCase() ||
-        m.name.toLowerCase().includes(manufacturerFromMetadata.toLowerCase()) ||
-        manufacturerFromMetadata.toLowerCase().includes(m.name.toLowerCase())
-      );
-      manufacturerId = mfg?.id;
+    if (c.manufacturer_id) {
+      // Buscar el manufacturer por ID en la lista de manufacturers
+      const mfg = catalogManufacturers.find(m => m.id === c.manufacturer_id);
+      if (mfg) {
+        // Convertir el nombre del manufacturer a formato ID (lowercase, replace spaces with hyphens)
+        manufacturerId = mfg.name.toLowerCase().replace(/\s+/g, '-');
+      }
     }
     
-    // Fallback: intentar inferir manufacturer desde el nombre de la collection
+    // Fallback: intentar inferir manufacturer desde el nombre de la collection (solo si no hay manufacturer_id)
     if (!manufacturerId) {
       const collectionName = c.name.toLowerCase();
       if (collectionName.includes('essential') || collectionName.includes('ess')) {
@@ -156,60 +205,74 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     };
   });
   
-  // Mapear variants del Catalog a formato esperado
-  const variants = catalogVariants.map(v => {
-    const variantMetadata = (v as any).metadata || {};
-    
-    // Obtener manufacturer desde el variant o desde la collection relacionada
-    let manufacturer: string | undefined;
-    if (variantMetadata.manufacturer) {
-      manufacturer = variantMetadata.manufacturer;
-    } else {
-      // Buscar la collection relacionada para obtener su manufacturer
-      const relatedCollection = collections.find(c => c.id === v.collection_id);
-      if (relatedCollection && relatedCollection.manufacturer) {
-        // Obtener el nombre del manufacturer desde el ID
+  // Mapear variants desde CatalogItems a formato esperado
+  // Filter by current collection if selected - use same logic as Collections.tsx
+  const filteredItemsForVariants = currentCollectionName 
+    ? allFabricItems.filter((item: any) => {
+        // Convert both to strings and compare (collection_name is now text, not UUID)
+        const itemCollectionName = item.collection_name ? String(item.collection_name).trim() : null;
+        const targetCollectionName = String(currentCollectionName).trim();
+        return itemCollectionName === targetCollectionName;
+      })
+    : allFabricItems;
+  
+  const variants = filteredItemsForVariants.map((item: any) => {
+      // Find related collection by collection_name - use same logic as Collections.tsx
+      const itemCollectionName = item.collection_name ? String(item.collection_name).trim() : '';
+      const relatedCollection = collections.find(c => {
+        const collectionName = c.name ? String(c.name).trim() : '';
+        return collectionName === itemCollectionName;
+      });
+      
+      // Get manufacturer from item or collection
+      let manufacturer: string | undefined;
+      if (item.manufacturer_id) {
+        const mfg = catalogManufacturers.find(m => m.id === item.manufacturer_id);
+        manufacturer = mfg?.name;
+      } else if (relatedCollection) {
         const mfg = manufacturers.find(m => m.id === relatedCollection.manufacturer);
         manufacturer = mfg?.name;
       }
-    }
-    
-    // Valores por defecto basados en el nombre del variant si no hay metadata
-    const variantName = v.name.toLowerCase();
-    let defaultApertura: string | undefined;
-    let defaultGramaje: string | undefined;
-    let defaultAnchoRollo = '3000 mm'; // Valor por defecto común
-    
-    // Inferir apertura desde el nombre (ej: "Chalk 5%" -> "5%")
-    const aperturaMatch = v.name.match(/(\d+)%/);
-    if (aperturaMatch) {
-      defaultApertura = `${aperturaMatch[1]}%`;
-    }
-    
-    // Inferir gramaje desde el nombre o usar valores por defecto
-    if (variantName.includes('chalk') || variantName.includes('ivory') || variantName.includes('white')) {
-      defaultGramaje = variantName.includes('sunset') ? '145 g/m²' : '110 g/m²';
-    }
-    
-    return {
-      id: v.id,
-      collectionId: v.collection_id,
-      name: v.name,
-      code: v.code || v.name,
-      color_name: v.color_name || v.name,
-      // Datos adicionales desde metadata si están disponibles, sino usar valores por defecto
-      manufacturer: manufacturer || 'N/A',
-      apertura: variantMetadata.apertura || variantMetadata.fabricOpening || defaultApertura || 'N/A',
-      gramaje: variantMetadata.gramaje || variantMetadata.fabricWeight || defaultGramaje || 'N/A',
-      anchoRollo: variantMetadata.anchoRollo || variantMetadata.rollWidth || defaultAnchoRollo || 'N/A',
-      puedeRotar: variantMetadata.puedeRotar !== undefined ? variantMetadata.puedeRotar : 
-                  variantMetadata.canRotate !== undefined ? variantMetadata.canRotate : true, // Por defecto true
-      imageUrl: variantMetadata.imageUrl || variantMetadata.image || undefined,
-    };
-  });
+      
+      // Extract technical data from item
+      const variantName = (item.variant_name || '').toLowerCase();
+      let defaultApertura: string | undefined;
+      let defaultGramaje: string | undefined;
+      let defaultAnchoRollo = item.roll_width_m ? `${item.roll_width_m}m` : '3000 mm';
+      
+      // Infer apertura from variant name (e.g., "Chalk 5%" -> "5%")
+      const aperturaMatch = item.variant_name?.match(/(\d+)%/);
+      if (aperturaMatch) {
+        defaultApertura = `${aperturaMatch[1]}%`;
+      }
+      
+      // Use default gramaje values based on variant name
+      if (variantName.includes('chalk') || variantName.includes('ivory') || variantName.includes('white')) {
+        defaultGramaje = variantName.includes('sunset') ? '145 g/m²' : '110 g/m²';
+      }
+      
+      // Use collection id from relatedCollection, or fallback to collection_name
+      // The collection.id should match what's used in the dropdown
+      const collectionId = relatedCollection?.id || itemCollectionName;
+      
+      return {
+        id: item.id, // Use catalog_item_id as variant id
+        collectionId: collectionId, // Use collection.id for matching with dropdown selection
+        name: item.variant_name || item.sku, // Use variant_name
+        code: item.sku,
+        color_name: item.variant_name, // variant_name replaces color_name
+        // Additional data
+        manufacturer: manufacturer || 'N/A',
+        apertura: defaultApertura || 'N/A',
+        gramaje: defaultGramaje || 'N/A',
+        anchoRollo: defaultAnchoRollo || 'N/A',
+        puedeRotar: true, // Default true
+        imageUrl: undefined, // Can be added later if needed
+      };
+    });
   
   // Fallback a datos hardcodeados si no hay datos del Catalog
-  const useHardcodedData = catalogCollections.length === 0 && !loadingCollections;
+  const useHardcodedData = catalogCollections.length === 0 && !loadingCollections && catalogItems.length === 0 && !loadingItems;
   const finalCollections = useHardcodedData ? COLLECTIONS : collections;
   const finalVariants = useHardcodedData ? VARIANTS : variants;
   const finalManufacturers = useHardcodedData ? [
@@ -218,16 +281,27 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
   ] : manufacturers;
   
   const handleCollectionChange = (collectionId: string) => {
+    // Get collection name from the selected collection
+    const selectedCollection = catalogCollections.find(c => c.id === collectionId);
+    const collectionName = selectedCollection?.name || (selectedCollection as any)?.collection_name || collectionId;
+    
     if (productType === 'roller-shade') {
-      onUpdate({ collectionId: collectionId, variantId: undefined });
+      onUpdate({ 
+        collectionId: collectionId, // Keep for backward compatibility
+        collectionName: collectionName, // New: use collection_name
+        variantId: undefined,
+        variantName: undefined 
+      });
     } else if (productType === 'dual-shade' || productType === 'triple-shade') {
       const currentFabric = (config as any).frontFabric || {};
       onUpdate({ 
         frontFabric: { 
           ...currentFabric,
           manufacturer: (config as any).variantManufacturer || currentFabric.manufacturer,
-          collectionId: collectionId, 
-          variantId: undefined 
+          collectionId: collectionId, // Keep for backward compatibility
+          collectionName: collectionName, // New: use collection_name
+          variantId: undefined,
+          variantName: undefined 
         } 
       });
     } else if (productType === 'drapery' || productType === 'awning') {
@@ -236,8 +310,10 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
         fabric: { 
           ...currentFabric,
           manufacturer: (config as any).variantManufacturer || currentFabric.manufacturer,
-          collectionId: collectionId, 
-          variantId: undefined 
+          collectionId: collectionId, // Keep for backward compatibility
+          collectionName: collectionName, // New: use collection_name
+          variantId: undefined,
+          variantName: undefined 
         } 
       });
     } else {
@@ -247,15 +323,23 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
   };
   
   const handleVariantChange = (variantId: string | undefined) => {
+    // Get variant name from the selected variant
+    const selectedVariantItem = allFabricItems.find((item: any) => item.id === variantId);
+    const variantName = selectedVariantItem?.variant_name || undefined;
+    
     if (productType === 'roller-shade') {
-      onUpdate({ variantId: variantId });
+      onUpdate({ 
+        variantId: variantId, // Keep for backward compatibility (catalog_item_id)
+        variantName: variantName // New: use variant_name
+      });
     } else if (productType === 'dual-shade' || productType === 'triple-shade') {
       const currentFabric = (config as any).frontFabric || {};
       onUpdate({ 
         frontFabric: { 
           ...currentFabric,
           manufacturer: (config as any).variantManufacturer || currentFabric.manufacturer,
-          variantId: variantId 
+          variantId: variantId, // Keep for backward compatibility
+          variantName: variantName // New: use variant_name
         } 
       });
     } else if (productType === 'drapery' || productType === 'awning') {
@@ -264,7 +348,8 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
         fabric: { 
           ...currentFabric,
           manufacturer: (config as any).variantManufacturer || currentFabric.manufacturer,
-          variantId: variantId 
+          variantId: variantId, // Keep for backward compatibility
+          variantName: variantName // New: use variant_name
         } 
       });
     } else {
@@ -397,15 +482,14 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
               </div>
             ) : (
               <div className="grid grid-cols-4 gap-6">
-                {loadingVariants ? (
+                {loadingItems ? (
                   <div className="col-span-4 text-center text-gray-500 py-4">Loading variants...</div>
-                ) : finalVariants.filter(variant => variant.collectionId === currentCollectionId).length === 0 ? (
+                ) : finalVariants.length === 0 ? (
                   <div className="col-span-4 text-center text-gray-500 py-4">
                     No variants available for this collection
                   </div>
                 ) : (
                   finalVariants
-                    .filter(variant => variant.collectionId === currentCollectionId)
                     .map((variant) => {
                   const isSelected = currentVariantId === variant.id;
                   return (

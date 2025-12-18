@@ -224,10 +224,7 @@ const Collections = lazy(() => {
   return import('./pages/catalog/Collections');
 });
 
-const Variants = lazy(() => {
-  logger.debug('Loading Variants component');
-  return import('./pages/catalog/Variants');
-});
+// Variants component removed - use CollectionsCatalog instead
 
 const CatalogItemNew = lazy(() => {
   logger.debug('Loading CatalogItemNew component');
@@ -653,9 +650,11 @@ function App() {
         setCurrentPage('login');
       }
     });
+    // Variants route removed - redirect to collections instead
     router.addRoute('/catalog/variants', () => {
       if (isAuthenticated) {
-        setCurrentPage('variants');
+        // Redirect to collections page
+        router.navigate('/catalog/collections', true);
       } else {
         setCurrentPage('login');
       }
@@ -944,8 +943,7 @@ function App() {
         return <Categories />;
       case 'collections':
         return <Collections />;
-      case 'variants':
-        return <Variants />;
+      // Variants case removed - use CollectionsCatalog instead
       case 'inventory':
         return <Inventory />;
       case 'warehouse':

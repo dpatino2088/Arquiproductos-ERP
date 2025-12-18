@@ -5,6 +5,8 @@ import { useContacts, useDeleteContact } from '../../hooks/useDirectory';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
   Contact, 
   Search, 
@@ -115,6 +117,8 @@ export default function Contacts() {
   }, []);
 
   const { registerSubmodules } = useSubmoduleNav();
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -165,9 +169,6 @@ export default function Contacts() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
-
-  // Get active organization
-  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   
   // Prevent hook execution without org
   if (!orgLoading && !activeOrganizationId) {
@@ -392,13 +393,20 @@ export default function Contacts() {
   const handleArchiveContact = async (contact: ContactItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas archivar "${contact.firstName}"?`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Archivar Contacto',
+      message: `¿Estás seguro de que deseas archivar "${contact.firstName}"?`,
+      variant: 'warning',
+      confirmText: 'Archivar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
       if (!activeOrganizationId) return;
       
+      setLoading(true);
       const { error } = await supabase
         .from('DirectoryContacts')
         .update({ archived: true })
@@ -420,6 +428,8 @@ export default function Contacts() {
         title: 'Error al archivar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -427,11 +437,18 @@ export default function Contacts() {
   const handleDeleteContact = async (contact: ContactItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas eliminar "${contact.firstName}"? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Contacto',
+      message: `¿Estás seguro de que deseas eliminar "${contact.firstName}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteContact(contact.id);
       useUIStore.getState().addNotification({
         type: 'success',
@@ -439,12 +456,14 @@ export default function Contacts() {
         message: 'El contacto ha sido eliminado correctamente.',
       });
       refetch();
-    } catch (error) {
+        } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al eliminar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1196,6 +1215,19 @@ export default function Contacts() {
           )}
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

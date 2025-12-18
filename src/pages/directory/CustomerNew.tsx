@@ -32,7 +32,17 @@ const customerSchema = z.object({
   ),
   customer_name: z.string().min(1, 'Customer name is required'),
   identification_number: z.string().optional(),
-  website: z.string().url('Invalid URL').optional().or(z.literal('')),
+  website: z.string()
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => {
+      if (!val || val.trim() === '') return true;
+      // Allow URLs with or without protocol
+      const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/i;
+      return urlPattern.test(val.trim());
+    }, {
+      message: 'Invalid URL format. Use format like: example.com or https://example.com'
+    }),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   company_phone: z.string().optional(),
   alt_phone: z.string().optional(),
@@ -101,6 +111,7 @@ export default function CustomerNew() {
     defaultValues: {
       customer_type_name: 'VIP',
       billing_same_as_location: true,
+      primary_contact_id: '', // Initialize to empty string to avoid undefined
     },
   });
 
@@ -307,11 +318,21 @@ export default function CustomerNew() {
         return;
       }
 
+      // Normalize website URL: add https:// if no protocol is provided
+      const normalizeWebsite = (url: string | undefined | null): string | null => {
+        if (!url || url.trim() === '') return null;
+        const trimmed = url.trim();
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          return trimmed;
+        }
+        return `https://${trimmed}`;
+      };
+
       const customerData: any = {
         organization_id: activeOrganizationId,
         customer_type_name: values.customer_type_name,
         customer_name: values.customer_name,
-        website: values.website || null,
+        website: normalizeWebsite(values.website),
         email: values.email || null,
         company_phone: values.company_phone || null,
         alt_phone: values.alt_phone || null,
@@ -736,7 +757,8 @@ export default function CustomerNew() {
                 <SelectShadcn
                   value={watch('primary_contact_id') || ''}
                   onValueChange={(value) => {
-                    setValue('primary_contact_id', value, { shouldValidate: true });
+                    // Ensure value is always a string, never undefined
+                    setValue('primary_contact_id', value || '', { shouldValidate: true });
                   }}
                   disabled={loadingContacts || isReadOnly}
                 >

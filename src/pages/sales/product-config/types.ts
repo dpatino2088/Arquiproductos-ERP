@@ -11,6 +11,14 @@ export type ProductType =
   | 'awning'
   | 'window-film';
 
+// Panel interface for multi-panel support (for interconnected curtains)
+// Note: height_mm is stored globally in height_mm field, not per panel
+// This avoids redundancy since all panels share the same height
+export interface Panel {
+  width_mm: number;
+  // height_mm is NOT stored here - it's stored in the parent config's height_mm field
+}
+
 export interface BaseProductConfig {
   productType: ProductType;
   area?: string;
@@ -21,9 +29,11 @@ export interface BaseProductConfig {
 // Roller Shade Configuration
 export interface RollerShadeConfig extends BaseProductConfig {
   productType: 'roller-shade';
-  // Measurements
-  width_mm?: number;
-  height_mm?: number;
+  // Measurements - Support for multiple panels (interconnected curtains)
+  // If panels array exists, use it; otherwise fallback to width_mm/height_mm (legacy)
+  panels?: Panel[]; // Array of panels (1-3 panels supported)
+  width_mm?: number; // Legacy: single panel width
+  height_mm?: number; // Legacy: single panel height
   fabricDrop?: 'normal' | 'inverted';
   installationType?: 'inside' | 'outside';
   installationLocation?: 'ceiling' | 'wall';
@@ -50,8 +60,10 @@ export interface RollerShadeConfig extends BaseProductConfig {
 export interface DualShadeConfig extends BaseProductConfig {
   productType: 'dual-shade';
   // Similar to Roller Shade but with dual layer specifics
-  width_mm?: number;
-  height_mm?: number;
+  // Support for multiple panels (interconnected curtains)
+  panels?: Panel[]; // Array of panels (1-3 panels supported)
+  width_mm?: number; // Legacy: single panel width
+  height_mm?: number; // Legacy: single panel height
   fabricDrop?: 'normal' | 'inverted';
   installationType?: 'inside' | 'outside';
   installationLocation?: 'ceiling' | 'wall';
@@ -78,8 +90,10 @@ export interface DualShadeConfig extends BaseProductConfig {
 // Triple Shade Configuration
 export interface TripleShadeConfig extends BaseProductConfig {
   productType: 'triple-shade';
-  width_mm?: number;
-  height_mm?: number;
+  // Support for multiple panels (interconnected curtains)
+  panels?: Panel[]; // Array of panels (1-3 panels supported)
+  width_mm?: number; // Legacy: single panel width
+  height_mm?: number; // Legacy: single panel height
   installationType?: 'inside' | 'outside';
   installationLocation?: 'ceiling' | 'wall';
   // Triple layer fabrics

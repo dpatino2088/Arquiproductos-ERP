@@ -6,6 +6,8 @@ import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
   Users, 
   Search, 
@@ -38,7 +40,6 @@ interface CustomerItem {
   contactName: string;
   email: string;
   phone: string;
-  industry: string;
   customerType: 'Enterprise' | 'SMB' | 'Startup' | 'Individual';
   status: 'Active' | 'Inactive' | 'On Hold' | 'Archived';
   location: string;
@@ -79,22 +80,20 @@ export default function Customers() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { canEditCustomers, canViewQuotes, loading: roleLoading } = useCurrentOrgRole();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  const [sortBy, setSortBy] = useState<'companyName' | 'industry' | 'customerType' | 'dateAdded'>('companyName');
+  const [sortBy, setSortBy] = useState<'companyName' | 'customerType' | 'dateAdded'>('companyName');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedIndustry, setSelectedIndustry] = useState<string[]>([]);
   const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [selectedCustomerType, setSelectedCustomerType] = useState<string[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<string[]>([]);
-  const [showIndustryDropdown, setShowIndustryDropdown] = useState(false);
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showCustomerTypeDropdown, setShowCustomerTypeDropdown] = useState(false);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
-  const [industrySearchTerm, setIndustrySearchTerm] = useState('');
   const [statusSearchTerm, setStatusSearchTerm] = useState('');
   const [customerTypeSearchTerm, setCustomerTypeSearchTerm] = useState('');
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
@@ -112,12 +111,10 @@ export default function Customers() {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       if (!target.closest('.dropdown-container')) {
-        setShowIndustryDropdown(false);
         setShowStatusDropdown(false);
         setShowCustomerTypeDropdown(false);
         setShowLocationDropdown(false);
         // Clear search terms when closing dropdowns
-        setIndustrySearchTerm('');
         setStatusSearchTerm('');
         setCustomerTypeSearchTerm('');
         setLocationSearchTerm('');
@@ -154,12 +151,8 @@ export default function Customers() {
         customer.companyName.toLowerCase().includes(searchLower) ||
         customer.contactName.toLowerCase().includes(searchLower) ||
         customer.email.toLowerCase().includes(searchLower) ||
-        customer.industry.toLowerCase().includes(searchLower) ||
         customer.phone.toLowerCase().includes(searchLower)
       );
-
-      // Industry filter
-      const matchesIndustry = selectedIndustry.length === 0 || selectedIndustry.includes(customer.industry);
 
       // Status filter
       const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(customer.status);
@@ -170,7 +163,7 @@ export default function Customers() {
       // Location filter
       const matchesLocation = selectedLocation.length === 0 || selectedLocation.includes(customer.location);
 
-      return matchesSearch && matchesIndustry && matchesStatus && matchesCustomerType && matchesLocation;
+      return matchesSearch && matchesStatus && matchesCustomerType && matchesLocation;
     });
 
     // Apply sorting
@@ -182,10 +175,6 @@ export default function Customers() {
         case 'companyName':
           aValue = a.companyName.toLowerCase();
           bValue = b.companyName.toLowerCase();
-          break;
-        case 'industry':
-          aValue = a.industry.toLowerCase();
-          bValue = b.industry.toLowerCase();
           break;
         case 'customerType':
           aValue = a.customerType.toLowerCase();
@@ -212,7 +201,7 @@ export default function Customers() {
         return 0;
       }
     });
-  }, [searchTerm, customersData, sortBy, sortOrder, selectedIndustry, selectedStatus, selectedCustomerType, selectedLocation]);
+  }, [searchTerm, customersData, sortBy, sortOrder, selectedStatus, selectedCustomerType, selectedLocation]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
@@ -236,26 +225,16 @@ export default function Customers() {
 
   // Clear all filters
   const clearAllFilters = () => {
-    setSelectedIndustry([]);
     setSelectedStatus([]);
     setSelectedCustomerType([]);
     setSelectedLocation([]);
     setSearchTerm('');
-    setIndustrySearchTerm('');
     setStatusSearchTerm('');
     setCustomerTypeSearchTerm('');
     setLocationSearchTerm('');
   };
 
   // Helper functions for multi-select
-  const handleIndustryToggle = (industry: string) => {
-    setSelectedIndustry(prev => 
-      prev.includes(industry) 
-        ? prev.filter(i => i !== industry)
-        : [...prev, industry]
-    );
-  };
-
   const handleStatusToggle = (status: string) => {
     setSelectedStatus(prev => 
       prev.includes(status) 
@@ -281,14 +260,6 @@ export default function Customers() {
   };
 
   // Filter options based on search terms
-  const getFilteredIndustryOptions = () => {
-    const industryOptions = ['Technology', 'Software', 'Consulting', 'E-commerce', 'Marketing', 'Healthcare', 'Finance', 'Retail'];
-    if (!industrySearchTerm) return industryOptions;
-    return industryOptions.filter(industry => 
-      industry.toLowerCase().includes(industrySearchTerm.toLowerCase())
-    );
-  };
-
   const getFilteredStatusOptions = () => {
     const statusOptions = ['Active', 'Inactive', 'On Hold', 'Archived'];
     if (!statusSearchTerm) return statusOptions;
@@ -337,13 +308,20 @@ export default function Customers() {
   const handleArchiveCustomer = async (customer: CustomerItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas archivar "${customer.companyName}"?`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Archivar Customer',
+      message: `¿Estás seguro de que deseas archivar "${customer.companyName}"?`,
+      variant: 'warning',
+      confirmText: 'Archivar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
       if (!activeOrganizationId) return;
       
+      setLoading(true);
       const { error } = await supabase
         .from('DirectoryCustomers')
         .update({ archived: true })
@@ -365,6 +343,8 @@ export default function Customers() {
         title: 'Error al archivar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -372,11 +352,18 @@ export default function Customers() {
   const handleDeleteCustomer = async (customer: CustomerItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas eliminar "${customer.companyName}"? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Customer',
+      message: `¿Estás seguro de que deseas eliminar "${customer.companyName}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteCustomer(customer.id);
       useUIStore.getState().addNotification({
         type: 'success',
@@ -384,12 +371,14 @@ export default function Customers() {
         message: 'El customer ha sido eliminado correctamente.',
       });
       refetch();
-    } catch (error) {
+        } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al eliminar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -547,7 +536,7 @@ export default function Customers() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search customers by company name, contact, email, industry, or phone..."
+                placeholder="Search customers by company name, contact, email, or phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
@@ -603,60 +592,6 @@ export default function Customers() {
         {showFilters && (
           <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              {/* Industry Multi-Select */}
-              <div className="relative dropdown-container">
-                <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
-                     onClick={() => setShowIndustryDropdown(!showIndustryDropdown)}>
-                  <span className="text-gray-700">
-                    {selectedIndustry.length === 0 ? 'All Industries' : 
-                     selectedIndustry.length === 1 ? selectedIndustry[0] :
-                     `${selectedIndustry.length} selected`}
-                  </span>
-                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-                {showIndustryDropdown && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded shadow-lg z-10 max-h-48 overflow-y-auto">
-                    <div className="p-2 border-b border-gray-100">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Search industries..."
-                          value={industrySearchTerm}
-                          onChange={(e) => setIndustrySearchTerm(e.target.value)}
-                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        {selectedIndustry.length > 0 && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedIndustry([]);
-                            }}
-                            className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
-                          >
-                            Clear ({selectedIndustry.length})
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {getFilteredIndustryOptions().map((industry) => (
-                      <div key={industry} className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
-                           onClick={() => handleIndustryToggle(industry)}>
-                        <input type="checkbox" checked={selectedIndustry.includes(industry)} readOnly className="w-4 h-4" />
-                        <span className="text-sm text-gray-700">{industry}</span>
-                      </div>
-                    ))}
-                    {getFilteredIndustryOptions().length === 0 && (
-                      <div className="px-3 py-2 text-sm text-gray-500 text-center">
-                        No industries found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
               {/* Status Multi-Select */}
               <div className="relative dropdown-container">
                 <div className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] flex items-center justify-between cursor-pointer hover:bg-gray-50" 
@@ -839,15 +774,6 @@ export default function Customers() {
                   {sortBy === 'companyName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                 </button>
                 <button 
-                  onClick={() => handleSort('industry')}
-                  className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
-                    sortBy === 'industry' ? 'text-gray-900 font-medium' : 'text-gray-600'
-                  }`}
-                >
-                  Industry
-                  {sortBy === 'industry' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                </button>
-                <button 
                   onClick={() => handleSort('dateAdded')}
                   className={`text-xs hover:text-gray-900 flex items-center gap-1 ${
                     sortBy === 'dateAdded' ? 'text-gray-900 font-medium' : 'text-gray-600'
@@ -879,15 +805,6 @@ export default function Customers() {
                     </button>
                   </th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Contact</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('industry')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Industry
-                      {sortBy === 'industry' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Customer Type</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Status</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Location</th>
@@ -949,7 +866,6 @@ export default function Customers() {
                         </div>
                       </td>
                       <td className="py-4 px-6 text-gray-700 text-sm">{customer.contactName || 'N/A'}</td>
-                      <td className="py-4 px-6 text-gray-900 text-sm">{customer.industry}</td>
                       <td className="py-4 px-6">{getCustomerTypeBadge(customer.customerType)}</td>
                       <td className="py-4 px-6">{getStatusBadge(customer.status)}</td>
                       <td className="py-4 px-6 text-gray-600 text-sm">{customer.location}</td>
@@ -1098,10 +1014,6 @@ export default function Customers() {
                       <span className="truncate">{customer.location}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-gray-600">
-                      <Building className="w-3 h-3 flex-shrink-0" />
-                      <span>{customer.industry}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-600">
                       <Calendar className="w-3 h-3 flex-shrink-0" />
                       <span>Added {new Date(customer.dateAdded).toLocaleDateString()}</span>
                     </div>
@@ -1204,6 +1116,19 @@ export default function Customers() {
           )}
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

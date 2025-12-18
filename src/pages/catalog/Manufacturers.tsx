@@ -3,6 +3,8 @@ import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useManufacturersCRUD } from '../../hooks/useCatalog';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
   Search, 
   Plus,
@@ -15,12 +17,12 @@ import {
   Package,
   FolderTree,
   Book,
-  Palette
 } from 'lucide-react';
 
 export default function Manufacturers() {
   const { registerSubmodules } = useSubmoduleNav();
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
   useEffect(() => {
     // Register Catalog submodules when this component mounts
@@ -31,7 +33,6 @@ export default function Manufacturers() {
         { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
         { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
         { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
-        { id: 'variants', label: 'Variants', href: '/catalog/variants', icon: Palette },
       ]);
       if (import.meta.env.DEV) {
         console.log('✅ Manufacturers.tsx: Registered Catalog submodules');
@@ -135,23 +136,32 @@ export default function Manufacturers() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Fabricante',
+      message: `¿Estás seguro de que deseas eliminar "${name}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteManufacturer(id);
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Manufacturer deleted',
-        message: 'Manufacturer has been deleted successfully.',
+        title: 'Fabricante eliminado',
+        message: 'El fabricante ha sido eliminado correctamente.',
       });
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error deleting',
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        title: 'Error al eliminar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -414,6 +424,19 @@ export default function Manufacturers() {
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

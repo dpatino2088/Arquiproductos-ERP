@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useItemCategoriesCRUD } from '../../hooks/useCatalog';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
   Search, 
   Plus,
@@ -16,12 +18,12 @@ import {
   Building2,
   FolderTree,
   Book,
-  Palette
 } from 'lucide-react';
 
 export default function Categories() {
   const { registerSubmodules } = useSubmoduleNav();
   const { categories, loading, error, createCategory, updateCategory, deleteCategory, isCreating, isDeleting } = useItemCategoriesCRUD();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
   useEffect(() => {
     // Register Catalog submodules when this component mounts
@@ -32,7 +34,6 @@ export default function Categories() {
         { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
         { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
         { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
-        { id: 'variants', label: 'Variants', href: '/catalog/variants', icon: Palette },
       ]);
       if (import.meta.env.DEV) {
         console.log('✅ Categories.tsx: Registered Catalog submodules');
@@ -42,7 +43,7 @@ export default function Categories() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', parent_id: '', sort_order: 0 });
+  const [formData, setFormData] = useState({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   // Build tree structure
@@ -50,8 +51,10 @@ export default function Categories() {
     id: string;
     organization_id: string;
     parent_id?: string | null;
+    parent_category_id?: string | null;
     name: string;
     code?: string | null;
+    is_group?: boolean;
     sort_order: number;
     deleted: boolean;
     archived: boolean;
@@ -70,8 +73,11 @@ export default function Categories() {
       const node = categoryMap.get(category.id);
       if (!node) return;
       
-      if (category.parent_id && categoryMap.has(category.parent_id)) {
-        const parent = categoryMap.get(category.parent_id);
+      // Use parent_category_id (preferred) or parent_id (legacy)
+      const parentId = category.parent_category_id || category.parent_id;
+      
+      if (parentId && categoryMap.has(parentId)) {
+        const parent = categoryMap.get(parentId);
         if (parent) {
           parent.children.push(node);
         }
@@ -131,8 +137,14 @@ export default function Categories() {
     });
   };
 
-  const handleNew = (parentId?: string) => {
-    setFormData({ name: '', code: '', parent_id: parentId || '', sort_order: 0 });
+  const handleNew = (parentId?: string, isGroup: boolean = false) => {
+    setFormData({ 
+      name: '', 
+      code: '', 
+      parent_category_id: parentId || '', 
+      is_group: isGroup,
+      sort_order: 0 
+    });
     setEditingId(null);
     setShowNewModal(true);
   };
@@ -141,7 +153,8 @@ export default function Categories() {
     setFormData({
       name: category.name,
       code: category.code || '',
-      parent_id: category.parent_id || '',
+      parent_category_id: category.parent_category_id || category.parent_id || '',
+      is_group: category.is_group || false,
       sort_order: category.sort_order || 0,
     });
     setEditingId(category.id);
@@ -153,7 +166,8 @@ export default function Categories() {
       const data = {
         name: formData.name.trim(),
         code: formData.code.trim() || null,
-        parent_id: formData.parent_id || null,
+        parent_category_id: formData.parent_category_id || null,
+        is_group: formData.is_group,
         sort_order: formData.sort_order,
       };
 
@@ -173,7 +187,7 @@ export default function Categories() {
         });
       }
       setShowNewModal(false);
-      setFormData({ name: '', code: '', parent_id: '', sort_order: 0 });
+      setFormData({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
       setEditingId(null);
     } catch (error) {
       useUIStore.getState().addNotification({
@@ -185,23 +199,32 @@ export default function Categories() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete "${name}"? This will also delete all subcategories. This action cannot be undone.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Categoría',
+      message: `¿Estás seguro de que deseas eliminar "${name}"? Esto también eliminará todas las subcategorías. Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteCategory(id);
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Category deleted',
-        message: 'Category has been deleted successfully.',
+        title: 'Categoría eliminada',
+        message: 'La categoría ha sido eliminada correctamente.',
       });
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error deleting',
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        title: 'Error al eliminar',
+        message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -209,6 +232,7 @@ export default function Categories() {
     const hasChildren = category.children && category.children.length > 0;
     const isExpanded = expandedCategories.has(category.id);
     const indent = level * 24;
+    const isGroup = category.is_group || false;
 
     return (
       <div key={category.id}>
@@ -235,15 +259,22 @@ export default function Categories() {
             {category.code && (
               <span className="text-xs text-gray-500 ml-2">{category.code}</span>
             )}
+            {isGroup && (
+              <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
+                Group
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1 ml-4">
-            <button
-              onClick={() => handleNew(category.id)}
-              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-              title="Add subcategory"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
+            {!isGroup && (
+              <button
+                onClick={() => handleNew(category.id, false)}
+                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                title="Add subcategory"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            )}
             <button
               onClick={() => handleEdit(category)}
               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
@@ -278,13 +309,22 @@ export default function Categories() {
           <h1 className="text-title font-semibold text-foreground mb-1">Categories</h1>
           <p className="text-small text-muted-foreground">Manage product categories (nested structure)</p>
         </div>
-        <button
-          onClick={() => handleNew()}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add New Category
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleNew(undefined, true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Parent Group
+          </button>
+          <button
+            onClick={() => handleNew()}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Category
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -379,7 +419,7 @@ export default function Categories() {
             <button
               onClick={() => {
                 setShowNewModal(false);
-                setFormData({ name: '', code: '', parent_id: '', sort_order: 0 });
+                setFormData({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
                 setEditingId(null);
               }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
@@ -420,23 +460,42 @@ export default function Categories() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Parent Category
+                  Is Group (Parent Category)
                 </label>
-                <select
-                  value={formData.parent_id}
-                  onChange={(e) => setFormData({ ...formData, parent_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                >
-                  <option value="">None (Root Category)</option>
-                  {categories
-                    .filter(c => !editingId || c.id !== editingId)
-                    .map(category => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                </select>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_group}
+                    onChange={(e) => setFormData({ ...formData, is_group: e.target.checked, parent_category_id: e.target.checked ? formData.parent_category_id : '' })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-gray-700">
+                    This is a parent group (not selectable for SKUs)
+                  </span>
+                </label>
               </div>
+
+              {!formData.is_group && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Parent Category
+                  </label>
+                  <select
+                    value={formData.parent_category_id}
+                    onChange={(e) => setFormData({ ...formData, parent_category_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
+                    <option value="">None (Root Category)</option>
+                    {categories
+                      .filter(c => (c.is_group || false) && (!editingId || c.id !== editingId))
+                      .map(category => (
+                        <option key={category.id} value={category.id}>
+                          {category.name} {category.code && `(${category.code})`}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -456,7 +515,7 @@ export default function Categories() {
               <button
                 onClick={() => {
                   setShowNewModal(false);
-                  setFormData({ name: '', code: '', parent_id: '', sort_order: 0 });
+                  setFormData({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
                   setEditingId(null);
                 }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
@@ -474,6 +533,19 @@ export default function Categories() {
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

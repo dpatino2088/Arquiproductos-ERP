@@ -74,6 +74,7 @@ export default function VendorNew() {
           .from('DirectoryContacts')
           .select('id, contact_name, identification_number')
           .eq('organization_id', activeOrganizationId)
+          .eq('contact_type', 'vendor') // Filter by vendor contact type
           .eq('deleted', false)
           .eq('archived', false)
           .order('contact_name', { ascending: true });
@@ -279,8 +280,7 @@ export default function VendorNew() {
 
       const vendorData: any = {
         organization_id: activeOrganizationId,
-        name: vendorName.trim(), // Use 'name' as required by DB schema
-        vendor_name: vendorName.trim(), // Keep for backward compatibility if needed
+        vendor_name: vendorName.trim(), // Use vendor_name as per DB schema
         primary_contact_id: primaryContactId.trim(), // Required field
         identification_number: identificationNumber.trim() || null,
         website: website.trim() || null,

@@ -5,6 +5,8 @@ import { useQuotes } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
   Search, 
   Filter,
@@ -66,6 +68,7 @@ export default function Quotes() {
   const { registerSubmodules } = useSubmoduleNav();
   const { quotes, loading, error, refetch } = useQuotes();
   const { activeOrganizationId } = useOrganizationContext();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -195,13 +198,20 @@ export default function Quotes() {
   const handleArchiveQuote = async (quote: QuoteItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas archivar la cotización "${quote.quoteNo}"?`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Archivar Cotización',
+      message: `¿Estás seguro de que deseas archivar la cotización "${quote.quoteNo}"?`,
+      variant: 'warning',
+      confirmText: 'Archivar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
       if (!activeOrganizationId) return;
       
+      setLoading(true);
       const { error } = await supabase
         .from('Quotes')
         .update({ archived: true })
@@ -223,19 +233,28 @@ export default function Quotes() {
         title: 'Error al archivar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDeleteQuote = async (quote: QuoteItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas eliminar la cotización "${quote.quoteNo}"? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Cotización',
+      message: `¿Estás seguro de que deseas eliminar la cotización "${quote.quoteNo}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
       if (!activeOrganizationId) return;
       
+      setLoading(true);
       const { error } = await supabase
         .from('Quotes')
         .update({ deleted: true })
@@ -257,6 +276,8 @@ export default function Quotes() {
         title: 'Error al eliminar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -590,6 +611,19 @@ export default function Quotes() {
           </div>
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

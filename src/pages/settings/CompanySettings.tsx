@@ -13,6 +13,7 @@ import {
 import OrganizationUser from './OrganizationUser';
 import OrganizationProfileView from './OrganizationProfileView';
 import OrganizationUserNew from './OrganizationUserNew';
+import CostEngineSettings from './CostEngineSettings';
 
 export default function CompanySettings() {
   const { getPreviousPage } = usePreviousPage();
@@ -86,7 +87,8 @@ export default function CompanySettings() {
   // Settings menu configuration based on our app modules
   const settingsMenu = [
     { id: 'organization-user', label: 'Organization User', icon: Users },
-    { id: 'organization-profile', label: 'Organization Profile', icon: Building }
+    { id: 'organization-profile', label: 'Organization Profile', icon: Building },
+    { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon }
   ];
 
   // Tab configurations for each section
@@ -137,6 +139,10 @@ export default function CompanySettings() {
 
     if (activeSection === 'organization-profile') {
       return <OrganizationProfileView />;
+    }
+
+    if (activeSection === 'cost-engine') {
+      return <CostEngineSettings />;
     }
 
     // Default content for other sections (shouldn't happen with current menu)

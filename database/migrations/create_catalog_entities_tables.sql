@@ -180,3 +180,5 @@ BEGIN
     RAISE NOTICE '📋 Created tables: Manufacturers, ItemCategories, CatalogCollections, CatalogVariants';
 END $$;
 
+
+

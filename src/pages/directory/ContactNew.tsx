@@ -22,12 +22,13 @@ const CONTACT_TYPE_OPTIONS = [
   { value: 'dealer', label: 'Dealer' },
   { value: 'reseller', label: 'Reseller' },
   { value: 'partner', label: 'Partner' },
+  { value: 'vendor', label: 'Vendor' },
 ] as const;
 
 // Unified schema for contacts
 const contactSchema = z.object({
   customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
-  contact_type: z.enum(['architect', 'interior_designer', 'project_manager', 'consultant', 'dealer', 'reseller', 'partner']),
+  contact_type: z.enum(['architect', 'interior_designer', 'project_manager', 'consultant', 'dealer', 'reseller', 'partner', 'vendor']),
   title_id: z.string().optional(),
   contact_name: z.string().min(1, 'Contact name is required'),
   identification_number: z.string().optional(),
@@ -495,7 +496,7 @@ export default function ContactNew() {
                   <p className="mt-1 text-xs text-red-600">{form.formState.errors.customer_id.message}</p>
                 )}
                 <p className="mt-1 text-xs text-gray-500">
-                  Optional: Select a customer to associate this contact with. A contact can exist independently.
+                  Optional: Select a customer to associate this contact with. A contact can exist independently. Note: A customer is required when creating an Organization User.
                 </p>
               </div>
             </div>

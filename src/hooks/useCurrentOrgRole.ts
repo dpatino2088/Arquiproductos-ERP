@@ -23,6 +23,7 @@ type UseCurrentOrgRoleResult = {
   canManageOrganization: boolean;
   canManageUsers: boolean;
   canCreateQuotes: boolean;
+  canEditQuotes: boolean;
   canViewQuotes: boolean;
   canEditCustomers: boolean;
   canEditContacts: boolean;
@@ -144,6 +145,7 @@ export function useCurrentOrgRole(
   const canManageOrganization = isSuperAdmin; // Solo superadmin puede gestionar organización
   const canManageUsers = isSuperAdmin; // Solo superadmin puede crear/borrar usuarios
   const canCreateQuotes = isSuperAdmin || isAdmin || isMember; // Todos pueden crear quotes
+  const canEditQuotes = isSuperAdmin || isAdmin || isMember; // Todos pueden editar quotes (Member solo las suyas)
   const canViewQuotes = !!role || isSuperAdmin; // Todos pueden ver quotes (pero Member solo las suyas)
   const canEditCustomers = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar customers
   const canEditContacts = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar contacts
@@ -162,6 +164,7 @@ export function useCurrentOrgRole(
     canManageOrganization,
     canManageUsers,
     canCreateQuotes,
+    canEditQuotes,
     canViewQuotes,
     canEditCustomers,
     canEditContacts,

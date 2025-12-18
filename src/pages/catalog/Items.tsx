@@ -5,7 +5,10 @@ import { useCatalogItems, useDeleteCatalogItem } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import ImportCatalog from './ImportCatalog';
+import BOMTab from './BOMTab';
 import { 
   Search, 
   Filter,
@@ -26,7 +29,6 @@ import {
   Building2,
   FolderTree,
   Book,
-  Palette
 } from 'lucide-react';
 
 interface Item {
@@ -40,6 +42,8 @@ interface Item {
   is_fabric?: boolean;
   unit_price?: number;
   cost_price?: number;
+  msrp?: number;
+  updated_at?: string;
   active?: boolean;
   discontinued?: boolean;
   manufacturer?: string;
@@ -51,6 +55,8 @@ interface Item {
 export default function Items() {
   const { registerSubmodules } = useSubmoduleNav();
   const { items, loading, error, refetch } = useCatalogItems();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  const [activeTab, setActiveTab] = useState<'items' | 'bom'>('items');
 
   useEffect(() => {
     // Register Catalog submodules when this component mounts
@@ -61,7 +67,6 @@ export default function Items() {
         { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
         { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
         { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
-        { id: 'variants', label: 'Variants', href: '/catalog/variants', icon: Palette },
       ]);
       if (import.meta.env.DEV) {
         console.log('✅ Items.tsx: Registered Catalog submodules');
@@ -86,6 +91,20 @@ export default function Items() {
   const [showImportModal, setShowImportModal] = useState(false);
 
 
+  // Format date to DD/MM/YY format
+  const formatDate = (dateString?: string | null): string => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = String(date.getFullYear()).slice(-2);
+      return `${day}/${month}/${year}`;
+    } catch {
+      return 'N/A';
+    }
+  };
+
   // Transform catalog items to display format
   const itemsData: Item[] = useMemo(() => {
     if (!items) return [];
@@ -93,13 +112,15 @@ export default function Items() {
       id: item.id,
       sku: item.sku,
       itemName: item.name,
-      description: item.description,
+      description: item.description || undefined,
       item_type: item.item_type,
       measure_basis: item.measure_basis,
       uom: item.uom,
       is_fabric: item.is_fabric,
       unit_price: item.unit_price,
       cost_price: item.cost_price,
+      msrp: (item as any).msrp || undefined,
+      updated_at: (item as any).updated_at || undefined,
       active: item.active,
       discontinued: item.discontinued,
       manufacturer: item.metadata?.manufacturer || 'Not specified',
@@ -118,15 +139,15 @@ export default function Items() {
       // Search filter
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
-        item.sku.toLowerCase().includes(searchLower) ||
-        item.itemName.toLowerCase().includes(searchLower) ||
+        (item.sku || '').toLowerCase().includes(searchLower) ||
+        (item.itemName || '').toLowerCase().includes(searchLower) ||
         (item.description || '').toLowerCase().includes(searchLower) ||
         (item.item_type || '').toLowerCase().includes(searchLower) ||
         (item.measure_basis || '').toLowerCase().includes(searchLower) ||
         (item.uom || '').toLowerCase().includes(searchLower) ||
-        item.manufacturer.toLowerCase().includes(searchLower) ||
-        item.category.toLowerCase().includes(searchLower) ||
-        item.family.toLowerCase().includes(searchLower)
+        (item.manufacturer || '').toLowerCase().includes(searchLower) ||
+        (item.category || '').toLowerCase().includes(searchLower) ||
+        (item.family || '').toLowerCase().includes(searchLower)
       );
 
       // Manufacturer filter
@@ -157,24 +178,24 @@ export default function Items() {
 
       switch (sortBy) {
         case 'manufacturer':
-          aValue = a.manufacturer.toLowerCase();
-          bValue = b.manufacturer.toLowerCase();
+          aValue = (a.manufacturer || '').toLowerCase();
+          bValue = (b.manufacturer || '').toLowerCase();
           break;
         case 'sku':
-          aValue = a.sku.toLowerCase();
-          bValue = b.sku.toLowerCase();
+          aValue = (a.sku || '').toLowerCase();
+          bValue = (b.sku || '').toLowerCase();
           break;
         case 'itemName':
-          aValue = a.itemName.toLowerCase();
-          bValue = b.itemName.toLowerCase();
+          aValue = (a.itemName || '').toLowerCase();
+          bValue = (b.itemName || '').toLowerCase();
           break;
         case 'category':
-          aValue = a.category.toLowerCase();
-          bValue = b.category.toLowerCase();
+          aValue = (a.category || '').toLowerCase();
+          bValue = (b.category || '').toLowerCase();
           break;
         case 'family':
-          aValue = a.family.toLowerCase();
-          bValue = b.family.toLowerCase();
+          aValue = (a.family || '').toLowerCase();
+          bValue = (b.family || '').toLowerCase();
           break;
         case 'item_type':
           aValue = (a.item_type || '').toLowerCase();
@@ -193,8 +214,8 @@ export default function Items() {
           bValue = String(b.active ? 1 : 0);
           break;
         default:
-          aValue = a.sku.toLowerCase();
-          bValue = b.sku.toLowerCase();
+          aValue = (a.sku || '').toLowerCase();
+          bValue = (b.sku || '').toLowerCase();
       }
 
       // For numeric fields, compare as numbers
@@ -278,13 +299,20 @@ export default function Items() {
   const handleArchiveItem = async (item: Item, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas archivar "${item.itemName}"?`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Archivar Item',
+      message: `¿Estás seguro de que deseas archivar "${item.itemName}"?`,
+      variant: 'warning',
+      confirmText: 'Archivar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
       if (!activeOrganizationId) return;
       
+      setLoading(true);
       const { error } = await supabase
         .from('CatalogItems')
         .update({ archived: true })
@@ -306,17 +334,26 @@ export default function Items() {
         title: 'Error al archivar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDeleteItem = async (item: Item, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas eliminar "${item.itemName}"? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Item',
+      message: `¿Estás seguro de que deseas eliminar "${item.itemName}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteItem(item.id);
       useUIStore.getState().addNotification({
         type: 'success',
@@ -324,12 +361,14 @@ export default function Items() {
         message: 'El item ha sido eliminado correctamente.',
       });
       refetch();
-    } catch (error) {
+        } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al eliminar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -353,23 +392,56 @@ export default function Items() {
           <p className="text-small text-muted-foreground">Manage your product catalog, items, and collections</p>
         </div>
         <div className="flex items-center gap-3">
+          {activeTab === 'items' && (
+            <>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Upload className="w-4 h-4" />
+                Import
+              </button>
+              <button
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                onClick={() => router.navigate('/catalog/items/new')}
+              >
+                <Plus className="w-4 h-4" />
+                Add New Items
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-6 border-b border-gray-200">
+        <div className="flex gap-6">
           <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            onClick={() => setActiveTab('items')}
+            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'items'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
           >
-            <Upload className="w-4 h-4" />
-            Import
+            Items
           </button>
           <button
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-            onClick={() => router.navigate('/catalog/items/new')}
+            onClick={() => setActiveTab('bom')}
+            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'bom'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            Add New Items
+            BOM
           </button>
         </div>
       </div>
 
+      {/* Tab Content */}
+      {activeTab === 'items' && (
+        <>
       {/* Search Bar */}
       <div className="mb-4">
         <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
@@ -694,16 +766,9 @@ export default function Items() {
                     </button>
                   </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">UOM</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('unit_price')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Unit Price
-                      {sortBy === 'unit_price' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Cost Price</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">MSRP</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Last Updated</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('active')}
@@ -757,10 +822,13 @@ export default function Items() {
                         {item.uom || 'N/A'}
                       </td>
                       <td className="py-3 px-4 text-gray-700 text-xs">
-                        ${item.unit_price?.toFixed(2) || '0.00'}
+                        ${item.cost_price?.toFixed(2) || '0.00'}
                       </td>
                       <td className="py-3 px-4 text-gray-700 text-xs">
-                        ${item.cost_price?.toFixed(2) || '0.00'}
+                        ${item.msrp?.toFixed(2) || '0.00'}
+                      </td>
+                      <td className="py-3 px-4 text-gray-700 text-xs">
+                        {formatDate(item.updated_at)}
                       </td>
                       <td className="py-3 px-4 text-gray-700 text-xs">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
@@ -861,6 +929,23 @@ export default function Items() {
           setShowImportModal(false);
           refetch();
         }}
+      />
+        </>
+      )}
+
+      {activeTab === 'bom' && <BOMTab />}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
       />
     </div>
   );

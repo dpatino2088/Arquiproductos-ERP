@@ -5,6 +5,8 @@ import { useVendors, useDeleteVendor } from '../../hooks/useDirectory';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { 
   Store, 
@@ -76,6 +78,8 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
 
 export default function Vendors() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { activeOrganizationId, hasOrganizations, loading: orgLoading } = useOrganizationContext();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -121,9 +125,6 @@ export default function Vendors() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
-
-  // Get active organization
-  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   
   // Get role and permissions
   const { canEditVendors, isViewer, loading: roleLoading } = useCurrentOrgRole();
@@ -312,13 +313,20 @@ export default function Vendors() {
   const handleArchiveVendor = async (vendor: VendorItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas archivar "${vendor.vendorName}"?`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Archivar Vendor',
+      message: `¿Estás seguro de que deseas archivar "${vendor.vendorName}"?`,
+      variant: 'warning',
+      confirmText: 'Archivar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
       if (!activeOrganizationId) return;
       
+      setLoading(true);
       const { error } = await supabase
         .from('DirectoryVendors')
         .update({ archived: true })
@@ -340,6 +348,8 @@ export default function Vendors() {
         title: 'Error al archivar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -347,11 +357,18 @@ export default function Vendors() {
   const handleDeleteVendor = async (vendor: VendorItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!confirm(`¿Estás seguro de que deseas eliminar "${vendor.vendorName}"? Esta acción no se puede deshacer.`)) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Eliminar Vendor',
+      message: `¿Estás seguro de que deseas eliminar "${vendor.vendorName}"? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+
+    if (!confirmed) return;
 
     try {
+      setLoading(true);
       await deleteVendor(vendor.id);
       useUIStore.getState().addNotification({
         type: 'success',
@@ -359,12 +376,14 @@ export default function Vendors() {
         message: 'El vendor ha sido eliminado correctamente.',
       });
       refetch();
-    } catch (error) {
+        } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al eliminar',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1086,6 +1105,19 @@ export default function Vendors() {
           )}
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

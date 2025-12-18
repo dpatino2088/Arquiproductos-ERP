@@ -458,13 +458,25 @@ function Layout({ children }: LayoutProps) {
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/directory') {
+      // Always redirect to a list page when navigating to Directory module
+      // Ignore last route if it was an edit/new page
       const lastRoute = getLastRouteForModule('/directory');
-      const actualPath = lastRoute || '/directory/contacts';
+      // Only use lastRoute if it's a list page (contacts, customers, or vendors), not edit/new pages
+      const isListPage = lastRoute && (
+        lastRoute === '/directory/contacts' || 
+        lastRoute === '/directory/customers' || 
+        lastRoute === '/directory/vendors'
+      );
+      const actualPath = (isListPage ? lastRoute : null) || '/directory/contacts';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/sales') {
+      // Always redirect to quotes list when navigating to Sales module
+      // Ignore last route if it was an edit/new page
       const lastRoute = getLastRouteForModule('/sales');
-      const actualPath = lastRoute || '/sales/quotes';
+      // Only use lastRoute if it's a list page (quotes or orders), not edit/new pages
+      const isListPage = lastRoute && (lastRoute === '/sales/quotes' || lastRoute === '/sales/orders');
+      const actualPath = (isListPage ? lastRoute : null) || '/sales/quotes';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/catalog') {

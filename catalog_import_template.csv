@@ -1,0 +1,7 @@
+sku,name,description,item_type,measure_basis,uom,is_fabric,roll_width_m,fabric_pricing_mode,unit_price,cost_price,active,discontinued,manufacturer,category,family
+PROD-001,Roller Shade Basic,Cortina enrollable básica 2m de alto,component,linear_m,m,FALSE,,,150.00,100.00,TRUE,FALSE,Hunter Douglas,Window Coverings,Roller Shades
+PROD-002,Tela Blackout 1.5m,Tela blackout ancho 1.5m,fabric,fabric,m,TRUE,1.5,per_linear_m,25.00,15.00,TRUE,FALSE,Sunbrella,Fabrics,Blackout
+PROD-003,Hardware Kit Básico,Kit de hardware básico para instalación,accessory,unit,ea,FALSE,,,50.00,30.00,TRUE,FALSE,Generic,Hardware,Installation
+PROD-004,Dual Shade Premium,Cortina dual premium 2.5m,component,linear_m,m,FALSE,,,250.00,180.00,TRUE,FALSE,Hunter Douglas,Window Coverings,Dual Shades
+PROD-005,Motor RF 12V,Motor de radiofrecuencia 12V,accessory,unit,ea,FALSE,,,200.00,140.00,TRUE,FALSE,Somfy,Motors,RF Motors
+
