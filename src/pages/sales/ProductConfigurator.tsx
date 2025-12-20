@@ -105,14 +105,15 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   };
 
   // Check if can proceed to next step
-  const canProceed = () => {
+  const canProceed = (): boolean => {
     // For product selection step (index 0), just check if product type is selected
     if (currentStepIndex === 0) {
       return !!productType;
     }
     // For other steps, use validation
     if (!productType || !currentStep) return false;
-    return canProceedToNext(currentStep.id, productType, config as ProductConfig);
+    const result = canProceedToNext(currentStep.id, productType, config as ProductConfig);
+    return !!result; // Ensure boolean return
   };
 
   // Render step content
@@ -255,7 +256,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
               {!productType || currentStepIndex < steps.length ? (
                 <button
                   onClick={handleNext}
-                  disabled={isSubmitting || (!productType && currentStepIndex === 0) || (productType && !canProceed())}
+                  disabled={!!(isSubmitting || (!productType && currentStepIndex === 0) || (productType && !canProceed()))}
                   className="px-6 py-2 rounded-lg text-white transition-colors text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--primary-brand-hex)' }}
                 >
@@ -264,7 +265,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
               ) : (
                 <button
                   onClick={handleComplete}
-                  disabled={isSubmitting || !canProceed()}
+                  disabled={!!(isSubmitting || !canProceed())}
                   className="px-6 py-2 bg-green-600 text-white rounded-lg transition-colors text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? 'Adding...' : 'Add to Quote'}
