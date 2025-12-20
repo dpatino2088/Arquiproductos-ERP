@@ -49,7 +49,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   const handleUpdate = (updates: Partial<ProductConfig>) => {
     setConfig(prev => {
       // Merge updates while preserving productType
-      return { ...prev, ...updates, productType: prev.productType || updates.productType } as Partial<ProductConfig>;
+      const merged = { ...prev, ...updates };
+      if (prev.productType) {
+        (merged as any).productType = prev.productType;
+      }
+      return merged as Partial<ProductConfig>;
     });
   };
 

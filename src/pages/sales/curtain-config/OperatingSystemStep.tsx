@@ -153,10 +153,9 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
             <SelectShadcn
               value={(config as any).bottom_rail_type || (config as any).bottomBar || 'standard'}
               onValueChange={(value: string) => {
-                const bottomRailType = value === 'none' ? 'standard' : value;
                 onUpdate({ 
-                  bottom_rail_type: bottomRailType as 'standard' | 'wrapped',
-                  bottomBar: (value === 'none' ? 'none' : bottomRailType) as 'none' | 'standard' | 'weighted'
+                  bottom_rail_type: value as 'standard' | 'wrapped',
+                  bottomBar: value as 'standard' | 'weighted' | 'none'
                 } as any);
               }}
             >

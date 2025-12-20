@@ -68,7 +68,7 @@ export default function Variants() {
 
   // Filter and sort
   const filteredVariants = useMemo(() => {
-    const filtered = variants.filter(v => {
+    const filtered = variants.filter((v: any) => {
       const searchLower = searchTerm.toLowerCase();
       return !searchTerm || 
         v.name.toLowerCase().includes(searchLower) ||
@@ -337,7 +337,7 @@ export default function Variants() {
                     </td>
                   </tr>
                 ) : (
-                  paginatedVariants.map((variant) => {
+                  paginatedVariants.map((variant: any) => {
                     const collection = collections.find(c => c.id === variant.collection_id);
                     return (
                       <tr 

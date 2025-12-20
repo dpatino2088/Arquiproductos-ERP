@@ -148,7 +148,7 @@ export function adaptQuoteLineToProductConfig(line: QuoteLine & { [key: string]:
       productType: 'roller-shade',
       panels, // Include panels if available
       collectionId: line.collection_id || undefined,
-      position: line.position || baseConfig.position || '',
+      position: (line.position || baseConfig.position || '') as string | number,
       variantId: line.variant_id || undefined,
       operatingSystem: line.operating_system as any,
       operatingSystemManufacturer: line.operating_system_manufacturer as any,
