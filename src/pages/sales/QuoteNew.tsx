@@ -172,7 +172,8 @@ export default function QuoteNew() {
           setQuoteData(data);
           setValue('quote_no', (data as any).quote_no || '');
           setValue('customer_id', data.customer_id || '');
-          setValue('status', (data.status as QuoteStatus) || 'draft');
+          const status = data.status as QuoteStatus;
+          setValue('status', (status === 'cancelled' ? 'draft' : status) || 'draft');
           setValue('currency', data.currency || 'USD');
           setValue('notes', data.notes || '');
           // Note: contact_id is not stored in Quotes table, so we don't load it
@@ -303,14 +304,19 @@ export default function QuoteNew() {
       // Extract data from productConfig
       const area = productConfig.area || null;
       const position = productConfig.position || null;
-      const width_m = productConfig.widthM || null;
-      const height_m = productConfig.heightM || null;
+      const width_m = (productConfig as any).widthM || ((productConfig as any).width_mm ? (productConfig as any).width_mm / 1000 : null);
+      const height_m = (productConfig as any).heightM || ((productConfig as any).height_mm ? (productConfig as any).height_mm / 1000 : null);
       const quantity = productConfig.quantity || 1;
 
       // Get catalog item ID (from productConfig)
       const catalogItemId = (productConfig as any).catalogItemId;
       if (!catalogItemId) {
-        throw new Error('Catalog item ID is required');
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'Catalog item ID is required. Please complete the product configuration.',
+        });
+        return;
       }
 
       // Get product type ID
@@ -749,7 +755,10 @@ export default function QuoteNew() {
             <Label htmlFor="status">Status *</Label>
             <SelectShadcn
               value={watch('status') || 'draft'}
-              onValueChange={(value) => setValue('status', value as QuoteStatus)}
+              onValueChange={(value) => {
+                const validStatus = value as 'draft' | 'sent' | 'approved' | 'rejected';
+                setValue('status', validStatus);
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
