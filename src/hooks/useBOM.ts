@@ -7,7 +7,9 @@ export interface BOMComponent {
   organization_id: string;
   parent_item_id?: string | null; // Deprecated: use bom_template_id instead
   bom_template_id?: string | null; // New: FK to BOMTemplates
-  component_item_id: string;
+  component_item_id?: string | null; // Can be null for auto-select components (fabric, etc.)
+  component_role?: string | null; // Role of component (fabric, tube, bracket, etc.)
+  auto_select?: boolean; // Whether component is auto-selected by rules
   qty_per_unit: number;
   uom: string;
   is_required: boolean;
@@ -65,25 +67,10 @@ export function useBOMComponents(bomTemplateId: string | null) {
         setLoading(true);
         setError(null);
 
-        const { data, error: fetchError } = await supabase
+        // Fetch BOMComponents separately to avoid join issues
+        const { data: bomComponentsData, error: fetchError } = await supabase
           .from('BOMComponents')
-          .select(`
-            *,
-            component_item:CatalogItems!BOMComponents_component_item_id_fkey(
-              sku,
-              item_name,
-              cost_exw,
-              item_category_id,
-              is_fabric,
-              collection_name,
-              variant_name,
-              ItemCategories(
-                id,
-                name,
-                code
-              )
-            )
-          `)
+          .select('*')
           .eq('bom_template_id', bomTemplateId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
@@ -93,19 +80,76 @@ export function useBOMComponents(bomTemplateId: string | null) {
           throw fetchError;
         }
 
+        if (!bomComponentsData || bomComponentsData.length === 0) {
+          setComponents([]);
+          return;
+        }
+
+        // Get all unique component_item_ids (filter out nulls - these are auto-select components)
+        // Auto-select components (like fabric) don't have component_item_id until resolved
+        const componentItemIds = [...new Set(
+          bomComponentsData
+            .map((comp: any) => comp.component_item_id)
+            .filter((id: string | null) => id !== null)
+        )];
+
+        // Fetch CatalogItems separately
+        let catalogItemsMap = new Map<string, any>();
+        if (componentItemIds.length > 0) {
+          const { data: catalogItemsData } = await supabase
+            .from('CatalogItems')
+            .select('*')
+            .in('id', componentItemIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+
+          if (catalogItemsData) {
+            catalogItemsMap = new Map(catalogItemsData.map((item: any) => [item.id, item]));
+          }
+        }
+
+        // Get all unique category_ids
+        const categoryIds = [...new Set(
+          Array.from(catalogItemsMap.values())
+            .map((item: any) => item.item_category_id)
+            .filter((id: string | null) => id !== null)
+        )];
+
+        // Fetch ItemCategories separately
+        let categoriesMap = new Map<string, any>();
+        if (categoryIds.length > 0) {
+          const { data: categoriesData } = await supabase
+            .from('ItemCategories')
+            .select('*')
+            .in('id', categoryIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+
+          if (categoriesData) {
+            categoriesMap = new Map(categoriesData.map((cat: any) => [cat.id, cat]));
+          }
+        }
+
         // Map the data to include joined component information
-        const mappedComponents: BOMComponent[] = (data || []).map((item: any) => ({
-          ...item,
-          component_sku: item.component_item?.sku,
-          component_name: item.component_item?.item_name,
-          component_cost_exw: item.component_item?.cost_exw,
-          component_category_id: item.component_item?.item_category_id,
-          component_category_name: item.component_item?.ItemCategories?.name,
-          component_category_code: item.component_item?.ItemCategories?.code,
-          component_is_fabric: item.component_item?.is_fabric,
-          component_collection_name: item.component_item?.collection_name,
-          component_variant_name: item.component_item?.variant_name,
-        }));
+        // Note: Components with auto_select=true and component_item_id=null won't have catalog item data
+        // These will be resolved dynamically during BOM generation
+        const mappedComponents: BOMComponent[] = (bomComponentsData || []).map((item: any) => {
+          const catalogItem = item.component_item_id ? catalogItemsMap.get(item.component_item_id) : null;
+          const category = catalogItem ? categoriesMap.get(catalogItem.item_category_id) : null;
+
+          return {
+            ...item,
+            component_sku: catalogItem?.sku || (item.auto_select ? 'Auto-selected' : null),
+            component_name: catalogItem?.item_name || (item.component_role ? `${item.component_role} (auto-select)` : null),
+            component_cost_exw: catalogItem?.cost_exw,
+            component_category_id: catalogItem?.item_category_id,
+            component_category_name: category?.name,
+            component_category_code: category?.code,
+            component_is_fabric: catalogItem?.is_fabric,
+            component_collection_name: catalogItem?.collection_name,
+            component_variant_name: catalogItem?.variant_name,
+          };
+        });
 
         setComponents(mappedComponents);
       } catch (err) {

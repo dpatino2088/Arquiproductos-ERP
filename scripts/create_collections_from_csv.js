@@ -162,3 +162,7 @@ console.log('\n✅ Done!');
 console.log('\n📋 Next step:');
 console.log('   Run the catalog import script to assign collections to items\n');
 
+
+
+
+

@@ -21,21 +21,8 @@ export default function Collections() {
   const itemsPerPage = 24;
   const cardRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
-  useEffect(() => {
-    // Register Catalog submodules
-    const currentPath = window.location.pathname;
-    if (currentPath.startsWith('/catalog')) {
-      registerSubmodules('Catalog', [
-        { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
-        { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
-        { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
-        { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
-      ]);
-      if (import.meta.env.DEV) {
-        console.log('✅ Collections.tsx: Registered Catalog submodules');
-      }
-    }
-  }, [registerSubmodules]);
+  // Don't register submodules here - Catalog.tsx handles that
+  // This component is now used as a tab content within Items.tsx
 
   // Debug: log when catalogItems change
   useEffect(() => {

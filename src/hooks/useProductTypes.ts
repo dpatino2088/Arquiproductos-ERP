@@ -1,11 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { ProductType } from '../types/catalog';
 
-/**
- * Hook to fetch ProductTypes (from Profiles table)
- */
+export interface ProductType {
+  id: string;
+  name: string;
+  code?: string | null;
+  archived: boolean;
+  deleted: boolean;
+}
+
 export function useProductTypes() {
   const [productTypes, setProductTypes] = useState<ProductType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -13,64 +17,89 @@ export function useProductTypes() {
   const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
+    let isMounted = true;
+
     async function fetchProductTypes() {
       if (!activeOrganizationId) {
-        setLoading(false);
-        setProductTypes([]);
-        setError(null);
+        if (isMounted) {
+          setLoading(false);
+          setProductTypes([]);
+          setError(null);
+        }
         return;
       }
 
       try {
-        setLoading(true);
-        setError(null);
+        if (isMounted) {
+          setLoading(true);
+          setError(null);
+        }
 
-        // Try ProductTypes first, then fallback to Profiles
-        // ProductTypes table structure: id, organization_id, code, name, sort_order, deleted, created_at, updated_at
-        let { data, error: fetchError } = await supabase
+        const { data, error: queryError } = await supabase
           .from('ProductTypes')
-          .select('id, organization_id, code, name, sort_order, deleted, created_at, updated_at')
+          .select('id, name, code, archived, deleted')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
-          .order('sort_order', { ascending: true })
           .order('name', { ascending: true });
 
-        // If ProductTypes doesn't exist, try Profiles (without organization_id filter)
-        if (fetchError && (fetchError.code === 'PGRST205' || fetchError.message?.includes('does not exist'))) {
-          const { data: profilesData, error: profilesError } = await supabase
-            .from('Profiles')
-            .select('id, code, name, sort_order, deleted, created_at, updated_at')
-            .eq('deleted', false)
-            .order('sort_order', { ascending: true })
-            .order('name', { ascending: true });
+        if (queryError) {
+          throw queryError;
+        }
+
+        if (isMounted) {
+          setProductTypes(data || []);
           
-          if (!profilesError) {
-            data = profilesData;
-            fetchError = null;
-          } else {
-            fetchError = profilesError;
+          if (import.meta.env.DEV) {
+            console.log('✅ ProductTypes loaded:', data?.length || 0, 'types');
+            console.log('   Types:', data?.map(pt => pt.name));
           }
         }
-
-        if (fetchError) {
-          throw fetchError;
-        }
-
-        setProductTypes((data || []) as ProductType[]);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading product types';
-        setError(errorMessage);
         if (import.meta.env.DEV) {
-          console.error('Error fetching ProductTypes:', err);
+          console.error('❌ Error fetching ProductTypes:', err);
+        }
+        if (isMounted) {
+          setError(errorMessage);
+          setProductTypes([]);
         }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     }
 
     fetchProductTypes();
+
+    return () => {
+      isMounted = false;
+    };
   }, [activeOrganizationId]);
 
-  return { productTypes, loading, error };
-}
+  // Helper function to find ProductType by name (case-insensitive, flexible matching)
+  // Memoized with useCallback to prevent infinite loops
+  const findProductTypeByName = useCallback((name: string): ProductType | undefined => {
+    if (!name || !productTypes.length) return undefined;
+    
+    const normalizedName = name.trim();
+    
+    // Try exact match first
+    let found = productTypes.find(pt => 
+      pt.name === normalizedName || 
+      pt.name?.toLowerCase() === normalizedName.toLowerCase()
+    );
+    
+    // Try partial match
+    if (!found) {
+      found = productTypes.find(pt => 
+        pt.name?.toLowerCase().includes(normalizedName.toLowerCase()) ||
+        normalizedName.toLowerCase().includes(pt.name?.toLowerCase() || '')
+      );
+    }
+    
+    return found;
+  }, [productTypes]);
 
+  return { productTypes, loading, error, findProductTypeByName };
+}

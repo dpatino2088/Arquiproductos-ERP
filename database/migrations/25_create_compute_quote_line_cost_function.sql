@@ -261,3 +261,7 @@ BEGIN
     RAISE NOTICE '   - Trigger: trigger_quote_lines_compute_cost on QuoteLines';
 END $$;
 
+
+
+
+

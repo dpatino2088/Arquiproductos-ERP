@@ -97,26 +97,103 @@ export function useQuoteLines(quoteId: string | null) {
         // Use automatic JOINs with proper aliases to avoid collision
         // Join CatalogItems twice: once for catalog_item_id, once for operating_system_drive_id
         // Note: Collection JOIN may fail if FK doesn't exist, so we'll handle it separately
+        // Try to fetch QuoteLines with join first
+        // Explicitly select all columns including area and position to ensure they're included
         let { data, error: queryError } = await supabase
           .from('QuoteLines')
           .select(`
-            *,
-            Item:catalog_item_id (
-              id,
-              name,
-              sku,
-              metadata,
-              item_type
-            ),
-            SystemDriveItem:operating_system_drive_id (
-              id,
-              name,
-              sku
-            )
+            id,
+            organization_id,
+            quote_id,
+            catalog_item_id,
+            qty,
+            width_m,
+            height_m,
+            area,
+            position,
+            collection_id,
+            collection_name,
+            variant_id,
+            variant_name,
+            product_type,
+            product_type_id,
+            drive_type,
+            bottom_rail_type,
+            cassette,
+            cassette_type,
+            side_channel,
+            side_channel_type,
+            hardware_color,
+            computed_qty,
+            line_total,
+            unit_price_snapshot,
+            unit_cost_snapshot,
+            measure_basis_snapshot,
+            margin_percentage,
+            metadata,
+            deleted,
+            archived,
+            created_at,
+            updated_at,
+            created_by,
+            updated_by
           `)
           .eq('quote_id', quoteId)
           .eq('deleted', false)
           .order('created_at', { ascending: true });
+
+        // If join fails, try without join (fallback)
+        if (queryError && (queryError.message?.includes('relationship') || queryError.message?.includes('schema cache'))) {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ Join failed, fetching QuoteLines without join:', queryError.message);
+          }
+          
+          const fallbackQuery = await supabase
+            .from('QuoteLines')
+            .select(`
+              id,
+              organization_id,
+              quote_id,
+              catalog_item_id,
+              qty,
+              width_m,
+              height_m,
+              area,
+              position,
+              collection_id,
+              collection_name,
+              variant_id,
+              variant_name,
+              product_type,
+              product_type_id,
+              drive_type,
+              bottom_rail_type,
+              cassette,
+              cassette_type,
+              side_channel,
+              side_channel_type,
+              hardware_color,
+              computed_qty,
+              line_total,
+              unit_price_snapshot,
+              unit_cost_snapshot,
+              measure_basis_snapshot,
+              margin_percentage,
+              metadata,
+              deleted,
+              archived,
+              created_at,
+              updated_at,
+              created_by,
+              updated_by
+            `)
+            .eq('quote_id', quoteId)
+            .eq('deleted', false)
+            .order('created_at', { ascending: true });
+          
+          data = fallbackQuery.data;
+          queryError = fallbackQuery.error;
+        }
 
         if (queryError) {
           if (import.meta.env.DEV) {
@@ -125,32 +202,186 @@ export function useQuoteLines(quoteId: string | null) {
           throw queryError;
         }
 
-        // Manually fetch Collection and enrich data (FK may not be configured for automatic JOIN)
+        // Manually fetch CatalogItems and enrich data (FK join may not work)
         if (data && data.length > 0) {
-          const collectionIds = data
-            .map((line: any) => line.collection_id)
-            .filter((id: string | null) => id)
-            .filter((id: string, index: number, self: string[]) => self.indexOf(id) === index);
+          // Get unique catalog_item_ids (for main product)
+          const catalogItemIds = [...new Set(
+            data
+              .map((line: any) => line.catalog_item_id)
+              .filter((id: string | null) => id)
+          )];
           
+          // Get unique operating_system_drive_ids
+          const operatingSystemDriveIds = [...new Set(
+            data
+              .map((line: any) => line.operating_system_drive_id)
+              .filter((id: string | null) => id)
+          )];
+          
+          // Get unique variant_ids (fabric variants for collection_name and variant_name)
+          const variantIds = [...new Set(
+            data
+              .map((line: any) => line.variant_id)
+              .filter((id: string | null) => id)
+          )];
+          
+          // Combine all IDs to fetch in one query (catalog items, operating system drives, and fabric variants)
+          const allCatalogItemIds = [...new Set([...catalogItemIds, ...operatingSystemDriveIds, ...variantIds])];
+          
+          // Fetch CatalogItems separately (including fabric variants)
+          let catalogItemsMap = new Map<string, any>();
+          if (allCatalogItemIds.length > 0) {
+            const { data: catalogItemsData } = await supabase
+              .from('CatalogItems')
+              .select('id, item_name, sku, uom, cost_exw, default_margin_pct, msrp, measure_basis, item_type, metadata, collection_name, variant_name')
+              .in('id', allCatalogItemIds)
+              .eq('organization_id', activeOrganizationId)
+              .eq('deleted', false);
+            
+            if (catalogItemsData) {
+              catalogItemsMap = new Map(catalogItemsData.map((item: any) => [item.id, item]));
+            }
+          }
+          
+          // Get unique product_type_ids from QuoteLines (if stored) or find from product_type string
+          const productTypeIds = [...new Set(
+            data
+              .map((line: any) => {
+                // Try to get product_type_id if stored, otherwise we'll look it up by product_type string
+                return line.product_type_id || null;
+              })
+              .filter((id: string | null) => id)
+          )];
+          
+          // Also collect product_type strings to look up ProductTypes
+          const productTypeStrings = [...new Set(
+            data
+              .map((line: any) => line.product_type)
+              .filter((str: string | null) => str)
+          )];
+          
+          // Fetch ProductTypes
+          let productTypesMap = new Map<string, any>();
+          if (productTypeIds.length > 0 || productTypeStrings.length > 0) {
+            let productTypesQuery = supabase
+              .from('ProductTypes')
+              .select('id, name, code')
+              .eq('organization_id', activeOrganizationId)
+              .eq('deleted', false);
+            
+            if (productTypeIds.length > 0) {
+              productTypesQuery = productTypesQuery.in('id', productTypeIds);
+            }
+            
+            const { data: productTypesData } = await productTypesQuery;
+            
+            if (productTypesData) {
+              // Map by ID
+              productTypesData.forEach((pt: any) => {
+                productTypesMap.set(pt.id, pt);
+              });
+              
+              // Also map by name (normalized) for lookup by product_type string
+              productTypesData.forEach((pt: any) => {
+                const normalizedName = pt.name.toLowerCase().replace(/\s+/g, '-');
+                productTypesMap.set(normalizedName, pt);
+              });
+            }
+          }
+          
+          // Get unique collection_ids
+          const collectionIds = [...new Set(
+            data
+              .map((line: any) => line.collection_id)
+              .filter((id: string | null) => id)
+          )];
+          
+          // Fetch Collections separately
+          let collectionsMap = new Map<string, any>();
           if (collectionIds.length > 0) {
             const { data: collectionsData } = await supabase
               .from('CatalogCollections')
-              .select('id, name')
+              .select('id, name, code')
               .in('id', collectionIds)
+              .eq('organization_id', activeOrganizationId)
               .eq('deleted', false);
             
             if (collectionsData) {
-              const collectionsMap = collectionsData.reduce((acc: Record<string, any>, coll: any) => {
-                acc[coll.id] = coll;
-                return acc;
-              }, {});
-              
-              data = data.map((line: any) => ({
-                ...line,
-                Collection: line.collection_id ? collectionsMap[line.collection_id] : null,
-              }));
+              collectionsMap = new Map(collectionsData.map((coll: any) => [coll.id, coll]));
             }
           }
+          
+          // Enrich QuoteLines with CatalogItems, Fabric Variants, ProductTypes, and Operating System Drives
+          data = data.map((line: any) => {
+            const catalogItem = catalogItemsMap.get(line.catalog_item_id);
+            const fabricVariant = line.variant_id ? catalogItemsMap.get(line.variant_id) : null; // Fabric variant for collection_name and variant_name
+            const operatingSystemDrive = line.operating_system_drive_id ? catalogItemsMap.get(line.operating_system_drive_id) : null;
+            const collection = line.collection_id ? collectionsMap.get(line.collection_id) : null;
+            
+            // Find ProductType by product_type_id or product_type string
+            let productType = null;
+            if (line.product_type_id) {
+              productType = productTypesMap.get(line.product_type_id);
+            } else if (line.product_type) {
+              // Try to find by normalized product_type string
+              const normalizedType = line.product_type.toLowerCase().replace(/\s+/g, '-');
+              productType = productTypesMap.get(normalizedType);
+              
+              // If not found, try direct lookup
+              if (!productType) {
+                // We'll need to do a separate query if needed, but for now use the string
+                productType = { name: line.product_type };
+              }
+            }
+            
+            // Calculate unit_price (PRECIO UN Venta) from catalog item
+            let unitPrice = 0;
+            if (catalogItem) {
+              if (catalogItem.msrp) {
+                unitPrice = catalogItem.msrp;
+              } else if (catalogItem.cost_exw && catalogItem.default_margin_pct) {
+                unitPrice = catalogItem.cost_exw * (1 + catalogItem.default_margin_pct / 100);
+              } else if (catalogItem.cost_exw) {
+                unitPrice = catalogItem.cost_exw * 1.5; // Default 50% margin
+              }
+            }
+            
+            // Debug: Log original line data to see what we're getting from DB
+            if (import.meta.env.DEV && line.id) {
+              console.log('Raw QuoteLine from DB:', {
+                id: line.id,
+                area: line.area,
+                position: line.position,
+                hasArea: 'area' in line,
+                hasPosition: 'position' in line,
+                allKeys: Object.keys(line),
+              });
+            }
+
+            return {
+              ...line,
+              // Explicitly preserve area and position from the original line data
+              // IMPORTANT: These fields must be preserved exactly as they come from the database
+              area: line.area !== undefined ? line.area : null,
+              position: line.position !== undefined ? line.position : null,
+              CatalogItems: catalogItem ? {
+                ...catalogItem,
+                name: catalogItem.item_name || catalogItem.sku, // Map item_name to name for compatibility
+                unit_price: unitPrice, // Add calculated unit_price
+              } : null,
+              FabricVariant: fabricVariant ? {
+                ...fabricVariant,
+                collection_name: fabricVariant.collection_name || null,
+                variant_name: fabricVariant.variant_name || null,
+              } : null,
+              ProductType: productType,
+              Collection: collection, // Keep for backward compatibility
+              OperatingSystemDrive: operatingSystemDrive ? {
+                ...operatingSystemDrive,
+                name: operatingSystemDrive.item_name || operatingSystemDrive.sku,
+              } : null,
+            };
+          });
         }
 
         setLines(data || []);

@@ -26,7 +26,8 @@ function validateStep(stepId: string, config: RollerShadeConfig): boolean {
     case 'variants':
       return !!(config.collectionId && config.variantId);
     case 'operating-system':
-      return !!(config.operatingSystem && config.operatingSystemManufacturer && config.operatingSystemVariant);
+      // Only require drive_type (or operatingSystem for backward compatibility)
+      return !!((config as any).drive_type || config.operatingSystem);
     default:
       return true;
   }

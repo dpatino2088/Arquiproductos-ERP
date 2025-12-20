@@ -53,3 +53,7 @@ COMMIT;
 -- Note: Supabase may convert column names to lowercase when importing
 -- ====================================================
 
+
+
+
+

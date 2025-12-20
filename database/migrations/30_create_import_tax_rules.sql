@@ -190,3 +190,7 @@ BEGIN
     RAISE NOTICE '   - RLS Policies: 4';
 END $$;
 
+
+
+
+

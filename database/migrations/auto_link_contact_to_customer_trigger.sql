@@ -73,3 +73,7 @@ WHERE dcu.primary_contact_id = dc.id
 --
 -- Expected: All contacts that are primary_contact of a customer should have customer_id set
 
+
+
+
+

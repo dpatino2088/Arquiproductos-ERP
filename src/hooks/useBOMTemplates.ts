@@ -10,10 +10,10 @@ export function useBOMTemplates(productTypeId?: string | null) {
   const [templates, setTemplates] = useState<BOMTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
 
-  useEffect(() => {
-    async function fetchBOMTemplates() {
+  const fetchBOMTemplates = async () => {
       if (!activeOrganizationId) {
         setLoading(false);
         setTemplates([]);
@@ -60,12 +60,19 @@ export function useBOMTemplates(productTypeId?: string | null) {
         
         if (productTypeIds.length > 0) {
           const { data: ptData } = await supabase
-            .from('Profiles')
-            .select('id, code, name, sort_order')
-            .in('id', productTypeIds);
+            .from('ProductTypes')
+            .select('id, code, name')
+            .in('id', productTypeIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
           
           if (ptData) {
-            productTypesMap = new Map(ptData.map((pt: any) => [pt.id, pt as ProductType]));
+            productTypesMap = new Map(ptData.map((pt: any) => [pt.id, {
+              id: pt.id,
+              code: pt.code,
+              name: pt.name,
+              sort_order: 0, // ProductTypes doesn't have sort_order, use default
+            } as ProductType]));
           }
         }
 
@@ -85,12 +92,17 @@ export function useBOMTemplates(productTypeId?: string | null) {
       } finally {
         setLoading(false);
       }
-    }
+    };
 
+  useEffect(() => {
     fetchBOMTemplates();
-  }, [activeOrganizationId, productTypeId]);
+  }, [activeOrganizationId, productTypeId, refreshTrigger]);
 
-  return { templates, loading, error };
+  const refetch = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  return { templates, loading, error, refetch };
 }
 
 /**

@@ -26,7 +26,8 @@ function validateStep(stepId: string, config: DualShadeConfig): boolean {
     case 'variants':
       return !!(config.frontFabric?.collectionId && config.frontFabric?.variantId);
     case 'operating-system':
-      return !!(config.operatingSystem && config.operatingSystemManufacturer && config.operatingSystemVariant);
+      // Only require drive_type (or operatingSystem for backward compatibility)
+      return !!((config as any).drive_type || config.operatingSystem);
     default:
       return true;
   }

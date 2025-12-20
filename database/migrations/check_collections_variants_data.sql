@@ -87,3 +87,7 @@ FROM pg_policies
 WHERE tablename IN ('CatalogCollections', 'CatalogVariants')
 ORDER BY tablename, policyname;
 
+
+
+
+

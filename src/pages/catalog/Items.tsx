@@ -8,7 +8,9 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import ImportCatalog from './ImportCatalog';
-import BOMTab from './BOMTab';
+import Manufacturers from './Manufacturers';
+import Categories from './Categories';
+import Collections from './Collections';
 import { 
   Search, 
   Filter,
@@ -26,9 +28,7 @@ import {
   User,
   Image as ImageIcon,
   Package,
-  Building2,
-  FolderTree,
-  Book,
+  Wrench,
 } from 'lucide-react';
 
 interface Item {
@@ -56,21 +56,16 @@ export default function Items() {
   const { registerSubmodules } = useSubmoduleNav();
   const { items, loading, error, refetch } = useCatalogItems();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
-  const [activeTab, setActiveTab] = useState<'items' | 'bom'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'manufacturer' | 'categories' | 'collection'>('items');
 
+  // Register Catalog submodules when Items component mounts
   useEffect(() => {
-    // Register Catalog submodules when this component mounts
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/catalog')) {
       registerSubmodules('Catalog', [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
-        { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
-        { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
-        { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
+        { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
       ]);
-      if (import.meta.env.DEV) {
-        console.log('✅ Items.tsx: Registered Catalog submodules');
-      }
     }
   }, [registerSubmodules]);
   const { activeOrganizationId } = useOrganizationContext();
@@ -413,7 +408,7 @@ export default function Items() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Internal Tabs - Items | Manufacturer | Categories | Collection */}
       <div className="mb-6 border-b border-gray-200">
         <div className="flex gap-6">
           <button
@@ -427,14 +422,34 @@ export default function Items() {
             Items
           </button>
           <button
-            onClick={() => setActiveTab('bom')}
+            onClick={() => setActiveTab('manufacturer')}
             className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-              activeTab === 'bom'
+              activeTab === 'manufacturer'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            BOM
+            Manufacturer
+          </button>
+          <button
+            onClick={() => setActiveTab('categories')}
+            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'categories'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Categories
+          </button>
+          <button
+            onClick={() => setActiveTab('collection')}
+            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === 'collection'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Collection
           </button>
         </div>
       </div>
@@ -933,7 +948,9 @@ export default function Items() {
         </>
       )}
 
-      {activeTab === 'bom' && <BOMTab />}
+      {activeTab === 'manufacturer' && <Manufacturers />}
+      {activeTab === 'categories' && <Categories />}
+      {activeTab === 'collection' && <Collections />}
 
       {/* Confirm Dialog */}
       <ConfirmDialog

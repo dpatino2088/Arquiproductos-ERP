@@ -37,3 +37,7 @@ COMMENT ON COLUMN "DirectoryContacts".customer_id IS
 -- 
 -- is_nullable should be 'YES'
 
+
+
+
+

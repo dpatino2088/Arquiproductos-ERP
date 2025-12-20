@@ -127,3 +127,7 @@ BEGIN
   RAISE NOTICE '✅ Indexes and RLS policies created';
 END $$;
 
+
+
+
+

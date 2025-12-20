@@ -207,3 +207,7 @@ console.log(`   1. Execute the migration: database/migrations/add_collection_id_
 console.log(`   2. Execute the generated SQL: ${outputPath}`);
 console.log(`   3. Verify the results in Supabase SQL Editor\n`);
 
+
+
+
+

@@ -6,6 +6,13 @@ interface ReviewStepProps {
   onUpdate: (updates: Partial<CurtainConfiguration>) => void;
 }
 
+const formatCurrency = (amount: number, currency: string = 'USD') => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency,
+  }).format(amount);
+};
+
 export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   const calculateTotal = () => {
     // This is a placeholder - actual calculation should be done server-side
@@ -76,7 +83,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
           <div className="flex justify-between items-center">
             <span className="text-lg font-semibold text-gray-900">Estimated Total:</span>
             <span className="text-2xl font-bold text-primary">
-              €{calculateTotal().toFixed(2)}
+              {formatCurrency(calculateTotal(), 'USD')}
             </span>
           </div>
           <p className="text-xs text-gray-500 mt-2">

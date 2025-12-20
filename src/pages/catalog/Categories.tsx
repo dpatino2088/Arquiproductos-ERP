@@ -25,21 +25,8 @@ export default function Categories() {
   const { categories, loading, error, createCategory, updateCategory, deleteCategory, isCreating, isDeleting } = useItemCategoriesCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
-  useEffect(() => {
-    // Register Catalog submodules when this component mounts
-    const currentPath = window.location.pathname;
-    if (currentPath.startsWith('/catalog')) {
-      registerSubmodules('Catalog', [
-        { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
-        { id: 'manufacturers', label: 'Manufacturers', href: '/catalog/manufacturers', icon: Building2 },
-        { id: 'categories', label: 'Categories', href: '/catalog/categories', icon: FolderTree },
-        { id: 'collections', label: 'Collections', href: '/catalog/collections', icon: Book },
-      ]);
-      if (import.meta.env.DEV) {
-        console.log('✅ Categories.tsx: Registered Catalog submodules');
-      }
-    }
-  }, [registerSubmodules]);
+  // Don't register submodules here - Catalog.tsx handles that
+  // This component is now used as a tab content within Items.tsx
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);

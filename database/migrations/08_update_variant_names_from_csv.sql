@@ -1731,3 +1731,7 @@ BEGIN
   RAISE NOTICE '✅ variant_name update completed!';
 
 END $$;
+
+
+
+

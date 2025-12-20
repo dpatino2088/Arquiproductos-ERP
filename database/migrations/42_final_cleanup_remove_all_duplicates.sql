@@ -186,3 +186,7 @@ SELECT
 FROM public."ItemCategories"
 WHERE deleted = false;
 
+
+
+
+

@@ -1,13 +1,15 @@
+import { useMemo } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
-import Input from '../../../components/ui/Input';
+import { useProductTypes } from '../../../hooks/useProductTypes';
 
 interface ProductStepProps {
   config: CurtainConfiguration | ProductConfig;
   onUpdate: (updates: Partial<CurtainConfiguration | ProductConfig>) => void;
 }
 
+// Product types configuration - UI only, data comes from database
 const PRODUCT_TYPES = [
   { 
     id: 'roller-shade', 
@@ -90,28 +92,61 @@ const PRODUCT_TYPES = [
 ];
 
 export default function ProductStep({ config, onUpdate }: ProductStepProps) {
+  // Load ProductTypes from database
+  const { productTypes, loading: loadingProductTypes, findProductTypeByName } = useProductTypes();
+  
+  // Map each PRODUCT_TYPE card to its corresponding ProductType UUID from database
+  const productTypeMap = useMemo(() => {
+    if (!productTypes.length) return new Map<string, string>();
+    
+    const map = new Map<string, string>();
+    
+    PRODUCT_TYPES.forEach(product => {
+      const dbProductType = findProductTypeByName(product.name);
+      if (dbProductType) {
+        map.set(product.id, dbProductType.id);
+      }
+    });
+    
+    return map;
+  }, [productTypes, findProductTypeByName]);
+  
+  // Handle product type selection
+  const handleProductTypeSelect = (productId: string) => {
+    const productTypeId = productTypeMap.get(productId);
+    
+    onUpdate({ 
+      productType: productId,
+      productTypeId: productTypeId || undefined,
+    });
+  };
+  
+  const handleProductTypeDeselect = () => {
+    onUpdate({ 
+      productType: undefined,
+      productTypeId: undefined,
+    });
+  };
+  
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        {/* Product Type */}
         <div className="relative">
           <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
+          
           <div className="grid grid-cols-3 gap-4">
             {PRODUCT_TYPES.map((product) => {
               const isSelected = config.productType === product.id;
+              
               return (
                 <div key={product.id} className="relative">
-                  {/* Product Card */}
                   <button
                     type="button"
                     onClick={() => {
-                      // Toggle selection: if selected, deselect; if not selected, select
                       if (isSelected) {
-                        // Clicking selected product closes overlay by deselecting
-                        onUpdate({ productType: undefined });
+                        handleProductTypeDeselect();
                       } else {
-                        // Select new product
-                        onUpdate({ productType: product.id });
+                        handleProductTypeSelect(product.id);
                       }
                     }}
                     className={`w-full p-[5px] border-2 rounded-lg text-left transition-all ${
@@ -138,36 +173,26 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
             })}
           </div>
 
-          {/* Expandable Details Panel - Overlay above the grid, same size as selected card */}
+          {/* Expandable Details Panel */}
           {config.productType && (() => {
             const selectedProduct = PRODUCT_TYPES.find(p => p.id === config.productType);
             if (!selectedProduct) return null;
 
-            // Find the selected product's position in the grid
             const selectedIndex = PRODUCT_TYPES.findIndex(p => p.id === config.productType);
             const row = Math.floor(selectedIndex / 3);
             const col = selectedIndex % 3;
 
-            // Calculate position to match the grid card exactly
-            // Grid uses: grid-cols-3 gap-4
-            // Each card width: calc((100% - 2 * 16px) / 3) = calc(33.333% - 10.67px)
-            const gap = 16; // gap-4 = 16px
+            const gap = 16;
             const cardWidth = 'calc(33.333% - 10.67px)';
             
-            // Calculate left offset to align with card's left edge
-            // Grid calculates: each column = (100% - 2*gap) / 3, then adds gaps
-            // Col 0: 0
-            // Col 1: (100% - 32px) / 3 + 16px = 33.333% - 10.67px + 16px = 33.333% + 5.33px
-            // Col 2: 2 * (100% - 32px) / 3 + 32px = 66.666% - 21.33px + 32px = 66.666% + 10.67px
             const leftOffset = col === 0 
               ? '0' 
               : col === 1
               ? 'calc(33.333% + 5.33px)'
               : 'calc(66.666% + 10.67px)';
             
-            // Card height: p-[5px] (5px top + 5px bottom) + text content (~20px) = ~30px
             const cardHeight = 30;
-            const topOffset = `${56 + row * (cardHeight + gap) + cardHeight}px`; // Label height + rows above + current card height
+            const topOffset = `${56 + row * (cardHeight + gap) + cardHeight}px`;
 
             return (
               <div 
@@ -178,25 +203,22 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                   width: cardWidth,
                 }}
               >
-                {/* Details Content */}
                 <div className="space-y-3">
-                  {/* Max Width x Height */}
                   {!selectedProduct.isAccessoriesOnly && (
                     <>
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
-                    <p className="text-sm font-bold text-gray-900">
-                      {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
-                    </p>
-                  </div>
-                  
-                  {/* Variations Available */}
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
-                    <p className="text-sm font-bold text-gray-900">
-                      {selectedProduct.variations}
-                    </p>
-                  </div>
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
+                        <p className="text-sm font-bold text-gray-900">
+                          {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
+                        </p>
+                      </div>
+                      
+                      <div>
+                        <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
+                        <p className="text-sm font-bold text-gray-900">
+                          {selectedProduct.variations}
+                        </p>
+                      </div>
                     </>
                   )}
                   
@@ -209,9 +231,7 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                     </div>
                   )}
                   
-                  {/* Divider */}
                   <div className="border-t border-gray-300 pt-3">
-                    {/* Additional Information */}
                     <div>
                       <p className="text-xs text-gray-600 mb-2">Additional Information:</p>
                       <ul className="space-y-1">
@@ -232,4 +252,3 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     </div>
   );
 }
-

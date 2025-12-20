@@ -21,6 +21,7 @@ export interface Panel {
 
 export interface BaseProductConfig {
   productType: ProductType;
+  productTypeId?: string; // UUID from ProductTypes table - set by ProductStep
   area?: string;
   position: number | string;
   quantity?: number;
@@ -48,10 +49,14 @@ export interface RollerShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
-  operatingSystemColor?: 'white' | 'black';
+  operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
   tubeSize?: 'standard' | '42mm' | '65mm' | '80mm';
+  // BOM Component Options
+  hardwareColor?: 'white' | 'black' | 'silver' | 'bronze';
+  cassetteColor?: 'white' | 'black' | 'silver' | 'bronze';
+  bottomBar?: 'standard' | 'weighted' | 'none';
   // Accessories
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }
@@ -83,6 +88,25 @@ export interface DualShadeConfig extends BaseProductConfig {
   operatingSystemManufacturer?: 'motion' | 'lutron' | 'vertilux';
   operatingSystemVariant?: string;
   operatingSystemSide?: 'left' | 'right';
+  // Manual specific
+  clutchSize?: 'S' | 'M' | 'L';
+  operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
+  chainColor?: 'white' | 'black';
+  operatingSystemHeight?: 'standard' | 'custom';
+  tubeSize?: 'standard' | '42mm' | '65mm' | '80mm';
+  // BOM Component Options (Block-based system)
+  drive_type?: 'manual' | 'motor';
+  bottom_rail_type?: 'standard' | 'wrapped';
+  cassette?: boolean;
+  cassette_type?: 'standard' | 'recessed' | 'surface';
+  side_channel?: boolean;
+  side_channel_type?: 'left' | 'right' | 'both';
+  hardware_color?: 'white' | 'black' | 'silver' | 'bronze';
+  
+  // Legacy fields
+  hardwareColor?: 'white' | 'black' | 'silver' | 'bronze';
+  cassetteColor?: 'white' | 'black' | 'silver' | 'bronze';
+  bottomBar?: 'standard' | 'weighted' | 'none';
   // Accessories
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }
@@ -117,6 +141,23 @@ export interface TripleShadeConfig extends BaseProductConfig {
   operatingSystemManufacturer?: 'motion' | 'lutron' | 'vertilux';
   operatingSystemVariant?: string;
   operatingSystemSide?: 'left' | 'right';
+  // Manual specific
+  clutchSize?: 'S' | 'M' | 'L';
+  operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
+  chainColor?: 'white' | 'black';
+  operatingSystemHeight?: 'standard' | 'custom';
+  tubeSize?: 'standard' | '42mm' | '65mm' | '80mm';
+  // BOM Component Options (Block-based system)
+  drive_type?: 'manual' | 'motor';
+  bottom_rail_type?: 'standard' | 'wrapped';
+  cassette?: boolean;
+  side_channel?: boolean;
+  hardware_color?: 'white' | 'black' | 'silver' | 'bronze';
+  
+  // Legacy fields
+  hardwareColor?: 'white' | 'black' | 'silver' | 'bronze';
+  cassetteColor?: 'white' | 'black' | 'silver' | 'bronze';
+  bottomBar?: 'standard' | 'weighted' | 'none';
   // Accessories
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }

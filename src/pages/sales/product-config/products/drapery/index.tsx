@@ -26,7 +26,8 @@ function validateStep(stepId: string, config: DraperyConfig): boolean {
     case 'variants':
       return !!(config.fabric?.collectionId && config.fabric?.variantId);
     case 'operating-system':
-      return !!(config.operatingSystem && config.operatingSystemManufacturer && config.operatingSystemVariant);
+      // Only require drive_type (or operatingSystem for backward compatibility)
+      return !!((config as any).drive_type || config.operatingSystem);
     default:
       return true;
   }

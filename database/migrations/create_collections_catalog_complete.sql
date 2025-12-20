@@ -259,3 +259,7 @@ BEGIN
     RAISE NOTICE '   - Constraint: Only fabrics (is_fabric=true) can be added';
 END $$;
 
+
+
+
+

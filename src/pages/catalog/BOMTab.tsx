@@ -20,7 +20,7 @@ interface ComponentGroupedByCategory {
 export default function BOMTab() {
   const { activeOrganizationId } = useOrganizationContext();
   const { productTypes, loading: productTypesLoading } = useProductTypes();
-  const { templates, loading: templatesLoading } = useBOMTemplates();
+  const { templates, loading: templatesLoading, refetch: refetchTemplates } = useBOMTemplates();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showBOMModal, setShowBOMModal] = useState(false);
@@ -55,11 +55,35 @@ export default function BOMTab() {
     setShowBOMModal(true);
   };
 
+  const handleDeleteBOM = async (templateId: string) => {
+    if (!confirm('Are you sure you want to delete this BOM template? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('BOMTemplates')
+        .update({ deleted: true })
+        .eq('id', templateId)
+        .eq('organization_id', activeOrganizationId);
+
+      if (error) {
+        throw error;
+      }
+
+      // Refetch templates
+      refetchTemplates();
+    } catch (error) {
+      console.error('Error deleting BOM template:', error);
+      alert('Error deleting BOM template');
+    }
+  };
+
   const handleBOMSaved = () => {
     setShowBOMModal(false);
     setEditingTemplateId(null);
-    // Refetch templates
-    window.location.reload();
+    // Refetch templates without reloading the page
+    refetchTemplates();
   };
 
   // Early returns AFTER all hooks
@@ -144,6 +168,7 @@ export default function BOMTab() {
                     key={template.id}
                     template={template}
                     onEdit={() => handleEditBOM(template.id)}
+                    onDelete={() => handleDeleteBOM(template.id)}
                   />
                 ))}
               </div>
@@ -169,7 +194,7 @@ export default function BOMTab() {
 }
 
 // BOM Template Card Component
-function BOMTemplateCard({ template, onEdit }: { template: any; onEdit: () => void }) {
+function BOMTemplateCard({ template, onEdit, onDelete }: { template: any; onEdit: () => void; onDelete: () => void }) {
   const { components, loading } = useBOMComponents(template.id);
   const { categories } = useItemCategories();
   const [expanded, setExpanded] = useState(false);
@@ -245,13 +270,22 @@ function BOMTemplateCard({ template, onEdit }: { template: any; onEdit: () => vo
             )}
           </div>
         </div>
-        <button
-          onClick={onEdit}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          <Edit className="w-4 h-4" />
-          Edit BOM
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onEdit}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Edit className="w-4 h-4" />
+            Edit
+          </button>
+          <button
+            onClick={onDelete}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+          </button>
+        </div>
       </div>
 
       {expanded && (
@@ -483,11 +517,35 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   };
 
   const handleUpdateComponent = () => {
-    if (!editingComponentId) return;
+    if (!editingComponentId) {
+      console.error('❌ No editingComponentId set');
+      return;
+    }
 
-    setComponents(components.map(c =>
-      c.id === editingComponentId ? { ...c, ...formData } : c
-    ));
+    if (!formData.component_item_id) {
+      alert('Please select a component');
+      return;
+    }
+
+    console.log('💾 Updating component:', { editingComponentId, formData });
+
+    // Mark component as modified by changing its ID to temp-* if it's an existing one
+    // This ensures it will be recreated in handleSave
+    setComponents(components.map(c => {
+      if (c.id === editingComponentId) {
+        const updated = { ...c, ...formData };
+        console.log('📝 Component before update:', c);
+        console.log('📝 Component after update:', updated);
+        // If it's an existing component (not temp-), mark it for recreation
+        if (!c.id.startsWith('temp-')) {
+          updated.id = `temp-${Date.now()}-${c.id}`; // Mark for deletion and recreation
+          updated._originalId = c.id; // Keep original ID for deletion
+          console.log('🔄 Marked component for recreation:', { originalId: c.id, newId: updated.id });
+        }
+        return updated;
+      }
+      return c;
+    }));
     setEditingComponentId(null);
     setFormData({
       component_item_id: '',
@@ -533,7 +591,14 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       // Delete existing components if editing
       if (editingTemplateId) {
         const existingComponentIds = existingComponents.map((c: any) => c.id);
-        for (const compId of existingComponentIds) {
+        // Also delete components that were edited (they have _originalId)
+        const editedComponentIds = components
+          .filter(c => (c as any)._originalId)
+          .map(c => (c as any)._originalId);
+        
+        const allIdsToDelete = [...new Set([...existingComponentIds, ...editedComponentIds])];
+        
+        for (const compId of allIdsToDelete) {
           await supabase
             .from('BOMComponents')
             .update({ deleted: true })
@@ -541,18 +606,38 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         }
       }
 
-      // Create new components
+      // Create new components (including edited ones marked as temp-)
       for (const component of components) {
-        if (!component.id.startsWith('temp-')) continue; // Skip already saved components
+        // Skip components that weren't modified (they don't start with temp-)
+        if (!component.id.startsWith('temp-')) {
+          console.log('⏭️ Skipping component (not modified):', component.id);
+          continue;
+        }
 
-        await createComponent({
-          bom_template_id: templateId,
+        console.log('➕ Creating component:', {
+          id: component.id,
           component_item_id: component.component_item_id,
           qty_per_unit: component.qty_per_unit,
-          uom: component.uom,
-          is_required: component.is_required,
-          sequence_order: component.sequence_order,
-        } as any);
+        });
+
+        try {
+          await createComponent({
+            bom_template_id: templateId,
+            component_item_id: component.component_item_id || null, // Allow NULL for fabric
+            component_role: component.component_role || null, // Support component_role
+            auto_select: component.auto_select || false,
+            applies_color: component.applies_color || false,
+            allow_override: component.allow_override || false,
+            qty_per_unit: component.qty_per_unit,
+            uom: component.uom,
+            is_required: component.is_required,
+            sequence_order: component.sequence_order,
+          } as any);
+          console.log('✅ Component created successfully');
+        } catch (error) {
+          console.error('❌ Error creating component:', error);
+          throw error;
+        }
       }
 
       onSave();
@@ -852,11 +937,14 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                       )}
                     </div>
                     <SelectShadcn
-                      value={formData.component_item_id}
-                      onValueChange={(value) => setFormData({ ...formData, component_item_id: value })}
+                      value={formData.component_item_id || ''}
+                      onValueChange={(value) => {
+                        console.log('📦 Component selected:', value);
+                        setFormData({ ...formData, component_item_id: value });
+                      }}
                     >
                       <SelectTrigger className="py-1 text-xs">
-                        <SelectValue placeholder="Select component" />
+                        <SelectValue placeholder={formData.component_item_id ? "Component selected" : "Select component"} />
                       </SelectTrigger>
                       <SelectContent className="max-h-[400px]">
                         {/* Grouped Components by Category */}
@@ -1010,13 +1098,26 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                         <tbody className="divide-y divide-gray-200">
                           {categoryGroup.components.map((component) => {
                             const componentItem = catalogItems.find(item => item.id === component.component_item_id);
+                            // Also check if component has component_role (for fabric or rule-based components)
+                            const hasComponentRole = component.component_role && !component.component_item_id;
                             return (
                               <tr key={component.id} className="hover:bg-gray-50">
                                 <td className="py-2 px-4 text-xs text-gray-900">
-                                  {componentItem?.name || componentItem?.item_name || 'Unknown'}
-                                  <div className="text-gray-500 text-xs mt-0.5">
-                                    SKU: {componentItem?.sku || 'N/A'}
-                                  </div>
+                                  {hasComponentRole ? (
+                                    <>
+                                      <span className="font-medium">{component.component_role}</span>
+                                      <div className="text-gray-500 text-xs mt-0.5">
+                                        {component.auto_select ? 'Auto-select' : 'Manual'}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      {componentItem?.name || componentItem?.item_name || component.component_name || 'Unknown'}
+                                      <div className="text-gray-500 text-xs mt-0.5">
+                                        SKU: {componentItem?.sku || component.component_sku || 'N/A'}
+                                      </div>
+                                    </>
+                                  )}
                                 </td>
                                 <td className="py-2 px-4 text-xs text-gray-700 text-right">
                                   {component.qty_per_unit?.toFixed(4) || '0.0000'}
@@ -1040,15 +1141,18 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                   <div className="flex items-center gap-1 justify-end">
                                     <button
                                       onClick={() => {
+                                        console.log('🔍 Editing component:', component);
                                         setEditingComponentId(component.id);
                                         setFormData({
-                                          component_item_id: component.component_item_id,
-                                          qty_per_unit: component.qty_per_unit,
-                                          uom: component.uom,
-                                          is_required: component.is_required,
-                                          sequence_order: component.sequence_order,
+                                          component_item_id: component.component_item_id || '',
+                                          qty_per_unit: component.qty_per_unit || 1,
+                                          uom: component.uom || 'unit',
+                                          is_required: component.is_required ?? true,
+                                          sequence_order: component.sequence_order || 0,
                                         });
                                         setShowAddComponentForm(true);
+                                        setComponentSearchTerm('');
+                                        setSelectedCategoryFilter('');
                                       }}
                                       className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                                       title="Edit component"

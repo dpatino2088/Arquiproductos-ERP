@@ -224,6 +224,11 @@ const Collections = lazy(() => {
   return import('./pages/catalog/Collections');
 });
 
+const BOM = lazy(() => {
+  logger.debug('Loading BOM component');
+  return import('./pages/catalog/BOM');
+});
+
 // Variants component removed - use CollectionsCatalog instead
 
 const CatalogItemNew = lazy(() => {
@@ -650,6 +655,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/catalog/bom', () => {
+      if (isAuthenticated) {
+        setCurrentPage('bom');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     // Variants route removed - redirect to collections instead
     router.addRoute('/catalog/variants', () => {
       if (isAuthenticated) {
@@ -943,6 +955,8 @@ function App() {
         return <Categories />;
       case 'collections':
         return <Collections />;
+      case 'bom':
+        return <BOM />;
       // Variants case removed - use CollectionsCatalog instead
       case 'inventory':
         return <Inventory />;

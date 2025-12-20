@@ -23,3 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_quote_lines_metadata ON "QuoteLines" USING GIN (m
 -- WHERE table_name = 'QuoteLines' AND column_name = 'metadata';
 -- Expected: data_type = 'jsonb', is_nullable = 'YES'
 
+
+
+
+

@@ -183,7 +183,8 @@ BEGIN
                 
                 IF FOUND THEN
                     -- Map customer_type_name to discount field (case-insensitive)
-                    CASE UPPER(TRIM(v_customer_record.customer_type_name))
+                    -- Convert ENUM to text before using TRIM
+                    CASE UPPER(TRIM(v_customer_record.customer_type_name::text))
                         WHEN 'RESELLER' THEN
                             v_discount_percentage := COALESCE(v_cost_settings_record.discount_reseller_pct, 0);
                         WHEN 'DISTRIBUTOR' THEN
