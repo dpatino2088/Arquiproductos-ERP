@@ -236,7 +236,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
   // Handlers
   const handleManufacturerChange = (manufacturerId: string) => {
     if (productType === 'roller-shade') {
-      onUpdate({ variantManufacturer: manufacturerId });
+      onUpdate({ variantManufacturer: manufacturerId as 'coulisse' | 'vertilux' });
     } else if (productType === 'dual-shade' || productType === 'triple-shade') {
       const currentFabric = (config as any).frontFabric || {};
       onUpdate({ 
@@ -264,10 +264,8 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     if (productType === 'roller-shade') {
       onUpdate({ 
         collectionId: collectionId,
-        collectionName: collectionName,
         variantId: undefined,
-        variantName: undefined 
-      });
+      } as any);
     } else if (productType === 'dual-shade' || productType === 'triple-shade') {
       const currentFabric = (config as any).frontFabric || {};
       onUpdate({ 
@@ -304,8 +302,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     if (productType === 'roller-shade') {
       onUpdate({ 
         variantId: variantId,
-        variantName: variantName
-      });
+      } as any);
     } else if (productType === 'dual-shade' || productType === 'triple-shade') {
       const currentFabric = (config as any).frontFabric || {};
       onUpdate({ 

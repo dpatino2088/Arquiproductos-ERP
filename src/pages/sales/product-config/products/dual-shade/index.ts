@@ -3,7 +3,7 @@
  * Complete configuration flow for Dual Shade products
  */
 
-import { ProductType, DualShadeConfig } from '../../types';
+import { ProductType, DualShadeConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
@@ -19,15 +19,17 @@ const DUAL_SHADE_STEPS: ProductStep[] = [
   { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
 ];
 
-function validateStep(stepId: string, config: DualShadeConfig): boolean {
+function validateStep(stepId: string, config: ProductConfig): boolean {
+  if (config.productType !== 'dual-shade') return false;
+  const dualConfig = config as DualShadeConfig;
   switch (stepId) {
     case 'measurements':
-      return !!(config.width_mm && config.height_mm);
+      return !!(dualConfig.width_mm && dualConfig.height_mm);
     case 'variants':
-      return !!(config.frontFabric?.collectionId && config.frontFabric?.variantId);
+      return !!(dualConfig.frontFabric?.collectionId && dualConfig.frontFabric?.variantId);
     case 'operating-system':
       // Only require drive_type (or operatingSystem for backward compatibility)
-      return !!((config as any).drive_type || config.operatingSystem);
+      return !!((dualConfig as any).drive_type || dualConfig.operatingSystem);
     default:
       return true;
   }

@@ -3,7 +3,7 @@
  * Complete configuration flow for Awning products
  */
 
-import { ProductType, AwningConfig } from '../../types';
+import { ProductType, AwningConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
@@ -19,15 +19,17 @@ const AWNING_STEPS: ProductStep[] = [
   { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
 ];
 
-function validateStep(stepId: string, config: AwningConfig): boolean {
+function validateStep(stepId: string, config: ProductConfig): boolean {
+  if (config.productType !== 'awning') return false;
+  const awningConfig = config as AwningConfig;
   switch (stepId) {
     case 'measurements':
-      return !!(config.width_mm && config.height_mm);
+      return !!(awningConfig.width_mm && awningConfig.height_mm);
     case 'variants':
-      return !!(config.fabric?.collectionId && config.fabric?.variantId);
+      return !!(awningConfig.fabric?.collectionId && awningConfig.fabric?.variantId);
     case 'operating-system':
       // Only require drive_type (or operatingSystem for backward compatibility)
-      return !!((config as any).drive_type || config.operatingSystem);
+      return !!((awningConfig as any).drive_type || awningConfig.operatingSystem);
     default:
       return true;
   }

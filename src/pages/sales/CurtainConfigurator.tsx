@@ -5,6 +5,7 @@ import VariantsStep from './curtain-config/VariantsStep';
 import OperatingSystemStep from './curtain-config/OperatingSystemStep';
 import AccessoriesStep from './curtain-config/AccessoriesStep';
 import ReviewStep from './curtain-config/ReviewStep';
+import { ProductConfig } from './product-config/types';
 
 export type ConfigStep = 
   | 'product' 
@@ -130,8 +131,8 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
     setCurrentStep(stepId);
   };
 
-  const handleUpdate = (updates: Partial<CurtainConfiguration>) => {
-    const newConfig = { ...config, ...updates };
+  const handleUpdate = (updates: Partial<ProductConfig | CurtainConfiguration>) => {
+    const newConfig = { ...config, ...updates } as CurtainConfiguration;
     setConfig(newConfig);
     
     // If productType is set to 'accessories', jump directly to accessories step

@@ -3,7 +3,7 @@
  * Complete configuration flow for Triple Shade products
  */
 
-import { ProductType, TripleShadeConfig } from '../../types';
+import { ProductType, TripleShadeConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
@@ -19,15 +19,17 @@ const TRIPLE_SHADE_STEPS: ProductStep[] = [
   { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
 ];
 
-function validateStep(stepId: string, config: TripleShadeConfig): boolean {
+function validateStep(stepId: string, config: ProductConfig): boolean {
+  if (config.productType !== 'triple-shade') return false;
+  const tripleConfig = config as TripleShadeConfig;
   switch (stepId) {
     case 'measurements':
-      return !!(config.width_mm && config.height_mm);
+      return !!(tripleConfig.width_mm && tripleConfig.height_mm);
     case 'variants':
-      return !!(config.frontFabric?.collectionId && config.frontFabric?.variantId);
+      return !!(tripleConfig.frontFabric?.collectionId && tripleConfig.frontFabric?.variantId);
     case 'operating-system':
       // Only require drive_type (or operatingSystem for backward compatibility)
-      return !!((config as any).drive_type || config.operatingSystem);
+      return !!((tripleConfig as any).drive_type || tripleConfig.operatingSystem);
     default:
       return true;
   }

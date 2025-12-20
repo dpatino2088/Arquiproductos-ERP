@@ -76,7 +76,8 @@ export function adaptFromProductConfig(newConfig: ProductConfig): CurtainConfigu
       area: config.area,
       position: config.position,
       width_mm: firstPanel?.width_mm || config.width_mm,
-      height_mm: firstPanel?.height_mm || config.height_mm,
+      // height_mm is stored in parent config, not in panel
+      height_mm: config.height_mm,
       fabricDrop: config.fabricDrop,
       installationType: config.installationType,
       installationLocation: config.installationLocation,
@@ -88,7 +89,7 @@ export function adaptFromProductConfig(newConfig: ProductConfig): CurtainConfigu
       operatingSystemVariant: config.operatingSystemVariant,
       operatingSystemSide: config.operatingSystemSide,
       clutchSize: config.clutchSize,
-      operatingSystemColor: config.operatingSystemColor,
+      operatingSystemColor: (config.operatingSystemColor === 'silver' || config.operatingSystemColor === 'bronze') ? 'white' : (config.operatingSystemColor as 'white' | 'black' | undefined),
       chainColor: config.chainColor,
       operatingSystemHeight: config.operatingSystemHeight,
       tubeSize: config.tubeSize,
@@ -147,6 +148,7 @@ export function adaptQuoteLineToProductConfig(line: QuoteLine & { [key: string]:
       productType: 'roller-shade',
       panels, // Include panels if available
       collectionId: line.collection_id || undefined,
+      position: line.position || baseConfig.position || '',
       variantId: line.variant_id || undefined,
       operatingSystem: line.operating_system as any,
       operatingSystemManufacturer: line.operating_system_manufacturer as any,

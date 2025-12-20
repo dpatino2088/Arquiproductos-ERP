@@ -330,7 +330,7 @@ export default function QuoteNew() {
           .eq('deleted', false)
           .limit(1);
 
-        if (productTypes && productTypes.length > 0) {
+        if (productTypes && productTypes.length > 0 && productTypes[0]?.id) {
           productTypeId = productTypes[0].id;
         }
       }

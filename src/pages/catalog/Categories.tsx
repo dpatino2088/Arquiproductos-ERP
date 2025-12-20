@@ -42,7 +42,7 @@ export default function Categories() {
     name: string;
     code?: string | null;
     is_group?: boolean;
-    sort_order: number;
+    sort_order: number; // Required, defaults to 0 if null/undefined
     deleted: boolean;
     archived: boolean;
     created_at: string;
@@ -52,7 +52,7 @@ export default function Categories() {
 
   const categoryTree = useMemo(() => {
     const categoryMap = new Map<string, CategoryNode>(
-      categories.map(c => [c.id, { ...c, children: [] as CategoryNode[] }])
+      categories.map(c => [c.id, { ...c, children: [] as CategoryNode[], sort_order: c.sort_order ?? 0 }])
     );
     const roots: CategoryNode[] = [];
 
@@ -61,7 +61,7 @@ export default function Categories() {
       if (!node) return;
       
       // Use parent_category_id (preferred) or parent_id (legacy)
-      const parentId = category.parent_category_id || category.parent_id;
+      const parentId = category.parent_category_id || (category as any).parent_id;
       
       if (parentId && categoryMap.has(parentId)) {
         const parent = categoryMap.get(parentId);

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useCatalogVariantsCRUD, useCatalogCollections } from '../../hooks/useCatalog';
+import { useCatalogVariants, useCatalogCollections } from '../../hooks/useCatalog';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
@@ -50,7 +50,13 @@ export default function Variants() {
     }
   }, [registerSubmodules]);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string>('');
-  const { variants, loading, error, createVariant, updateVariant, deleteVariant, isCreating, isDeleting } = useCatalogVariantsCRUD(selectedCollectionId || undefined);
+  const { variants, loading, error } = useCatalogVariants(selectedCollectionId || undefined);
+  // TODO: Implement CRUD operations for variants
+  const createVariant = async (data: any) => { throw new Error('Not implemented'); };
+  const updateVariant = async (id: string, data: any) => { throw new Error('Not implemented'); };
+  const deleteVariant = async (id: string) => { throw new Error('Not implemented'); };
+  const isCreating = false;
+  const isDeleting = false;
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -70,7 +76,7 @@ export default function Variants() {
         (v.color_name && v.color_name.toLowerCase().includes(searchLower));
     });
 
-    return filtered.sort((a, b) => {
+    return filtered.sort((a: any, b: any) => {
       let aValue: string | number;
       let bValue: string | number;
 

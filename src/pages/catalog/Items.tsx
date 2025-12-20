@@ -146,13 +146,13 @@ export default function Items() {
       );
 
       // Manufacturer filter
-      const matchesManufacturer = selectedManufacturer.length === 0 || selectedManufacturer.includes(item.manufacturer);
+      const matchesManufacturer = selectedManufacturer.length === 0 || (item.manufacturer && selectedManufacturer.includes(item.manufacturer));
 
       // Category filter
-      const matchesCategory = selectedCategory.length === 0 || selectedCategory.includes(item.category);
+      const matchesCategory = selectedCategory.length === 0 || (item.category && selectedCategory.includes(item.category));
 
       // Family filter
-      const matchesFamily = selectedFamily.length === 0 || selectedFamily.includes(item.family);
+      const matchesFamily = selectedFamily.length === 0 || (item.family && selectedFamily.includes(item.family));
 
       // Item Type filter
       const matchesItemType = selectedItemType.length === 0 || (item.item_type && selectedItemType.includes(item.item_type));
@@ -533,9 +533,10 @@ export default function Items() {
                       <div
                         key={itemType}
                         onClick={() => {
+                          if (!itemType) return;
                           setSelectedItemType(prev => 
                             prev.includes(itemType) 
-                              ? prev.filter(t => t !== itemType)
+                              ? prev.filter((t: string) => t !== itemType)
                               : [...prev, itemType]
                           );
                         }}
@@ -543,7 +544,7 @@ export default function Items() {
                       >
                         <input
                           type="checkbox"
-                          checked={selectedItemType.includes(itemType)}
+                          checked={itemType ? selectedItemType.includes(itemType) : false}
                           readOnly
                           className="w-4 h-4"
                         />
@@ -571,9 +572,10 @@ export default function Items() {
                       <div
                         key={measureBasis}
                         onClick={() => {
+                          if (!measureBasis) return;
                           setSelectedMeasureBasis(prev => 
                             prev.includes(measureBasis) 
-                              ? prev.filter(m => m !== measureBasis)
+                              ? prev.filter((m: string) => m !== measureBasis)
                               : [...prev, measureBasis]
                           );
                         }}
@@ -581,7 +583,7 @@ export default function Items() {
                       >
                         <input
                           type="checkbox"
-                          checked={selectedMeasureBasis.includes(measureBasis)}
+                          checked={measureBasis ? selectedMeasureBasis.includes(measureBasis) : false}
                           readOnly
                           className="w-4 h-4"
                         />
@@ -645,12 +647,12 @@ export default function Items() {
                     {manufacturerOptions.map((manufacturer) => (
                       <div
                         key={manufacturer}
-                        onClick={() => handleManufacturerToggle(manufacturer)}
+                        onClick={() => handleManufacturerToggle(manufacturer || '')}
                         className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
                       >
                         <input
                           type="checkbox"
-                          checked={selectedManufacturer.includes(manufacturer)}
+                          checked={manufacturer ? selectedManufacturer.includes(manufacturer) : false}
                           readOnly
                           className="w-4 h-4"
                         />
@@ -677,12 +679,12 @@ export default function Items() {
                     {categoryOptions.map((category) => (
                       <div
                         key={category}
-                        onClick={() => handleCategoryToggle(category)}
+                        onClick={() => handleCategoryToggle(category || '')}
                         className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
                       >
                         <input
                           type="checkbox"
-                          checked={selectedCategory.includes(category)}
+                          checked={category ? selectedCategory.includes(category) : false}
                           readOnly
                           className="w-4 h-4"
                         />
@@ -709,12 +711,12 @@ export default function Items() {
                     {familyOptions.map((family) => (
                       <div
                         key={family}
-                        onClick={() => handleFamilyToggle(family)}
+                        onClick={() => handleFamilyToggle(family || '')}
                         className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
                       >
                         <input
                           type="checkbox"
-                          checked={selectedFamily.includes(family)}
+                          checked={family ? selectedFamily.includes(family) : false}
                           readOnly
                           className="w-4 h-4"
                         />

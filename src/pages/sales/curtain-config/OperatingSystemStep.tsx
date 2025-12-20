@@ -22,24 +22,24 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
     let hasUpdates = false;
     
     // Set default drive_type if not present
-    if (!(config as any).drive_type && !config.operatingSystem) {
-      updates.drive_type = 'motor';
-      updates.operatingSystem = 'motorized';
+    if (!(config as any).drive_type && !((config as any).operatingSystem)) {
+      (updates as any).drive_type = 'motor';
+      (updates as any).operatingSystem = 'motorized';
       hasUpdates = true;
     }
     
     // Set default hardware_color if not present
-    if (!(config as any).hardwareColor && !(config as any).hardware_color && !config.operatingSystemColor) {
-      updates.hardwareColor = 'white';
-      updates.hardware_color = 'white';
-      updates.operatingSystemColor = 'white';
+    if (!(config as any).hardwareColor && !(config as any).hardware_color && !((config as any).operatingSystemColor)) {
+      (updates as any).hardwareColor = 'white';
+      (updates as any).hardware_color = 'white';
+      (updates as any).operatingSystemColor = 'white';
       hasUpdates = true;
     }
     
     // Set default bottom_rail_type if not present
-    if (!(config as any).bottom_rail_type && !(config as any).bottomBar) {
-      updates.bottom_rail_type = 'standard';
-      updates.bottomBar = 'standard';
+    if (!(config as any).bottom_rail_type && !((config as any).bottomBar)) {
+      (updates as any).bottom_rail_type = 'standard';
+      (updates as any).bottomBar = 'standard';
       hasUpdates = true;
     }
     
@@ -58,7 +58,7 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
     }
     
     // Get color from hardwareColor or operatingSystemColor (default to white)
-    const hardwareColor = (config as any).hardwareColor || (config as any).hardware_color || config.operatingSystemColor || 'white';
+    const hardwareColor = (config as any).hardwareColor || (config as any).hardware_color || ((config as any).operatingSystemColor) || 'white';
     const colorName = hardwareColor === 'white' ? 'White' : hardwareColor === 'black' ? 'Black' : 'White';
     
     // Find template by name pattern: "{ProductType} - {Color}"
@@ -70,7 +70,7 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
     
     // If no template found by color, use the first template for this product type
     return template || bomTemplates[0] || null;
-  }, [bomTemplates, productTypeId, config.operatingSystemColor, (config as any).hardwareColor, (config as any).hardware_color]);
+  }, [bomTemplates, productTypeId, (config as any).operatingSystemColor, (config as any).hardwareColor, (config as any).hardware_color]);
   
   // Load BOM Components for the selected template
   const { components: bomComponents, loading: loadingBOMComponents } = useBOMComponents(
@@ -124,12 +124,12 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
           <div className="mb-4">
             <Label htmlFor="hardwareColor" className="text-xs mb-1">Hardware Color</Label>
             <SelectShadcn
-              value={(config as any).hardwareColor || (config as any).hardware_color || config.operatingSystemColor || 'white'}
-              onValueChange={(value) => onUpdate({ 
-                hardwareColor: value,
-                hardware_color: value,
-                operatingSystemColor: value 
-              })}
+              value={(config as any).hardwareColor || (config as any).hardware_color || ((config as any).operatingSystemColor) || 'white'}
+              onValueChange={(value: string) => onUpdate({ 
+                hardwareColor: value as 'white' | 'black' | 'silver' | 'bronze',
+                hardware_color: value as 'white' | 'black' | 'silver' | 'bronze',
+                operatingSystemColor: value as 'white' | 'black' | 'silver' | 'bronze'
+              } as any)}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select hardware color" />
@@ -152,12 +152,12 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
             <Label htmlFor="bottom_rail_type" className="text-xs mb-1">Bottom Rail Type</Label>
             <SelectShadcn
               value={(config as any).bottom_rail_type || (config as any).bottomBar || 'standard'}
-              onValueChange={(value) => {
+              onValueChange={(value: string) => {
                 const bottomRailType = value === 'none' ? 'standard' : value;
                 onUpdate({ 
                   bottom_rail_type: bottomRailType as 'standard' | 'wrapped',
-                  bottomBar: value === 'none' ? 'none' : bottomRailType
-                });
+                  bottomBar: (value === 'none' ? 'none' : bottomRailType) as 'none' | 'standard' | 'weighted'
+                } as any);
               }}
             >
               <SelectTrigger>

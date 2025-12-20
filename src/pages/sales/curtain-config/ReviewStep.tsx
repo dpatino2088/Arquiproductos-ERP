@@ -63,11 +63,11 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
               </div>
               <div>
                 <span className="font-medium text-gray-700">Guiding:</span>
-                <span className="ml-2 text-gray-900">{config.guidingProfile || 'Not selected'}</span>
+                <span className="ml-2 text-gray-900">{(config as any).guidingProfile || 'Not selected'}</span>
               </div>
               <div>
                 <span className="font-medium text-gray-700">Fixing:</span>
-                <span className="ml-2 text-gray-900">{config.fixingType || 'Not selected'}</span>
+                <span className="ml-2 text-gray-900">{(config as any).fixingType || 'Not selected'}</span>
               </div>
               <div>
                 <span className="font-medium text-gray-700">Accessories:</span>

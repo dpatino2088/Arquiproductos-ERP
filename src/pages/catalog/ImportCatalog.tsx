@@ -118,14 +118,14 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
         Papa.parse(file, {
           header: true,
           skipEmptyLines: true,
-          complete: (results) => {
+          complete: (results: any) => {
             if (results.errors.length > 0) {
-              reject(new Error(`CSV parsing errors: ${results.errors.map(e => e.message).join(', ')}`));
+              reject(new Error(`CSV parsing errors: ${results.errors.map((e: any) => e.message).join(', ')}`));
               return;
             }
             resolve(results.data as ParsedRow[]);
           },
-          error: (error) => {
+          error: (error: any) => {
             reject(new Error(`CSV parsing error: ${error.message}`));
           },
         });
@@ -135,9 +135,17 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
           try {
             const data = new Uint8Array(e.target?.result as ArrayBuffer);
             const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          const firstSheetName = workbook.SheetNames[0];
+          if (!firstSheetName) {
+            reject(new Error('Workbook has no sheets'));
+            return;
+          }
+          const worksheet = workbook.Sheets[firstSheetName];
+          if (!worksheet) {
+            reject(new Error('Worksheet not found'));
+            return;
+          }
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
             resolve(jsonData as ParsedRow[]);
           } catch (error) {
             reject(new Error(`Excel parsing error: ${error instanceof Error ? error.message : 'Unknown error'}`));

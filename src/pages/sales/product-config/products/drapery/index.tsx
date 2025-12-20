@@ -3,7 +3,7 @@
  * Complete configuration flow for Drapery (Wave/Ripple Fold) products
  */
 
-import { ProductType, DraperyConfig } from '../../types';
+import { ProductType, DraperyConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
@@ -19,15 +19,17 @@ const DRAPERY_STEPS: ProductStep[] = [
   { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
 ];
 
-function validateStep(stepId: string, config: DraperyConfig): boolean {
+function validateStep(stepId: string, config: ProductConfig): boolean {
+  if (config.productType !== 'drapery') return false;
+  const draperyConfig = config as DraperyConfig;
   switch (stepId) {
     case 'measurements':
-      return !!(config.width_mm && config.height_mm);
+      return !!(draperyConfig.width_mm && draperyConfig.height_mm);
     case 'variants':
-      return !!(config.fabric?.collectionId && config.fabric?.variantId);
+      return !!(draperyConfig.fabric?.collectionId && draperyConfig.fabric?.variantId);
     case 'operating-system':
-      // Only require drive_type (or operatingSystem for backward compatibility)
-      return !!((config as any).drive_type || config.operatingSystem);
+      // Drapery doesn't have operating system in the same way - it's optional
+      return true;
     default:
       return true;
   }

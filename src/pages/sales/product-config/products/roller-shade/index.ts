@@ -3,7 +3,7 @@
  * Complete configuration flow for Roller Shade products
  */
 
-import { ProductType, RollerShadeConfig } from '../../types';
+import { ProductType, RollerShadeConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
@@ -19,15 +19,17 @@ const ROLLER_SHADE_STEPS: ProductStep[] = [
   { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
 ];
 
-function validateStep(stepId: string, config: RollerShadeConfig): boolean {
+function validateStep(stepId: string, config: ProductConfig): boolean {
+  if (config.productType !== 'roller-shade') return false;
+  const rollerConfig = config as RollerShadeConfig;
   switch (stepId) {
     case 'measurements':
-      return !!(config.width_mm && config.height_mm);
+      return !!(rollerConfig.width_mm && rollerConfig.height_mm);
     case 'variants':
-      return !!(config.collectionId && config.variantId);
+      return !!(rollerConfig.collectionId && rollerConfig.variantId);
     case 'operating-system':
       // Only require drive_type (or operatingSystem for backward compatibility)
-      return !!((config as any).drive_type || config.operatingSystem);
+      return !!((rollerConfig as any).drive_type || rollerConfig.operatingSystem);
     default:
       return true;
   }

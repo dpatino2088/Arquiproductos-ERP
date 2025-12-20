@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { ProductType, WindowFilmConfig } from '../../types';
+import { ProductType, WindowFilmConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 
 // Placeholder components (TODO: Create actual Window Film-specific step components)
@@ -26,14 +26,16 @@ const WINDOW_FILM_STEPS: ProductStep[] = [
   { id: 'review', label: 'QUOTE', component: () => <PlaceholderStep title="Review" /> },
 ];
 
-function validateStep(stepId: string, config: WindowFilmConfig): boolean {
+function validateStep(stepId: string, config: ProductConfig): boolean {
+  if (config.productType !== 'window-film') return false;
+  const filmConfig = config as WindowFilmConfig;
   switch (stepId) {
     case 'film-type':
-      return !!config.filmType;
+      return !!filmConfig.filmType;
     case 'opacity':
-      return config.opacity !== undefined;
+      return filmConfig.opacity !== undefined;
     case 'measurements':
-      return !!(config.width_mm && config.height_mm);
+      return !!(filmConfig.width_mm && filmConfig.height_mm);
     default:
       return true;
   }

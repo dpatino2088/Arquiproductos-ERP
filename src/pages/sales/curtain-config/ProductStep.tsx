@@ -116,9 +116,9 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     const productTypeId = productTypeMap.get(productId);
     
     onUpdate({ 
-      productType: productId,
+      productType: productId as any,
       productTypeId: productTypeId || undefined,
-    });
+    } as any);
   };
   
   const handleProductTypeDeselect = () => {

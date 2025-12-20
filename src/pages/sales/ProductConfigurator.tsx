@@ -37,13 +37,20 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   // Handle product type selection
   const handleProductTypeSelect = (type: ProductType) => {
     setProductType(type);
-    setConfig(prev => ({ ...prev, productType: type }));
+    setConfig(prev => {
+      // Reset config when product type changes
+      const baseConfig: Partial<ProductConfig> = { productType: type, position: prev.position || '' };
+      return baseConfig;
+    });
     setCurrentStepIndex(1); // Move to first step after product selection
   };
 
   // Handle step updates
   const handleUpdate = (updates: Partial<ProductConfig>) => {
-    setConfig(prev => ({ ...prev, ...updates }));
+    setConfig(prev => {
+      // Merge updates while preserving productType
+      return { ...prev, ...updates, productType: prev.productType || updates.productType } as Partial<ProductConfig>;
+    });
   };
 
   // Navigation
