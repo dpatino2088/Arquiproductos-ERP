@@ -207,23 +207,27 @@ export default function ApprovedBOMList() {
 
         // Get BomInstances (with organization_id filter)
         let materialList: any[] = [];
+        let bomInstances: any[] = []; // Declare outside if block to avoid scope issues
+        
         if (saleOrderLineIds.length > 0) {
           if (import.meta.env.DEV) {
             console.log('🔍 ApprovedBOMList: Fetching BomInstances for saleOrderLineIds:', saleOrderLineIds.length);
           }
           
-          const { data: bomInstances, error: bomError } = await supabase
+          const { data: bomInstancesData, error: bomError } = await supabase
             .from('BomInstances')
             .select('id, sale_order_line_id, organization_id')
             .in('sale_order_line_id', saleOrderLineIds)
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false);
+          
+          bomInstances = bomInstancesData || []; // Assign to outer variable
 
           if (bomError) {
             if (import.meta.env.DEV) {
               console.warn('⚠️ Error fetching BomInstances:', bomError);
             }
-          } else if (bomInstances && bomInstances.length > 0) {
+          } else if (bomInstances.length > 0) {
             const bomInstanceIds = bomInstances.map((bi: any) => bi.id);
 
             // Get BomInstanceLines with CatalogItems (with organization_id filter)
@@ -235,20 +239,16 @@ export default function ApprovedBOMList() {
               .from('BomInstanceLines')
               .select(`
                 bom_instance_id,
+                resolved_part_id,
+                resolved_sku,
+                description,
                 category_code,
                 qty,
                 uom,
                 unit_cost_exw,
-                total_cost_exw,
-                organization_id,
-                CatalogItems:resolved_part_id (
-                  id,
-                  sku,
-                  item_name
-                )
+                total_cost_exw
               `)
               .in('bom_instance_id', bomInstanceIds)
-              .eq('organization_id', activeOrganizationId)
               .eq('deleted', false);
 
             if (linesError) {
@@ -264,8 +264,8 @@ export default function ApprovedBOMList() {
                   if (saleOrderId) {
                     materialList.push({
                       sale_order_id: saleOrderId,
-                      sku: bil.CatalogItems?.sku || 'N/A',
-                      item_name: bil.CatalogItems?.item_name || bil.description || 'N/A',
+                      sku: bil.resolved_sku || 'N/A',
+                      item_name: bil.description || 'N/A',
                       total_qty: Number(bil.qty) || 0,
                       uom: bil.uom || 'ea',
                       avg_unit_cost_exw: bil.unit_cost_exw ? Number(bil.unit_cost_exw) : 0,
