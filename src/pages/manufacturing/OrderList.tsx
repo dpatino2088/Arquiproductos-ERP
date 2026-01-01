@@ -70,6 +70,8 @@ export default function OrderList() {
   // Default sort: most recently approved first (created_at DESC)
   const [sortBy, setSortBy] = useState<'sale_order_no' | 'customer_name' | 'created_at'>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  // Filter to show/hide completed projects
+  const [showCompleted, setShowCompleted] = useState(false);
   
   const loading = loadingSO;
   const error = null;
@@ -79,8 +81,10 @@ export default function OrderList() {
     // CRITICAL: This ensures Sales Orders remain visible after MO creation
     // The name "saleOrdersWithoutMO" is misleading - it contains ALL Confirmed Sales Orders
     if (import.meta.env.DEV) {
-      console.log('🔄 OrderList: Refetching all data...');
-      console.log('   IMPORTANT: This will show ALL Confirmed Sales Orders (with and without MO)');
+      if (import.meta.env.DEV) {
+        console.log('🔄 OrderList: Refetching all data...');
+        console.log('   IMPORTANT: This will show ALL Confirmed Sales Orders (with and without MO)');
+      }
     }
     // Small delay to ensure any pending database transactions are committed
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -110,9 +114,9 @@ export default function OrderList() {
     };
   }, [registerSubmodules, clearSubmoduleNav]);
 
-  // Load SaleOrders that are Confirmed (status = 'Confirmed') 
-  // and don't have ManufacturingOrders
-  // IMPORTANT: OrderList should only show SalesOrders with status = 'Confirmed'
+  // Load SaleOrders that are ready for manufacturing
+  // Statuses: 'Confirmed', 'Scheduled for Production', 'In Production'
+  // IMPORTANT: OrderList shows ALL SalesOrders in these statuses (with or without MO)
   // SalesOrders created from Quote have status = 'Draft' and should NOT appear here
   const loadSaleOrdersWithoutMO = async () => {
     if (!activeOrganizationId) {
@@ -127,9 +131,18 @@ export default function OrderList() {
         console.log('🔍 OrderList: Loading Confirmed Sales Orders for organization:', activeOrganizationId);
       }
       
-      // Get all Sales Orders with status = 'Confirmed'
-      // These are Sales Orders that have been manually confirmed (changed from Draft to Confirmed)
-      // SalesOrders created from Quote have status = 'Draft' and will NOT appear here
+      // Get all Sales Orders that should appear in OrderList
+      // Active statuses (default):
+      // - 'Confirmed' = Ready for MO creation
+      // - 'Scheduled for Production' = MO created with status='planned'
+      // - 'In Production' = MO created with status='in_production'
+      // Completed statuses (when showCompleted=true):
+      // - 'Ready for Delivery' = MO completed
+      // - 'Delivered' = Order delivered
+      const statusesToLoad = showCompleted
+        ? ['Confirmed', 'Scheduled for Production', 'In Production', 'Ready for Delivery', 'Delivered']
+        : ['Confirmed', 'Scheduled for Production', 'In Production'];
+      
       const { data: allSaleOrders, error: soError } = await supabase
         .from('SalesOrders')
         .select(`
@@ -145,12 +158,14 @@ export default function OrderList() {
           )
         `)
         .eq('organization_id', activeOrganizationId)
-        .eq('status', 'Confirmed')
+        .in('status', statusesToLoad)
         .eq('deleted', false)
         .order('created_at', { ascending: false }); // Most recent first
 
       if (soError) {
-        console.error('❌ OrderList: Error loading SaleOrders:', soError);
+        if (import.meta.env.DEV) {
+          console.error('❌ OrderList: Error loading SaleOrders:', soError);
+        }
         setSaleOrdersWithoutMO([]);
         return;
       }
@@ -165,7 +180,9 @@ export default function OrderList() {
             customer: so.DirectoryCustomers?.customer_name
           })));
         } else {
-          console.log('⚠️ OrderList: No Confirmed Sales Orders found. Checking Draft orders...');
+          if (import.meta.env.DEV) {
+            console.log('⚠️ OrderList: No Confirmed Sales Orders found. Checking Draft orders...');
+          }
           // Debug: Check if there are Draft orders
           const { data: draftOrders } = await supabase
             .from('SalesOrders')
@@ -175,11 +192,13 @@ export default function OrderList() {
             .eq('deleted', false)
             .limit(5);
           if (draftOrders && draftOrders.length > 0) {
-            console.log('ℹ️ OrderList: Found', draftOrders.length, 'Draft Sales Orders. These need to be confirmed to appear in OrderList.');
-            console.log('📋 Draft Orders:', draftOrders.map((so: any) => ({
-              sale_order_no: so.sale_order_no,
-              status: so.status
-            })));
+            if (import.meta.env.DEV) {
+              console.log('ℹ️ OrderList: Found', draftOrders.length, 'Draft Sales Orders. These need to be confirmed to appear in OrderList.');
+              console.log('📋 Draft Orders:', draftOrders.map((so: any) => ({
+                sale_order_no: so.sale_order_no,
+                status: so.status
+              })));
+            }
           }
         }
       }
@@ -194,7 +213,9 @@ export default function OrderList() {
         .order('created_at', { ascending: false }); // Most recent first for debugging
 
       if (moError) {
-        console.error('Error loading ManufacturingOrders:', moError);
+        if (import.meta.env.DEV) {
+          console.error('Error loading ManufacturingOrders:', moError);
+        }
         // Continue anyway - we'll show all Sales Orders
       }
 
@@ -241,17 +262,16 @@ export default function OrderList() {
         enrichedSaleOrders.forEach((so: any) => {
           console.log('  📋', so.sale_order_no, ':', so.ManufacturingOrder ? `Has MO (${so.ManufacturingOrder.manufacturing_order_no})` : 'Needs MO');
         });
+        console.log('✅ OrderList: State updated with', enrichedSaleOrders.length, 'Sales Orders');
       }
 
       // CRITICAL: Always set ALL enriched Sales Orders, NEVER filter them out
       // This ensures Sales Orders remain visible even after MO creation
       setSaleOrdersWithoutMO(enrichedSaleOrders);
-      
+    } catch (err: any) {
       if (import.meta.env.DEV) {
-        console.log('✅ OrderList: State updated with', enrichedSaleOrders.length, 'Sales Orders');
+        console.error('Error loading SaleOrders without MO:', err);
       }
-    } catch (err) {
-      console.error('Error loading SaleOrders without MO:', err);
       setSaleOrdersWithoutMO([]);
     } finally {
       setLoadingSO(false);
@@ -260,7 +280,7 @@ export default function OrderList() {
 
   useEffect(() => {
     loadSaleOrdersWithoutMO();
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, showCompleted]);
 
   // Transform to display format: ALL Confirmed SaleOrders (with or without MO)
   // Status changes based on whether they have MO or not, but they all appear
@@ -333,6 +353,214 @@ export default function OrderList() {
     e.stopPropagation();
     
     try {
+      // Debug: Log payload before creating MO
+      if (import.meta.env.DEV) {
+        console.log('🔍 Create MO - Payload:', {
+          sale_order_id: saleOrderId,
+          sale_order_no: saleOrderNo,
+          organization_id: activeOrganizationId,
+          user_id: (await supabase.auth.getUser()).data.user?.id
+        });
+      }
+
+      // STEP 1: Check if BOM materials exist for this SalesOrder
+      // Get SalesOrderLines for this SalesOrder
+      const { data: saleOrderLines, error: solError } = await supabase
+        .from('SalesOrderLines')
+        .select('id')
+        .eq('sale_order_id', saleOrderId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false);
+
+      if (solError || !saleOrderLines || saleOrderLines.length === 0) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'No Sales Order Lines found. Cannot create Manufacturing Order.',
+        });
+        return;
+      }
+
+      const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
+
+      // Get BomInstances
+      const { data: bomInstances, error: biError } = await supabase
+        .from('BomInstances')
+        .select('id')
+        .in('sale_order_line_id', saleOrderLineIds)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false);
+
+      if (biError && import.meta.env.DEV) {
+        console.error('❌ Error checking BomInstances:', biError);
+      }
+
+      const bomInstanceIds = bomInstances?.map(bi => bi.id) || [];
+
+      // Get BomInstanceLines count
+      let bomLinesCount = 0;
+      if (bomInstanceIds.length > 0) {
+        const { count, error: bilError } = await supabase
+          .from('BomInstanceLines')
+          .select('id', { count: 'exact', head: true })
+          .in('bom_instance_id', bomInstanceIds)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false);
+
+        if (bilError && import.meta.env.DEV) {
+          console.error('❌ Error checking BomInstanceLines:', bilError);
+        } else {
+          bomLinesCount = count || 0;
+        }
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('🔍 BOM Check:', {
+          saleOrderLineIds: saleOrderLineIds.length,
+          bomInstances: bomInstanceIds.length,
+          bomLinesCount
+        });
+      }
+
+      // STEP 2: If no BOM materials exist, generate them first
+      // The trigger will generate BOM when MO is created, but we need to ensure
+      // QuoteLineComponents exist first. We'll let the trigger handle BOM generation,
+      // but we need to ensure the SalesOrder has QuoteLines with QuoteLineComponents.
+      
+      // Check if QuoteLineComponents exist for this SalesOrder's QuoteLines
+      const { data: salesOrder, error: soError } = await supabase
+        .from('SalesOrders')
+        .select('id, quote_id')
+        .eq('id', saleOrderId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .single();
+
+      if (soError || !salesOrder) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'Sales Order not found. Cannot create Manufacturing Order.',
+        });
+        return;
+      }
+
+      // Get QuoteLines for this Quote with all required fields for BOM generation
+      const { data: quoteLines, error: qlError } = await supabase
+        .from('QuoteLines')
+        .select('id, product_type_id, drive_type, bottom_rail_type, cassette, cassette_type, side_channel, side_channel_type, hardware_color, width_m, height_m, qty')
+        .eq('quote_id', salesOrder.quote_id)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false);
+
+      if (qlError || !quoteLines || quoteLines.length === 0) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'No Quote Lines found. Cannot create Manufacturing Order.',
+        });
+        return;
+      }
+
+      const quoteLineIds = quoteLines.map(ql => ql.id);
+
+      // Check if QuoteLineComponents exist
+      const { count: qlcCount, error: qlcError } = await supabase
+        .from('QuoteLineComponents')
+        .select('id', { count: 'exact', head: true })
+        .in('quote_line_id', quoteLineIds)
+        .eq('source', 'configured_component')
+        .eq('deleted', false);
+
+      if (qlcError) {
+        console.error('❌ Error checking QuoteLineComponents:', qlcError);
+      }
+
+      // STEP 3: Generate QuoteLineComponents if they don't exist
+      if ((qlcCount || 0) === 0) {
+        if (import.meta.env.DEV) {
+          console.log('🔧 No QuoteLineComponents found. Generating BOM for QuoteLines...');
+        }
+
+        // Generate BOM for each QuoteLine
+        let generatedCount = 0;
+        let failedCount = 0;
+
+        for (const quoteLine of quoteLines) {
+          if (!quoteLine.product_type_id) {
+            if (import.meta.env.DEV) {
+              console.warn(`⚠️ QuoteLine ${quoteLine.id} has no product_type_id, skipping BOM generation`);
+            }
+            failedCount++;
+            continue;
+          }
+
+          try {
+            const { error: bomError } = await supabase.rpc('generate_configured_bom_for_quote_line', {
+              p_quote_line_id: quoteLine.id,
+              p_product_type_id: quoteLine.product_type_id,
+              p_organization_id: activeOrganizationId,
+              p_drive_type: quoteLine.drive_type || 'manual',
+              p_bottom_rail_type: quoteLine.bottom_rail_type || 'standard',
+              p_cassette: quoteLine.cassette || false,
+              p_cassette_type: quoteLine.cassette_type || null,
+              p_side_channel: quoteLine.side_channel || false,
+              p_side_channel_type: quoteLine.side_channel_type || null,
+              p_hardware_color: quoteLine.hardware_color || 'white',
+              p_width_m: quoteLine.width_m || 0,
+              p_height_m: quoteLine.height_m || 0,
+              p_qty: quoteLine.qty || 1,
+            });
+
+            if (bomError) {
+              console.error(`❌ Error generating BOM for QuoteLine ${quoteLine.id}:`, bomError);
+              failedCount++;
+            } else {
+              generatedCount++;
+              if (import.meta.env.DEV) {
+                console.log(`✅ Generated BOM for QuoteLine ${quoteLine.id}`);
+              }
+            }
+          } catch (err) {
+            console.error(`❌ Exception generating BOM for QuoteLine ${quoteLine.id}:`, err);
+            failedCount++;
+          }
+        }
+
+        if (import.meta.env.DEV) {
+          console.log(`🔧 BOM Generation Summary: ${generatedCount} succeeded, ${failedCount} failed`);
+        }
+
+        // Re-check QuoteLineComponents count after generation
+        const { count: newQlcCount } = await supabase
+          .from('QuoteLineComponents')
+          .select('id', { count: 'exact', head: true })
+          .in('quote_line_id', quoteLineIds)
+          .eq('source', 'configured_component')
+          .eq('deleted', false);
+
+        if ((newQlcCount || 0) === 0) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Cannot Create MO',
+            message: 'Cannot create MO: BOM has no materials. Generate BOM first.',
+          });
+          if (import.meta.env.DEV) {
+            console.error('❌ BOM generation failed or produced no components:', {
+              quoteLines: quoteLines.length,
+              generatedCount,
+              failedCount,
+              finalQlcCount: newQlcCount || 0
+            });
+          }
+          return;
+        }
+      }
+
+      // STEP 4: Verify BOM materials exist (either already existed or were just generated)
+      // The trigger will create BomInstances and BomInstanceLines, but we should verify
+      // that at least QuoteLineComponents exist before proceeding
+      
       // First, generate the manufacturing order number using RPC
       const { data: moNumberData, error: numberError } = await supabase
         .rpc('get_next_document_number', {
@@ -377,19 +605,39 @@ export default function OrderList() {
       }
 
       // Create ManufacturingOrder
+      // CRITICAL: Status must be 'draft' on creation
+      // Only generate_bom_for_manufacturing_order can change to 'planned'
+      const moPayload = {
+        organization_id: activeOrganizationId,
+        sale_order_id: saleOrderId,
+        manufacturing_order_no: manufacturingOrderNo,
+        status: 'draft', // Must be DRAFT - will change to PLANNED only after BOM generation
+        priority: 'normal',
+        deleted: false, // CRITICAL: Required for trigger to fire
+      };
+      
+      // Debug: Log exact payload
+      if (import.meta.env.DEV) {
+        console.log('🔍 Create MO - Insert payload:', moPayload);
+      }
+      
       const { data: moData, error: moError } = await supabase
         .from('ManufacturingOrders')
-        .insert({
-          organization_id: activeOrganizationId,
-          sale_order_id: saleOrderId,
-          manufacturing_order_no: manufacturingOrderNo,
-          status: 'planned',
-          priority: 'normal',
-        })
+        .insert(moPayload)
         .select()
         .single();
 
       if (moError) {
+        // Debug: Log exact error details
+        if (import.meta.env.DEV) {
+          console.error('❌ Create MO - Supabase error:', {
+            message: moError.message,
+            details: moError.details,
+            hint: moError.hint,
+            code: moError.code,
+          });
+        }
+        
         // If MO already exists, that's okay
         if (moError.code === '23505') { // Unique violation
           useUIStore.getState().addNotification({
@@ -397,9 +645,41 @@ export default function OrderList() {
             title: 'Info',
             message: `Manufacturing Order already exists for ${saleOrderNo}`,
           });
-        } else {
-          throw moError;
+          return;
         }
+        
+        // Check if error is about missing BOM materials
+        if (moError.code === 'P0001' && moError.message?.includes('BOM materials')) {
+          // Re-check BOM lines count after potential generation
+          let finalBomLinesCount = 0;
+          if (bomInstanceIds.length > 0) {
+            const { count: finalCount } = await supabase
+              .from('BomInstanceLines')
+              .select('id', { count: 'exact', head: true })
+              .in('bom_instance_id', bomInstanceIds)
+              .eq('organization_id', activeOrganizationId)
+              .eq('deleted', false);
+            finalBomLinesCount = finalCount || 0;
+          }
+          
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Cannot Create MO',
+            message: `Cannot create MO: BOM has no materials (${finalBomLinesCount} lines found). Generate BOM first.`,
+          });
+          
+          if (import.meta.env.DEV) {
+            console.error('❌ BOM validation failed:', {
+              bomInstances: bomInstanceIds.length,
+              bomLinesCount: finalBomLinesCount,
+              quoteLineComponents: qlcCount || 0,
+              error: moError.message
+            });
+          }
+          return;
+        }
+        
+        throw moError;
       } else {
         useUIStore.getState().addNotification({
           type: 'success',
@@ -439,7 +719,7 @@ export default function OrderList() {
           if (import.meta.env.DEV) {
             console.log('✅ OrderList: Verified MO exists:', verifyMO.manufacturing_order_no);
           }
-        } else {
+        } else if (import.meta.env.DEV) {
           console.warn('⚠️ OrderList: Could not verify MO creation, but proceeding with refetch');
         }
       }
@@ -460,11 +740,15 @@ export default function OrderList() {
         const foundOrder = currentOrders.find((so: any) => so.id === saleOrderId);
         
         if (foundOrder) {
-          console.log('✅ OrderList: Verified Sales Order', saleOrderNo, 'is still visible in list');
-          console.log('   Status:', foundOrder.ManufacturingOrder ? 'Has MO' : 'Needs MO');
+          if (import.meta.env.DEV) {
+            console.log('✅ OrderList: Verified Sales Order', saleOrderNo, 'is still visible in list');
+            console.log('   Status:', foundOrder.ManufacturingOrder ? 'Has MO' : 'Needs MO');
+          }
         } else {
-          console.warn('⚠️ OrderList: Sales Order', saleOrderNo, 'not found in list after refetch. This should not happen!');
-          console.warn('   Current orders count:', currentOrders.length);
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ OrderList: Sales Order', saleOrderNo, 'not found in list after refetch. This should not happen!');
+            console.warn('   Current orders count:', currentOrders.length);
+          }
           // Force another reload as fallback
           await loadSaleOrdersWithoutMO();
         }
@@ -514,12 +798,12 @@ export default function OrderList() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Order List</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {`Manage your ${filteredOrders.length} confirmed sales orders${filteredOrders.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
+            {`Manage your ${filteredOrders.length} ${showCompleted ? 'sales orders (including completed)' : 'active sales orders'}${filteredOrders.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search and Filters */}
       <div className="mb-4">
         <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
           <div className="flex items-center gap-3">
@@ -535,6 +819,24 @@ export default function OrderList() {
                 }}
                 className="pl-10"
               />
+            </div>
+            <div className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition-colors">
+              <input
+                type="checkbox"
+                id="show-completed"
+                checked={showCompleted}
+                onChange={(e) => {
+                  setShowCompleted(e.target.checked);
+                  setCurrentPage(1);
+                }}
+                className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary focus:ring-2 cursor-pointer"
+              />
+              <label 
+                htmlFor="show-completed" 
+                className="text-sm text-gray-700 cursor-pointer select-none font-medium"
+              >
+                Show Completed
+              </label>
             </div>
           </div>
         </div>
@@ -582,10 +884,16 @@ export default function OrderList() {
                 <tr>
                   <td colSpan={5} className="py-12 px-6 text-center">
                     <div className="flex flex-col items-center">
-                      <p className="text-gray-600 mb-2">No confirmed sales orders found</p>
+                      <p className="text-gray-600 mb-2">
+                        {showCompleted 
+                          ? 'No sales orders found' 
+                          : 'No active sales orders found'}
+                      </p>
                       <p className="text-sm text-gray-500">
                         {displayOrders.length === 0 
-                          ? 'Confirmed sales orders will appear here when sales orders are confirmed (changed from Draft to Confirmed)'
+                          ? (showCompleted 
+                              ? 'Sales orders will appear here when they are confirmed or completed'
+                              : 'Confirmed sales orders will appear here when sales orders are confirmed (changed from Draft to Confirmed). Enable "Show Completed" to see archived orders.')
                           : 'Try adjusting your search criteria'}
                       </p>
                     </div>

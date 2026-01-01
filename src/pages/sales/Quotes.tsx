@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useQuotes } from '../../hooks/useQuotes';
+import { useQuotes, approveQuote, normalizeStatus, waitForSalesOrder } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
@@ -20,7 +20,10 @@ import {
   Copy,
   Eye,
   Trash2,
-  Archive
+  Archive,
+  ShoppingCart,
+  FileText,
+  CheckCircle
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
 
@@ -65,29 +68,37 @@ const formatCurrency = (amount: number, currency: string = 'USD') => {
 };
 
 export default function Quotes() {
-  const { registerSubmodules } = useSubmoduleNav();
+  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { quotes, loading, error, refetch } = useQuotes();
   const { activeOrganizationId } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [sortBy, setSortBy] = useState<'quoteNo' | 'status' | 'customerName' | 'total' | 'createdAt'>('quoteNo');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedStatus, setSelectedStatus] = useState<QuoteStatus[]>([]);
 
   useEffect(() => {
-    // Only register Sales submodules if we're actually in the Sales module
+    // Register Quotes submodules when Quotes component is mounted
     const currentPath = window.location.pathname;
-    if (currentPath.startsWith('/sales')) {
-      registerSubmodules('Sales', [
-        { id: 'quotes', label: 'Quotes', href: '/sales/quotes' },
-        { id: 'orders', label: 'Orders', href: '/sales/orders' },
+    if (currentPath.startsWith('/sales/quotes')) {
+      registerSubmodules('Quotes', [
+        { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
+        { id: 'quote-approved', label: 'Quote Approved', href: '/sales/quotes/approved', icon: CheckCircle },
       ]);
     }
-  }, [registerSubmodules]);
+    
+    // Cleanup: clear submodules when component unmounts or path changes
+    return () => {
+      const path = window.location.pathname;
+      if (!path.startsWith('/sales/quotes')) {
+        clearSubmoduleNav();
+      }
+    };
+  }, [registerSubmodules, clearSubmoduleNav]);
 
   // Transform quotes to display format
   const quotesData: QuoteItem[] = useMemo(() => {
@@ -232,6 +243,122 @@ export default function Quotes() {
         type: 'error',
         title: 'Error al archivar',
         message: error instanceof Error ? error.message : 'Error desconocido',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateSaleOrder = async (quote: QuoteItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'No organization selected',
+      });
+      return;
+    }
+
+    const confirmed = await showConfirm({
+      title: 'Create Sales Order',
+      message: `Create a Sales Order from Quote "${quote.quoteNo}"?`,
+      variant: 'info',
+      confirmText: 'Create',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      
+      // Step 1: Check if SalesOrder already exists
+      const { data: existingSaleOrder } = await supabase
+        .from('SalesOrders')
+        .select('id, sale_order_no')
+        .eq('quote_id', quote.id)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .maybeSingle();
+
+      if (existingSaleOrder) {
+        // SalesOrder already exists, navigate to it
+        console.log('✅ handleCreateSaleOrder: SalesOrder already exists', {
+          salesOrderId: existingSaleOrder.id,
+          saleOrderNo: existingSaleOrder.sale_order_no,
+        });
+        
+        useUIStore.getState().addNotification({
+          type: 'info',
+          title: 'Sales Order Exists',
+          message: `Sales Order ${existingSaleOrder.sale_order_no} already exists for this quote.`,
+        });
+        router.navigate(`/sale-orders/edit/${existingSaleOrder.id}`);
+        return;
+      }
+
+      // Step 2: Ensure quote is approved (use approveQuote function if needed)
+      // approveQuote() already includes polling, so we don't need to wait separately
+      const currentStatus = normalizeStatus(quote.status);
+      if (currentStatus !== 'approved') {
+        console.log('🔔 handleCreateSaleOrder: Quote not approved, approving first...', {
+          quoteId: quote.id,
+          currentStatus: quote.status,
+        });
+        
+        try {
+          await approveQuote(quote.id, activeOrganizationId);
+          console.log('✅ handleCreateSaleOrder: Quote approved successfully');
+        } catch (approveError) {
+          console.error('❌ handleCreateSaleOrder: Error approving quote:', approveError);
+          throw new Error(`Failed to approve quote: ${approveError instanceof Error ? approveError.message : 'Unknown error'}`);
+        }
+      } else {
+        console.log('✅ handleCreateSaleOrder: Quote already approved, waiting for SalesOrder...');
+        // Quote is already approved, but SalesOrder doesn't exist yet
+        // Wait for trigger to create it (polling)
+        const salesOrder = await waitForSalesOrder(quote.id, activeOrganizationId);
+        
+        if (salesOrder) {
+          console.log('✅ handleCreateSaleOrder: SalesOrder found after polling', {
+            salesOrderId: salesOrder.id,
+            saleOrderNo: salesOrder.sale_order_no,
+          });
+          
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Success',
+            message: `Sales Order ${salesOrder.sale_order_no} created successfully from Quote ${quote.quoteNo}`,
+          });
+          router.navigate(`/sale-orders/edit/${salesOrder.id}`);
+          return;
+        }
+      }
+
+      // Step 3: If SalesOrder still doesn't exist after approval/polling, show error
+      // (approveQuote already did polling, so if we reach here, it's likely a trigger issue)
+      console.error('❌ handleCreateSaleOrder: SalesOrder not found after approval and polling');
+      
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Sales Order Not Found',
+        message: 'Sales Order was not created automatically. Please try again or contact support.',
+      });
+      
+      // Optionally: Could add a "Force Create (Recovery)" button here for admin users
+      // For now, we just show the error and let the user retry
+    } catch (err) {
+      console.error('❌ handleCreateSaleOrder: Error:', err);
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : 'Failed to create sales order. Please check the console for details.';
+      
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: errorMessage,
       });
     } finally {
       setLoading(false);
@@ -533,6 +660,16 @@ export default function Quotes() {
                       </td>
                       <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
+                          {quote.status === 'approved' && (
+                            <button 
+                              onClick={(e) => handleCreateSaleOrder(quote, e)}
+                              className="p-1.5 hover:bg-blue-100 rounded transition-colors text-blue-600"
+                              aria-label={`Create Sales Order from ${quote.quoteNo}`}
+                              title={`Create Sales Order from ${quote.quoteNo}`}
+                            >
+                              <ShoppingCart className="w-4 h-4" />
+                            </button>
+                          )}
                           <button 
                             onClick={(e) => handleEditQuote(quote, e)}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"

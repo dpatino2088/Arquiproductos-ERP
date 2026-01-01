@@ -94,13 +94,35 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
           // Continuar con el usuario obtenido
           user = retryUser;
         } else {
-          if (import.meta.env.DEV) {
-            console.error('❌ OrganizationContext - Error obteniendo usuario:', userError);
+          // Log detailed error information for debugging
+          const errorDetails = {
+            message: userError?.message,
+            name: userError?.name,
+            code: (userError as any)?.code,
+            status: (userError as any)?.status,
+            stack: userError?.stack,
+          };
+          
+          console.error('❌ OrganizationContext - Error obteniendo usuario:', {
+            error: userError,
+            details: errorDetails,
+            timestamp: new Date().toISOString(),
+          });
+          
+          // Check if it's a network/fetch error
+          if (userError?.message?.includes('Failed to fetch') || 
+              userError?.message?.includes('ERR_INTERNET_DISCONNECTED') ||
+              userError?.name === 'AuthRetryableFetchError') {
+            const networkError = 'Network error: Unable to connect to Supabase. Please check your internet connection and Supabase configuration.';
+            console.error('❌ OrganizationContext - Network/Fetch Error:', networkError);
+            setError(networkError);
+          } else {
+            setError(userError?.message || 'Error loading organizations');
           }
+          
           setOrganizations([]);
           setActiveOrganizationIdState(null);
           setLoading(false);
-          setError(userError.message || 'Error loading organizations');
           return;
         }
       }
@@ -274,13 +296,39 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       }
 
       setLoading(false);
-    } catch (err: any) {
-      console.error('Error loading organizations:', err);
-      setError(err.message || 'Error loading organizations');
-      setOrganizations([]);
-      setActiveOrganizationIdState(null);
-      setLoading(false);
-    }
+      } catch (err: any) {
+        // Enhanced error logging
+        const errorDetails = {
+          message: err?.message,
+          name: err?.name,
+          code: err?.code,
+          status: err?.status,
+          stack: err?.stack,
+          cause: err?.cause,
+        };
+        
+        console.error('❌ OrganizationContext - Exception in loadOrganizations:', {
+          error: err,
+          details: errorDetails,
+          timestamp: new Date().toISOString(),
+        });
+        
+        // Check for network/fetch errors
+        if (err?.message?.includes('Failed to fetch') || 
+            err?.message?.includes('ERR_INTERNET_DISCONNECTED') ||
+            err?.name === 'AuthRetryableFetchError' ||
+            err?.name === 'TypeError') {
+          const networkError = 'Network error: Unable to connect to Supabase. Please check your internet connection and Supabase configuration.';
+          console.error('❌ OrganizationContext - Network/Fetch Error in catch:', networkError);
+          setError(networkError);
+        } else {
+          setError(err?.message || 'Error loading organizations');
+        }
+        
+        setOrganizations([]);
+        setActiveOrganizationIdState(null);
+        setLoading(false);
+      }
   };
 
   useEffect(() => {

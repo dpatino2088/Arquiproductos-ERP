@@ -531,3 +531,11 @@ SELECT 'ConfiguredProducts', COUNT(*) FROM "ConfiguredProducts" WHERE deleted = 
 
 **Si todo sale bien, continúa con FASE 2. Si hay errores, compártelos y los corregimos.**
 
+
+
+
+
+
+
+
+

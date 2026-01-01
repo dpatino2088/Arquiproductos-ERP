@@ -1,19 +1,29 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { useProductTypes } from '../../../hooks/useProductTypes';
+import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/SelectShadcn';
+import { useBOMTemplates } from '../../../hooks/useBOMTemplates';
 
 interface ProductStepProps {
   config: CurtainConfiguration | ProductConfig;
   onUpdate: (updates: Partial<CurtainConfiguration | ProductConfig>) => void;
 }
 
-// Product types configuration - UI only, data comes from database
-const PRODUCT_TYPES = [
-  { 
-    id: 'roller-shade', 
-    name: 'Roller Shade',
+// UI metadata for each product type code (display info only)
+// Keys MUST match ProductTypes.code in database exactly
+const PRODUCT_UI_METADATA: Record<string, {
+  uiCode: string;  // The code used in ProductConfig.productType
+  maxWidth: number;
+  maxHeight: number;
+  variations: string;
+  additionalInfo: string[];
+  isAccessoriesOnly?: boolean;
+}> = {
+  // DB code: ROLLER
+  ROLLER: {
+    uiCode: 'roller-shade',
     maxWidth: 2200,
     maxHeight: 3400,
     variations: 'Manual, Electric',
@@ -22,9 +32,9 @@ const PRODUCT_TYPES = [
       'Top model with many extras'
     ]
   },
-  { 
-    id: 'dual-shade', 
-    name: 'Dual Shade',
+  // DB code: DUAL
+  DUAL: {
+    uiCode: 'dual-shade',
     maxWidth: 2500,
     maxHeight: 3500,
     variations: 'Manual, Electric',
@@ -33,9 +43,9 @@ const PRODUCT_TYPES = [
       'Premium quality materials'
     ]
   },
-  { 
-    id: 'triple-shade', 
-    name: 'Triple Shade',
+  // DB code: TRIPLE
+  TRIPLE: {
+    uiCode: 'triple-shade',
     maxWidth: 3000,
     maxHeight: 4000,
     variations: 'Manual, Electric',
@@ -44,9 +54,9 @@ const PRODUCT_TYPES = [
       'Advanced motorization options available'
     ]
   },
-  { 
-    id: 'drapery', 
-    name: 'Drapery Wave / Rippel Fold',
+  // DB code: DRAPERY
+  DRAPERY: {
+    uiCode: 'drapery',
     maxWidth: 3500,
     maxHeight: 4500,
     variations: 'Manual, Electric',
@@ -55,9 +65,9 @@ const PRODUCT_TYPES = [
       'Wide range of fabric options'
     ]
   },
-  { 
-    id: 'awning', 
-    name: 'Awning',
+  // DB code: AWNING
+  AWNING: {
+    uiCode: 'awning',
     maxWidth: 4000,
     maxHeight: 5000,
     variations: 'Manual, Electric',
@@ -66,9 +76,9 @@ const PRODUCT_TYPES = [
       'Weather resistant materials'
     ]
   },
-  { 
-    id: 'window-film', 
-    name: 'Window Films',
+  // DB code: FILM
+  FILM: {
+    uiCode: 'window-film',
     maxWidth: 2000,
     maxHeight: 3000,
     variations: 'Static, Adhesive',
@@ -77,9 +87,9 @@ const PRODUCT_TYPES = [
       'Easy installation'
     ]
   },
-  { 
-    id: 'accessories', 
-    name: 'Accessories',
+  // DB code: ACCESSORIES
+  ACCESSORIES: {
+    uiCode: 'accessories',
     maxWidth: 0,
     maxHeight: 0,
     variations: 'Individual Items',
@@ -89,35 +99,71 @@ const PRODUCT_TYPES = [
     ],
     isAccessoriesOnly: true
   },
-];
+};
 
 export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   // Load ProductTypes from database
-  const { productTypes, loading: loadingProductTypes, findProductTypeByName } = useProductTypes();
+  const { productTypes, loading: loadingProductTypes } = useProductTypes();
   
-  // Map each PRODUCT_TYPE card to its corresponding ProductType UUID from database
-  const productTypeMap = useMemo(() => {
-    if (!productTypes.length) return new Map<string, string>();
+  // Load BOM Templates for selected product type
+  const productTypeId = (config as any).productTypeId;
+  const { templates: bomTemplates, loading: loadingBOMTemplates } = useBOMTemplates(productTypeId || undefined);
+  
+  // Auto-select BOM template if exactly 1 is available
+  useEffect(() => {
+    if (bomTemplates.length === 1 && !(config as any).bom_template_id) {
+      onUpdate({ bom_template_id: bomTemplates[0].id } as any);
+    }
+  }, [bomTemplates, config, onUpdate]);
+  
+  // Build product cards from DB ProductTypes + UI metadata
+  const productCards = useMemo(() => {
+    if (!productTypes.length) return [];
     
-    const map = new Map<string, string>();
-    
-    PRODUCT_TYPES.forEach(product => {
-      const dbProductType = findProductTypeByName(product.name);
-      if (dbProductType) {
-        map.set(product.id, dbProductType.id);
-      }
+    return productTypes
+      .map(pt => {
+        const metadata = PRODUCT_UI_METADATA[pt.code || ''];
+        if (!metadata) {
+          if (import.meta.env.DEV) {
+            console.warn(`ProductStep: No UI metadata for ProductType code: ${pt.code}`);
+          }
+          return null;
+        }
+        
+        return {
+          id: pt.id,                    // DB UUID
+          code: pt.code || '',          // DB code (ROLLER, DUAL, etc.)
+          uiCode: metadata.uiCode,      // UI code (roller-shade, dual-shade, etc.)
+          name: pt.name,                // DB name (Roller Shade, Dual Shade, etc.)
+          maxWidth: metadata.maxWidth,
+          maxHeight: metadata.maxHeight,
+          variations: metadata.variations,
+          additionalInfo: metadata.additionalInfo,
+          isAccessoriesOnly: metadata.isAccessoriesOnly,
+        };
+      })
+      .filter(Boolean);
+  }, [productTypes]);
+  
+  if (import.meta.env.DEV && productCards.length > 0) {
+    console.log('ProductStep: Product cards generated', {
+      count: productCards.length,
+      cards: productCards.map(c => ({ code: c?.code, name: c?.name, id: c?.id })),
     });
-    
-    return map;
-  }, [productTypes, findProductTypeByName]);
+  }
   
   // Handle product type selection
-  const handleProductTypeSelect = (productId: string) => {
-    const productTypeId = productTypeMap.get(productId);
+  const handleProductTypeSelect = (productTypeId: string, uiCode: string) => {
+    if (import.meta.env.DEV) {
+      console.log('ProductStep: Selecting product type', {
+        productTypeId,
+        uiCode,
+      });
+    }
     
     onUpdate({ 
-      productType: productId as any,
-      productTypeId: productTypeId || undefined,
+      productType: uiCode as any,      // UI code for ProductConfig
+      productTypeId: productTypeId,    // DB UUID for filtering
     } as any);
   };
   
@@ -128,126 +174,108 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     });
   };
   
+  // Show loading state
+  if (loadingProductTypes) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
+          <div className="text-center text-gray-500 py-8">Loading product types...</div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Show error if no product types
+  if (productCards.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
+          <div className="text-center text-red-500 py-8">
+            <p className="text-sm font-medium">No product types available</p>
+            <p className="text-xs mt-1">Please configure product types in your organization settings.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <div className="relative">
-          <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
-          
-          <div className="grid grid-cols-3 gap-4">
-            {PRODUCT_TYPES.map((product) => {
-              const isSelected = config.productType === product.id;
-              
-              return (
-                <div key={product.id} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isSelected) {
-                        handleProductTypeDeselect();
-                      } else {
-                        handleProductTypeSelect(product.id);
-                      }
-                    }}
-                    className={`w-full p-[5px] border-2 rounded-lg text-left transition-all ${
-                      isSelected
-                        ? 'border-gray-400 bg-gray-600 text-white'
-                        : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-gray-900'}`}>
-                        {product.name}
-                      </span>
-                      {isSelected ? (
-                        <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center ml-3 flex-shrink-0">
-                          <span className="text-white text-xs font-bold">✓</span>
-                        </div>
-                      ) : (
-                        <div className="w-5 h-5 rounded-full border-2 border-gray-400 bg-white ml-3 flex-shrink-0"></div>
-                      )}
-                    </div>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Expandable Details Panel */}
-          {config.productType && (() => {
-            const selectedProduct = PRODUCT_TYPES.find(p => p.id === config.productType);
-            if (!selectedProduct) return null;
-
-            const selectedIndex = PRODUCT_TYPES.findIndex(p => p.id === config.productType);
-            const row = Math.floor(selectedIndex / 3);
-            const col = selectedIndex % 3;
-
-            const gap = 16;
-            const cardWidth = 'calc(33.333% - 10.67px)';
+        <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
+        
+        <div className="grid grid-cols-4 gap-6">
+          {productCards.map((product) => {
+            if (!product) return null;
             
-            const leftOffset = col === 0 
-              ? '0' 
-              : col === 1
-              ? 'calc(33.333% + 5.33px)'
-              : 'calc(66.666% + 10.67px)';
+            // Check if selected by comparing UUID (more reliable than uiCode)
+            const isSelected = (config as any).productTypeId === product.id || 
+                              config.productType === product.uiCode;
             
-            const cardHeight = 30;
-            const topOffset = `${56 + row * (cardHeight + gap) + cardHeight}px`;
-
             return (
-              <div 
-                className="absolute bg-white border-2 border-gray-300 rounded-lg p-4 shadow-xl z-50"
-                style={{
-                  top: topOffset,
-                  left: leftOffset,
-                  width: cardWidth,
-                }}
-              >
-                <div className="space-y-3">
-                  {!selectedProduct.isAccessoriesOnly && (
-                    <>
-                      <div>
-                        <p className="text-xs text-gray-600 mb-1">Max Width x Height:</p>
-                        <p className="text-sm font-bold text-gray-900">
-                          {selectedProduct.maxWidth} x {selectedProduct.maxHeight} mm
-                        </p>
-                      </div>
-                      
-                      <div>
-                        <p className="text-xs text-gray-600 mb-1">Variations Available:</p>
-                        <p className="text-sm font-bold text-gray-900">
-                          {selectedProduct.variations}
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  
-                  {selectedProduct.isAccessoriesOnly && (
-                    <div>
-                      <p className="text-xs text-gray-600 mb-1">Type:</p>
-                      <p className="text-sm font-bold text-gray-900">
-                        {selectedProduct.variations}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div className="border-t border-gray-300 pt-3">
-                    <div>
-                      <p className="text-xs text-gray-600 mb-2">Additional Information:</p>
-                      <ul className="space-y-1">
-                        {selectedProduct.additionalInfo.map((info, index) => (
-                          <li key={index} className="text-sm font-bold text-gray-900 list-disc list-inside">
-                            {info}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+              <div key={product.id} className="flex flex-col items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSelected) {
+                      handleProductTypeDeselect();
+                    } else {
+                      handleProductTypeSelect(product.id, product.uiCode);
+                    }
+                  }}
+                  className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
+                    isSelected
+                      ? 'border-2 border-gray-400 bg-gray-600'
+                      : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
+                  }`}
+                  style={{ padding: '2px' }}
+                >
+                  {/* Contenido del card - 5% más chico que el card (95% del tamaño) respetando padding de 2px */}
+                  <div className="rounded overflow-hidden border border-gray-200 bg-gray-100 w-full h-full" style={{ width: '95%', height: '95%' }}>
+                    {/* TODO: Add image from Supabase storage */}
                   </div>
-                </div>
+                </button>
+                
+                {/* Nombre abajo del card - usa name de la DB */}
+                <span className={`text-sm font-semibold block mt-2 text-gray-900`}>
+                  {product.name}
+                </span>
               </div>
             );
-          })()}
+          })}
         </div>
+        
+        {/* BOM Template Selection - Only show if product type is selected and there are templates */}
+        {productTypeId && bomTemplates.length > 0 && (
+          <div className="mt-6">
+            <Label className="text-sm font-medium mb-2 block">BOM TEMPLATE</Label>
+            {bomTemplates.length === 1 ? (
+              <p className="text-xs text-gray-500">
+                {bomTemplates[0].name} (auto-selected)
+              </p>
+            ) : (
+              <SelectShadcn
+                value={(config as any).bom_template_id || ''}
+                onValueChange={(value) => {
+                  onUpdate({ bom_template_id: value || undefined } as any);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select BOM template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bomTemplates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </SelectShadcn>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

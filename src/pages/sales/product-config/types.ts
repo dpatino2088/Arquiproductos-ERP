@@ -36,12 +36,16 @@ export interface RollerShadeConfig extends BaseProductConfig {
   width_mm?: number; // Legacy: single panel width
   height_mm?: number; // Legacy: single panel height
   fabricDrop?: 'normal' | 'inverted';
+  drop_type?: 'regular' | 'reverse'; // New field for HardwareStep
   installationType?: 'inside' | 'outside';
   installationLocation?: 'ceiling' | 'wall';
   // Fabric/Collection
   variantManufacturer?: 'coulisse' | 'vertilux';
   collectionId?: string;
   variantId?: string;
+  // Fabric rotation and heatseal
+  fabric_rotation?: boolean;
+  fabric_heatseal?: boolean;
   // Operating System
   operatingSystem?: 'manual' | 'motorized';
   operatingSystemManufacturer?: 'motion' | 'lutron' | 'vertilux';
@@ -100,7 +104,7 @@ export interface DualShadeConfig extends BaseProductConfig {
   cassette?: boolean;
   cassette_type?: 'standard' | 'recessed' | 'surface';
   side_channel?: boolean;
-  side_channel_type?: 'left' | 'right' | 'both';
+  side_channel_type?: 'side_only' | 'side_and_bottom' | null;
   hardware_color?: 'white' | 'black' | 'silver' | 'bronze';
   
   // Legacy fields
@@ -138,6 +142,7 @@ export interface TripleShadeConfig extends BaseProductConfig {
   };
   // Operating System
   operatingSystem?: 'manual' | 'motorized';
+  operation_type?: 'manual' | 'motor'; // New field for block-based BOM
   operatingSystemManufacturer?: 'motion' | 'lutron' | 'vertilux';
   operatingSystemVariant?: string;
   operatingSystemSide?: 'left' | 'right';
@@ -147,6 +152,9 @@ export interface TripleShadeConfig extends BaseProductConfig {
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
   tubeSize?: 'standard' | '42mm' | '65mm' | '80mm';
+  tube_type?: 'RTU-38' | 'RTU-42' | 'RTU-50' | 'RTU-65' | 'RTU-80'; // New field for block-based BOM
+  motor_family?: string; // New field for motor family
+  drop_type?: 'regular' | 'reverse'; // New field for HardwareStep
   // BOM Component Options (Block-based system)
   drive_type?: 'manual' | 'motor';
   bottom_rail_type?: 'standard' | 'wrapped';

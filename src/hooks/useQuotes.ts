@@ -43,6 +43,7 @@ export function useQuotes() {
           `)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
+          .order('updated_at', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false });
 
         if (queryError) {
@@ -65,6 +66,191 @@ export function useQuotes() {
     }
 
     fetchQuotes();
+  }, [activeOrganizationId, refreshTrigger]);
+
+  return { quotes, loading, error, refetch };
+}
+
+export function useApprovedQuotesWithProgress() {
+  const [quotes, setQuotes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const { activeOrganizationId } = useOrganizationContext();
+
+  const refetch = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  useEffect(() => {
+    async function fetchApprovedQuotes() {
+      if (!activeOrganizationId) {
+        setLoading(false);
+        setQuotes([]);
+        setError(null);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Step 1: Fetch approved quotes (same approach as useSaleOrders - direct query)
+        const { data: quotesData, error: quotesError } = await supabase
+          .from('Quotes')
+          .select(`
+            *,
+            DirectoryCustomers:customer_id (
+              id,
+              customer_name
+            ),
+            QuoteLines (
+              id,
+              line_total,
+              deleted
+            )
+          `)
+          .eq('organization_id', activeOrganizationId)
+          .eq('status', 'approved')
+          .eq('deleted', false)
+          .order('updated_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false });
+
+        if (quotesError) {
+          if (import.meta.env.DEV) {
+            console.error('Error fetching Approved Quotes:', quotesError.message);
+          }
+          throw quotesError;
+        }
+
+        if (!quotesData || quotesData.length === 0) {
+          setQuotes([]);
+          return;
+        }
+
+        // Step 2: Fetch SalesOrders for these quotes (same approach as useSaleOrders)
+        const quoteIds = quotesData.map(q => q.id);
+        
+        if (import.meta.env.DEV) {
+          console.log('🔍 useApprovedQuotesWithProgress: Fetching SalesOrders for', quoteIds.length, 'quotes');
+        }
+        
+        // Fetch SalesOrders WITHOUT ManufacturingOrders JOIN (same as useSaleOrders)
+        // ManufacturingOrders can be fetched separately if needed
+        let saleOrdersData: any[] = [];
+        let saleOrdersError: any = null;
+        
+        // Only fetch if we have quote IDs
+        if (quoteIds.length > 0) {
+          const { data, error } = await supabase
+            .from('SalesOrders')
+            .select(`
+              id,
+              quote_id,
+              sale_order_no,
+              order_progress_status,
+              status,
+              organization_id
+            `)
+            .in('quote_id', quoteIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+          
+          saleOrdersData = data || [];
+          saleOrdersError = error;
+        }
+
+        // Log error but continue (non-critical)
+        if (saleOrdersError) {
+          if (import.meta.env.DEV) {
+            console.error('❌ Error fetching SaleOrders:', saleOrdersError);
+          }
+        } else {
+          if (import.meta.env.DEV) {
+            console.log('✅ useApprovedQuotesWithProgress: SalesOrders query successful, found:', saleOrdersData?.length || 0);
+          }
+        }
+        
+        // Filter by organization_id after fetching (in case RLS is blocking)
+        const filteredSaleOrders = saleOrdersData?.filter((so: any) => 
+          so.organization_id === activeOrganizationId
+        ) || [];
+        
+        if (import.meta.env.DEV && filteredSaleOrders.length !== (saleOrdersData?.length || 0)) {
+          console.warn(`⚠️ Filtered ${saleOrdersData?.length || 0} SalesOrders to ${filteredSaleOrders.length} by organization_id`);
+        }
+
+        // Step 3: Map SalesOrders to quotes (robust mapping with error handling)
+        const saleOrdersMap = new Map<string, any[]>();
+        if (filteredSaleOrders && Array.isArray(filteredSaleOrders) && filteredSaleOrders.length > 0) {
+          if (import.meta.env.DEV) {
+            console.log('🔍 useApprovedQuotesWithProgress: Mapping', filteredSaleOrders.length, 'SalesOrders');
+          }
+          filteredSaleOrders.forEach((so: any) => {
+            if (so && so.quote_id) {
+              // Store as array to match expected format
+              if (!saleOrdersMap.has(so.quote_id)) {
+                saleOrdersMap.set(so.quote_id, []);
+              }
+              saleOrdersMap.get(so.quote_id)!.push(so);
+              if (import.meta.env.DEV) {
+                console.log(`  ✅ Mapped SO ${so.sale_order_no} to quote ${so.quote_id}`);
+              }
+            }
+          });
+        } else {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ useApprovedQuotesWithProgress: No SalesOrders found for quotes:', quoteIds);
+            console.warn('  Raw saleOrdersData:', saleOrdersData);
+            console.warn('  Filtered saleOrdersData:', filteredSaleOrders);
+          }
+        }
+
+        // Step 4: Enrich quotes with SalesOrders data (robust with convenience fields)
+        const enrichedQuotes = quotesData.map((quote: any) => {
+          const saleOrders = saleOrdersMap.get(quote.id) || [];
+          const firstSO = saleOrders.length > 0 ? saleOrders[0] : null;
+          
+          if (import.meta.env.DEV) {
+            if (saleOrders.length === 0) {
+              console.warn(`⚠️ Quote ${quote.quote_no || quote.id} has no Sales Orders`);
+            } else {
+              console.log(`✅ Quote ${quote.quote_no || quote.id}:`, {
+                saleOrderNo: firstSO?.sale_order_no || 'N/A',
+                status: firstSO?.status || 'N/A',
+                orderProgressStatus: firstSO?.order_progress_status || 'N/A'
+              });
+            }
+          }
+          
+          return {
+            ...quote,
+            SaleOrders: saleOrders,
+            // Convenience fields for easier access in components
+            saleOrderNo: firstSO?.sale_order_no || null,
+            saleOrderStatus: firstSO?.status || null,
+            orderProgressStatus: firstSO?.order_progress_status || null,
+            saleOrderId: firstSO?.id || null,
+          };
+        });
+
+        if (import.meta.env.DEV) {
+          console.log('✅ useApprovedQuotesWithProgress: Enriched', enrichedQuotes.length, 'quotes');
+        }
+
+        setQuotes(enrichedQuotes);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error loading approved quotes';
+        if (import.meta.env.DEV) {
+          console.error('Error fetching Approved Quotes:', err instanceof Error ? err.message : String(err));
+        }
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchApprovedQuotes();
   }, [activeOrganizationId, refreshTrigger]);
 
   return { quotes, loading, error, refetch };
@@ -125,9 +311,15 @@ export function useQuoteLines(quoteId: string | null) {
             side_channel_type,
             hardware_color,
             computed_qty,
-            line_total,
+            list_unit_price_snapshot,
             unit_price_snapshot,
             unit_cost_snapshot,
+            total_unit_cost_snapshot,
+            discount_pct_used,
+            customer_type_snapshot,
+            price_basis,
+            margin_pct_used,
+            line_total,
             measure_basis_snapshot,
             margin_percentage,
             metadata,
@@ -174,9 +366,15 @@ export function useQuoteLines(quoteId: string | null) {
               side_channel_type,
               hardware_color,
               computed_qty,
-              line_total,
+              list_unit_price_snapshot,
               unit_price_snapshot,
               unit_cost_snapshot,
+              total_unit_cost_snapshot,
+              discount_pct_used,
+              customer_type_snapshot,
+              price_basis,
+              margin_pct_used,
+              line_total,
               measure_basis_snapshot,
               margin_percentage,
               metadata,
@@ -311,12 +509,77 @@ export function useQuoteLines(quoteId: string | null) {
             }
           }
           
+          // Fetch accessories (QuoteLineComponents with source='accessory') for all lines
+          const lineIds = data.map((line: any) => line.id);
+          let accessoriesMap = new Map<string, any[]>();
+          if (lineIds.length > 0) {
+            const { data: accessoriesData } = await supabase
+              .from('QuoteLineComponents')
+              .select(`
+                id,
+                quote_line_id,
+                catalog_item_id,
+                qty,
+                source,
+                component_role,
+                CatalogItems:catalog_item_id (
+                  id,
+                  item_name,
+                  sku,
+                  name
+                )
+              `)
+              .in('quote_line_id', lineIds)
+              .eq('deleted', false)
+              .eq('organization_id', activeOrganizationId);
+            
+            // Filter accessories: source='accessory' OR component_role='accessory'
+            // Also ensure CatalogItems relationship is loaded
+            const filteredAccessories = (accessoriesData || []).filter((acc: any) => {
+              const isAccessory = acc.source === 'accessory' || acc.component_role === 'accessory';
+              if (import.meta.env.DEV && isAccessory && !acc.CatalogItems) {
+                console.warn('Accessory missing CatalogItems:', acc);
+              }
+              return isAccessory;
+            });
+            
+            if (filteredAccessories.length > 0) {
+              // Group accessories by quote_line_id
+              filteredAccessories.forEach((acc: any) => {
+                const lineId = acc.quote_line_id;
+                if (!accessoriesMap.has(lineId)) {
+                  accessoriesMap.set(lineId, []);
+                }
+                accessoriesMap.get(lineId)!.push(acc);
+              });
+              
+              if (import.meta.env.DEV) {
+                console.log('useQuoteLines: Accessories loaded', {
+                  totalAccessories: filteredAccessories.length,
+                  linesWithAccessories: accessoriesMap.size,
+                  accessoriesPerLine: Array.from(accessoriesMap.entries()).map(([lineId, accs]) => ({
+                    lineId,
+                    count: accs.length,
+                    accessories: accs.map((a: any) => ({
+                      id: a.id,
+                      catalog_item_id: a.catalog_item_id,
+                      hasCatalogItem: !!a.CatalogItems,
+                      item_name: a.CatalogItems?.item_name || 'N/A',
+                      sku: a.CatalogItems?.sku || 'N/A',
+                    })),
+                  })),
+                });
+              }
+            }
+          }
+
           // Enrich QuoteLines with CatalogItems, Fabric Variants, ProductTypes, and Operating System Drives
           data = data.map((line: any) => {
             const catalogItem = catalogItemsMap.get(line.catalog_item_id);
             const fabricVariant = line.variant_id ? catalogItemsMap.get(line.variant_id) : null; // Fabric variant for collection_name and variant_name
             const operatingSystemDrive = line.operating_system_drive_id ? catalogItemsMap.get(line.operating_system_drive_id) : null;
             const collection = line.collection_id ? collectionsMap.get(line.collection_id) : null;
+            const accessories = accessoriesMap.get(line.id) || [];
             
             // Find ProductType by product_type_id or product_type string
             let productType = null;
@@ -346,21 +609,21 @@ export function useQuoteLines(quoteId: string | null) {
               }
             }
             
-            // Debug: Log original line data to see what we're getting from DB
-            if (import.meta.env.DEV && line.id) {
-              console.log('Raw QuoteLine from DB:', {
+            // Debug: Log original line data to see what we're getting from DB (only for first line to avoid spam)
+            if (import.meta.env.DEV && line.id && data.indexOf(line) === 0) {
+              console.log('Raw QuoteLine from DB (sample):', {
                 id: line.id,
                 area: line.area,
                 position: line.position,
-                hasArea: 'area' in line,
-                hasPosition: 'position' in line,
-                allKeys: Object.keys(line),
+                hasAccessories: accessories.length > 0,
+                accessoriesCount: accessories.length,
               });
             }
 
             return {
               ...line,
               // Explicitly preserve area and position from the original line data
+              Accessories: accessoriesMap.get(line.id) || [],
               // IMPORTANT: These fields must be preserved exactly as they come from the database
               area: line.area !== undefined ? line.area : null,
               position: line.position !== undefined ? line.position : null,
@@ -452,6 +715,32 @@ export function useUpdateQuote() {
 
     setIsUpdating(true);
     try {
+      // First, check if quote_no is being changed and if it conflicts with another quote
+      if (quoteData.quote_no) {
+        const { data: existingQuote } = await supabase
+          .from('Quotes')
+          .select('id, quote_no')
+          .eq('id', id)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+
+        // Only check for duplicates if quote_no is actually changing
+        if (existingQuote && existingQuote.quote_no !== quoteData.quote_no) {
+          const { data: conflictingQuote } = await supabase
+            .from('Quotes')
+            .select('id')
+            .eq('quote_no', quoteData.quote_no)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .neq('id', id) // Exclude the current quote
+            .maybeSingle();
+
+          if (conflictingQuote) {
+            throw new Error(`Quote number "${quoteData.quote_no}" already exists. Please use a different quote number.`);
+          }
+        }
+      }
+
       const { data, error } = await supabase
         .from('Quotes')
         .update(quoteData)
@@ -485,6 +774,152 @@ export function useUpdateQuote() {
   };
 
   return { updateQuote, isUpdating };
+}
+
+/**
+ * Normalize status string for consistent comparison
+ * @param status - Status string to normalize
+ * @returns Normalized status (trimmed, lowercase) or empty string
+ */
+export function normalizeStatus(status?: string): string {
+  return status?.trim().toLowerCase() ?? '';
+}
+
+/**
+ * Wait for SalesOrder to be created by trigger using polling
+ * @param quoteId - The UUID of the quote
+ * @param organizationId - The organization ID
+ * @param opts - Options: timeoutMs (default 8000), intervalMs (default 250)
+ * @returns SalesOrder data if found, null if timeout
+ */
+export async function waitForSalesOrder(
+  quoteId: string,
+  organizationId: string,
+  opts?: { timeoutMs?: number; intervalMs?: number }
+): Promise<{ id: string; sale_order_no: string } | null> {
+  const timeoutMs = opts?.timeoutMs ?? 8000;
+  const intervalMs = opts?.intervalMs ?? 250;
+  const start = Date.now();
+
+  console.log('🔍 waitForSalesOrder: Starting polling', {
+    quoteId,
+    organizationId,
+    timeoutMs,
+    intervalMs,
+  });
+
+  while (Date.now() - start < timeoutMs) {
+    const { data, error } = await supabase
+      .from('SalesOrders')
+      .select('id, sale_order_no')
+      .eq('quote_id', quoteId)
+      .eq('organization_id', organizationId)
+      .eq('deleted', false)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('⚠️ waitForSalesOrder: Error querying SalesOrders:', error);
+    } else if (data?.id) {
+      console.log('✅ waitForSalesOrder: SalesOrder found', {
+        salesOrderId: data.id,
+        saleOrderNo: data.sale_order_no,
+        elapsedMs: Date.now() - start,
+      });
+      return data;
+    }
+
+    // Wait before next poll
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+
+  console.warn('⚠️ waitForSalesOrder: Timeout reached, SalesOrder not found', {
+    quoteId,
+    elapsedMs: Date.now() - start,
+  });
+  return null;
+}
+
+/**
+ * Shared function to approve a quote by updating Quotes.status to 'approved'
+ * This is the ONLY source of truth for approval - all UI actions must use this function.
+ * 
+ * NOTE: The enum quote_status in DB has 'approved' (lowercase) and PostgreSQL enum is case-sensitive.
+ * We must write 'approved' (lowercase) to match the enum value exactly.
+ * The trigger is case-insensitive and will match 'approved' or 'Approved', but the UPDATE must use 'approved'.
+ * normalizeStatus() is used only for comparisons (normalizes to lowercase).
+ * 
+ * @param quoteId - The UUID of the quote to approve
+ * @param organizationId - The organization ID (required for RLS)
+ * @returns The updated quote record
+ */
+export async function approveQuote(quoteId: string, organizationId: string): Promise<Quote> {
+  if (!organizationId) {
+    throw new Error('Organization ID is required');
+  }
+
+  // Log the approval action
+  console.log('🔔 approveQuote: Approving quote', { quoteId, organizationId });
+
+  // Update Quotes.status to 'approved' (lowercase) - this triggers the DB trigger
+  // NOTE: The enum quote_status in DB has 'approved' (lowercase) and PostgreSQL enum is case-sensitive.
+  // The trigger is case-insensitive and will match 'approved' or 'Approved', but we must write
+  // the exact enum value: 'approved' (lowercase).
+  const { data, error } = await supabase
+    .from('Quotes')
+    .update({
+      status: 'approved',  // minúscula para coincidir con el enum (case-sensitive)
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', quoteId)
+    .eq('organization_id', organizationId)
+    .select('id, status, updated_at')
+    .single();
+
+  if (error) {
+    console.error('❌ approveQuote: Error updating Quotes.status:', {
+      quoteId,
+      error: error.message,
+      code: error.code,
+    });
+    throw new Error(`Failed to approve quote: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error('Quote not found or you do not have permission to update it');
+  }
+
+  console.log('✅ approveQuote: Quote approved successfully', {
+    quoteId: data.id,
+    status: data.status,
+    updated_at: data.updated_at,
+  });
+
+  // Wait for SalesOrder to be created by trigger using polling
+  const salesOrder = await waitForSalesOrder(quoteId, organizationId);
+
+  if (salesOrder) {
+    console.log('✅ approveQuote: SalesOrder created by trigger', {
+      salesOrderId: salesOrder.id,
+      saleOrderNo: salesOrder.sale_order_no,
+    });
+  } else {
+    console.warn('⚠️ approveQuote: SalesOrder not found after polling timeout. Trigger may not have fired or is still processing.');
+    // NOTE: We don't throw error here - the quote is approved, even if SalesOrder creation is delayed
+  }
+
+  // Return full quote data
+  const { data: fullQuote, error: fetchError } = await supabase
+    .from('Quotes')
+    .select('*')
+    .eq('id', quoteId)
+    .single();
+
+  if (fetchError) {
+    console.error('❌ approveQuote: Error fetching full quote:', fetchError);
+    throw new Error(`Failed to fetch updated quote: ${fetchError.message}`);
+  }
+
+  return fullQuote as Quote;
 }
 
 export function useCreateQuoteLine() {

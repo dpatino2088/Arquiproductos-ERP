@@ -46,7 +46,8 @@ import {
   Book,
   Package,
   Wrench,
-  DollarSign
+  DollarSign,
+  FileText
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -132,7 +133,7 @@ function Layout({ children }: LayoutProps) {
   const { clearCompanies } = useCompanyStore();
   const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
   const [currentRoute, setCurrentRoute] = useState('/');
-  const { tabs: submoduleTabs, breadcrumbs } = useSubmoduleNav();
+  const { tabs: submoduleTabs, breadcrumbs, clearSubmoduleNav } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
   const { isMember } = useCurrentOrgRole();
   
@@ -173,6 +174,8 @@ function Layout({ children }: LayoutProps) {
       setLastRouteForModule('/directory', route);
     } else if (route.startsWith('/sales')) {
       setLastRouteForModule('/sales', route);
+    } else if (route.startsWith('/sale-orders')) {
+      setLastRouteForModule('/sale-orders', route);
     } else if (route.startsWith('/catalog')) {
       setLastRouteForModule('/catalog', route);
     } else if (route.startsWith('/inventory')) {
@@ -185,9 +188,21 @@ function Layout({ children }: LayoutProps) {
   }, [setLastRouteForModule]);
 
   // Scroll to top when route changes and save route for module persistence
+  // Also clear submodules when switching between main modules
   useEffect(() => {
     const routeFromRouter = router.getCurrentRoute();
     if (routeFromRouter !== currentRoute) {
+      const previousModule = currentRoute.split('/')[1];
+      const newModule = routeFromRouter.split('/')[1];
+      
+      // Always clear submodules when route changes - let the new page register its own
+      // This ensures we don't have stale submodules from previous pages
+      // Clear immediately to prevent stale submodules from showing
+      if (previousModule && newModule && previousModule !== newModule) {
+        // Clear immediately when switching between different main modules
+        clearSubmoduleNav();
+      }
+      
       setCurrentRoute(routeFromRouter);
       // Save current route for module persistence
       saveCurrentRouteForModule(routeFromRouter);
@@ -199,7 +214,7 @@ function Layout({ children }: LayoutProps) {
         mainElement.scrollTop = 0;
       }
     }
-  }, [currentRoute, saveCurrentRouteForModule]);
+  }, [currentRoute, saveCurrentRouteForModule, clearSubmoduleNav]);
 
   // Update current route when router changes
   useEffect(() => {
@@ -365,8 +380,11 @@ function Layout({ children }: LayoutProps) {
         // Directory is active if we're on any directory route
         return currentRoute.includes('/directory');
       case 'Sales':
-        // Sales is active if we're on any sales route
-        return currentRoute.includes('/sales');
+        // Sales is active if we're on any sales/quotes route
+        return currentRoute.includes('/sales/quotes');
+      case 'Sales Orders':
+        // Sales Orders is active if we're on any sale-orders route
+        return currentRoute.includes('/sale-orders');
       case 'Catalog':
         // Catalog is active if we're on any catalog route
         return currentRoute.includes('/catalog');
@@ -402,9 +420,10 @@ function Layout({ children }: LayoutProps) {
     // Create base navigation with new tabs according to design
     const dashboardItem = baseNavigation[0]; // Dashboard
     
-    // Navigation items in order: Directory, Sales, Catalog, Inventory, Manufacturing, Financials, Reports
+    // Navigation items in order: Directory, Sales, Sales Orders, Catalog, Inventory, Manufacturing, Financials, Reports
     const directoryItem = { name: 'Directory', href: '/directory', icon: BookOpen };
-    const salesItem = { name: 'Sales', href: '/sales', icon: ShoppingBag };
+    const salesItem = { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag };
+    const saleOrdersItem = { name: 'Sales Orders', href: '/sale-orders', icon: FileText };
     const catalogItem = { name: 'Catalog', href: '/catalog', icon: Book };
     const inventoryItem = { name: 'Inventory', href: '/inventory', icon: Package };
     const manufacturingItem = { name: 'Manufacturing', href: '/manufacturing', icon: Wrench };
@@ -415,6 +434,7 @@ function Layout({ children }: LayoutProps) {
       dashboardItem, 
       directoryItem, 
       salesItem, 
+      saleOrdersItem,
       catalogItem, 
       inventoryItem, 
       manufacturingItem, 
@@ -470,18 +490,23 @@ function Layout({ children }: LayoutProps) {
       const actualPath = (isListPage ? lastRoute : null) || '/directory/contacts';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
-    } else if (path === '/sales') {
-      // Always redirect to quotes list when navigating to Sales module
-      // Ignore last route if it was an edit/new page
+    } else if (path === '/sales' || path === '/sales/quotes') {
+      // Navigate to quotes list
       const lastRoute = getLastRouteForModule('/sales');
-      // Only use lastRoute if it's a list page (quotes or orders), not edit/new pages
-      const isListPage = lastRoute && (lastRoute === '/sales/quotes' || lastRoute === '/sales/orders');
+      const isListPage = lastRoute && (lastRoute === '/sales/quotes' || lastRoute === '/sales');
       const actualPath = (isListPage ? lastRoute : null) || '/sales/quotes';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
+    } else if (path === '/sale-orders') {
+      // Navigate to sale orders list
+      const lastRoute = getLastRouteForModule('/sale-orders');
+      const isListPage = lastRoute && lastRoute === '/sale-orders';
+      const actualPath = (isListPage ? lastRoute : null) || '/sale-orders';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
     } else if (path === '/catalog') {
-      const lastRoute = getLastRouteForModule('/catalog');
-      const actualPath = lastRoute || '/catalog/items';
+      // Always redirect to Items (first sub-module) when entering Catalog module
+      const actualPath = '/catalog/items';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/inventory') {
@@ -490,8 +515,8 @@ function Layout({ children }: LayoutProps) {
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/manufacturing') {
-      const lastRoute = getLastRouteForModule('/manufacturing');
-      const actualPath = lastRoute || '/manufacturing/production-orders';
+      // Always redirect to Order List (first sub-module) when entering Manufacturing module
+      const actualPath = '/manufacturing/order-list';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/financials') {

@@ -46,8 +46,9 @@ export interface CatalogItem {
   fabric_pricing_mode?: FabricPricingMode | null;
   // Pricing fields
   cost_exw?: number | null; // Base cost (EXW = Ex Works) - actual column name
-  default_margin_pct?: number | null; // Default margin percentage for MSRP calculation
+  default_margin_pct?: number | null; // Default margin percentage for MSRP calculation (interpreted as margin-on-sale, NOT markup)
   msrp?: number | null; // Manufacturer's Suggested Retail Price
+  msrp_manual?: boolean | null; // If true, MSRP was manually edited and should not be auto-recalculated
   // Legacy pricing fields (for backward compatibility)
   cost_price: number; // Mapped from cost_exw
   unit_price: number; // Default 0 (doesn't exist in table)
@@ -61,6 +62,7 @@ export interface CatalogItem {
   archived: boolean;
   created_at: string;
   updated_at?: string | null;
+  image_url?: string | null; // Image URL from Supabase Storage or external URL
   metadata: Record<string, any>; // Default empty (doesn't exist in table)
   created_by?: string | null; // Default null (doesn't exist in table)
   updated_by?: string | null; // Default null (doesn't exist in table)
@@ -155,6 +157,10 @@ export interface QuoteLine {
   installation_type?: string | null;
   installation_location?: string | null;
   fabric_drop?: string | null;
+  // PRICING SNAPSHOTS (Source of Truth - captured at time of quote creation)
+  list_unit_price_snapshot?: number | null; // MSRP list price (precio de lista público) - BEFORE discounts
+  unit_price_snapshot?: number | null; // Net unit price (precio neto) - AFTER tier discounts applied
+  line_total?: number | null; // Net total = unit_price_snapshot * computed_qty
   // Snapshots (captured at time of quote creation)
   measure_basis_snapshot: MeasureBasis;
   roll_width_m_snapshot?: number | null;
@@ -163,14 +169,19 @@ export interface QuoteLine {
   computed_qty: number;
   // Price snapshots
   unit_price_snapshot: number;
-  unit_cost_snapshot: number;
+  unit_cost_snapshot: number; // Legacy: cost_exw only (kept for compatibility)
+  total_unit_cost_snapshot?: number | null; // NEW: Total unit cost (cost_exw + labor + logistics) at quote line creation
   // Margin information (for price calculation)
-  margin_percentage_used?: number | null; // Actual margin percentage used
+  margin_percentage_used?: number | null; // Legacy: Actual margin percentage used (kept for compatibility)
+  margin_pct_used?: number | null; // NEW: Actual margin percentage achieved (margin-on-sale) based on unit_price_snapshot and total_unit_cost_snapshot
   margin_source?: 'category' | 'item' | 'default' | null; // Source of margin
   // Discount information (for customer pricing tiers)
-  discount_percentage?: number | null; // Discount percentage applied
+  discount_percentage?: number | null; // Legacy: Discount percentage applied (kept for compatibility)
+  discount_pct_used?: number | null; // NEW: Discount percentage applied based on customer type at quote line creation
   discount_amount?: number | null; // Discount amount (unit_price * discount_percentage / 100)
   discount_source?: 'customer_type' | 'manual_customer' | 'manual_line' | null; // Source of discount
+  customer_type_snapshot?: string | null; // NEW: Customer type (VIP, Partner, Reseller, Distributor) at quote line creation time
+  price_basis?: 'MSRP_TIER' | 'MARGIN_FLOOR' | 'MANUAL' | null; // NEW: Source of unit price: MSRP_TIER (from customer tier discount), MARGIN_FLOOR (from minimum margin floor), or MANUAL (manually set)
   final_unit_price?: number | null; // Final unit price after discount (unit_price - discount_amount)
   // Line total
   line_total: number;

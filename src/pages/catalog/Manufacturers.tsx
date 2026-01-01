@@ -23,9 +23,16 @@ export default function Manufacturers() {
   const { registerSubmodules } = useSubmoduleNav();
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  // Register sub-tabs for Manufacturers (only manufacturers now)
+  useEffect(() => {
+    const currentPath = window.location.pathname;
+    if (currentPath.startsWith('/catalog') && currentPath.includes('manufacturer')) {
+      registerSubmodules('Manufacturers', [
+        { id: 'manufacturers', label: 'Manufacturers', href: '#manufacturers', icon: Building2 },
+      ]);
+    }
+  }, [registerSubmodules]);
 
-  // Don't register submodules here - Catalog.tsx handles that
-  // This component is now used as a tab content within Items.tsx
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -158,7 +165,7 @@ export default function Manufacturers() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-title font-semibold text-foreground mb-1">Manufacturers</h1>
-          <p className="text-small text-muted-foreground">Manage product manufacturers</p>
+          <p className="text-small text-muted-foreground">Manage product manufacturers and BOM</p>
         </div>
         <button
           onClick={handleNew}
@@ -168,6 +175,9 @@ export default function Manufacturers() {
           Add New Manufacturer
         </button>
       </div>
+
+      {/* Manufacturers Content */}
+      <>
 
       {/* Search Bar */}
       <div className="mb-4">
@@ -411,6 +421,7 @@ export default function Manufacturers() {
           </div>
         </div>
       )}
+      </>
 
       {/* Confirm Dialog */}
       <ConfirmDialog

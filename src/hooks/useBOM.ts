@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 
+export type BOMQtyType = 'fixed' | 'per_width' | 'per_area' | 'by_option';
+export type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | string;
+export type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
+
 export interface BOMComponent {
   id: string;
   organization_id: string;
@@ -9,6 +13,7 @@ export interface BOMComponent {
   bom_template_id?: string | null; // New: FK to BOMTemplates
   component_item_id?: string | null; // Can be null for auto-select components (fabric, etc.)
   component_role?: string | null; // Role of component (fabric, tube, bracket, etc.)
+  component_sub_role?: string | null; // Optional sub-role for granularity (e.g., hardware: fastener, end_cap, adapter)
   auto_select?: boolean; // Whether component is auto-selected by rules
   qty_per_unit: number;
   uom: string;
@@ -19,6 +24,20 @@ export interface BOMComponent {
   archived: boolean;
   created_at: string;
   updated_at?: string | null;
+  // Auto-select fields
+  select_rule?: Record<string, any> | null; // JSONB rule for selecting part
+  sku_resolution_rule?: SKUResolutionRule | null; // Rule for resolving SKU
+  hardware_color?: HardwareColor | null; // Hardware color (white, black, silver, bronze, grey)
+  block_condition?: Record<string, any> | null; // JSONB condition for block activation
+  block_type?: string | null; // Type of BOM block: drive, brackets, bottom_rail, cassette, side_channel
+  applies_color?: boolean; // Whether this component color depends on hardware_color selection
+  qty_type?: BOMQtyType | null; // Quantity type: fixed, per_width, per_area, by_option
+  qty_value?: number | null; // Quantity value (for fixed: count, for per_width/per_area: multiplier)
+  // Engineering fields
+  affects_role?: string | null; // Role that this component affects (for cut operations)
+  cut_axis?: string | null; // Cut axis: none, width, height
+  cut_delta_mm?: number | null; // Cut delta in mm
+  cut_delta_scope?: string | null; // Cut delta scope
   // Joined data
   component_sku?: string;
   component_name?: string;
@@ -77,10 +96,15 @@ export function useBOMComponents(bomTemplateId: string | null) {
           .order('sequence_order', { ascending: true });
 
         if (fetchError) {
+          console.error('❌ Error fetching BOM components:', fetchError);
           throw fetchError;
         }
 
+        console.log('📦 Fetched BOM components from DB:', bomComponentsData?.length || 0, 'components');
+        console.log('📦 BOM components data:', bomComponentsData);
+
         if (!bomComponentsData || bomComponentsData.length === 0) {
+          console.log('⚠️ No BOM components found in database');
           setComponents([]);
           return;
         }
@@ -151,13 +175,12 @@ export function useBOMComponents(bomTemplateId: string | null) {
           };
         });
 
+        console.log('✅ Mapped BOM components:', mappedComponents.length, 'components');
         setComponents(mappedComponents);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading BOM components';
         setError(errorMessage);
-        if (import.meta.env.DEV) {
-          console.error('Error fetching BOM components:', err);
-        }
+        console.error('❌ Error fetching BOM components:', err);
       } finally {
         setLoading(false);
       }

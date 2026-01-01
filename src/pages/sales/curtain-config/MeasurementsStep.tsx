@@ -334,34 +334,9 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                       }`}
                       style={{ padding: '2px' }}
                     >
-                      {/* Checkbox en esquina superior derecha */}
-                      <div className="absolute top-2 right-2">
-                        {isSelected ? (
-                          <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center">
-                            <span className="text-white text-xs font-bold">✓</span>
-                          </div>
-                        ) : (
-                          <div className="w-5 h-5 rounded-full border-2 border-gray-400 bg-white"></div>
-                        )}
-                      </div>
-                      
                       {/* Imagen - 5% más chica que el card (95% del tamaño) respetando padding de 2px */}
                       <div className="rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                        {option.imageUrl ? (
-                          <img
-                            src={option.imageUrl}
-                            alt={option.name}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <span className="text-xs text-gray-500">{option.name}</span>
-                          </div>
-                        )}
+                        {/* TODO: Add image from Supabase storage */}
                       </div>
                     </button>
                     
@@ -394,17 +369,6 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     }`}
                     style={{ padding: '2px' }}
                   >
-                    {/* Checkbox en esquina superior derecha */}
-                    <div className="absolute top-2 right-2">
-                      {isSelected ? (
-                        <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center">
-                          <span className="text-white text-xs font-bold">✓</span>
-                        </div>
-                      ) : (
-                        <div className="w-5 h-5 rounded-full border-2 border-gray-400 bg-white"></div>
-                      )}
-                    </div>
-                    
                     {/* Imagen - 5% más chica que el card (95% del tamaño) respetando padding de 2px */}
                     <div className="rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
                       {option.imageUrl ? (
@@ -447,17 +411,6 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     }`}
                     style={{ padding: '2px' }}
                   >
-                    {/* Checkbox en esquina superior derecha */}
-                    <div className="absolute top-2 right-2">
-                      {isSelected ? (
-                        <div className="w-5 h-5 bg-green-600 rounded-full flex items-center justify-center">
-                          <span className="text-white text-xs font-bold">✓</span>
-                        </div>
-                      ) : (
-                        <div className="w-5 h-5 rounded-full border-2 border-gray-400 bg-white"></div>
-                      )}
-                    </div>
-                    
                     {/* Imagen - 5% más chica que el card (95% del tamaño) respetando padding de 2px */}
                     <div className="rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
                       {option.imageUrl ? (

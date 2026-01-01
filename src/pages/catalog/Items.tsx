@@ -29,7 +29,9 @@ import {
   Image as ImageIcon,
   Package,
   Wrench,
+  CheckCircle,
 } from 'lucide-react';
+import ImageModal from '../../components/ui/ImageModal';
 
 interface Item {
   id: string;
@@ -65,6 +67,7 @@ export default function Items() {
       registerSubmodules('Catalog', [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
         { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
+        { id: 'bom-readiness', label: 'BOM Readiness', href: '/catalog/bom-readiness', icon: CheckCircle },
       ]);
     }
   }, [registerSubmodules]);
@@ -84,6 +87,7 @@ export default function Items() {
   const [selectedMeasureBasis, setSelectedMeasureBasis] = useState<string[]>([]);
   const [selectedActive, setSelectedActive] = useState<string[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
 
   // Format date to DD/MM/YY format
@@ -121,7 +125,7 @@ export default function Items() {
       manufacturer: item.metadata?.manufacturer || 'Not specified',
       category: item.metadata?.category || 'Not specified',
       family: item.metadata?.family || 'Not specified',
-      image: item.metadata?.image,
+      image: item.image_url || item.metadata?.image || null,
     }));
   }, [items]);
 
@@ -746,6 +750,7 @@ export default function Items() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-16">Image</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('sku')}
@@ -801,7 +806,7 @@ export default function Items() {
               <tbody className="divide-y divide-gray-200">
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 px-6 text-center">
+                    <td colSpan={10} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                           <Search className="w-6 h-6 text-gray-400" />
@@ -821,6 +826,33 @@ export default function Items() {
                       key={item.id} 
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
+                      <td className="py-3 px-4">
+                        {item.image ? (
+                          <div 
+                            className="w-10 h-10 rounded border border-gray-200 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+                            onClick={() => setSelectedImage(item.image || null)}
+                          >
+                            <img 
+                              src={item.image} 
+                              alt={item.itemName || 'Item image'} 
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                console.error('Image load error for item:', item.sku, 'URL:', item.image);
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                              onLoad={() => {
+                                if (import.meta.env.DEV) {
+                                  console.log('Image loaded successfully for item:', item.sku, 'URL:', item.image);
+                                }
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-10 h-10 rounded border border-gray-200 bg-gray-50 flex items-center justify-center">
+                            <ImageIcon className="w-4 h-4 text-gray-400" />
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-gray-900 text-xs font-medium">
                         {item.sku}
                       </td>
@@ -966,6 +998,15 @@ export default function Items() {
         variant={dialogState.variant}
         isLoading={dialogState.isLoading}
       />
+
+      {/* Image Modal */}
+      {selectedImage && (
+        <ImageModal 
+          imageUrl={selectedImage} 
+          alt="Item image"
+          onClose={() => setSelectedImage(null)} 
+        />
+      )}
     </div>
   );
 }

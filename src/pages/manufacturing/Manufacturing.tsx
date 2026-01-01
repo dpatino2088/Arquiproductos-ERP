@@ -1,24 +1,35 @@
 import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Wrench, FileText, ClipboardList, Layers, Settings, Factory } from 'lucide-react';
 
 export default function Manufacturing() {
-  const { registerSubmodules } = useSubmoduleNav();
+  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
 
   useEffect(() => {
-    registerSubmodules('Manufacturing', [
-      { id: 'production-orders', label: 'Production Orders', href: '/manufacturing/production-orders', icon: FileText },
-      { id: 'work-orders', label: 'Work Orders', href: '/manufacturing/work-orders', icon: ClipboardList },
-      { id: 'bill-of-materials', label: 'Bill of Materials', href: '/manufacturing/bill-of-materials', icon: Layers },
-      { id: 'routing', label: 'Routing', href: '/manufacturing/routing', icon: Settings },
-      { id: 'work-centers', label: 'Work Centers', href: '/manufacturing/work-centers', icon: Factory },
-    ]);
+    const currentPath = window.location.pathname;
     
-    // Redirect to production orders by default
-    router.navigate('/manufacturing/production-orders');
-  }, [registerSubmodules]);
+    if (currentPath.startsWith('/manufacturing')) {
+      // Register submodules without clearing first (let individual components handle it)
+      // This ensures tabs are visible when navigating directly to sub-routes
+      registerSubmodules('Manufacturing', [
+        { id: 'order-list', label: 'Order List', href: '/manufacturing/order-list' },
+        { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
+        { id: 'material', label: 'Material', href: '/manufacturing/material' },
+      ]);
+      
+      // Redirect to Order List (first tab) when entering Manufacturing module
+      if (currentPath === '/manufacturing' || currentPath === '/manufacturing/') {
+        router.navigate('/manufacturing/order-list');
+      }
+    }
+    
+    return () => {
+      const path = window.location.pathname;
+      if (!path.startsWith('/manufacturing')) {
+        clearSubmoduleNav();
+      }
+    };
+  }, [registerSubmodules, clearSubmoduleNav]);
 
   return null;
 }
-

@@ -12,6 +12,9 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
+    // Force clear any cached data to ensure fresh fetch
+    setItems([]);
+    setLoading(true);
   };
 
   useEffect(() => {
@@ -56,18 +59,12 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
           });
         }
 
-        // First, try to get items with collection join
+        // First, try to get items - NO JOIN with CatalogCollections (table may not exist)
         // Note: We select all columns including collection_name and variant_name directly from CatalogItems
+        // collection_name and variant_name are already in CatalogItems, no need for JOIN
         let query = supabase
           .from('CatalogItems')
-          .select(`
-            *,
-            collection:CatalogCollections!CatalogItems_collection_id_fkey(
-              id,
-              name,
-              code
-            )
-          `)
+          .select('*')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
@@ -83,13 +80,48 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
         
         if (productTypeId && isValidUUID(productTypeId)) {
           try {
-            // First, get item IDs from CatalogItemProductTypes relation
-            const { data: relatedItems, error: relationError } = await supabase
-              .from('CatalogItemProductTypes')
-              .select('catalog_item_id')
-              .eq('product_type_id', productTypeId)
-              .eq('organization_id', activeOrganizationId)
-              .eq('deleted', false);
+            // First, get item IDs from CatalogItemProductTypes relation WITH PAGINATION
+            // This is critical: if there are more than 1000 relations, we need to paginate
+            let allRelatedItems: any[] = [];
+            let relationPage = 0;
+            const relationPageSize = 1000;
+            let hasMoreRelations = true;
+            let relationError: any = null;
+            
+            console.log('🔍 Loading CatalogItemProductTypes with pagination...');
+            
+            while (hasMoreRelations) {
+              const relationFrom = relationPage * relationPageSize;
+              const relationTo = relationFrom + relationPageSize - 1;
+              
+              const { data: pageRelatedItems, error: pageRelationError } = await supabase
+                .from('CatalogItemProductTypes')
+                .select('catalog_item_id')
+                .eq('product_type_id', productTypeId)
+                .eq('organization_id', activeOrganizationId)
+                .eq('deleted', false)
+                .range(relationFrom, relationTo);
+              
+              if (pageRelationError) {
+                console.error(`❌ Error loading CatalogItemProductTypes page ${relationPage + 1}:`, pageRelationError);
+                relationError = pageRelationError;
+                hasMoreRelations = false;
+                break;
+              }
+              
+              if (pageRelatedItems && pageRelatedItems.length > 0) {
+                allRelatedItems = [...allRelatedItems, ...pageRelatedItems];
+                console.log(`✅ Loaded CatalogItemProductTypes page ${relationPage + 1}: ${pageRelatedItems.length} relations (Total: ${allRelatedItems.length})`);
+                
+                if (pageRelatedItems.length < relationPageSize) {
+                  hasMoreRelations = false;
+                } else {
+                  relationPage++;
+                }
+              } else {
+                hasMoreRelations = false;
+              }
+            }
             
             if (relationError) {
               if (import.meta.env.DEV) {
@@ -100,11 +132,16 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
               if (family) {
                 query = query.eq('family', family);
               }
-            } else if (relatedItems && relatedItems.length > 0) {
-              itemIds = relatedItems.map(r => r.catalog_item_id).filter(id => id); // Filter out any null/undefined
+            } else if (allRelatedItems && allRelatedItems.length > 0) {
+              itemIds = allRelatedItems.map(r => r.catalog_item_id).filter(id => id); // Filter out any null/undefined
+              
+              if (import.meta.env.DEV) {
+                console.log(`✅ Found ${itemIds.length} catalog_item_ids from CatalogItemProductTypes (across ${relationPage + 1} page(s))`);
+              }
               
               // Only use .in() if we have valid IDs
               if (itemIds.length > 0) {
+                // Note: Supabase .in() can handle large arrays, but we'll still paginate the final CatalogItems query
                 query = query.in('id', itemIds);
                 
                 if (import.meta.env.DEV) {
@@ -159,94 +196,113 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
           }
         }
 
-        let { data, error: queryError } = await query.order('created_at', { ascending: false });
+        // Execute query with pagination to load ALL items (not just first 1000)
+        // Supabase has a default limit of 1000 rows, so we need to paginate
+        let allData: any[] = [];
+        let currentPage = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        let queryError: any = null;
         
-        if (import.meta.env.DEV && !family && !productTypeId) {
-          console.log('📊 useCatalogItems - Loaded all items:', {
-            itemsFound: data?.length || 0,
-            sampleItems: data?.slice(0, 3).map((item: any) => ({
-              id: item.id,
-              sku: item.sku,
-              item_name: item.item_name,
-              item_type: item.item_type,
-              measure_basis: item.measure_basis,
-            })),
-          });
-        }
+        console.log('🔍 Loading items with pagination...');
         
-        if (import.meta.env.DEV && family) {
-          console.log('📊 useCatalogItems query result:', {
-            family,
-            itemsFound: data?.length || 0,
-            sampleItems: data?.slice(0, 3).map((item: any) => ({
-              sku: item.sku,
-              collection_name: item.collection_name,
-              variant_name: item.variant_name,
-              family: item.family,
-            })),
-          });
-        }
-
-        // If join fails, try without join (fallback)
-        if (queryError && (queryError.message?.includes('does not exist') || queryError.code === '42P01' || queryError.message?.includes('relationship'))) {
-          let fallbackQuery = supabase
+        while (hasMore) {
+          const from = currentPage * pageSize;
+          const to = from + pageSize - 1;
+          
+          // Create a fresh query for each page (query is immutable, so we need to rebuild it)
+          let pageQuery = supabase
             .from('CatalogItems')
             .select('*')
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false);
-
-          // Filter by productTypeId (preferred) or family (fallback)
-          if (productTypeId) {
-            // Try to get item IDs from CatalogItemProductTypes
-            const { data: relatedItems } = await supabase
-              .from('CatalogItemProductTypes')
-              .select('catalog_item_id')
-              .eq('product_type_id', productTypeId)
-              .eq('organization_id', activeOrganizationId)
-              .eq('deleted', false);
-            
-            if (relatedItems && relatedItems.length > 0) {
-              const itemIds = relatedItems.map(r => r.catalog_item_id);
-              fallbackQuery = fallbackQuery.in('id', itemIds);
-            } else {
-              // No items found for this productType, return empty
-              fallbackQuery = fallbackQuery.eq('id', '00000000-0000-0000-0000-000000000000'); // Impossible UUID
-            }
+          
+          // Apply the same filters as the main query
+          if (itemIds && itemIds.length > 0) {
+            // If we have itemIds from productTypeId filtering, use them
+            pageQuery = pageQuery.in('id', itemIds);
           } else if (family) {
-            fallbackQuery = fallbackQuery.eq('family', family);
+            // If filtering by family, apply that filter
+            pageQuery = pageQuery.eq('family', family);
           }
-
-          const result = await fallbackQuery.order('created_at', { ascending: false });
+          // If no filters, pageQuery will load all items for the organization
           
-          data = result.data;
-          queryError = result.error;
+          const { data: pageData, error: pageError } = await pageQuery
+            .order('sku', { ascending: true })
+            .range(from, to);
+          
+          if (pageError) {
+            console.error(`❌ Error loading page ${currentPage + 1}:`, pageError);
+            queryError = pageError;
+            hasMore = false;
+            break;
+          }
+          
+          if (pageData && pageData.length > 0) {
+            allData = [...allData, ...pageData];
+            console.log(`✅ Loaded page ${currentPage + 1}: ${pageData.length} items (Total: ${allData.length})`);
+            
+            // If we got less than pageSize items, we've reached the end
+            if (pageData.length < pageSize) {
+              hasMore = false;
+            } else {
+              currentPage++;
+            }
+          } else {
+            hasMore = false;
+          }
+        }
+        
+        const data = allData;
+        
+        if (queryError) {
+          console.error('❌ Error during pagination:', queryError);
+        } else {
+          console.log(`✅ Finished loading all items: ${data.length} total across ${currentPage + 1} page(s)`);
         }
 
-        // If still error, try Collections table instead of CatalogCollections
-        if (queryError && queryError.message?.includes('CatalogCollections')) {
-          let collectionsQuery = supabase
-            .from('CatalogItems')
-            .select(`
-              *,
-              collection:Collections!CatalogItems_collection_id_fkey(
-                id,
-                name,
-                code
-              )
-            `)
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
+        // Debug: Verify specific SKUs are loaded after pagination
+        const rc3006wh = data?.find((item: any) => {
+          const sku = (item.sku || '').toUpperCase().replace(/[-_]/g, '');
+          return sku === 'RC3006WH' || sku === 'RC3006-WH';
+        });
+        const rc3006bk = data?.find((item: any) => {
+          const sku = (item.sku || '').toUpperCase().replace(/[-_]/g, '');
+          return sku === 'RC3006BK' || sku === 'RC3006-BK';
+        });
+        const allRC3006Items = data?.filter((item: any) => {
+          const sku = (item.sku || '').toUpperCase().replace(/[-_]/g, '');
+          return sku.startsWith('RC3006');
+        }) || [];
+        
+        console.log('═══════════════════════════════════════════');
+        console.log('🔍 useCatalogItems - Final Results');
+        console.log('═══════════════════════════════════════════');
+        console.log('Total items loaded:', data?.length || 0);
+        console.log('Pages loaded:', currentPage + 1);
+        console.log('Active Organization ID:', activeOrganizationId);
+        console.log('ProductTypeId filter:', productTypeId || 'NONE (loading all)');
+        console.log('Family filter:', family || 'NONE (loading all)');
+        console.log('RC3006-BK:', rc3006bk ? {
+          sku: rc3006bk.sku,
+          item_name: rc3006bk.item_name,
+          active: rc3006bk.active,
+          deleted: rc3006bk.deleted,
+          archived: rc3006bk.archived,
+          organization_id: rc3006bk.organization_id
+        } : '❌ NOT FOUND');
+        console.log('RC3006-WH:', rc3006wh ? {
+          sku: rc3006wh.sku,
+          item_name: rc3006wh.item_name,
+          active: rc3006wh.active,
+          deleted: rc3006wh.deleted,
+          archived: rc3006wh.archived,
+          organization_id: rc3006wh.organization_id
+        } : '❌ NOT FOUND');
+        console.log('All RC3006-* items found:', allRC3006Items.map((item: any) => item.sku));
+        console.log('═══════════════════════════════════════════');
 
-          // Filter by family if provided
-          if (family) {
-            collectionsQuery = collectionsQuery.eq('family', family);
-          }
-
-          const result = await collectionsQuery.order('created_at', { ascending: false });
-          
-          data = result.data;
-          queryError = result.error;
-        }
+        // No fallback needed - we're using select('*') directly, no JOINs
 
         if (queryError) {
           if (import.meta.env.DEV) {
@@ -269,11 +325,14 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
           }
           
           // Map to CatalogItem interface
+          // IMPORTANT: Ensure name is never null or empty
+          const itemName = item.item_name || item.sku || `Item-${item.id.substring(0, 8)}`;
+          
           const catalogItem: CatalogItem = {
             id: item.id,
             organization_id: item.organization_id,
             sku: item.sku || '',
-            name: item.item_name || item.sku || '', // Map item_name to name for compatibility
+            name: itemName, // Map item_name to name for compatibility
             item_name: item.item_name || null, // Keep original item_name
             description: item.description || null,
             manufacturer_id: item.manufacturer_id || null,
@@ -293,13 +352,14 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
             active: item.active !== undefined ? item.active : true,
             discontinued: item.discontinued || false,
             collection_id: item.collection_id || null,
-            collection_name: item.collection_name || (item.collection?.name || item.collection?.code || null),
+            collection_name: item.collection_name || null,
             variant_id: item.variant_id || null,
             variant_name: item.variant_name || null,
             deleted: item.deleted || false,
             archived: item.archived || false,
             created_at: item.created_at || new Date().toISOString(),
             updated_at: item.updated_at || null,
+            image_url: item.image_url || null,
             metadata: item.metadata || {},
             created_by: item.created_by || null,
             updated_by: item.updated_by || null,
@@ -412,6 +472,70 @@ export function useDeleteCatalogItem() {
   return { deleteItem, isDeleting };
 }
 
+// Hook to fetch a single CatalogItem by ID
+export function useCatalogItemById(itemId: string | null | undefined) {
+  const [item, setItem] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { activeOrganizationId } = useOrganizationContext();
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchItem() {
+      if (!itemId || !activeOrganizationId) {
+        if (isMounted) {
+          setItem(null);
+          setLoading(false);
+          setError(null);
+        }
+        return;
+      }
+
+      try {
+        if (isMounted) {
+          setLoading(true);
+          setError(null);
+        }
+
+        const { data, error: queryError } = await supabase
+          .from('CatalogItems')
+          .select('*')
+          .eq('id', itemId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .eq('archived', false)
+          .maybeSingle();
+
+        if (queryError) {
+          throw queryError;
+        }
+
+        if (isMounted) {
+          setItem(data);
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error loading catalog item';
+        if (isMounted) {
+          setError(errorMessage);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchItem();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [itemId, activeOrganizationId]);
+
+  return { item, loading, error };
+}
+
 // Hook para cargar CatalogCollections
 export interface CatalogCollection {
   id: string;
@@ -478,64 +602,10 @@ export function useCatalogCollections(family?: string, productTypeId?: string) {
 
         let collectionsData: CatalogCollection[] = [];
 
-        // First, try to get from CatalogCollections table
-        let query = supabase
-          .from('CatalogCollections')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        let { data, error: queryError } = await query.eq('active', true);
-
-        // If error and it's about 'active' column, try without it
-        if (queryError && queryError.message?.includes('active')) {
-          const result = await supabase
-            .from('CatalogCollections')
-            .select('*')
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
-          
-          data = result.data;
-          queryError = result.error;
-        }
-
-        // If still error and it's about table not found, try 'Collections'
-        if (queryError && (queryError.message?.includes('does not exist') || queryError.code === '42P01')) {
-          query = supabase
-            .from('Collections')
-            .select('*')
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
-
-          let result = await query.eq('active', true);
-          data = result.data;
-          queryError = result.error;
-
-          // If 'active' doesn't exist, try without it
-          if (queryError && queryError.message?.includes('active')) {
-            result = await query;
-            data = result.data;
-            queryError = result.error;
-          }
-        }
-
-        // If we got data from tables, use it
-        if (data && data.length > 0) {
-          collectionsData = data.map((item: any) => ({
-            id: item.id,
-            organization_id: item.organization_id,
-            name: item.name,
-            code: item.code || null,
-            description: item.description || null,
-            active: item.active !== undefined ? item.active : true,
-            sort_order: item.sort_order || 0,
-            deleted: item.deleted || false,
-            archived: item.archived || false,
-            created_at: item.created_at,
-            updated_at: item.updated_at || null,
-          }));
-        } else {
-          // If no data from tables, extract collections from CatalogItems
+        // Skip trying CatalogCollections/Collections tables - they may not exist
+        // Go directly to extracting collections from CatalogItems
+        {
+          // Extract collections from CatalogItems
           if (import.meta.env.DEV) {
             console.log('📦 No collections found in tables, extracting from CatalogItems...', family ? `(filtered by family: ${family})` : '');
           }
@@ -1060,20 +1130,61 @@ export function useOperatingDrives() {
         // Buscar CatalogItems que sean operating drives
         // Pueden ser item_type='component' o 'accessory' con metadata.operatingDrive=true
         // O podemos buscar por category o metadata específico
-        const { data, error: queryError } = await supabase
-          .from('CatalogItems')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .eq('active', true)
-          .in('item_type', ['component', 'accessory'])
-          .order('item_name', { ascending: true });
-
+        // IMPORTANT: Paginate to load ALL items (not just first 1000)
+        let allOperatingDrives: any[] = [];
+        let drivePage = 0;
+        const drivePageSize = 1000;
+        let hasMoreDrives = true;
+        let queryError: any = null;
+        
+        console.log('🔍 Loading Operating Drives with pagination...');
+        
+        while (hasMoreDrives) {
+          const driveFrom = drivePage * drivePageSize;
+          const driveTo = driveFrom + drivePageSize - 1;
+          
+          const { data: pageData, error: pageError } = await supabase
+            .from('CatalogItems')
+            .select('*')
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .eq('active', true)
+            .in('item_type', ['component', 'accessory'])
+            .order('item_name', { ascending: true })
+            .range(driveFrom, driveTo);
+          
+          if (pageError) {
+            console.error(`❌ Error loading Operating Drives page ${drivePage + 1}:`, pageError);
+            queryError = pageError;
+            hasMoreDrives = false;
+            break;
+          }
+          
+          if (pageData && pageData.length > 0) {
+            allOperatingDrives = [...allOperatingDrives, ...pageData];
+            console.log(`✅ Loaded Operating Drives page ${drivePage + 1}: ${pageData.length} items (Total: ${allOperatingDrives.length})`);
+            
+            if (pageData.length < drivePageSize) {
+              hasMoreDrives = false;
+            } else {
+              drivePage++;
+            }
+          } else {
+            hasMoreDrives = false;
+          }
+        }
+        
+        const data = allOperatingDrives;
+        
         if (queryError) {
           if (import.meta.env.DEV) {
             console.error('Error fetching Operating Drives:', queryError);
           }
           throw queryError;
+        }
+        
+        if (import.meta.env.DEV) {
+          console.log(`✅ Finished loading Operating Drives: ${data.length} total across ${drivePage + 1} page(s)`);
         }
 
         // Filtrar y mapear items que sean operating drives

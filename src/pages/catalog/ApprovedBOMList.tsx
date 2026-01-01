@@ -107,13 +107,16 @@ export default function ApprovedBOMList() {
           setLoading(false);
           return;
         }
+        
+        // Filter to only include active MOs (deleted = false)
+        const activeMOs = manufacturingOrders.filter((mo: any) => !mo.organization_id || mo.organization_id === activeOrganizationId);
 
         if (import.meta.env.DEV) {
           console.log('✅ ApprovedBOMList: Found', manufacturingOrders.length, 'ManufacturingOrders');
         }
 
-        // Get unique sale_order_ids
-        const saleOrderIds = [...new Set(manufacturingOrders.map((mo: any) => mo.sale_order_id).filter(Boolean))];
+        // Get unique sale_order_ids from active MOs
+        const saleOrderIds = [...new Set(activeMOs.map((mo: any) => mo.sale_order_id).filter(Boolean))];
 
         // Step 2: Get SalesOrders for these ManufacturingOrders
         const { data: saleOrders, error: soError } = await supabase
@@ -140,9 +143,7 @@ export default function ApprovedBOMList() {
           if (import.meta.env.DEV) {
             console.log('⚠️ ApprovedBOMList: No SalesOrders found for ManufacturingOrders');
           }
-          setSaleOrderGroups([]);
-          setLoading(false);
-          return;
+          // Don't return - continue to show empty state
         }
 
         if (import.meta.env.DEV) {
@@ -176,7 +177,6 @@ export default function ApprovedBOMList() {
           .from('SalesOrderLines')
           .select('id, sale_order_id, organization_id')
           .in('sale_order_id', saleOrderIds)
-          .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
         if (solError) {
@@ -190,9 +190,7 @@ export default function ApprovedBOMList() {
           if (import.meta.env.DEV) {
             console.log('⚠️ ApprovedBOMList: No SalesOrderLines found');
           }
-          setSaleOrderGroups([]);
-          setLoading(false);
-          return;
+          // Don't return - continue to show available data
         }
 
         const saleOrderLineIds = allSalesOrderLines.map((sol: any) => sol.id);
@@ -205,78 +203,251 @@ export default function ApprovedBOMList() {
           console.log('✅ ApprovedBOMList: Found', saleOrderLineIds.length, 'SalesOrderLines');
         }
 
-        // Get BomInstances (with organization_id filter)
+        // STEP 1: Fetch BomInstances (no embedded joins)
         let materialList: any[] = [];
-        let bomInstances: any[] = []; // Declare outside if block to avoid scope issues
+        let bomInstances: any[] = [];
+        let queryErrors: string[] = [];
         
         if (saleOrderLineIds.length > 0) {
           if (import.meta.env.DEV) {
-            console.log('🔍 ApprovedBOMList: Fetching BomInstances for saleOrderLineIds:', saleOrderLineIds.length);
+            console.log('🔍 ApprovedBOMList: Step 1 - Fetching BomInstances for saleOrderLineIds:', saleOrderLineIds.length);
           }
           
           const { data: bomInstancesData, error: bomError } = await supabase
             .from('BomInstances')
-            .select('id, sale_order_line_id, organization_id')
+            .select('id, sale_order_line_id, quote_line_id, organization_id')
             .in('sale_order_line_id', saleOrderLineIds)
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
+            .eq('deleted', false)
+            .eq('organization_id', activeOrganizationId);
           
-          bomInstances = bomInstancesData || []; // Assign to outer variable
-
           if (bomError) {
+            console.error('ApprovedBOMList query failed', { step: '1 - BomInstances', error: bomError });
+            queryErrors.push('Failed to fetch BomInstances');
+          } else {
+            bomInstances = bomInstancesData || [];
             if (import.meta.env.DEV) {
-              console.warn('⚠️ Error fetching BomInstances:', bomError);
+              console.log('✅ ApprovedBOMList: Step 1 - Found', bomInstances.length, 'BomInstances');
             }
-          } else if (bomInstances.length > 0) {
+          }
+
+          if (bomInstances.length > 0) {
             const bomInstanceIds = bomInstances.map((bi: any) => bi.id);
 
-            // Get BomInstanceLines with CatalogItems (with organization_id filter)
+            // STEP 2: Fetch BomInstanceLines (flat fields only, no joins)
             if (import.meta.env.DEV) {
-              console.log('🔍 ApprovedBOMList: Fetching BomInstanceLines for bomInstanceIds:', bomInstanceIds.length);
+              console.log('🔍 ApprovedBOMList: Step 2 - Fetching BomInstanceLines for bomInstanceIds:', bomInstanceIds.length);
             }
             
             const { data: bomLines, error: linesError } = await supabase
               .from('BomInstanceLines')
-              .select(`
-                bom_instance_id,
-                resolved_part_id,
-                resolved_sku,
-                description,
-                category_code,
-                qty,
-                uom,
-                unit_cost_exw,
-                total_cost_exw
-              `)
+              .select('id, bom_instance_id, resolved_part_id, resolved_sku, part_role, category_code, qty, uom, unit_cost_exw, total_cost_exw, organization_id, description')
               .in('bom_instance_id', bomInstanceIds)
-              .eq('deleted', false);
+              .eq('deleted', false)
+              .eq('organization_id', activeOrganizationId);
 
             if (linesError) {
+              console.error('ApprovedBOMList query failed', { step: '2 - BomInstanceLines', error: linesError });
+              queryErrors.push('Failed to fetch BomInstanceLines');
+            } else if (bomLines && bomLines.length > 0) {
               if (import.meta.env.DEV) {
-                console.warn('⚠️ Error fetching BomInstanceLines:', linesError);
+                console.log('✅ ApprovedBOMList: Step 2 - Found', bomLines.length, 'BomInstanceLines');
+                console.log('null resolved_part_id lines', bomLines.filter((l: any) => !l.resolved_part_id).length);
               }
-            } else if (bomLines) {
-              // Map BomInstanceLines to material list format
+
+              // STEP 3: Build unique set of resolved_part_id and fetch CatalogItems
+              // Filter to valid UUIDs only to avoid PostgREST 400 errors
+              const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+              const catalogItemIds = [...new Set(
+                bomLines
+                  .map((bil: any) => bil.resolved_part_id)
+                  .filter((id: any) => typeof id === 'string' && UUID_RE.test(id))
+              )];
+              
+              let catalogItemById = new Map<string, any>();
+              if (catalogItemIds.length > 0) {
+                if (import.meta.env.DEV) {
+                  console.log('🔍 ApprovedBOMList: Step 3 - Fetching CatalogItems for', catalogItemIds.length, 'valid UUIDs');
+                }
+                
+                // Chunk queries to avoid URL length issues (max 200 IDs per chunk)
+                const chunks = [];
+                for (let i = 0; i < catalogItemIds.length; i += 200) {
+                  chunks.push(catalogItemIds.slice(i, i + 200));
+                }
+                
+                let allCatalogItems: any[] = [];
+                let catalogError: any = null;
+                
+                for (const chunk of chunks) {
+                  const { data: chunkItems, error: chunkError } = await supabase
+                    .from('CatalogItems')
+                    .select('id, sku, item_name, description, item_type, measure_basis, collection_name, variant_name')
+                    .in('id', chunk);
+                  
+                  if (chunkError) {
+                    catalogError = chunkError;
+                    break; // Stop on first error
+                  } else if (chunkItems) {
+                    allCatalogItems = allCatalogItems.concat(chunkItems);
+                  }
+                }
+
+                if (catalogError) {
+                  console.error('ApprovedBOMList step 3 CatalogItems failed', {
+                    message: catalogError?.message,
+                    details: catalogError?.details,
+                    hint: catalogError?.hint,
+                    code: catalogError?.code,
+                    partIdsSample: catalogItemIds.slice(0, 10),
+                    partIdsCount: catalogItemIds.length
+                  });
+                  queryErrors.push('Failed to fetch CatalogItems');
+                } else if (allCatalogItems.length > 0) {
+                  allCatalogItems.forEach((ci: any) => {
+                    if (ci.id) {
+                      catalogItemById.set(ci.id, ci);
+                    }
+                  });
+                  if (import.meta.env.DEV) {
+                    console.log('✅ ApprovedBOMList: Step 3 - Found', allCatalogItems.length, 'CatalogItems');
+                    console.log('CatalogItems sample', allCatalogItems?.[0]);
+                  }
+                }
+              } else {
+                if (import.meta.env.DEV) {
+                  console.warn('⚠️ ApprovedBOMList: Step 3 - No valid UUIDs found in resolved_part_id, skipping CatalogItems fetch');
+                }
+              }
+
+              // STEP 4: Build unique set of quote_line_id and fetch QuoteLines + ProductTypes
+              const quoteLineIds = [...new Set(bomInstances.map((bi: any) => bi.quote_line_id).filter(Boolean))];
+              
+              let quoteLineToProductTypeName = new Map<string, string>();
+              if (quoteLineIds.length > 0) {
+                if (import.meta.env.DEV) {
+                  console.log('🔍 ApprovedBOMList: Step 4a - Fetching QuoteLines for', quoteLineIds.length, 'quote lines');
+                }
+                
+                const { data: quoteLines, error: quoteLinesError } = await supabase
+                  .from('QuoteLines')
+                  .select('id, product_type_id')
+                  .in('id', quoteLineIds)
+                  .eq('deleted', false);
+
+                if (quoteLinesError) {
+                  console.error('ApprovedBOMList query failed', { step: '4a - QuoteLines', error: quoteLinesError });
+                  queryErrors.push('Failed to fetch QuoteLines');
+                } else if (quoteLines) {
+                  const productTypeIds = [...new Set(quoteLines.map((ql: any) => ql.product_type_id).filter(Boolean))];
+                  
+                  if (productTypeIds.length > 0) {
+                    if (import.meta.env.DEV) {
+                      console.log('🔍 ApprovedBOMList: Step 4b - Fetching ProductTypes for', productTypeIds.length, 'product types');
+                    }
+                    
+                    const { data: productTypes, error: productTypesError } = await supabase
+                      .from('ProductTypes')
+                      .select('id, name')
+                      .in('id', productTypeIds)
+                      .eq('deleted', false);
+
+                    if (productTypesError) {
+                      console.error('ApprovedBOMList query failed', { step: '4b - ProductTypes', error: productTypesError });
+                      queryErrors.push('Failed to fetch ProductTypes');
+                    } else if (productTypes) {
+                      const productTypeById = new Map<string, string>();
+                      productTypes.forEach((pt: any) => {
+                        if (pt.id && pt.name) {
+                          productTypeById.set(pt.id, pt.name);
+                        }
+                      });
+                      
+                      // Build quoteLineToProductTypeName map
+                      quoteLines.forEach((ql: any) => {
+                        if (ql.id && ql.product_type_id) {
+                          const productTypeName = productTypeById.get(ql.product_type_id);
+                          if (productTypeName) {
+                            quoteLineToProductTypeName.set(ql.id, productTypeName);
+                          }
+                        }
+                      });
+                      
+                      if (import.meta.env.DEV) {
+                        console.log('✅ ApprovedBOMList: Step 4b - Found', productTypes.length, 'ProductTypes');
+                        console.log('✅ ApprovedBOMList: Step 4c - Built quoteLineToProductTypeName map with', quoteLineToProductTypeName.size, 'entries');
+                      }
+                    }
+                  }
+                }
+              }
+
+              // STEP 5: Map BomInstanceLines to material list format using the maps
+              if (import.meta.env.DEV) {
+                console.log('🔍 ApprovedBOMList: Step 5 - Mapping data using catalogItemById and quoteLineToProductTypeName maps');
+              }
+              
               bomLines.forEach((bil: any) => {
                 const bomInstance = bomInstances.find((bi: any) => bi.id === bil.bom_instance_id);
                 if (bomInstance) {
                   const saleOrderId = saleOrderLineToSO.get(bomInstance.sale_order_line_id);
                   if (saleOrderId) {
+                    // component_name: Fabric names come from collection + variant, not item_name
+                    // Detect fabric using part_role first, then fallback to CatalogItems fields
+                    const catalogItem = catalogItemById.get(bil.resolved_part_id);
+                    const isFabric = bil.part_role === 'fabric' || 
+                                   (catalogItem && ((catalogItem.item_type === 'fabric') || (catalogItem.measure_basis === 'fabric')));
+                    
+                    let component_name = 'N/A';
+                    if (isFabric && catalogItem) {
+                      // Fabric: use collection_name - variant_name (never show SKU as first choice)
+                      const fabricName = [catalogItem.collection_name, catalogItem.variant_name].filter(Boolean).join(' - ');
+                      component_name = fabricName || catalogItem.item_name || catalogItem.description || bil.resolved_sku || 'N/A';
+                    } else if (catalogItem) {
+                      // Non-fabric: use item_name -> description -> resolved_sku
+                      component_name = catalogItem.item_name ?? catalogItem.description ?? bil.resolved_sku ?? 'N/A';
+                    } else {
+                      // No catalog item found: fallback to resolved_sku
+                      component_name = bil.resolved_sku ?? bil.description ?? 'N/A';
+                    }
+                    
+                    // product_type_name: from ProductTypes via QuoteLines (from map)
+                    const productTypeName = bomInstance.quote_line_id 
+                      ? (quoteLineToProductTypeName.get(bomInstance.quote_line_id) || 'Product')
+                      : 'Product';
+                    
                     materialList.push({
                       sale_order_id: saleOrderId,
                       sku: bil.resolved_sku || 'N/A',
-                      item_name: bil.description || 'N/A',
+                      item_name: component_name,
+                      product_type_name: productTypeName,
                       total_qty: Number(bil.qty) || 0,
                       uom: bil.uom || 'ea',
                       avg_unit_cost_exw: bil.unit_cost_exw ? Number(bil.unit_cost_exw) : 0,
                       total_cost_exw: Number(bil.total_cost_exw) || 0,
-                      category_code: bil.category_code || 'accessory',
+                      category_code: bil.category_code || bil.part_role || 'accessory',
                     });
                   }
                 }
               });
+              
+              if (import.meta.env.DEV) {
+                console.log('✅ ApprovedBOMList: Step 5 - Mapped', materialList.length, 'materials');
+              }
+            } else {
+              if (import.meta.env.DEV) {
+                console.warn('⚠️ ApprovedBOMList: Step 2 - No BomInstanceLines found for', bomInstanceIds.length, 'BomInstances');
+              }
             }
           }
+        }
+        
+        // Show non-blocking UI alert if any query failed
+        if (queryErrors.length > 0) {
+          useUIStore.getState().addNotification({
+            type: 'warning',
+            title: 'Data Loading Warning',
+            message: `Some data could not be loaded: ${queryErrors.join(', ')}. The list may be incomplete.`,
+          });
         }
 
         if (import.meta.env.DEV) {
@@ -320,10 +491,6 @@ export default function ApprovedBOMList() {
           // NO saltar Sale Orders sin materiales - mostrar todos
           const customerName = customersMap.get(so.customer_id) || 'N/A';
           
-          // Get product type - we'll need to fetch it separately if needed
-          // For now, use 'N/A' as we removed the QuoteLines join to simplify
-          const productTypeName = 'N/A';
-          
           // Si no hay materiales, crear un array vacío
           const components: ApprovedBOMItem[] = soMaterials.length > 0
             ? soMaterials.map((m: any) => {
@@ -331,8 +498,10 @@ export default function ApprovedBOMList() {
                   sale_order_id: so.id,
                   sale_order_no: so.sale_order_no,
                   quote_line_id: soLines[0]?.id || '',
-                  product_type_name: productTypeName,
+                  // product_type_name: from ProductTypes via QuoteLines (already fetched in query)
+                  product_type_name: m.product_type_name || 'Product',
                   component_sku: m.sku || 'N/A',
+                  // component_name: from CatalogItems (already fetched in query with fallback order)
                   component_name: m.item_name || 'N/A',
                   qty: Number(m.total_qty) || 0,
                   uom: m.uom || 'ea',

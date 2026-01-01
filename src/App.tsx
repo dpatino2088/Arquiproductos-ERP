@@ -194,9 +194,24 @@ const Quotes = lazy(() => {
   return import('./pages/sales/Quotes');
 });
 
+const QuoteApproved = lazy(() => {
+  logger.debug('Loading QuoteApproved component');
+  return import('./pages/sales/QuoteApproved');
+});
+
 const QuoteNew = lazy(() => {
   logger.debug('Loading QuoteNew component');
   return import('./pages/sales/QuoteNew');
+});
+
+const SaleOrders = lazy(() => {
+  logger.debug('Loading SaleOrders component');
+  return import('./pages/sales/SaleOrders');
+});
+
+const SaleOrderNew = lazy(() => {
+  logger.debug('Loading SaleOrderNew component');
+  return import('./pages/sales/SaleOrderNew');
 });
 
 const Catalog = lazy(() => {
@@ -229,6 +244,27 @@ const BOM = lazy(() => {
   return import('./pages/catalog/BOM');
 });
 
+const BOMTemplates = lazy(() => {
+  logger.debug('Loading BOMTemplates component');
+  return import('./pages/catalog/BOMTemplates');
+});
+
+const BOMReadiness = lazy(() => {
+  logger.debug('Loading BOMReadiness component');
+  return import('./pages/catalog/BOMReadiness');
+});
+
+
+const ManufacturingOrders = lazy(() => {
+  logger.debug('Loading ManufacturingOrders component');
+  return import('./pages/manufacturing/ManufacturingOrders');
+});
+
+const ManufacturingOrderDetail = lazy(() => {
+  logger.debug('Loading ManufacturingOrderDetail component');
+  return import('./pages/manufacturing/ManufacturingOrderDetail');
+});
+
 // Variants component removed - use CollectionsCatalog instead
 
 const CatalogItemNew = lazy(() => {
@@ -249,6 +285,21 @@ const Warehouse = lazy(() => {
 const Manufacturing = lazy(() => {
   logger.debug('Loading Manufacturing component');
   return import('./pages/manufacturing/Manufacturing');
+});
+
+const BillOfMaterials = lazy(() => {
+  logger.debug('Loading BillOfMaterials component');
+  return import('./pages/manufacturing/BillOfMaterials');
+});
+
+const ApprovedBOMList = lazy(() => {
+  logger.debug('Loading ApprovedBOMList component');
+  return import('./pages/catalog/ApprovedBOMList');
+});
+
+const OrderList = lazy(() => {
+  logger.debug('Loading OrderList component');
+  return import('./pages/manufacturing/OrderList');
 });
 
 const Financials = lazy(() => {
@@ -576,9 +627,52 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/sales/orders', () => {
+    // Sale Orders routes (independent module)
+    router.addRoute('/sale-orders', () => {
       if (isAuthenticated) {
-        setCurrentPage('orders');
+        setCurrentPage('sale-orders');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sale-orders/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('sale-order-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sale-orders/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('sale-order-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    // Keep old routes for backward compatibility (redirect to new routes)
+    router.addRoute('/sales/sale-orders', () => {
+      if (isAuthenticated) {
+        router.navigate('/sale-orders');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/sale-orders/new', () => {
+      if (isAuthenticated) {
+        router.navigate('/sale-orders/new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/sale-orders/edit/:id', () => {
+      if (isAuthenticated) {
+        const path = router.getCurrentRoute();
+        const match = path.match(/\/sales\/sale-orders\/edit\/([^/]+)/);
+        if (match && match[1]) {
+          router.navigate(`/sale-orders/edit/${match[1]}`);
+        } else {
+          router.navigate('/sale-orders');
+        }
       } else {
         setCurrentPage('login');
       }
@@ -604,11 +698,19 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/sales/quotes/approved', () => {
+      if (isAuthenticated) {
+        setCurrentPage('quote-approved');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
     // Catalog routes
     router.addRoute('/catalog', () => {
       if (isAuthenticated) {
-        setCurrentPage('catalog');
+        // Redirect to first sub-module (Items)
+        router.navigate('/catalog/items', false);
       } else {
         setCurrentPage('login');
       }
@@ -658,6 +760,13 @@ function App() {
     router.addRoute('/catalog/bom', () => {
       if (isAuthenticated) {
         setCurrentPage('bom');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/catalog/bom-readiness', () => {
+      if (isAuthenticated) {
+        setCurrentPage('bom-readiness');
       } else {
         setCurrentPage('login');
       }
@@ -719,7 +828,8 @@ function App() {
     // Manufacturing routes
     router.addRoute('/manufacturing', () => {
       if (isAuthenticated) {
-        setCurrentPage('manufacturing');
+        // Redirect to first sub-module (Order List)
+        router.navigate('/manufacturing/order-list', false);
       } else {
         setCurrentPage('login');
       }
@@ -738,13 +848,6 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/manufacturing/bill-of-materials', () => {
-      if (isAuthenticated) {
-        setCurrentPage('manufacturing');
-      } else {
-        setCurrentPage('login');
-      }
-    });
     router.addRoute('/manufacturing/routing', () => {
       if (isAuthenticated) {
         setCurrentPage('manufacturing');
@@ -755,6 +858,51 @@ function App() {
     router.addRoute('/manufacturing/work-centers', () => {
       if (isAuthenticated) {
         setCurrentPage('manufacturing');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/manufacturing-orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('manufacturing-orders');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/manufacturing-orders/:id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/manufacturing\/manufacturing-orders\/([^/]+)/);
+        const moId = match ? match[1] : null;
+        if (moId) {
+          setCurrentPage('manufacturing-order-detail');
+          // Store MO ID in sessionStorage for the component to access
+          sessionStorage.setItem('currentManufacturingOrderId', moId);
+        } else {
+          setCurrentPage('manufacturing-orders');
+        }
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/order-list', () => {
+      if (isAuthenticated) {
+        setCurrentPage('order-list');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/material', () => {
+      if (isAuthenticated) {
+        setCurrentPage('material');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    // Legacy route redirect
+    router.addRoute('/manufacturing/bill-of-materials', () => {
+      if (isAuthenticated) {
+        router.navigate('/manufacturing/material', false);
       } else {
         setCurrentPage('login');
       }
@@ -941,8 +1089,14 @@ function App() {
         return <Orders />;
       case 'quotes':
         return <Quotes />;
+      case 'quote-approved':
+        return <QuoteApproved />;
       case 'quote-new':
         return <QuoteNew />;
+      case 'sale-orders':
+        return <SaleOrders />;
+      case 'sale-order-new':
+        return <SaleOrderNew />;
       case 'catalog':
         return <Catalog />;
       case 'items':
@@ -957,6 +1111,8 @@ function App() {
         return <Collections />;
       case 'bom':
         return <BOM />;
+      case 'bom-readiness':
+        return <BOMReadiness />;
       // Variants case removed - use CollectionsCatalog instead
       case 'inventory':
         return <Inventory />;
@@ -964,6 +1120,18 @@ function App() {
         return <Warehouse />;
       case 'manufacturing':
         return <Manufacturing />;
+      case 'manufacturing-orders':
+        return <ManufacturingOrders />;
+      case 'manufacturing-order-detail': {
+        const moId = sessionStorage.getItem('currentManufacturingOrderId');
+        return moId ? <ManufacturingOrderDetail moId={moId} /> : <ManufacturingOrders />;
+      }
+      case 'order-list':
+        return <OrderList />;
+      case 'material':
+        return <ApprovedBOMList />;
+      case 'bill-of-materials':
+        return <ApprovedBOMList />; // Legacy support - redirect to ApprovedBOMList
       case 'financials':
         return <Financials />;
 

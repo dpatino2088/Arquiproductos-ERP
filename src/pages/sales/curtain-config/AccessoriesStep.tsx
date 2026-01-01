@@ -300,15 +300,17 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
         {currentAccessories.length > 0 && (
           <div className="border-t border-gray-200 pt-6">
             <Label className="text-sm font-medium mb-4 block">SELECTED ACCESSORIES</Label>
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full">
+            <div className="border border-gray-200 rounded-lg overflow-x-auto">
+              <table className="w-full min-w-[800px]">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="text-left py-3 px-4 text-xs font-medium text-gray-700">Item Name</th>
-                    <th className="text-center py-3 px-4 text-xs font-medium text-gray-700">Quantity</th>
-                    <th className="text-right py-3 px-4 text-xs font-medium text-gray-700">Unit Price</th>
-                    <th className="text-right py-3 px-4 text-xs font-medium text-gray-700">Total Price</th>
-                    <th className="text-center py-3 px-4 text-xs font-medium text-gray-700">Actions</th>
+                    <th className="text-left py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '12%' }}>SKU</th>
+                    <th className="text-left py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '18%' }}>Name</th>
+                    <th className="text-left py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '25%' }}>Description</th>
+                    <th className="text-center py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '12%' }}>QTY</th>
+                    <th className="text-right py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '15%' }}>Precio Unit MSRP</th>
+                    <th className="text-right py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '12%' }}>TOTAL MSRP</th>
+                    <th className="text-center py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '6%' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -316,8 +318,8 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
                     const catalogItem = searchableCatalogItems.find(ci => ci.id === accessory.id);
                     const qty = accessory.qty || 0;
                     
-                    // Update price from catalog item if available
-                    const currentPrice = catalogItem 
+                    // Get MSRP price - priority: msrp > unit_price > calculated from cost_exw + margin
+                    const msrpPrice = catalogItem 
                       ? ((catalogItem as any).msrp || 
                          catalogItem.unit_price || 
                          ((catalogItem as any).cost_exw && (catalogItem as any).default_margin_pct 
@@ -325,42 +327,58 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
                            : (catalogItem as any).cost_exw ? (catalogItem as any).cost_exw * 1.5 : accessory.price))
                       : accessory.price;
                     
+                    const sku = catalogItem?.sku || '';
+                    const itemName = accessory.name || catalogItem?.item_name || catalogItem?.name || 'Unknown';
+                    const description = (catalogItem as any)?.description || '';
+                    
                     return (
                       <tr key={accessory.id} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4">
-                          <span className="text-sm text-gray-900">{accessory.name}</span>
+                        <td className="py-4 px-5">
+                          <span className="text-sm text-gray-900 break-words">{sku || '—'}</span>
                         </td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-4 px-5">
+                          <span className="text-sm text-gray-900 break-words">{itemName}</span>
+                        </td>
+                        <td className="py-4 px-5">
+                          <span className="text-sm text-gray-600 break-words line-clamp-2" title={description || undefined}>
+                            {description || '—'}
+                          </span>
+                        </td>
+                        <td className="py-4 px-5 text-center">
                           <div className="flex items-center justify-center gap-2">
                             <button
                               onClick={() => updateAccessoryQty(accessory.id, accessory.name, accessory.price, -1)}
                               disabled={qty <= 1}
-                              className="p-1 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="p-1.5 hover:bg-gray-200 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
-                              <Minus className="w-3 h-3" />
+                              <Minus className="w-3.5 h-3.5" />
                             </button>
-                            <span className="text-sm font-medium w-8">{qty}</span>
+                            <span className="text-sm font-medium w-10 text-center">{qty}</span>
                             <button
                               onClick={() => updateAccessoryQty(accessory.id, accessory.name, accessory.price, 1)}
-                              className="p-1 hover:bg-gray-200 rounded"
+                              className="p-1.5 hover:bg-gray-200 rounded transition-colors"
                             >
-                              <Plus className="w-3 h-3" />
+                              <Plus className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-right text-sm text-gray-700">
-                          ${currentPrice.toFixed(2)} {catalogItem?.uom ? `/${catalogItem.uom}` : ''}
+                        <td className="py-4 px-5 text-right">
+                          <span className="text-sm text-gray-700 whitespace-nowrap">
+                            ${msrpPrice.toFixed(2)}{catalogItem?.uom ? ` /${catalogItem.uom}` : ''}
+                          </span>
                         </td>
-                        <td className="py-3 px-4 text-right text-sm font-medium text-gray-900">
-                          ${(currentPrice * qty).toFixed(2)}
+                        <td className="py-4 px-5 text-right">
+                          <span className="text-sm font-medium text-gray-900 whitespace-nowrap">
+                            ${(msrpPrice * qty).toFixed(2)}
+                          </span>
                         </td>
-                        <td className="py-3 px-4 text-center">
+                        <td className="py-4 px-5 text-center">
                           <button
                             onClick={() => {
                               const updated = currentAccessories.filter((a: any) => a.id !== accessory.id);
                               onUpdate({ accessories: updated });
                             }}
-                            className="p-1 hover:bg-red-100 rounded text-red-600"
+                            className="p-1.5 hover:bg-red-100 rounded text-red-600 transition-colors"
                             title="Remove item"
                           >
                             <X className="w-4 h-4" />

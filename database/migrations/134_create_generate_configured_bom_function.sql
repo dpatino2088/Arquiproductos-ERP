@@ -247,6 +247,10 @@ BEGIN
                v_bom_component_record.component_role LIKE '%cassette%' THEN
                 -- Use width for horizontal components
                 v_component_qty := v_bom_component_record.qty_per_unit * COALESCE(v_quote_line_record.width_m, 0);
+            ELSIF v_bom_component_record.component_role LIKE '%side_channel%' OR
+                  v_bom_component_record.component_role LIKE '%side%channel%' THEN
+                -- Side channel: height × 2 units (always required)
+                v_component_qty := COALESCE(v_quote_line_record.height_m, 0) * 2;
             ELSE
                 -- Use height for vertical components (e.g., side channel)
                 v_component_qty := v_bom_component_record.qty_per_unit * COALESCE(v_quote_line_record.height_m, 0);

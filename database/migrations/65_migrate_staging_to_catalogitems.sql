@@ -26,21 +26,61 @@ BEGIN
   -- ====================================================
   -- STEP 1: Verificar qué tabla temporal tiene datos
   -- ====================================================
-  RAISE NOTICE '📋 Verificando tabla de staging...';
+  RAISE NOTICE '📋 Verificando tablas de staging...';
   
+  -- Verificar si _stg_catalog_items existe y tiene datos
   BEGIN
-    SELECT COUNT(*) INTO stg_items_count
-    FROM public."_stg_catalog_items"
-    WHERE sku IS NOT NULL AND trim(sku) <> '';
+    IF EXISTS (
+      SELECT 1 FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name = '_stg_catalog_items'
+    ) THEN
+      SELECT COUNT(*) INTO stg_items_count
+      FROM public."_stg_catalog_items"
+      WHERE sku IS NOT NULL AND trim(sku) <> '';
+      RAISE NOTICE '   ℹ️  Tabla _stg_catalog_items existe con % registros válidos', stg_items_count;
+    ELSE
+      RAISE NOTICE '   ⚠️  Tabla _stg_catalog_items NO existe';
+      stg_items_count := 0;
+    END IF;
   EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE '   ⚠️  Error al verificar _stg_catalog_items: %', SQLERRM;
     stg_items_count := 0;
   END;
   
+  -- Verificar si _stg_catalog_update existe y tiene datos
   BEGIN
-    SELECT COUNT(*) INTO stg_update_count
-    FROM public."_stg_catalog_update"
-    WHERE sku IS NOT NULL AND trim(sku) <> '';
+    IF EXISTS (
+      SELECT 1 FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name = '_stg_catalog_update'
+    ) THEN
+      BEGIN
+        -- Contar registros con SKU válido
+        SELECT COUNT(*) INTO stg_update_count
+        FROM public."_stg_catalog_update"
+        WHERE sku IS NOT NULL 
+          AND trim(COALESCE(sku, '')) <> '';
+        RAISE NOTICE '   ℹ️  Tabla _stg_catalog_update existe con % registros válidos', stg_update_count;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING '   ⚠️  Error al contar registros en _stg_catalog_update: %', SQLERRM;
+        RAISE WARNING '   Detalle del error: %', SQLSTATE;
+        -- Intentar contar total sin filtro
+        BEGIN
+          SELECT COUNT(*) INTO stg_update_count
+          FROM public."_stg_catalog_update";
+          RAISE WARNING '   ℹ️  Total de registros en _stg_catalog_update (sin filtrar SKU): %', stg_update_count;
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING '   ⚠️  Error al contar total de registros: %', SQLERRM;
+          stg_update_count := 0;
+        END;
+      END;
+    ELSE
+      RAISE NOTICE '   ⚠️  Tabla _stg_catalog_update NO existe';
+      stg_update_count := 0;
+    END IF;
   EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING '   ⚠️  Error al verificar existencia de _stg_catalog_update: %', SQLERRM;
     stg_update_count := 0;
   END;
   
@@ -49,22 +89,33 @@ BEGIN
     use_stg_items := true;
     staging_count := stg_items_count;
     stg_table_name := '_stg_catalog_items';
-    RAISE NOTICE '   ✅ Encontrados % registros en _stg_catalog_items', stg_items_count;
-    RAISE NOTICE '   ℹ️  Usando _stg_catalog_items como fuente de datos';
+    RAISE NOTICE '';
+    RAISE NOTICE '   ✅ Usando _stg_catalog_items como fuente de datos (% registros)', stg_items_count;
   ELSIF stg_update_count > 0 THEN
     use_stg_items := false;
     staging_count := stg_update_count;
     stg_table_name := '_stg_catalog_update';
-    RAISE NOTICE '   ✅ Encontrados % registros en _stg_catalog_update', stg_update_count;
+    RAISE NOTICE '';
+    RAISE NOTICE '   ✅ Usando _stg_catalog_update como fuente de datos (% registros)', stg_update_count;
   ELSE
     RAISE WARNING '';
     RAISE WARNING '========================================';
     RAISE WARNING '⚠️  ERROR: No se encontraron datos en las tablas de staging';
     RAISE WARNING '========================================';
     RAISE WARNING '';
-    RAISE WARNING 'Por favor importa el CSV a una de estas tablas:';
-    RAISE WARNING '1. _stg_catalog_items';
-    RAISE WARNING '2. _stg_catalog_update';
+    RAISE WARNING 'Diagnóstico:';
+    RAISE WARNING '  - _stg_catalog_items: % registros', stg_items_count;
+    RAISE WARNING '  - _stg_catalog_update: % registros', stg_update_count;
+    RAISE WARNING '';
+    RAISE WARNING 'Instrucciones:';
+    RAISE WARNING '1. Ve a Supabase Table Editor';
+    RAISE WARNING '2. Verifica que exista una de estas tablas:';
+    RAISE WARNING '   - _stg_catalog_items';
+    RAISE WARNING '   - _stg_catalog_update';
+    RAISE WARNING '3. Si no existe, créala primero (usa el script 61_create_staging_table.sql)';
+    RAISE WARNING '4. Importa el CSV a la tabla usando "Import data from CSV"';
+    RAISE WARNING '5. Asegúrate de que la columna "sku" tenga datos válidos';
+    RAISE WARNING '6. Vuelve a ejecutar este script';
     RAISE WARNING '';
     RAISE EXCEPTION 'Script detenido: no se encontraron datos en las tablas de staging.';
   END IF;
@@ -193,8 +244,16 @@ BEGIN
     WHERE s.sku IS NOT NULL AND trim(s.sku) <> ''
     ON CONFLICT (organization_id, sku) WHERE deleted = false
     DO UPDATE SET
-      collection_name = EXCLUDED.collection_name,
-      variant_name = EXCLUDED.variant_name,
+      collection_name = CASE 
+        WHEN EXCLUDED.collection_name IS NOT NULL AND trim(EXCLUDED.collection_name) <> '' 
+        THEN EXCLUDED.collection_name 
+        ELSE CatalogItems.collection_name 
+      END,
+      variant_name = CASE 
+        WHEN EXCLUDED.variant_name IS NOT NULL AND trim(EXCLUDED.variant_name) <> '' 
+        THEN EXCLUDED.variant_name 
+        ELSE CatalogItems.variant_name 
+      END,
       item_name = EXCLUDED.item_name,
       description = EXCLUDED.description,
       item_type = EXCLUDED.item_type,
@@ -334,8 +393,16 @@ BEGIN
     WHERE s.sku IS NOT NULL AND trim(s.sku) <> ''
     ON CONFLICT (organization_id, sku) WHERE deleted = false
     DO UPDATE SET
-      collection_name = EXCLUDED.collection_name,
-      variant_name = EXCLUDED.variant_name,
+      collection_name = CASE 
+        WHEN EXCLUDED.collection_name IS NOT NULL AND trim(EXCLUDED.collection_name) <> '' 
+        THEN EXCLUDED.collection_name 
+        ELSE CatalogItems.collection_name 
+      END,
+      variant_name = CASE 
+        WHEN EXCLUDED.variant_name IS NOT NULL AND trim(EXCLUDED.variant_name) <> '' 
+        THEN EXCLUDED.variant_name 
+        ELSE CatalogItems.variant_name 
+      END,
       item_name = EXCLUDED.item_name,
       description = EXCLUDED.description,
       item_type = EXCLUDED.item_type,

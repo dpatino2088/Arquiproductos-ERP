@@ -1,27 +1,27 @@
 import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { ShoppingBag, FileText } from 'lucide-react';
 
 export default function Sales() {
-  const { registerSubmodules } = useSubmoduleNav();
+  const { clearSubmoduleNav } = useSubmoduleNav();
 
   useEffect(() => {
-    // Only register Sales submodules if we're actually in the Sales module
+    // Sales component is only rendered for /sales route
+    // Submodules are registered by Quotes.tsx and QuoteApproved.tsx
+    // Just clear submodules when leaving the sales module
     const currentPath = window.location.pathname;
-    if (currentPath.startsWith('/sales')) {
-      registerSubmodules('Sales', [
-        { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
-        { id: 'orders', label: 'Orders', href: '/sales/orders', icon: ShoppingBag },
-      ]);
-      
-      // Redirect to quotes list by default when navigating to Sales module
-      // Only redirect if we're on the base /sales route, not if we're already on a sub-route
-      if (currentPath === '/sales' || currentPath === '/sales/') {
-        router.navigate('/sales/quotes', false); // false = replace instead of push to avoid history issues
-      }
+    if (currentPath === '/sales' || currentPath === '/sales/') {
+      // Redirect to quotes by default
+      router.navigate('/sales/quotes', false);
     }
-  }, [registerSubmodules]);
+    
+    return () => {
+      const path = window.location.pathname;
+      if (!path.startsWith('/sales')) {
+        clearSubmoduleNav();
+      }
+    };
+  }, [clearSubmoduleNav]);
 
   return null;
 }

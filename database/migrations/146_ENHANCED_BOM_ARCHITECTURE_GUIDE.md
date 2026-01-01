@@ -292,3 +292,11 @@ The new system works alongside the existing system:
 - ✅ **Queryable**: Can query "all configurations with CM-09 motor"
 - ✅ **Backward compatible**: Works with existing `BOMTemplates`/`BOMComponents`
 
+
+
+
+
+
+
+
+

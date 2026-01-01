@@ -101,6 +101,8 @@ export interface CostSettings {
   discount_distributor_pct?: number; // Default: 0.00
   discount_partner_pct?: number; // Default: 0.00
   discount_vip_pct?: number; // Default: 0.00
+  // Pricing guardrail (margin-on-sale)
+  min_margin_pct?: number; // Minimum margin percentage (margin-on-sale) used as pricing floor. Default: 35%
   // Legacy fields (kept for backward compatibility)
   labor_rate_per_hour?: number;
   default_labor_minutes_per_unit?: number;

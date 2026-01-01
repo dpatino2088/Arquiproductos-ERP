@@ -11,7 +11,7 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
-import { useCreateQuote, useUpdateQuote, useQuoteLines } from '../../hooks/useQuotes';
+import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
 import { Plus, Edit, Trash2, X, Download } from 'lucide-react';
 import ProductConfigurator from './ProductConfigurator';
@@ -20,6 +20,8 @@ import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import { generateQuotePDF } from '../../lib/pdf/generateQuotePDF';
+import { useCostSettings } from '../../hooks/useCosts';
+import { calculateQuoteLinePrice } from '../../lib/pricing';
 
 // Format currency
 const formatCurrency = (amount: number, currency: string = 'USD') => {
@@ -62,6 +64,7 @@ type QuoteFormValues = z.infer<typeof quoteSchema>;
 interface Customer {
   id: string;
   customer_name: string;
+  customer_type_name?: string | null; // VIP, Partner, Reseller, Distributor
   primary_contact_id?: string | null;
 }
 
@@ -112,8 +115,10 @@ export default function QuoteNew() {
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [initialLineConfig, setInitialLineConfig] = useState<ProductConfig | undefined>(undefined);
 
   const { lines: quoteLines, loading: loadingLines, refetch: refetchLines } = useQuoteLines(quoteId);
+  const { settings: costSettings } = useCostSettings(); // Get cost settings for pricing calculations
 
   // Form setup
   const {
@@ -147,7 +152,8 @@ export default function QuoteNew() {
       setQuoteId(queryQuoteId);
       if (lineId) {
         setEditingLineId(lineId);
-        setShowConfigurator(true);
+        // Don't show configurator immediately - wait for line config to load
+        // It will be shown when initialLineConfig is set
       }
     }
   }, []);
@@ -170,7 +176,9 @@ export default function QuoteNew() {
 
         if (data) {
           setQuoteData(data);
-          setValue('quote_no', (data as any).quote_no || '');
+          // Set all values, ensuring quote_no is set first and won't be overwritten
+          const quoteNo = (data as any).quote_no || '';
+          setValue('quote_no', quoteNo, { shouldValidate: true });
           setValue('customer_id', data.customer_id || '');
           const status = data.status as QuoteStatus;
           setValue('status', (status === 'cancelled' ? 'draft' : status) || 'draft');
@@ -200,7 +208,7 @@ export default function QuoteNew() {
       try {
         const { data, error } = await supabase
           .from('DirectoryCustomers')
-          .select('id, customer_name, primary_contact_id')
+          .select('id, customer_name, customer_type_name, primary_contact_id')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('customer_name');
@@ -243,46 +251,63 @@ export default function QuoteNew() {
     loadContacts();
   }, [selectedCustomerId, activeOrganizationId]);
 
-  // Generate quote number for new quotes
+  // Generate quote number for new quotes only (not when editing)
   useEffect(() => {
     const generateQuoteNo = async () => {
-      if (quoteId || !activeOrganizationId) return; // Don't generate if editing
-
-      try {
-        const { data, error } = await supabase
-          .from('Quotes')
-          .select('quote_no')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        if (error) throw error;
-
-        let nextNumber = 1;
-        if (data && data.length > 0) {
-          const lastNo = (data[0] as any).quote_no;
-          const match = lastNo?.match(/QT-(\d+)/);
-          if (match) {
-            nextNumber = parseInt(match[1], 10) + 1;
+      // CRITICAL: Don't generate if editing - must preserve existing quote_no
+      if (quoteId) {
+        // When editing, ensure we keep the existing quote_no from quoteData
+        // This will be set by loadQuoteData, but we ensure it's preserved here
+        if (quoteData?.quote_no) {
+          const currentQuoteNo = watch('quote_no');
+          // Only set if it's different (to avoid unnecessary updates)
+          if (currentQuoteNo !== quoteData.quote_no) {
+            setValue('quote_no', quoteData.quote_no, { shouldValidate: true });
           }
         }
+        return; // Never generate new number when editing
+      }
+      
+      // Only generate for new quotes
+      if (!activeOrganizationId) return;
+      
+      // Check if quote_no already has a value (from form state)
+      const currentQuoteNo = watch('quote_no');
+      if (currentQuoteNo && currentQuoteNo.trim() !== '') {
+        return; // Already has a value, don't overwrite
+      }
 
-        const quoteNo = `QT-${String(nextNumber).padStart(6, '0')}`;
+      try {
+        // Use the utility function to generate next sequential number
+        const { generateNextQuoteNumber } = await import('../../lib/sequential-numbers');
+        const quoteNo = await generateNextQuoteNumber(activeOrganizationId);
         setValue('quote_no', quoteNo, { shouldValidate: true });
       } catch (err) {
         console.error('Error generating quote number:', err);
-        const fallbackNo = `QT-${Date.now()}`;
+        const fallbackNo = `QT-${Date.now().toString().slice(-6)}`;
         setValue('quote_no', fallbackNo, { shouldValidate: true });
       }
     };
 
-    generateQuoteNo();
-  }, [activeOrganizationId, quoteId, setValue]);
+    // Small delay to ensure quoteData is loaded when editing
+    const timeoutId = setTimeout(() => {
+      generateQuoteNo();
+    }, 100);
 
-  // Calculate totals
+    return () => clearTimeout(timeoutId);
+  }, [activeOrganizationId, quoteId, setValue, watch, quoteData]);
+
+  // Calculate totals from List Price (MSRP End User) × Quantity
+  // This shows the total MSRP value, not the net distributor price
+  // Use the same qty that is displayed in the QTY column (line.qty, not computed_qty)
   const totals = useMemo(() => {
-    const subtotal = quoteLines.reduce((sum, line) => sum + (line.line_total || 0), 0);
+    const subtotal = quoteLines.reduce((sum, line) => {
+      // Total = List Price (MSRP) × Quantity (the qty shown in the QTY column)
+      // Fallback to unit_price_snapshot for old records that don't have list_unit_price_snapshot
+      const listPrice = line.list_unit_price_snapshot || line.unit_price_snapshot || 0;
+      const qty = line.qty || 1; // Use qty (what's displayed), not computed_qty
+      return sum + (listPrice * qty);
+    }, 0);
     const tax = 0; // TODO: Calculate tax if needed
     const total = subtotal + tax;
 
@@ -301,6 +326,34 @@ export default function QuoteNew() {
     }
 
     try {
+      // Validate required fields for Roller Shade
+      if (productConfig.productType === 'roller-shade') {
+        const operatingSystemVariant = (productConfig as any).operating_system_variant;
+        const tubeType = (productConfig as any).tube_type;
+        const width_m = (productConfig as any).widthM || ((productConfig as any).width_mm ? (productConfig as any).width_mm / 1000 : null);
+        const height_m = (productConfig as any).heightM || ((productConfig as any).height_mm ? (productConfig as any).height_mm / 1000 : null);
+        const driveType = (productConfig as any).operation_type || (productConfig as any).drive_type;
+        const sideChannel = (productConfig as any).side_channel;
+        const sideChannelType = (productConfig as any).side_channel_type;
+        
+        const errors: string[] = [];
+        if (!operatingSystemVariant) errors.push('Operating System Variant is required');
+        if (!tubeType) errors.push('Tube Type is required');
+        if (!width_m || width_m <= 0) errors.push('Width is required');
+        if (!height_m || height_m <= 0) errors.push('Height is required');
+        if (!driveType) errors.push('Drive Type is required');
+        if (sideChannel && !sideChannelType) errors.push('Side Channel Type is required when Side Channel is enabled');
+        
+        if (errors.length > 0) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Validation Error',
+            message: errors.join('. '),
+          });
+          return;
+        }
+      }
+      
       // Extract data from productConfig
       const area = productConfig.area || null;
       const position = productConfig.position || null;
@@ -309,19 +362,33 @@ export default function QuoteNew() {
       const quantity = productConfig.quantity || 1;
 
       // Get catalog item ID (from productConfig)
-      const catalogItemId = (productConfig as any).catalogItemId;
+      // For roller-shade: use variantId directly
+      // For dual/triple-shade: use frontFabric.variantId
+      // For drapery/awning: use fabric.variantId
+      let catalogItemId: string | undefined;
+      if (productConfig.productType === 'roller-shade') {
+        catalogItemId = (productConfig as any).variantId || (productConfig as any).catalogItemId;
+      } else if (productConfig.productType === 'dual-shade' || productConfig.productType === 'triple-shade') {
+        catalogItemId = (productConfig as any).frontFabric?.variantId;
+      } else if (productConfig.productType === 'drapery' || productConfig.productType === 'awning') {
+        catalogItemId = (productConfig as any).fabric?.variantId;
+      } else {
+        catalogItemId = (productConfig as any).catalogItemId;
+      }
+      
       if (!catalogItemId) {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Error',
-          message: 'Catalog item ID is required. Please complete the product configuration.',
+          message: 'Catalog item ID is required. Please complete the product configuration and select a variant.',
         });
         return;
       }
 
-      // Get product type ID
+      // Get product type ID - CRITICAL: Always try to find product_type_id
       let productTypeId: string | null = null;
       if (productConfig.productType) {
+        // First try: exact match by code in organization
         const { data: productTypes } = await supabase
           .from('ProductTypes')
           .select('id')
@@ -332,17 +399,74 @@ export default function QuoteNew() {
 
         if (productTypes && productTypes.length > 0 && productTypes[0]?.id) {
           productTypeId = productTypes[0].id;
+        } else {
+          // Second try: case-insensitive match by code in organization
+          const { data: productTypesCaseInsensitive } = await supabase
+            .from('ProductTypes')
+            .select('id')
+            .eq('organization_id', activeOrganizationId)
+            .ilike('code', productConfig.productType)
+            .eq('deleted', false)
+            .limit(1);
+
+          if (productTypesCaseInsensitive && productTypesCaseInsensitive.length > 0 && productTypesCaseInsensitive[0]?.id) {
+            productTypeId = productTypesCaseInsensitive[0].id;
+          } else {
+            // Third try: shared ProductTypes (organization_id IS NULL)
+            const { data: sharedProductTypes } = await supabase
+              .from('ProductTypes')
+              .select('id')
+              .is('organization_id', null)
+              .ilike('code', productConfig.productType)
+              .eq('deleted', false)
+              .limit(1);
+
+            if (sharedProductTypes && sharedProductTypes.length > 0 && sharedProductTypes[0]?.id) {
+              productTypeId = sharedProductTypes[0].id;
+            } else {
+              // Fourth try: common fallback (ROLLER SHADE)
+              const { data: fallbackProductTypes } = await supabase
+                .from('ProductTypes')
+                .select('id')
+                .in('code', ['ROLLER', 'ROLLER_SHADE', 'ROLLER-SHADE'])
+                .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
+                .eq('deleted', false)
+                .order('organization_id', { ascending: true }) // Prefer organization-specific
+                .limit(1);
+
+              if (fallbackProductTypes && fallbackProductTypes.length > 0 && fallbackProductTypes[0]?.id) {
+                productTypeId = fallbackProductTypes[0].id;
+                console.warn(`ProductType not found for code "${productConfig.productType}", using fallback: ${productTypeId}`);
+              }
+            }
+          }
         }
       }
+      
+      // Log warning if productTypeId is still null
+      if (!productTypeId && productConfig.productType) {
+        console.warn(`⚠️ Could not find product_type_id for productType: "${productConfig.productType}". BOM generation may fail.`);
+      }
 
-      // Get collection and variant names from catalog item
+      // Get collection and variant names from catalog item (only fields that exist)
       const { data: catalogItem } = await supabase
         .from('CatalogItems')
-        .select('collection_name, variant_name, cost_exw, msrp, default_margin_pct, uom')
+        .select('collection_name, variant_name, cost_exw, msrp, default_margin_pct, uom, item_category_id, sku')
         .eq('id', catalogItemId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .maybeSingle();
+
+      // SECURITY GUARD: Block quoting items without MSRP
+      if (!catalogItem || !catalogItem.msrp || catalogItem.msrp === 0) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Cannot Add Line',
+          message: `Catalog item ${catalogItem?.sku || catalogItemId} does not have MSRP (list price). Please define MSRP before adding to quote.`,
+        });
+        setShowConfigurator(false);
+        return;
+      }
 
       const collectionName = catalogItem?.collection_name || null;
       const variantName = catalogItem?.variant_name || null;
@@ -350,17 +474,114 @@ export default function QuoteNew() {
       // Calculate computed_qty (for pricing)
       const computedQty = width_m && height_m ? width_m * height_m : quantity;
 
-      // Calculate unit price
-      let unitPrice = 0;
-      if (catalogItem?.msrp) {
-        unitPrice = catalogItem.msrp;
-      } else if (catalogItem?.cost_exw && catalogItem?.default_margin_pct) {
-        unitPrice = catalogItem.cost_exw * (1 + catalogItem.default_margin_pct / 100);
-      } else if (catalogItem?.cost_exw) {
-        unitPrice = catalogItem.cost_exw * 1.5; // Default 50% margin
+      // Get customer type for pricing tier (from quote's customer)
+      const quoteCustomerId = quoteData?.customer_id || watch('customer_id');
+      const quoteCustomer = customers.find(c => c.id === quoteCustomerId);
+      const customerType = quoteCustomer?.customer_type_name || 'VIP'; // Default to VIP if not set
+      
+      // Get MSRP (END USER list price) from CatalogItem
+      // CatalogItems.msrp = MSRP END USER (precio lista público)
+      const listPrice = catalogItem.msrp; // Already validated above (cannot be null/0)
+
+      // Calculate net price for distributor (with tier discounts + margin floor)
+      // This is the price the distributor/customer will pay (after discounts)
+      const categoryMargin: number | null = null;
+      const pricingResult = calculateQuoteLinePrice(
+        {
+          msrp: catalogItem.msrp,
+          cost_exw: catalogItem?.cost_exw || null,
+          // Don't include optional cost fields that may not exist in DB
+          labor_cost_per_unit: null,
+          shipping_cost_per_unit: null,
+          freight_cost: null,
+          handling_cost: null,
+          import_tax_pct: null,
+          default_margin_pct: catalogItem?.default_margin_pct || null,
+        },
+        customerType,
+        costSettings || null,
+        categoryMargin
+      );
+
+      // Net unit price (after tier discount + margin floor) - distributor pays this
+      const netUnitPrice = pricingResult.unitPrice;
+      
+      // Line total = net price * quantity (distributor pays this total)
+      const lineTotal = netUnitPrice * computedQty;
+
+      // NORMALIZE side_channel to boolean (CRITICAL: prevent string contamination)
+      // Handle ALL possible truthy/falsy values defensively
+      const rawSideChannel = (productConfig as any).side_channel;
+      
+      // Explicitly check for false values first
+      const isExplicitlyFalse = 
+        rawSideChannel === false ||
+        rawSideChannel === 'false' ||
+        rawSideChannel === 0 ||
+        rawSideChannel === '0' ||
+        rawSideChannel === null ||
+        rawSideChannel === undefined ||
+        rawSideChannel === '';
+      
+      // Then check for true values
+      const sideChannelBool = !isExplicitlyFalse && (
+        rawSideChannel === true ||
+        rawSideChannel === 'true' ||
+        rawSideChannel === 1 ||
+        rawSideChannel === '1'
+      );
+      
+      const rawSideChannelType = (productConfig as any).side_channel_type;
+      
+      // CRITICAL: If side_channel is true, side_channel_type MUST be valid
+      // If side_channel is false, side_channel_type MUST be null
+      let sideChannelTypeNormalized: 'side_only' | 'side_and_bottom' | null = null;
+      
+      if (sideChannelBool) {
+        // side_channel = true: validate type
+        if (rawSideChannelType === 'side_only' || rawSideChannelType === 'side_and_bottom') {
+          sideChannelTypeNormalized = rawSideChannelType;
+        } else {
+          // If side_channel is true but type is invalid/missing, default to 'side_only'
+          // This prevents constraint violations
+          sideChannelTypeNormalized = 'side_only';
+          if (import.meta.env.DEV) {
+            console.warn('QuoteNew: side_channel=true but invalid type, defaulting to side_only', {
+              rawSideChannelType,
+              rawSideChannel
+            });
+          }
+        }
+      } else {
+        // side_channel = false: type MUST be null
+        sideChannelTypeNormalized = null;
       }
 
-      const lineTotal = unitPrice * computedQty;
+      // Debug log in development
+      if (import.meta.env.DEV) {
+        console.log('QuoteNew: Normalized side_channel values', {
+          rawSideChannel,
+          isExplicitlyFalse,
+          sideChannelBool,
+          rawSideChannelType,
+          sideChannelTypeNormalized,
+          productConfig: {
+            side_channel: (productConfig as any).side_channel,
+            side_channel_type: (productConfig as any).side_channel_type,
+            operating_system_variant: (productConfig as any).operating_system_variant,
+          }
+        });
+      }
+      
+      // FINAL VALIDATION: Ensure data integrity before saving
+      if (sideChannelBool && !sideChannelTypeNormalized) {
+        console.error('QuoteNew: CRITICAL - side_channel=true but type is null! Forcing side_only');
+        sideChannelTypeNormalized = 'side_only';
+      }
+      if (!sideChannelBool && sideChannelTypeNormalized !== null) {
+        console.error('QuoteNew: CRITICAL - side_channel=false but type is not null! Forcing null');
+        sideChannelTypeNormalized = null;
+      }
 
       // Create QuoteLine
       const quoteLineData: any = {
@@ -375,19 +596,51 @@ export default function QuoteNew() {
         variant_name: variantName,
         product_type: productConfig.productType || null,
         product_type_id: productTypeId,
-        drive_type: (productConfig as any).drive_type || null,
-        bottom_rail_type: (productConfig as any).bottom_rail_type || null,
+        bom_template_id: (productConfig as any).bom_template_id || null,
+        operating_system_variant: (productConfig as any).operating_system_variant || null,
+        tube_type: (productConfig as any).tube_type || null,
+        drive_type: (productConfig as any).operation_type || (productConfig as any).drive_type || null,
+        bottom_rail_type: (productConfig as any).bottom_rail_type || 'standard', // Default to 'standard' if not selected
         cassette: (productConfig as any).cassette || false,
         cassette_type: (productConfig as any).cassette_type || null,
-        side_channel: (productConfig as any).side_channel || false,
-        side_channel_type: (productConfig as any).side_channel_type || null,
-        hardware_color: (productConfig as any).hardware_color || null,
+        side_channel: sideChannelBool,
+        side_channel_type: sideChannelTypeNormalized,
+        hardware_color: (productConfig as any).hardware_color || (productConfig as any).hardwareColor || null,
         computed_qty: computedQty,
-        unit_price_snapshot: unitPrice,
-        unit_cost_snapshot: catalogItem?.cost_exw || 0,
-        line_total: lineTotal,
+        // ============================================
+        // PRICING SNAPSHOTS (Source of Truth)
+        // ============================================
+        // MSRP = End User List Price (precio lista público)
+        list_unit_price_snapshot: listPrice, // CatalogItems.msrp (END USER price)
+        // Net Price = Distributor price (after tier discount + margin floor)
+        unit_price_snapshot: netUnitPrice, // Net unit price distributor pays (pricingResult.unitPrice)
+        // Totals
+        line_total: lineTotal, // Net total = netUnitPrice * computedQty (distributor pays this)
+        // Optional: list_line_total_snapshot = listPrice * computedQty (end user would pay this)
+        // ============================================
+        // COST SNAPSHOTS
+        // ============================================
+        unit_cost_snapshot: catalogItem?.cost_exw || 0, // Legacy: cost_exw only (kept for compatibility)
+        total_unit_cost_snapshot: pricingResult.totalUnitCost, // Total unit cost (for margin calculation)
+        // ============================================
+        // PRICING METADATA
+        // ============================================
+        discount_pct_used: pricingResult.discountPct, // Discount percentage from customer tier
+        customer_type_snapshot: customerType, // Customer type used for tier discount (VIP, Partner, etc.)
+        price_basis: pricingResult.priceBasis, // 'MSRP_TIER' or 'MARGIN_FLOOR'
+        margin_pct_used: pricingResult.totalUnitCost > 0 && netUnitPrice > 0
+          ? ((netUnitPrice - pricingResult.totalUnitCost) / netUnitPrice * 100)
+          : null, // Actual margin achieved on net price (margin-on-sale)
         measure_basis_snapshot: 'area', // Default
-        margin_percentage: catalogItem?.default_margin_pct || 50,
+        // ============================================
+        // DO NOT WRITE LEGACY FIELDS:
+        // - final_unit_price (deprecated)
+        // - discount_percentage (deprecated)
+        // - discount_amount (deprecated)
+        // - discount_source (deprecated - use price_basis instead)
+        // - margin_percentage (deprecated - use margin_pct_used instead)
+        // - margin_source (deprecated)
+        // ============================================
       };
 
       let finalLineId = editingLineId;
@@ -430,27 +683,147 @@ export default function QuoteNew() {
         });
       }
 
+      // Upsert fabric QuoteLineComponent if catalog item is fabric
+      // (Trigger should handle this automatically, but we call it explicitly as fallback)
+      if (finalLineId && catalogItemId) {
+        try {
+          // Check if catalog item is fabric
+          const { data: itemCheck } = await supabase
+            .from('CatalogItems')
+            .select('is_fabric')
+            .eq('id', catalogItemId)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .maybeSingle();
+          
+          if (itemCheck?.is_fabric) {
+            // Update QuoteLine metadata with fabric rotation/heatseal if provided
+            const fabricRotation = (productConfig as any).fabric_rotation || false;
+            const fabricHeatseal = (productConfig as any).fabric_heatseal || false;
+            
+            if (fabricRotation || fabricHeatseal) {
+              await supabase
+                .from('QuoteLines')
+                .update({
+                  metadata: {
+                    fabric_rotation: fabricRotation,
+                    fabric_heatseal: fabricHeatseal,
+                  }
+                })
+                .eq('id', finalLineId)
+                .eq('organization_id', activeOrganizationId);
+            }
+            
+            // Call function to upsert fabric component
+            await supabase.rpc('upsert_fabric_quote_line_component', {
+              p_quote_line_id: finalLineId,
+              p_organization_id: activeOrganizationId,
+            });
+          }
+        } catch (fabricError) {
+          console.warn('Fabric component creation failed:', fabricError);
+          // Don't fail the whole operation if fabric component creation fails
+        }
+      }
+
       // Generate BOM if product_type_id exists
       if (productTypeId && finalLineId) {
         try {
+          // Use operation_type if available, fallback to drive_type, then default to 'motor'
+          const operationType = (productConfig as any).operation_type || 
+                               (productConfig as any).drive_type || 
+                               ((productConfig as any).operatingSystem === 'manual' ? 'manual' : 'motor');
+          
+          // Normalize side_channel for RPC (use same normalization as quoteLineData)
+          // Use the already normalized values from quoteLineData to ensure consistency
+          const sideChannelBoolRPC = sideChannelBool;
+          const sideChannelTypeRPC = sideChannelTypeNormalized;
+          
           await supabase.rpc('generate_configured_bom_for_quote_line', {
             p_quote_line_id: finalLineId,
             p_product_type_id: productTypeId,
             p_organization_id: activeOrganizationId,
-            p_drive_type: (productConfig as any).drive_type || 'motor',
+            p_drive_type: operationType,
             p_bottom_rail_type: (productConfig as any).bottom_rail_type || 'standard',
             p_cassette: (productConfig as any).cassette || false,
             p_cassette_type: (productConfig as any).cassette_type || null,
-            p_side_channel: (productConfig as any).side_channel || false,
-            p_side_channel_type: (productConfig as any).side_channel_type || null,
-            p_hardware_color: (productConfig as any).hardware_color || 'white',
+            p_side_channel: sideChannelBoolRPC,
+            p_side_channel_type: sideChannelTypeRPC,
+            p_hardware_color: (productConfig as any).hardware_color || 
+                            (productConfig as any).hardwareColor || 
+                            'white',
             p_width_m: width_m || 0,
             p_height_m: height_m || 0,
             p_qty: quantity,
+            p_tube_type: (productConfig as any).tube_type || null,
+            p_operating_system_variant: (productConfig as any).operating_system_variant || null,
           });
         } catch (bomError) {
           console.warn('BOM generation failed:', bomError);
           // Don't fail the whole operation if BOM generation fails
+        }
+      }
+
+      // Save accessories as QuoteLineComponents
+      const accessories = (productConfig as any).accessories || [];
+      if (finalLineId) {
+        try {
+          // IMPORTANT: Delete old accessories first (when editing)
+          // This prevents duplicates and ensures clean state
+          const { error: deleteError } = await supabase
+            .from('QuoteLineComponents')
+            .update({ deleted: true })
+            .eq('quote_line_id', finalLineId)
+            .eq('organization_id', activeOrganizationId)
+            .or('source.eq.accessory,component_role.eq.accessory');
+
+          if (deleteError && import.meta.env.DEV) {
+            console.warn('Failed to delete old accessories:', deleteError);
+          }
+
+          // Insert new accessories if any
+          if (accessories.length > 0) {
+            // Get catalog items for accessories to get their names and costs
+            const accessoryIds = accessories.map((a: any) => a.id).filter(Boolean);
+            if (accessoryIds.length > 0) {
+              const { data: accessoryItems } = await supabase
+                .from('CatalogItems')
+                .select('id, item_name, sku, msrp, cost_exw, default_margin_pct')
+                .in('id', accessoryIds)
+                .eq('organization_id', activeOrganizationId)
+                .eq('deleted', false);
+
+              // Insert accessories as QuoteLineComponents
+              const accessoryComponents = accessories.map((acc: any) => {
+                const catalogItem = accessoryItems?.find((item: any) => item.id === acc.id);
+                const unitCost = acc.price || catalogItem?.msrp || 
+                  (catalogItem?.cost_exw ? catalogItem.cost_exw * (1 + (catalogItem.default_margin_pct || 50) / 100) : 0);
+                
+                return {
+                  organization_id: activeOrganizationId,
+                  quote_line_id: finalLineId,
+                  catalog_item_id: acc.id,
+                  qty: acc.qty || 1,
+                  unit_cost_exw: unitCost,
+                  source: 'accessory',
+                  component_role: 'accessory',
+                  uom: (catalogItem as any)?.uom || 'ea',
+                };
+              });
+
+              if (accessoryComponents.length > 0) {
+                const { error: accessoryError } = await supabase
+                  .from('QuoteLineComponents')
+                  .insert(accessoryComponents);
+
+                if (accessoryError && import.meta.env.DEV) {
+                  console.warn('Failed to save accessories:', accessoryError);
+                }
+              }
+            }
+          }
+        } catch (accessoryError) {
+          console.warn('Error saving accessories:', accessoryError);
         }
       }
 
@@ -508,9 +881,272 @@ export default function QuoteNew() {
     }
   };
 
+  // Load initial config for editing a line
+  useEffect(() => {
+    const loadLineConfig = async () => {
+      if (!editingLineId || !quoteId || !activeOrganizationId) {
+        setInitialLineConfig(undefined);
+        return;
+      }
+
+      try {
+        // First, fetch the QuoteLine without embedded relationships (more reliable)
+        const { data: lineData, error } = await supabase
+          .from('QuoteLines')
+          .select('*')
+          .eq('id', editingLineId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!lineData) {
+          setInitialLineConfig(undefined);
+          return;
+        }
+
+        // Fetch CatalogItem separately (for main product)
+        let catalogItem = null;
+        if (lineData.catalog_item_id) {
+          const { data: catalogItemData } = await supabase
+            .from('CatalogItems')
+            .select('id, collection_name, variant_name, sku, item_name')
+            .eq('id', lineData.catalog_item_id)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .maybeSingle();
+          catalogItem = catalogItemData;
+        }
+
+        // Fetch ProductType separately
+        // Try to get product_type_id from lineData, or look it up by product_type string
+        let productType = null;
+        let productTypeId = lineData.product_type_id;
+        
+        if (!productTypeId && lineData.product_type) {
+          // If product_type_id is not stored, try to find it by product_type string
+          const { data: productTypeByCode } = await supabase
+            .from('ProductTypes')
+            .select('id, code, name')
+            .eq('code', lineData.product_type.toUpperCase())
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .maybeSingle();
+          
+          if (productTypeByCode) {
+            productTypeId = productTypeByCode.id;
+            productType = productTypeByCode;
+          }
+        }
+        
+        if (productTypeId && !productType) {
+          // Fetch ProductType by ID
+          const { data: productTypeData } = await supabase
+            .from('ProductTypes')
+            .select('id, code, name')
+            .eq('id', productTypeId)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .maybeSingle();
+          productType = productTypeData;
+        }
+
+        // Load accessories (filter by source='accessory' OR component_role='accessory')
+        // Fetch accessories and their CatalogItems separately
+        const { data: accessoriesData } = await supabase
+          .from('QuoteLineComponents')
+          .select('id, catalog_item_id, qty, unit_cost_exw, source, component_role')
+          .eq('quote_line_id', editingLineId)
+          .eq('deleted', false)
+          .eq('organization_id', activeOrganizationId)
+          .or('source.eq.accessory,component_role.eq.accessory');
+
+        // Fetch CatalogItems for accessories
+        const accessoryCatalogItemIds = (accessoriesData || [])
+          .map((acc: any) => acc.catalog_item_id)
+          .filter((id: string | null) => id);
+        
+        let accessoriesCatalogItemsMap = new Map<string, any>();
+        if (accessoryCatalogItemIds.length > 0) {
+          const { data: accessoryCatalogItems } = await supabase
+            .from('CatalogItems')
+            .select('id, item_name, sku, msrp, name')
+            .in('id', accessoryCatalogItemIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+          
+          if (accessoryCatalogItems) {
+            accessoryCatalogItems.forEach((item: any) => {
+              accessoriesCatalogItemsMap.set(item.id, item);
+            });
+          }
+        }
+
+        const accessories = (accessoriesData || []).map((acc: any) => {
+          const catalogItem = accessoriesCatalogItemsMap.get(acc.catalog_item_id);
+          return {
+            id: acc.catalog_item_id,
+            // Use item_name from CatalogItems (same pattern as area/position from QuoteLines)
+            name: catalogItem?.item_name || catalogItem?.name || catalogItem?.sku || 'Unknown',
+            qty: acc.qty || 1,
+            price: acc.unit_cost_exw || catalogItem?.msrp || 0,
+          };
+        });
+
+        // Convert QuoteLine to ProductConfig based on product_type
+        // Use productType from DB query or fallback to lineData.product_type
+        const productTypeCode = productType?.code || lineData.product_type?.toUpperCase() || 'ROLLER';
+        // Map DB code to UI code
+        const productTypeMap: Record<string, string> = {
+          'ROLLER': 'roller-shade',
+          'DUAL': 'dual-shade',
+          'TRIPLE': 'triple-shade',
+          'DRAPERY': 'drapery',
+          'AWNING': 'awning',
+          'FILM': 'window-film',
+        };
+        const productTypeUI = productTypeMap[productTypeCode] || 'roller-shade';
+        
+        // CRITICAL: Ensure we have productTypeId - use the one we found or fallback
+        const finalProductTypeId = productTypeId || productType?.id;
+        const width_mm = lineData.width_m ? lineData.width_m * 1000 : undefined;
+        const height_mm = lineData.height_m ? lineData.height_m * 1000 : undefined;
+
+        let config: ProductConfig;
+
+        if (productTypeUI === 'roller-shade' || productTypeUI === 'triple-shade') {
+          config = {
+            productType: productTypeUI as 'roller-shade' | 'triple-shade',
+            productTypeId: finalProductTypeId || undefined,
+            area: lineData.area || undefined,
+            position: lineData.position || '',
+            quantity: lineData.qty || 1,
+            width_mm,
+            height_mm,
+            variantId: lineData.catalog_item_id,
+            catalogItemId: lineData.catalog_item_id,
+            fabric_catalog_item_id: lineData.catalog_item_id, // For VariantsStep
+            collectionName: catalogItem?.collection_name || lineData.collection_name || undefined, // For VariantsStep dropdown
+            variantName: catalogItem?.variant_name || lineData.variant_name || undefined, // For display
+            operatingSystem: lineData.drive_type === 'motor' ? 'motorized' : 'manual',
+            operation_type: lineData.drive_type || 'motor',
+            drive_type: lineData.drive_type || 'motor',
+            bom_template_id: lineData.bom_template_id || undefined,
+            operating_system_variant: lineData.operating_system_variant || undefined,
+            tube_type: lineData.tube_type || undefined,
+            bottom_rail_type: lineData.bottom_rail_type || 'standard',
+            cassette: lineData.cassette || false,
+            cassette_type: lineData.cassette_type || undefined,
+            side_channel: lineData.side_channel || false,
+            // CRITICAL: If side_channel is true but type is null, default to 'side_only'
+            side_channel_type: lineData.side_channel 
+              ? (lineData.side_channel_type || 'side_only')
+              : (lineData.side_channel_type || undefined),
+            hardware_color: lineData.hardware_color || 'white',
+            hardwareColor: lineData.hardware_color || 'white',
+            fabric_rotation: lineData.metadata?.fabric_rotation || false,
+            fabric_heatseal: lineData.metadata?.fabric_heatseal || false,
+            accessories,
+          } as ProductConfig;
+        } else if (productTypeUI === 'dual-shade') {
+          config = {
+            productType: 'dual-shade',
+            productTypeId: finalProductTypeId || undefined,
+            area: lineData.area || undefined,
+            position: lineData.position || '',
+            quantity: lineData.qty || 1,
+            width_mm,
+            height_mm,
+            frontFabric: {
+              variantId: lineData.catalog_item_id,
+            },
+            fabric_catalog_item_id: lineData.catalog_item_id, // For VariantsStep
+            collectionName: catalogItem?.collection_name || lineData.collection_name || undefined, // For VariantsStep dropdown
+            variantName: catalogItem?.variant_name || lineData.variant_name || undefined, // For display
+            operatingSystem: lineData.drive_type === 'motor' ? 'motorized' : 'manual',
+            drive_type: lineData.drive_type || 'motor',
+            bottom_rail_type: lineData.bottom_rail_type || 'standard',
+            cassette: lineData.cassette || false,
+            side_channel: lineData.side_channel || false,
+            hardware_color: lineData.hardware_color || 'white',
+            fabric_rotation: lineData.metadata?.fabric_rotation || false,
+            fabric_heatseal: lineData.metadata?.fabric_heatseal || false,
+            accessories,
+          } as ProductConfig;
+        } else {
+          // Default to roller-shade if unknown type
+          config = {
+            productType: 'roller-shade',
+            productTypeId: finalProductTypeId || undefined,
+            area: lineData.area || undefined,
+            position: lineData.position || '',
+            quantity: lineData.qty || 1,
+            width_mm,
+            height_mm,
+            variantId: lineData.catalog_item_id,
+            catalogItemId: lineData.catalog_item_id,
+            fabric_catalog_item_id: lineData.catalog_item_id, // For VariantsStep
+            collectionName: catalogItem?.collection_name || lineData.collection_name || undefined, // For VariantsStep dropdown
+            variantName: catalogItem?.variant_name || lineData.variant_name || undefined, // For display
+            operatingSystem: lineData.drive_type === 'motor' ? 'motorized' : 'manual',
+            fabric_rotation: lineData.metadata?.fabric_rotation || false,
+            fabric_heatseal: lineData.metadata?.fabric_heatseal || false,
+            accessories,
+          } as ProductConfig;
+        }
+
+        if (import.meta.env.DEV) {
+          console.log('loadLineConfig: Config loaded - FULL DEBUG', {
+            lineId: editingLineId,
+            productType: config.productType,
+            productTypeId: config.productTypeId,
+            productTypeFromDB: productType?.id,
+            finalProductTypeId: finalProductTypeId,
+            hasArea: !!config.area,
+            hasPosition: !!config.position,
+            accessoriesCount: accessories.length,
+            hasCollection: !!config.collectionName,
+            hasVariant: !!config.variantName,
+            width_mm: config.width_mm,
+            height_mm: config.height_mm,
+            drive_type: (config as any).drive_type,
+            hardware_color: (config as any).hardware_color,
+            fullConfig: config,
+          });
+        }
+
+        setInitialLineConfig(config);
+        // Show configurator after config is loaded
+        if (editingLineId) {
+          setShowConfigurator(true);
+        }
+      } catch (err: any) {
+        const errorMessage = err?.message || 'Failed to load quote line configuration';
+        if (import.meta.env.DEV) {
+          console.error('Error loading line config:', {
+            message: errorMessage,
+            code: err?.code,
+            editingLineId,
+            quoteId,
+          });
+        }
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error loading quote line',
+          message: errorMessage + '. Please try again.',
+        });
+        setInitialLineConfig(undefined);
+      }
+    };
+
+    loadLineConfig();
+  }, [editingLineId, quoteId, activeOrganizationId]);
+
   // Handle edit line
   const handleEditLine = (lineId: string) => {
-    router.navigate(`/sales/quotes/new?quote_id=${quoteId}&line_id=${lineId}`);
+    setEditingLineId(lineId);
+    // Don't show configurator immediately - wait for loadLineConfig to finish
+    // The useEffect will show it after config is loaded
   };
 
   // Handle PDF download
@@ -571,7 +1207,7 @@ export default function QuoteNew() {
   };
 
   // Handle form submit
-  const onSubmit = async (data: QuoteFormValues) => {
+  const onSubmit = async (data: QuoteFormValues, shouldNavigate: boolean = false) => {
     if (!activeOrganizationId) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -602,25 +1238,66 @@ export default function QuoteNew() {
 
       if (quoteId) {
         // Update existing quote
-        await updateQuote(quoteId, quoteData);
+        // Check if status is changing to 'approved' - use approveQuote function
+        const isApproving = normalizeStatus(quoteData.status) === 'approved';
+        
+        // If approving, update other fields FIRST, then approve (safer transaction order)
+        if (isApproving) {
+          console.log('🔔 QuoteNew: Status changed to approved, using approveQuote function');
+          
+          // Step 1: Update other fields first (without status)
+          const { status, ...safeData } = quoteData;
+          if (Object.keys(safeData).length > 0) {
+            await updateQuote(quoteId, safeData);
+          }
+          
+          // Step 2: Approve quote (this triggers the DB trigger)
+          await approveQuote(quoteId, activeOrganizationId);
+        } else {
+          // For non-approval updates, use regular updateQuote
+          await updateQuote(quoteId, quoteData);
+        }
+        
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Success',
-          message: 'Quote updated successfully',
+          message: isApproving ? 'Quote approved successfully' : 'Quote updated successfully',
         });
-        // Navigate back to quotes list
-        router.navigate('/sales/quotes');
+        
+        // Only navigate if shouldNavigate is true
+        if (shouldNavigate) {
+          // If status is 'approved', navigate to QuoteApproved view
+          if (isApproving) {
+            router.navigate('/sales/quotes/approved');
+          } else {
+            // Otherwise, navigate back to quotes list
+            router.navigate('/sales/quotes');
+          }
+        }
       } else {
         // Create new quote
         const created = await createQuote(quoteData);
         if (created?.id) {
+          // Update quoteId state so form knows it's now in edit mode
+          setQuoteId(created.id);
+          setQuoteData(created);
+          
           useUIStore.getState().addNotification({
             type: 'success',
             title: 'Success',
             message: 'Quote created successfully',
           });
-          // Navigate back to quotes list
-          router.navigate('/sales/quotes');
+          
+          // Only navigate if shouldNavigate is true
+          if (shouldNavigate) {
+            // If status is 'approved', navigate to QuoteApproved view
+            if (quoteData.status === 'approved') {
+              router.navigate('/sales/quotes/approved');
+            } else {
+              // Otherwise, navigate back to quotes list
+              router.navigate('/sales/quotes');
+            }
+          }
         }
       }
     } catch (err: any) {
@@ -634,6 +1311,11 @@ export default function QuoteNew() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Wrapper for Save and Close button
+  const handleSaveAndClose = async (data: QuoteFormValues) => {
+    await onSubmit(data, true); // Pass true to navigate after saving
   };
 
   // Get selected customer name
@@ -674,12 +1356,21 @@ export default function QuoteNew() {
           </button>
           <button
             type="button"
-            onClick={handleSubmit(onSubmit)}
+            onClick={handleSubmit((data) => onSubmit(data, false))}
             disabled={isSaving || isCreating || isUpdating}
-            className="px-4 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
+            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save'}
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit(handleSaveAndClose)}
+            disabled={isSaving || isCreating || isUpdating}
+            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: '#10b981' }}
+          >
+            {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save and Close'}
           </button>
         </div>
       </div>
@@ -844,6 +1535,7 @@ export default function QuoteNew() {
                 type="button"
                 onClick={() => {
                   setEditingLineId(null);
+                  setInitialLineConfig(undefined); // Clear config for new line
                   setShowConfigurator(true);
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
@@ -869,27 +1561,18 @@ export default function QuoteNew() {
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Collection</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">System Drive</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Measurements</th>
+                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Accessories</th>
                     <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Qty</th>
-                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Total Price</th>
+                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">List Price</th>
+                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Total</th>
                     <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {quoteLines.map((line: any) => {
-                    // Debug: Log the line data to see what we're getting
-                    if (import.meta.env.DEV) {
-                      console.log('QuoteLine data:', {
-                        id: line.id,
-                        area: line.area,
-                        position: line.position,
-                        allKeys: Object.keys(line),
-                        rawLine: line,
-                      });
-                    }
-
-                    // Try multiple ways to access area and position
-                    const area = line.area ?? (line as any).Area ?? null;
-                    const position = line.position ?? (line as any).Position ?? null;
+                    // Extract data from line
+                    const area = line.area ?? null;
+                    const position = line.position ?? null;
                     
                     const productTypeName = line.ProductType?.name || line.product_type || 'N/A';
                     const collectionDisplay = line.collection_name && line.variant_name
@@ -901,10 +1584,10 @@ export default function QuoteNew() {
                     return (
                       <tr key={line.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <td className="py-4 px-6 text-gray-700 text-sm">
-                          {area != null && String(area).trim() !== '' ? String(area).trim() : 'N/A'}
+                          {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
                         <td className="py-4 px-6 text-gray-700 text-sm">
-                          {position != null && String(position).trim() !== '' ? String(position).trim() : 'N/A'}
+                          {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
                         <td className="py-4 px-6 text-gray-900 text-sm font-medium">
                           {productTypeName}
@@ -918,15 +1601,48 @@ export default function QuoteNew() {
                         <td className="py-4 px-6 text-gray-700 text-sm">
                           {line.width_m && line.height_m
                             ? `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)} mm`
-                            : 'N/A'}
+                            : '—'}
+                        </td>
+                        <td className="py-4 px-6 text-gray-700 text-sm">
+                          {line.Accessories && line.Accessories.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 items-center">
+                              {line.Accessories.map((acc: any, idx: number) => {
+                                // Get item_name from CatalogItems relationship (similar to how area/position work)
+                                const itemName = acc.CatalogItems?.item_name || 
+                                                acc.CatalogItems?.name || 
+                                                acc.CatalogItems?.sku || 
+                                                'Unknown';
+                                return (
+                                  <span key={acc.id || idx} className="text-xs bg-gray-100 px-2 py-0.5 rounded inline-block">
+                                    {itemName}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
                         </td>
                         <td className="py-4 px-6 text-right text-gray-900 text-sm">
                           {line.qty ? line.qty.toFixed(0) : 'N/A'}
                         </td>
-                        <td className="py-4 px-6 text-right text-gray-900 text-sm">
-                          <div className="font-medium">
-                            {formatCurrency(line.line_total || 0, watch('currency'))}
-                          </div>
+                        {/* List Price (MSRP End User) */}
+                        <td className="py-4 px-6 text-right text-gray-900 text-sm font-medium">
+                          {(() => {
+                            // Use list_unit_price_snapshot if available, otherwise fallback to unit_price_snapshot (for old records)
+                            const listPrice = line.list_unit_price_snapshot || line.unit_price_snapshot || 0;
+                            return formatCurrency(listPrice, watch('currency'));
+                          })()}
+                        </td>
+                        {/* Total (List Price × Quantity) */}
+                        <td className="py-4 px-6 text-right text-gray-900 text-sm font-medium">
+                          {(() => {
+                            // Use list_unit_price_snapshot if available, otherwise fallback to unit_price_snapshot (for old records)
+                            const listPrice = line.list_unit_price_snapshot || line.unit_price_snapshot || 0;
+                            // Use the same qty that is displayed in the QTY column
+                            const qty = line.qty || 1;
+                            return formatCurrency(listPrice * qty, watch('currency'));
+                          })()}
                         </td>
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-1 justify-end">
@@ -959,7 +1675,7 @@ export default function QuoteNew() {
       {/* Product Configurator Modal */}
       {showConfigurator && quoteId && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="text-lg font-semibold">
                 {editingLineId ? 'Edit Quote Line' : 'Add Quote Line'}
@@ -968,6 +1684,7 @@ export default function QuoteNew() {
                 onClick={() => {
                   setShowConfigurator(false);
                   setEditingLineId(null);
+                  setInitialLineConfig(undefined); // Clear config when closing
                 }}
                 className="p-1 hover:bg-gray-100 rounded transition-colors"
               >
@@ -981,8 +1698,9 @@ export default function QuoteNew() {
                 onClose={() => {
                   setShowConfigurator(false);
                   setEditingLineId(null);
+                  setInitialLineConfig(undefined);
                 }}
-                initialConfig={editingLineId ? undefined : undefined} // TODO: Load initial config for editing
+                initialConfig={initialLineConfig}
               />
             </div>
           </div>

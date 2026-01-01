@@ -18,6 +18,7 @@ const costSettingsSchema = z.object({
   discount_distributor_pct: z.number().min(0, 'Discount must be >= 0').max(100, 'Discount must be <= 100').optional(),
   discount_partner_pct: z.number().min(0, 'Discount must be >= 0').max(100, 'Discount must be <= 100').optional(),
   discount_vip_pct: z.number().min(0, 'Discount must be >= 0').max(100, 'Discount must be <= 100').optional(),
+  min_margin_pct: z.number().min(0, 'Minimum margin must be >= 0').max(95, 'Minimum margin must be <= 95').optional(),
 });
 
 type CostSettingsFormData = z.infer<typeof costSettingsSchema>;
@@ -44,6 +45,7 @@ export default function CostEngineSettings() {
       discount_distributor_pct: 0,
       discount_partner_pct: 0,
       discount_vip_pct: 0,
+      min_margin_pct: 35, // Default 35% minimum margin (margin-on-sale, used as pricing floor)
     },
   });
 
@@ -70,6 +72,7 @@ export default function CostEngineSettings() {
       setValue('discount_distributor_pct', settings.discount_distributor_pct ?? 0);
       setValue('discount_partner_pct', settings.discount_partner_pct ?? 0);
       setValue('discount_vip_pct', settings.discount_vip_pct ?? 0);
+      setValue('min_margin_pct', settings.min_margin_pct ?? 35);
     }
   }, [settings, setValue]);
 
@@ -87,6 +90,7 @@ export default function CostEngineSettings() {
           discount_distributor_pct: data.discount_distributor_pct ?? 0,
           discount_partner_pct: data.discount_partner_pct ?? 0,
           discount_vip_pct: data.discount_vip_pct ?? 0,
+          min_margin_pct: data.min_margin_pct ?? 35,
         });
       } else {
         // Create new
@@ -99,6 +103,7 @@ export default function CostEngineSettings() {
           discount_distributor_pct: data.discount_distributor_pct ?? 0,
           discount_partner_pct: data.discount_partner_pct ?? 0,
           discount_vip_pct: data.discount_vip_pct ?? 0,
+          min_margin_pct: data.min_margin_pct ?? 35,
           // Legacy fields (set to 0 for v1)
           labor_rate_per_hour: 0,
           default_labor_minutes_per_unit: 0,
@@ -405,6 +410,39 @@ export default function CostEngineSettings() {
                     />
                     <p className="text-xs text-gray-500 mt-1">
                       Default discount for VIP customers
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Minimum Margin Section */}
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <DollarSign className="w-5 h-5 text-gray-700" />
+                  <h3 className="text-sm font-semibold text-gray-900">Minimum Margin (Pricing Guardrail)</h3>
+                </div>
+                <p className="text-xs text-gray-600 mb-4">
+                  Minimum margin percentage (margin-on-sale) used as pricing floor. This ensures quotes never go below this margin percentage, protecting profitability even with tier discounts.
+                </p>
+
+                <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+                  <div className="col-span-3">
+                    <Label htmlFor="min_margin_pct" className="text-xs">
+                      Minimum Margin (%)
+                    </Label>
+                    <Input
+                      id="min_margin_pct"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="95"
+                      {...register('min_margin_pct', { valueAsNumber: true })}
+                      className="py-1 text-xs"
+                      error={errors.min_margin_pct?.message}
+                      placeholder="35.00"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Pricing floor margin (margin-on-sale, default: 35%)
                     </p>
                   </div>
                 </div>

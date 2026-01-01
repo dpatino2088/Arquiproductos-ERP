@@ -20,13 +20,58 @@ interface ProductConfiguratorProps {
 }
 
 export default function ProductConfigurator({ quoteId, onComplete, onClose, initialConfig }: ProductConfiguratorProps) {
+  // CRITICAL: Initialize with initialConfig values if editing
   const [productType, setProductType] = useState<ProductType | null>(initialConfig?.productType || null);
-  const [currentStepIndex, setCurrentStepIndex] = useState(initialConfig?.productType ? 1 : 0);
-  const [config, setConfig] = useState<Partial<ProductConfig>>({
-    position: '',
-    ...initialConfig, // Merge initial config if provided
-  });
+  const [currentStepIndex, setCurrentStepIndex] = useState(initialConfig?.productType ? 0 : 0); // Start at 0 to show selected product
+  const [config, setConfig] = useState<Partial<ProductConfig>>(initialConfig || { position: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // CRITICAL: Update state when initialConfig changes (e.g., when loading config for editing)
+  useEffect(() => {
+    if (initialConfig && Object.keys(initialConfig).length > 0) {
+      // When editing, completely replace config with initialConfig
+      // This preserves ALL fields: productType, productTypeId, collectionName, variantName, etc.
+      setConfig(initialConfig);
+      
+      // Update productType if provided in initialConfig
+      if (initialConfig.productType) {
+        setProductType(initialConfig.productType);
+        // Start at step 0 (PRODUCT) to show the selected product
+        // User can see what's selected and navigate through steps
+        setCurrentStepIndex(0);
+      }
+      
+      if (import.meta.env.DEV) {
+        console.log('ProductConfigurator: initialConfig loaded for editing', {
+          productType: initialConfig.productType,
+          productTypeId: (initialConfig as any).productTypeId,
+          hasArea: !!initialConfig.area,
+          hasPosition: !!initialConfig.position,
+          accessoriesCount: (initialConfig as any).accessories?.length || 0,
+          hasCollection: !!(initialConfig as any).collectionName,
+          variantName: (initialConfig as any).variantName,
+          collectionName: (initialConfig as any).collectionName,
+          width_mm: initialConfig.width_mm,
+          height_mm: initialConfig.height_mm,
+          fabric_catalog_item_id: (initialConfig as any).fabric_catalog_item_id,
+          variantId: (initialConfig as any).variantId,
+          drive_type: (initialConfig as any).drive_type,
+          hardware_color: (initialConfig as any).hardware_color,
+          cassette: (initialConfig as any).cassette,
+          side_channel: (initialConfig as any).side_channel,
+        });
+      }
+    } else if (initialConfig === undefined) {
+      // If initialConfig is cleared (e.g., adding new line), reset to defaults
+      setProductType(null);
+      setCurrentStepIndex(0);
+      setConfig({ position: '' });
+      
+      if (import.meta.env.DEV) {
+        console.log('ProductConfigurator: initialConfig cleared - resetting to defaults');
+      }
+    }
+  }, [initialConfig]);
 
   // Get steps for selected product type
   const steps = productType ? getProductSteps(productType) : [];
@@ -35,24 +80,73 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   const productDefinition = productType ? getProductDefinition(productType) : null;
 
   // Handle product type selection
-  const handleProductTypeSelect = (type: ProductType) => {
+  const handleProductTypeSelect = (type: ProductType, productTypeId?: string) => {
     setProductType(type);
+    
+    // CRITICAL: When editing, don't reset config - just update productType and productTypeId
     setConfig(prev => {
-      // Reset config when product type changes
-      const baseConfig: Partial<ProductConfig> = { productType: type, position: prev.position || '' };
+      const hasExistingConfig = prev && Object.keys(prev).length > 1;
+      
+      // If we already have a config with the same product type (editing scenario)
+      // preserve ALL existing values
+      if (hasExistingConfig && prev.productType === type) {
+        if (import.meta.env.DEV) {
+          console.log('ProductConfigurator: Preserving existing config (editing)', {
+            type,
+            productTypeId,
+            existingConfig: prev,
+          });
+        }
+        return {
+          ...prev,
+          productType: type,
+          ...(productTypeId ? { productTypeId } : {}),
+        };
+      }
+      
+      // New selection - reset config
+      const baseConfig: Partial<ProductConfig> = { 
+        productType: type, 
+        position: prev.position || '',
+        ...(productTypeId ? { productTypeId } : {}),
+      };
+      
+      if (import.meta.env.DEV) {
+        console.log('ProductConfigurator: New product type selected', {
+          type,
+          productTypeId,
+          newConfig: baseConfig,
+        });
+      }
+      
       return baseConfig;
     });
+    
     setCurrentStepIndex(1); // Move to first step after product selection
   };
 
   // Handle step updates
   const handleUpdate = (updates: Partial<ProductConfig>) => {
     setConfig(prev => {
-      // Merge updates while preserving productType
+      // Merge updates while preserving critical fields (productType, productTypeId)
       const merged = { ...prev, ...updates };
+      
+      // CRITICAL: Always preserve productType and productTypeId
       if (prev.productType) {
         (merged as any).productType = prev.productType;
       }
+      if ((prev as any).productTypeId) {
+        (merged as any).productTypeId = (prev as any).productTypeId;
+      }
+      
+      if (import.meta.env.DEV) {
+        console.log('ProductConfigurator: handleUpdate', {
+          updates,
+          prevProductTypeId: (prev as any).productTypeId,
+          mergedProductTypeId: (merged as any).productTypeId,
+        });
+      }
+      
       return merged as Partial<ProductConfig>;
     });
   };
@@ -82,8 +176,18 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   };
 
   const handleStepClick = (index: number) => {
-    if (index <= currentStepIndex) {
+    // When editing, allow navigation to any step (not just completed ones)
+    // This is because all data is already loaded from DB
+    const hasInitialConfig = initialConfig && Object.keys(initialConfig).length > 0;
+    
+    if (hasInitialConfig) {
+      // When editing, allow free navigation to all steps
       setCurrentStepIndex(index);
+    } else {
+      // When creating new, only allow navigation to completed steps
+      if (index <= currentStepIndex) {
+        setCurrentStepIndex(index);
+      }
     }
   };
 
@@ -125,16 +229,18 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           config={config as any} 
           onUpdate={(updates) => {
             const newProductType = (updates as any).productType;
+            const newProductTypeId = (updates as any).productTypeId;
+            
             if (newProductType) {
               // Validate that it's a valid ProductType
               const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'window-film'];
               if (validTypes.includes(newProductType)) {
-                handleProductTypeSelect(newProductType as ProductType);
+                handleProductTypeSelect(newProductType as ProductType, newProductTypeId);
               }
             } else if (newProductType === undefined && productType) {
               // If product type is cleared, reset to product selection
               setProductType(null);
-              setConfig(prev => ({ ...prev, productType: undefined }));
+              setConfig(prev => ({ ...prev, productType: undefined, productTypeId: undefined }));
               setCurrentStepIndex(0);
             }
           }} 
@@ -149,11 +255,31 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     if (!step) return null;
 
     const StepComponent = step.component;
+    
+    // CRITICAL: Log config before passing to step
+    if (import.meta.env.DEV) {
+      console.log(`ProductConfigurator: Passing config to ${step.id}`, {
+        productTypeId: (config as any).productTypeId,
+        productType: config.productType,
+        collectionName: (config as any).collectionName,
+        variantId: (config as any).variantId,
+        fullConfig: config,
+      });
+    }
+    
+    // Pass quoteId to ReviewStep if it's that component
+    const stepProps: any = {
+      config: config as any,
+      onUpdate: handleUpdate,
+    };
+    
+    // If this is the review step, pass quoteId
+    if (step.id === 'review') {
+      stepProps.quoteId = quoteId;
+    }
+    
     return (
-      <StepComponent 
-        config={config as any} 
-        onUpdate={handleUpdate}
-      />
+      <StepComponent {...stepProps} />
     );
   };
 
@@ -184,8 +310,13 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           {steps.map((step, index) => {
             const stepIndex = index + 1; // +1 because product selection is step 0
             const isActive = currentStepIndex === stepIndex;
-            const isCompleted = stepIndex < currentStepIndex;
-            const isAccessible = productType && stepIndex <= currentStepIndex;
+            
+            // When editing (has initialConfig), all steps are accessible and show as completed
+            const hasInitialConfig = initialConfig && Object.keys(initialConfig).length > 0;
+            const isAccessible = productType && (hasInitialConfig || stepIndex <= currentStepIndex);
+            
+            // When editing, show all steps as completed (green) except the active one
+            const isCompleted = hasInitialConfig ? !isActive : stepIndex < currentStepIndex;
             
             return (
               <button

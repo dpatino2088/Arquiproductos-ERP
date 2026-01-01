@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Package, Wrench } from 'lucide-react';
+import { Package, Wrench, CheckCircle } from 'lucide-react';
 
 export default function Catalog() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
@@ -11,10 +11,11 @@ export default function Catalog() {
     const currentPath = window.location.pathname;
     
     if (currentPath.startsWith('/catalog')) {
-      // Register Items and BOM as main sub-modules
+      // Register Catalog sub-modules
       registerSubmodules('Catalog', [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
         { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
+        { id: 'bom-readiness', label: 'BOM Readiness', href: '/catalog/bom-readiness', icon: CheckCircle },
       ]);
       
       // Only redirect to items if we're at the base /catalog route

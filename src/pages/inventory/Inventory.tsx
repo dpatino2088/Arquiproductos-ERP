@@ -4,7 +4,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { Package, Warehouse, ShoppingCart, Receipt, ArrowLeftRight, Settings } from 'lucide-react';
 
 export default function Inventory() {
-  const { registerSubmodules } = useSubmoduleNav();
+  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
 
   useEffect(() => {
     // Only register Inventory submodules if we're actually in the Inventory module
@@ -23,7 +23,16 @@ export default function Inventory() {
         router.navigate('/inventory/warehouse');
       }
     }
-  }, [registerSubmodules]);
+    
+    // Cleanup: clear submodules when component unmounts or path changes
+    return () => {
+      const path = window.location.pathname;
+      if (!path.startsWith('/inventory')) {
+        // Only clear if we're leaving the Inventory module
+        clearSubmoduleNav();
+      }
+    };
+  }, [registerSubmodules, clearSubmoduleNav]);
 
   return null;
 }

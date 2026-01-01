@@ -8,6 +8,7 @@ export interface ProductType {
   code?: string | null;
   archived: boolean;
   deleted: boolean;
+  sort_order?: number | null;
 }
 
 export function useProductTypes() {
@@ -37,9 +38,10 @@ export function useProductTypes() {
 
         const { data, error: queryError } = await supabase
           .from('ProductTypes')
-          .select('id, name, code, archived, deleted')
+          .select('id, name, code, archived, deleted, sort_order')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
+          .order('sort_order', { ascending: true, nullsFirst: false })
           .order('name', { ascending: true });
 
         if (queryError) {

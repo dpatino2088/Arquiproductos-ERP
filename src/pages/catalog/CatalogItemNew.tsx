@@ -14,14 +14,19 @@ import { useCategoryMargin } from '../../hooks/useCategoryMargins';
 import { MeasureBasis, FabricPricingMode } from '../../types/catalog';
 import { supabase } from '../../lib/supabase/client';
 import { Plus, Trash2, Edit, X } from 'lucide-react';
+import ImageUpload from '../../components/ui/ImageUpload';
+import FileUpload from '../../components/ui/FileUpload';
+import { 
+  MEASURE_BASIS_OPTIONS, 
+  getValidUomOptions, 
+  normalizeUom, 
+  normalizeMeasureBasis,
+  isUomValidForMeasureBasis,
+  validateAndNormalizeUom 
+} from '../../lib/uom';
 
-// Measure basis options
-const MEASURE_BASIS_OPTIONS = [
-  { value: 'unit', label: 'Unit' },
-  { value: 'linear_m', label: 'Metro Lineal' },
-  { value: 'area', label: 'Area' },
-  { value: 'fabric', label: 'Fabric' },
-] as const;
+// Re-export for local use (already normalized in uom.ts)
+const MEASURE_BASIS_OPTIONS_LOCAL = MEASURE_BASIS_OPTIONS;
 
 // Fabric pricing mode options
 const FABRIC_PRICING_MODE_OPTIONS = [
@@ -52,6 +57,7 @@ const catalogItemSchema = z.object({
   variant_name: z.string().optional().nullable(),
   roll_width_m: z.number().optional().nullable(),
   fabric_pricing_mode: z.enum(['per_linear_m', 'per_sqm']).optional().nullable(),
+  image_url: z.string().url().optional().nullable().or(z.literal('')),
   // Pricing fields
   cost_exw: z.number().min(0, 'Cost EXW must be >= 0').optional().nullable(), // Base cost (EXW = Ex Works)
   default_margin_pct: z.number().min(0).max(100, 'Margin must be between 0 and 100').optional().nullable(), // Default margin percentage
@@ -96,11 +102,20 @@ const catalogItemSchema = z.object({
 
 type CatalogItemFormValues = z.infer<typeof catalogItemSchema>;
 
+interface FileItem {
+  id: string;
+  name: string;
+  url: string;
+  size: number;
+  type: string;
+}
+
 export default function CatalogItemNew() {
   const [activeTab, setActiveTab] = useState<'profile' | 'settings' | 'rates' | 'attachments'>('profile');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [itemId, setItemId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<FileItem[]>([]);
   const { activeOrganizationId } = useOrganizationContext();
   const { createItem, isCreating } = useCreateCatalogItem();
   const { updateItem, isUpdating } = useUpdateCatalogItem();
@@ -118,14 +133,17 @@ export default function CatalogItemNew() {
     handleSubmit,
     watch,
     setValue,
+    clearErrors,
     formState: { errors },
   } = useForm<CatalogItemFormValues>({
+    mode: 'onBlur', // Only validate on blur, not on change
     resolver: zodResolver(catalogItemSchema),
     defaultValues: {
       item_type: 'component',
       measure_basis: 'unit',
       uom: 'unit',
       is_fabric: false,
+      image_url: null,
       cost_exw: null,
       default_margin_pct: 35, // Default 35% margin
       msrp: null,
@@ -261,6 +279,16 @@ export default function CatalogItemNew() {
     }
   }, [isFabric, measureBasis, itemType, setValue]);
 
+  // Clear UOM if it becomes invalid when measure_basis changes
+  useEffect(() => {
+    const currentUom = watch('uom');
+    const currentMeasureBasis = watch('measure_basis');
+    
+    if (currentUom && currentMeasureBasis && !isUomValidForMeasureBasis(currentMeasureBasis, currentUom)) {
+      setValue('uom', '', { shouldValidate: true });
+    }
+  }, [measureBasis, watch, setValue]);
+
   // Get item ID from URL if in edit mode
   useEffect(() => {
     const path = window.location.pathname;
@@ -299,13 +327,22 @@ export default function CatalogItemNew() {
           setValue('name', data.name || data.item_name || '');
           setValue('description', data.description || '');
           setValue('item_type', (data as any).item_type || 'component');
-          setValue('measure_basis', data.measure_basis);
-          setValue('uom', data.uom || 'unit');
+          setValue('measure_basis', normalizeMeasureBasis(data.measure_basis) || data.measure_basis || 'unit');
+          setValue('uom', normalizeUom(data.uom) || data.uom || 'unit');
           setValue('is_fabric', data.is_fabric || false);
           setValue('collection_name', data.collection_name || null);
           setValue('variant_name', data.variant_name || null);
           setValue('roll_width_m', data.roll_width_m);
           setValue('fabric_pricing_mode', data.fabric_pricing_mode);
+          setValue('image_url', data.image_url || (data.metadata && typeof data.metadata === 'object' && data.metadata.image) || null);
+          
+          // Load attachments from metadata
+          if (data.metadata && typeof data.metadata === 'object' && Array.isArray(data.metadata.attachments)) {
+            setAttachments(data.metadata.attachments);
+          } else {
+            setAttachments([]);
+          }
+          
           // New pricing fields
           setValue('cost_exw', data.cost_exw ?? null);
           setValue('default_margin_pct', data.default_margin_pct ?? 35);
@@ -366,24 +403,26 @@ export default function CatalogItemNew() {
     try {
       const itemData: any = {
         sku: values.sku.trim(),
-        name: values.name.trim(),
-        item_name: values.name.trim(), // Map name to item_name for database
+        item_name: values.name.trim(), // Map name to item_name for database (name field doesn't exist in CatalogItems)
         description: values.description?.trim() || null,
         item_category_id: values.item_category_id || null,
         item_type: values.item_type,
-        measure_basis: values.measure_basis,
-        uom: values.uom.trim(),
+        measure_basis: normalizeMeasureBasis(values.measure_basis) || values.measure_basis,
+        uom: normalizeUom(values.uom) || '',
         is_fabric: values.is_fabric,
         collection_name: values.collection_name?.trim() || null,
         variant_name: values.variant_name?.trim() || null,
         roll_width_m: values.is_fabric && values.roll_width_m ? values.roll_width_m : null,
         fabric_pricing_mode: values.is_fabric ? values.fabric_pricing_mode : null,
+        image_url: values.image_url?.trim() || null,
         // Legacy fields (hidden from UI, kept for database compatibility only)
         unit_price: values.unit_price,
         cost_price: values.cost_price ?? values.cost_exw ?? 0, // Map cost_exw to cost_price if not set
         active: values.active,
         discontinued: values.discontinued,
-        metadata: {},
+        metadata: {
+          attachments: attachments,
+        },
       };
 
       // Only include new pricing fields if they have values (to avoid errors if columns don't exist yet)
@@ -607,14 +646,36 @@ export default function CatalogItemNew() {
                 </div>
                 <div className="col-span-3">
                   <Label htmlFor="uom" className="text-xs" required>Unit of Measure</Label>
-                  <Input 
-                    id="uom" 
-                    {...register('uom')}
-                    className="py-1 text-xs"
-                    error={errors.uom?.message}
-                    disabled={isReadOnly}
-                    placeholder="unit"
-                  />
+                  <SelectShadcn
+                    value={watch('uom') || ''}
+                    onValueChange={(value) => {
+                      const normalized = normalizeUom(value);
+                      if (normalized) {
+                        clearErrors('uom');
+                      }
+                      setValue('uom', normalized || '', { shouldValidate: true });
+                    }}
+                    disabled={isReadOnly || !watch('measure_basis')}
+                  >
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.uom && !watch('uom') ? 'bg-red-50' : ''}`}>
+                      <SelectValue placeholder={watch('measure_basis') ? "Select UOM" : "Select measure basis first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getValidUomOptions(watch('measure_basis')).map((uomOption) => (
+                        <SelectItem key={uomOption} value={uomOption}>
+                          {uomOption}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.uom && !watch('uom') && (
+                    <p className="text-xs text-red-600 mt-1">{errors.uom.message}</p>
+                  )}
+                  {watch('measure_basis') && !watch('uom') && !errors.uom && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valid options: {getValidUomOptions(watch('measure_basis')).join(', ')}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -630,46 +691,60 @@ export default function CatalogItemNew() {
                 />
               </div>
 
-              {/* Category Selection */}
+              {/* Image Upload */}
               <div className="col-span-12">
-                <Label htmlFor="item_category_id" className="text-xs">Category</Label>
-                <SelectShadcn
-                  value={watch('item_category_id') || '__none__'}
-                  onValueChange={(value) => {
-                    setValue('item_category_id', value === '__none__' ? null : value, { shouldValidate: true });
+                <Label className="text-xs">Image</Label>
+                <ImageUpload
+                  currentImageUrl={watch('image_url') || null}
+                  onImageUploaded={(url) => {
+                    setValue('image_url', url || null, { shouldValidate: false });
                   }}
                   disabled={isReadOnly}
-                >
-                  <SelectTrigger className={`py-1 text-xs ${errors.item_category_id ? 'border-red-300 bg-red-50' : ''}`}>
-                    <SelectValue placeholder="Select category (leaf categories only)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None</SelectItem>
-                    {leafCategories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name} {category.code && `(${category.code})`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </SelectShadcn>
-                {errors.item_category_id && (
-                  <p className="text-xs text-red-600 mt-1">{errors.item_category_id.message}</p>
-                )}
-                {/* Warning badge if category is a group */}
-                {watch('item_category_id') && (() => {
-                  const selectedCategory = allCategories.find(c => c.id === watch('item_category_id'));
-                  if (selectedCategory?.is_group) {
-                    return (
-                      <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-md">
-                        <span className="text-xs text-yellow-800 font-medium">⚠️ Warning:</span>
-                        <span className="text-xs text-yellow-700">
-                          Category "{selectedCategory.name}" is a group. Please choose a specific subcategory.
-                        </span>
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
+                />
+              </div>
+
+              {/* Category Selection */}
+              <div className="col-span-12 grid grid-cols-12 gap-x-4">
+                <div className="col-span-4">
+                  <Label htmlFor="item_category_id" className="text-xs">Category</Label>
+                  <SelectShadcn
+                    value={watch('item_category_id') || '__none__'}
+                    onValueChange={(value) => {
+                      setValue('item_category_id', value === '__none__' ? null : value, { shouldValidate: true });
+                    }}
+                    disabled={isReadOnly}
+                  >
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.item_category_id ? 'border-red-300 bg-red-50' : ''}`}>
+                      <SelectValue placeholder="Select category (leaf categories only)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {leafCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name} {category.code && `(${category.code})`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.item_category_id && (
+                    <p className="text-xs text-red-600 mt-1">{errors.item_category_id.message}</p>
+                  )}
+                  {/* Warning badge if category is a group */}
+                  {watch('item_category_id') && (() => {
+                    const selectedCategory = allCategories.find(c => c.id === watch('item_category_id'));
+                    if (selectedCategory?.is_group) {
+                      return (
+                        <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-md">
+                          <span className="text-xs text-yellow-800 font-medium">⚠️ Warning:</span>
+                          <span className="text-xs text-yellow-700">
+                            Category "{selectedCategory.name}" is a group. Please choose a specific subcategory.
+                          </span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
               </div>
 
               {/* Item Type and Measurement */}
@@ -683,7 +758,7 @@ export default function CatalogItemNew() {
                     }}
                     disabled={isReadOnly || isFabric} // Disable if is_fabric is checked (auto-set to fabric)
                   >
-                    <SelectTrigger className={`py-1 text-xs ${errors.item_type ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.item_type ? 'border-red-300 bg-red-50' : ''}`}>
                       <SelectValue placeholder="Select item type" />
                     </SelectTrigger>
                     <SelectContent>
@@ -702,17 +777,29 @@ export default function CatalogItemNew() {
                 <div className="col-span-4">
                   <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
                   <SelectShadcn
-                    value={watch('measure_basis') || 'unit'}
+                    value={normalizeMeasureBasis(watch('measure_basis')) || 'unit'}
                     onValueChange={(value) => {
-                      setValue('measure_basis', value as MeasureBasis, { shouldValidate: true });
+                      const normalized = normalizeMeasureBasis(value) || value.toLowerCase();
+                      setValue('measure_basis', normalized as MeasureBasis, { shouldValidate: true });
+                      // Clear UOM if it's not valid for the new measure basis
+                      const currentUom = watch('uom');
+                      if (currentUom && !isUomValidForMeasureBasis(normalized, currentUom)) {
+                        setValue('uom', '', { shouldValidate: true });
+                      }
                     }}
                     disabled={isReadOnly}
                   >
-                    <SelectTrigger className={`py-1 text-xs ${errors.measure_basis ? 'border-red-300 bg-red-50' : ''}`}>
-                      <SelectValue placeholder="Select measure basis" />
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.measure_basis ? 'border-red-300 bg-red-50' : ''}`}>
+                      <SelectValue placeholder="Select measure basis">
+                        {(() => {
+                          const currentValue = normalizeMeasureBasis(watch('measure_basis'));
+                          const option = MEASURE_BASIS_OPTIONS_LOCAL.find(opt => opt.value === currentValue);
+                          return option ? option.label : currentValue || 'Select measure basis';
+                        })()}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {MEASURE_BASIS_OPTIONS.map((option) => (
+                      {MEASURE_BASIS_OPTIONS_LOCAL.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -791,7 +878,7 @@ export default function CatalogItemNew() {
                         }}
                         disabled={isReadOnly}
                       >
-                        <SelectTrigger className={`py-1 text-xs ${errors.fabric_pricing_mode ? 'border-red-300 bg-red-50' : ''}`}>
+                        <SelectTrigger className={`h-auto py-1 text-xs ${errors.fabric_pricing_mode ? 'border-red-300 bg-red-50' : ''}`}>
                           <SelectValue placeholder="Select pricing mode" />
                         </SelectTrigger>
                         <SelectContent>
@@ -940,7 +1027,14 @@ export default function CatalogItemNew() {
           {activeTab === 'attachments' && (
             <div className="grid grid-cols-12 gap-x-4 gap-y-4">
               <div className="col-span-12">
-                <p className="text-xs text-gray-500">Attachments tab - To be implemented</p>
+                <FileUpload
+                  currentFiles={attachments}
+                  onFilesChanged={(files) => setAttachments(files)}
+                  disabled={isReadOnly || isSaving}
+                  acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/*']}
+                  maxFileSize={10 * 1024 * 1024} // 10MB
+                  maxFiles={10}
+                />
               </div>
             </div>
           )}

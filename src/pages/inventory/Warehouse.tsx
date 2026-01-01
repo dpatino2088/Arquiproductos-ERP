@@ -36,7 +36,7 @@ const getQuantityBadgeColor = (quantity: number) => {
 };
 
 export default function Warehouse() {
-  const { registerSubmodules } = useSubmoduleNav();
+  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -59,7 +59,16 @@ export default function Warehouse() {
         { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
       ]);
     }
-  }, [registerSubmodules]);
+    
+    // Cleanup: clear submodules when component unmounts or path changes
+    return () => {
+      const path = window.location.pathname;
+      if (!path.startsWith('/inventory')) {
+        // Only clear if we're leaving the Inventory module
+        clearSubmoduleNav();
+      }
+    };
+  }, [registerSubmodules, clearSubmoduleNav]);
 
   // Mock data - Replace with actual data fetching
   const warehouseData: WarehouseItem[] = useMemo(() => [
