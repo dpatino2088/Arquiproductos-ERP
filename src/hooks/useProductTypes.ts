@@ -41,6 +41,7 @@ export function useProductTypes() {
           .select('id, name, code, archived, deleted, sort_order')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
+          .eq('archived', false) // ✅ Filter out archived product types
           .order('sort_order', { ascending: true, nullsFirst: false })
           .order('name', { ascending: true });
 

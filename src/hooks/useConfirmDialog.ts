@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 export interface ConfirmDialogOptions {
   title: string;
@@ -22,10 +22,13 @@ export function useConfirmDialog() {
     onConfirm: null,
     isLoading: false,
   });
+  
+  const resolveRef = useRef<((value: boolean) => void) | null>(null);
 
   const showConfirm = useCallback(
     (options: ConfirmDialogOptions): Promise<boolean> => {
       return new Promise((resolve) => {
+        resolveRef.current = resolve;
         setDialogState({
           isOpen: true,
           title: options.title,
@@ -34,7 +37,10 @@ export function useConfirmDialog() {
           cancelText: options.cancelText || 'Cancelar',
           variant: options.variant || 'danger',
           onConfirm: () => {
-            resolve(true);
+            if (resolveRef.current) {
+              resolveRef.current(true);
+              resolveRef.current = null;
+            }
             setDialogState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
           },
           isLoading: false,
@@ -45,6 +51,10 @@ export function useConfirmDialog() {
   );
 
   const closeDialog = useCallback(() => {
+    if (resolveRef.current) {
+      resolveRef.current(false);
+      resolveRef.current = null;
+    }
     setDialogState((prev) => ({
       ...prev,
       isOpen: false,
@@ -71,6 +81,8 @@ export function useConfirmDialog() {
     handleConfirm,
   };
 }
+
+
 
 
 

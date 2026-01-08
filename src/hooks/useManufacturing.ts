@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { normalizeUUID } from '../utils/uuid';
 
 // ============================================================================
 // TYPES
@@ -12,7 +13,7 @@ export type ManufacturingOrderPriority = 'low' | 'normal' | 'high' | 'urgent';
 export interface ManufacturingOrder {
   id: string;
   organization_id: string;
-  sale_order_id: string;
+  sales_order_id: string;
   manufacturing_order_no: string;
   status: ManufacturingOrderStatus;
   priority: ManufacturingOrderPriority;
@@ -54,6 +55,8 @@ export interface ManufacturingMaterial {
   total_qty: number;
   unit_cost_exw?: number;
   total_cost_exw: number;
+  unit_msrp_sale_out?: number;
+  total_msrp_sale_out?: number;
   cut_length_mm?: number | null;
   cut_width_mm?: number | null;
   cut_height_mm?: number | null;
@@ -84,6 +87,12 @@ export interface CutJobLine {
   notes: string | null;
   created_at: string;
   deleted: boolean;
+}
+
+export interface BomInstanceTotals {
+  totalLaborCost: number;
+  totalCostWithLabor: number;
+  totalMSRPWithLabor: number;
 }
 
 // ============================================================================
@@ -143,7 +152,7 @@ export function useManufacturingOrders() {
           .from('ManufacturingOrders')
           .select(`
             *,
-            SalesOrders:sale_order_id (
+            SalesOrders:sales_order_id (
               id,
               sale_order_no,
               customer_id,
@@ -205,7 +214,13 @@ export function useManufacturingOrder(moId: string | null) {
 
   useEffect(() => {
     async function fetchManufacturingOrder() {
-      if (!activeOrganizationId || !moId) {
+      // Normalize UUID before use
+      const safeMoId = normalizeUUID(moId);
+      
+      if (!activeOrganizationId || !safeMoId) {
+        if (import.meta.env.DEV && moId && !safeMoId) {
+          console.warn('⚠️ Invalid moId after normalization in useManufacturingOrder:', moId);
+        }
         setLoading(false);
         setManufacturingOrder(null);
         setError(null);
@@ -220,7 +235,7 @@ export function useManufacturingOrder(moId: string | null) {
           .from('ManufacturingOrders')
           .select(`
             *,
-            SalesOrders:sale_order_id (
+            SalesOrders:sales_order_id (
               id,
               sale_order_no,
               customer_id,
@@ -232,7 +247,7 @@ export function useManufacturingOrder(moId: string | null) {
               )
             )
           `)
-          .eq('id', moId)
+          .eq('id', safeMoId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .single();
@@ -258,14 +273,43 @@ export function useManufacturingOrder(moId: string | null) {
 // HOOK: useManufacturingMaterials
 // ============================================================================
 
-export function useManufacturingMaterials(saleOrderId: string | null) {
+export interface UseManufacturingMaterialsResult {
+  materials: ManufacturingMaterial[];
+  bomTotals: BomInstanceTotals;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+  hasBomInstances: boolean;
+  hasBomLines: boolean;
+  debugCounts: {
+    bomInstances: number;
+    bomLines: number;
+  };
+}
+
+import { normalizeUUID } from '../utils/uuid';
+
+export function useManufacturingMaterials(manufacturingOrderId: string): UseManufacturingMaterialsResult {
   const [materials, setMaterials] = useState<ManufacturingMaterial[]>([]);
+  const [bomTotals, setBomTotals] = useState<BomInstanceTotals>({
+    totalLaborCost: 0,
+    totalCostWithLabor: 0,
+    totalMSRPWithLabor: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bomInstancesCount, setBomInstancesCount] = useState(0);
+  const [bomLinesCount, setBomLinesCount] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
 
   const fetchMaterials = useCallback(async () => {
-      if (!activeOrganizationId || !saleOrderId) {
+      // Normalize UUID before use
+      const safeManufacturingOrderId = normalizeUUID(manufacturingOrderId);
+      
+      if (!activeOrganizationId || !safeManufacturingOrderId) {
+        if (import.meta.env.DEV && manufacturingOrderId && !safeManufacturingOrderId) {
+          console.warn('⚠️ Invalid manufacturingOrderId after normalization:', manufacturingOrderId);
+        }
         setLoading(false);
         setMaterials([]);
         setError(null);
@@ -276,44 +320,48 @@ export function useManufacturingMaterials(saleOrderId: string | null) {
         setLoading(true);
         setError(null);
 
-        // Query BomInstances and BomInstanceLines directly
-        // (SalesOrderMaterialList view may not exist, so we query tables directly)
         if (import.meta.env.DEV) {
-          console.log('🔍 useManufacturingMaterials: Fetching BOM for saleOrderId:', saleOrderId, 'organization:', activeOrganizationId);
-        }
-        
-        const { data: saleOrderLines, error: solError } = await supabase
-          .from('SalesOrderLines')
-          .select('id, organization_id')
-          .eq('sale_order_id', saleOrderId)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (solError) throw solError;
-        if (!saleOrderLines || saleOrderLines.length === 0) {
-          setMaterials([]);
-          setLoading(false);
-          return;
+          console.log('🔍 useManufacturingMaterials: Fetching BOM for manufacturingOrderId:', safeManufacturingOrderId, 'organization:', activeOrganizationId);
         }
 
-        const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
-
+        // Get BomInstances for this manufacturing_order_id
         const { data: bomInstances, error: bomError } = await supabase
           .from('BomInstances')
-          .select('id, organization_id')
-          .in('sale_order_line_id', saleOrderLineIds)
+          .select('id, organization_id, labor_cost, total_cost_with_labor, total_msrp_sale_out_with_labor')
+          .eq('manufacturing_order_id', safeManufacturingOrderId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
         if (bomError) throw bomError;
+        
+        if (import.meta.env.DEV) {
+          console.log('📊 useManufacturingMaterials: Found', bomInstances?.length || 0, 'BomInstances');
+        }
+        
+        const bomInstancesCount = bomInstances?.length || 0;
+        setBomInstancesCount(bomInstancesCount);
+        
+        if (import.meta.env.DEV) {
+          console.log('📊 useManufacturingMaterials: Found', bomInstancesCount, 'BomInstances');
+        }
+        
         if (!bomInstances || bomInstances.length === 0) {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ useManufacturingMaterials: No BomInstances found for manufacturingOrderId:', manufacturingOrderId);
+          }
           setMaterials([]);
+          setBomLinesCount(0);
           setLoading(false);
           return;
         }
 
         const bomInstanceIds = bomInstances.map(bi => bi.id);
+        
+        const totalLaborCost = bomInstances.reduce((sum, bi) => sum + (Number(bi.labor_cost) || 0), 0);
+        const totalCostWithLabor = bomInstances.reduce((sum, bi) => sum + (Number(bi.total_cost_with_labor) || 0), 0);
+        const totalMSRPWithLabor = bomInstances.reduce((sum, bi) => sum + (Number(bi.total_msrp_sale_out_with_labor) || 0), 0);
 
+        // Get BomInstanceLines for these BomInstances
         const { data: bomLines, error: linesError } = await supabase
           .from('BomInstanceLines')
           .select(`
@@ -327,6 +375,8 @@ export function useManufacturingMaterials(saleOrderId: string | null) {
             uom,
             unit_cost_exw,
             total_cost_exw,
+            unit_msrp_sale_out,
+            total_msrp_sale_out,
             description,
             cut_length_mm,
             cut_width_mm,
@@ -339,9 +389,14 @@ export function useManufacturingMaterials(saleOrderId: string | null) {
           .eq('deleted', false);
 
         if (linesError) throw linesError;
+        
+        const bomLinesCount = bomLines?.length || 0;
+        setBomLinesCount(bomLinesCount);
+        
+        if (import.meta.env.DEV) {
+          console.log('📊 useManufacturingMaterials: Found', bomLinesCount, 'BomInstanceLines');
+        }
 
-        // Return individual BOM lines (not aggregated) to show cut dimensions per line
-        // Backend already provides resolved_sku and description - no need for CatalogItems lookup
         const materialsList: ManufacturingMaterial[] = bomLines?.map((line: any) => ({
           bom_instance_line_id: line.id,
           bom_instance_id: line.bom_instance_id,
@@ -355,6 +410,8 @@ export function useManufacturingMaterials(saleOrderId: string | null) {
           total_qty: Number(line.qty) || 0,
           unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
           total_cost_exw: Number(line.total_cost_exw) || 0,
+          unit_msrp_sale_out: line.unit_msrp_sale_out ? Number(line.unit_msrp_sale_out) : undefined,
+          total_msrp_sale_out: line.total_msrp_sale_out ? Number(line.total_msrp_sale_out) : undefined,
           cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
           cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
           cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,
@@ -362,13 +419,19 @@ export function useManufacturingMaterials(saleOrderId: string | null) {
         })) || [];
 
         setMaterials(materialsList);
+        
+        setBomTotals({
+          totalLaborCost,
+          totalCostWithLabor,
+          totalMSRPWithLabor,
+        });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading materials';
         setError(errorMessage);
       } finally {
         setLoading(false);
       }
-  }, [activeOrganizationId, saleOrderId]);
+  }, [activeOrganizationId, manufacturingOrderId]);
 
   useEffect(() => {
     fetchMaterials();
@@ -378,7 +441,19 @@ export function useManufacturingMaterials(saleOrderId: string | null) {
     return fetchMaterials();
   }, [fetchMaterials]);
 
-  return { materials, loading, error, refetch };
+  return { 
+    materials, 
+    bomTotals, 
+    loading, 
+    error, 
+    refetch,
+    hasBomInstances: bomInstancesCount > 0,
+    hasBomLines: bomLinesCount > 0,
+    debugCounts: {
+      bomInstances: bomInstancesCount,
+      bomLines: bomLinesCount,
+    },
+  };
 }
 
 // ============================================================================
@@ -390,7 +465,7 @@ export function useCreateManufacturingOrder() {
   const { activeOrganizationId } = useOrganizationContext();
 
   const createManufacturingOrder = async (moData: {
-    sale_order_id: string;
+    sales_order_id: string;
     scheduled_start_date?: string;
     scheduled_end_date?: string;
     priority?: ManufacturingOrderPriority;
@@ -425,7 +500,7 @@ export function useCreateManufacturingOrder() {
         .from('ManufacturingOrders')
         .insert({
           organization_id: activeOrganizationId,
-          sale_order_id: moData.sale_order_id,
+          sales_order_id: moData.sales_order_id,
           manufacturing_order_no: moNumber,
           status: 'draft',
           priority: moData.priority || 'normal',
@@ -513,7 +588,13 @@ export function useCutList(manufacturingOrderId: string | null) {
 
   useEffect(() => {
     async function fetchCutList() {
-      if (!activeOrganizationId || !manufacturingOrderId) {
+      // Normalize UUID before use
+      const safeManufacturingOrderId = normalizeUUID(manufacturingOrderId);
+      
+      if (!activeOrganizationId || !safeManufacturingOrderId) {
+        if (import.meta.env.DEV && manufacturingOrderId && !safeManufacturingOrderId) {
+          console.warn('⚠️ Invalid manufacturingOrderId after normalization in useCutList:', manufacturingOrderId);
+        }
         setLoading(false);
         setCutJob(null);
         setCutJobLines([]);
@@ -529,7 +610,7 @@ export function useCutList(manufacturingOrderId: string | null) {
         const { data: cutJobData, error: cutJobError } = await supabase
           .from('CutJobs')
           .select('*')
-          .eq('manufacturing_order_id', manufacturingOrderId)
+          .eq('manufacturing_order_id', safeManufacturingOrderId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .single();

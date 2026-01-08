@@ -327,6 +327,11 @@ const OrganizationUserNew = lazy(() => {
   return import('./pages/settings/OrganizationUserNew');
 });
 
+const CustomerPortalUsers = lazy(() => {
+  logger.debug('Loading Customer Portal Users component');
+  return import('./pages/settings/CustomerPortalUsers');
+});
+
 // Auth pages
 const Login = lazy(() => {
   logger.debug('Loading Login component');
@@ -976,6 +981,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/settings/customer-portal-users', () => {
+      if (isAuthenticated) {
+        setCurrentPage('customer-portal-users');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     
     // Other routes
     router.addRoute('/time-tracking', () => {
@@ -1147,6 +1159,8 @@ function App() {
         return <OrganizationUser />;
       case 'organization-profile':
         return <OrganizationUser />; // This route is handled by CompanySettings, but keep for backward compatibility
+      case 'customer-portal-users':
+        return <CustomerPortalUsers />;
       // Note: 'organization-user-new' routes now render CompanySettings which handles the embedded form
       
       // Auth pages
@@ -1196,6 +1210,7 @@ function App() {
             </Suspense>
           </ErrorBoundary>
         ) : currentPage === 'company-settings' ? (
+          // Settings pages with their own independent layout
           <ErrorBoundary>
             <Suspense fallback={null}>
               <CompanySettings />

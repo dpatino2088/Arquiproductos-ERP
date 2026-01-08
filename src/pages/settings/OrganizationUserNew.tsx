@@ -5,20 +5,34 @@ import { z } from 'zod';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, X } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
-import { useContacts, useCustomers } from '../../hooks/useDirectory';
-
-// Schema: Solo 3 roles (superadmin, admin, member)
+// Schema: Email + Role obligatorios, Customer/Contact opcionales
 const organizationUserSchema = z.object({
-  contact_id: z.string().uuid('Debes seleccionar un contacto'),
+  email: z.string().email('Debes ingresar un email válido'),
   role: z.enum(['superadmin', 'admin', 'member']),
-});
+  customer_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
+  contact_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
+}).refine(
+  (data) => {
+    // Si contact_id está presente y no es null/vacío, customer_id debe estar presente
+    const hasContact = data.contact_id && data.contact_id !== '' && data.contact_id !== null;
+    const hasCustomer = data.customer_id && data.customer_id !== '' && data.customer_id !== null;
+    if (hasContact && !hasCustomer) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: 'Si seleccionas un Contact, debes seleccionar un Customer',
+    path: ['contact_id'],
+  }
+);
 
 type OrganizationUserFormData = z.infer<typeof organizationUserSchema>;
 
@@ -33,9 +47,12 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   const { user } = useAuthStore();
   const { isSuperAdmin, loading: roleLoading } = useCurrentOrgRole();
 
-  // Cargar contactos y customers
-  const { contacts, isLoading: contactsLoading } = useContacts();
-  const { customers, isLoading: customersLoading } = useCustomers();
+  // ✅ OPTIONAL: Cargar contactos y customers solo si se necesita (no bloquea el flujo)
+  const [customers, setCustomers] = useState<Array<{ id: string; companyName?: string; customerName?: string }>>([]);
+  const [contacts, setContacts] = useState<Array<{ id: string; firstName?: string; email?: string; customer_id?: string; status?: string }>>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [showLinkSection, setShowLinkSection] = useState(false);
 
   // Estado para contactos disponibles (solo los que tienen customer_id y email)
   const [availableContacts, setAvailableContacts] = useState<Array<{
@@ -46,12 +63,73 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     customer_name: string;
   }>>([]);
 
-  // Preparar contactos disponibles cuando se cargan los datos
+  // ✅ Load customers and contacts OPTIONALLY (non-blocking)
+  useEffect(() => {
+    if (!showLinkSection || !activeOrganizationId) return;
+
+    const loadOptionalData = async () => {
+      try {
+        setLoadingCustomers(true);
+        const { data: customersData, error: customersError } = await supabase
+          .from('DirectoryCustomers')
+          .select('id, company_name, customer_name')
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .limit(100);
+
+        if (!customersError && customersData) {
+          setCustomers(customersData.map(c => ({
+            id: c.id,
+            companyName: c.company_name,
+            customerName: c.customer_name,
+          })));
+        }
+      } catch (err) {
+        // Silently fail - this is optional
+        if (import.meta.env.DEV) {
+          console.warn('Failed to load customers (optional):', err);
+        }
+      } finally {
+        setLoadingCustomers(false);
+      }
+
+      try {
+        setLoadingContacts(true);
+        const { data: contactsData, error: contactsError } = await supabase
+          .from('DirectoryContacts')
+          .select('id, contact_name, email, customer_id, status')
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .limit(100);
+
+        if (!contactsError && contactsData) {
+          setContacts(contactsData.map(c => ({
+            id: c.id,
+            firstName: c.contact_name,
+            email: c.email,
+            customer_id: c.customer_id,
+            status: c.status,
+          })));
+        }
+      } catch (err) {
+        // Silently fail - this is optional
+        if (import.meta.env.DEV) {
+          console.warn('Failed to load contacts (optional):', err);
+        }
+      } finally {
+        setLoadingContacts(false);
+      }
+    };
+
+    loadOptionalData();
+  }, [showLinkSection, activeOrganizationId]);
+
+  // Preparar contactos disponibles cuando se cargan los datos (non-blocking)
   useEffect(() => {
     if (contacts.length > 0 && customers.length > 0) {
       // Crear mapa de customers para búsqueda rápida
       const customersMap = new Map(
-        customers.map(c => [c.id, c.companyName || 'N/A'])
+        customers.map(c => [c.id, c.companyName || c.customerName || 'N/A'])
       );
 
       // Filtrar contactos que:
@@ -67,8 +145,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         })
         .map(contact => ({
           id: contact.id,
-          name: contact.firstName || contact.email || 'Sin nombre', // firstName contiene contact_name
-          email: contact.email!.trim().toLowerCase(), // Normalizar email
+          name: contact.firstName || contact.email || 'Sin nombre',
+          email: contact.email!.trim().toLowerCase(),
           customer_id: contact.customer_id!,
           customer_name: customersMap.get(contact.customer_id!) || 'N/A',
         }))
@@ -83,14 +161,22 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   const form = useForm<OrganizationUserFormData>({
     resolver: zodResolver(organizationUserSchema),
     defaultValues: {
-      contact_id: '',
+      email: '',
       role: 'member',
+      customer_id: null,
+      contact_id: null,
     },
   });
 
-  // Obtener el contacto seleccionado para mostrar información
+  // Watch form values
   const selectedContactId = form.watch('contact_id');
+  const selectedCustomerId = form.watch('customer_id');
   const selectedContact = availableContacts.find(c => c.id === selectedContactId);
+  
+  // Filter contacts by selected customer
+  const filteredContacts = selectedCustomerId
+    ? availableContacts.filter(c => c.customer_id === selectedCustomerId)
+    : availableContacts;
 
   const handleSubmit = async (data: OrganizationUserFormData) => {
     // Validaciones básicas
@@ -110,30 +196,28 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       return;
     }
 
-    const contact = availableContacts.find(c => c.id === data.contact_id);
-    if (!contact) {
-      setSaveError('El contacto seleccionado no es válido.');
-      return;
-    }
-
-    // Validar que el contacto tenga customer_id
-    if (!contact.customer_id) {
-      setSaveError('El contacto seleccionado debe estar relacionado con un Customer.');
-      return;
-    }
-
-    // Validar que el contacto tenga email
-    if (!contact.email || contact.email.trim().length === 0) {
-      setSaveError('El contacto seleccionado debe tener un email válido.');
-      return;
-    }
-
     setIsSaving(true);
     setSaveError(null);
 
     try {
-      const normalizedEmail = contact.email.trim().toLowerCase();
-      const userName = contact.name.trim();
+      const normalizedEmail = data.email.trim().toLowerCase();
+      
+      // Si se selecciona un contact, obtener su información
+      let userName: string | null = null;
+      // Normalizar customer_id y contact_id (convertir '' a null)
+      let finalCustomerId: string | null = (data.customer_id && data.customer_id !== '') ? data.customer_id : null;
+      let finalContactId: string | null = (data.contact_id && data.contact_id !== '') ? data.contact_id : null;
+      
+      if (finalContactId) {
+        const contact = availableContacts.find(c => c.id === finalContactId);
+        if (contact) {
+          userName = contact.name.trim();
+          // Si no se seleccionó customer pero sí contact, usar el customer del contact
+          if (!finalCustomerId && contact.customer_id) {
+            finalCustomerId = contact.customer_id;
+          }
+        }
+      }
 
       // VALIDACIÓN CRÍTICA: Verificar que el email sea único en esta organización
       const { data: existingUser, error: checkError } = await supabase
@@ -160,8 +244,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             role: data.role,
             user_name: userName,
             email: normalizedEmail,
-            contact_id: contact.id,
-            customer_id: contact.customer_id,
+            contact_id: finalContactId,
+            customer_id: finalCustomerId,
             deleted: false,
             updated_at: new Date().toISOString(),
           })
@@ -193,8 +277,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
           role: data.role,
           user_name: userName,
           email: normalizedEmail,
-          contact_id: contact.id,
-          customer_id: contact.customer_id,
+          contact_id: finalContactId,
+          customer_id: finalCustomerId,
           invited_by: user.id,
           deleted: false,
           is_system: false,
@@ -238,8 +322,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     }
   };
 
-  // Estados de carga
-  if (orgLoading || roleLoading || contactsLoading || customersLoading) {
+  // Estados de carga (NO incluir contacts/customers loading - son opcionales)
+  if (orgLoading || roleLoading) {
     return (
       <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
@@ -296,7 +380,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             <div>
               <h1 className="text-xl font-semibold text-foreground">Agregar Usuario</h1>
               <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-                Agrega un nuevo usuario a tu organización (debe ser un Contact relacionado con un Customer)
+                Agrega un nuevo usuario a tu organización (email + rol obligatorios, Customer/Contact opcionales)
               </p>
             </div>
           </div>
@@ -304,11 +388,21 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       )}
 
       {embedded && (
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Agregar Usuario</h2>
-          <p className="text-sm text-gray-600">
-            Agrega un nuevo usuario a tu organización (debe ser un Contact relacionado con un Customer)
-          </p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Agregar Usuario</h2>
+            <p className="text-sm text-gray-600">
+              Agrega un nuevo usuario a tu organización (email + rol obligatorios, Customer/Contact opcionales)
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.navigate('/settings/organization-user')}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+            title="Cerrar y volver a la lista"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       )}
 
@@ -316,99 +410,31 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
         <div className="py-6 px-6">
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-            {/* Contacto - Campo principal */}
+            {/* Email - Campo obligatorio */}
             <div>
-              <Label htmlFor="contact_id" className="text-xs" required>
-                Contacto
+              <Label htmlFor="email" className="text-xs" required>
+                Email
               </Label>
-              <select
-                id="contact_id"
-                {...form.register('contact_id')}
+              <Input
+                id="email"
+                type="email"
+                {...form.register('email')}
                 className={`w-full py-1.5 px-2.5 text-xs border rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 ${
-                  form.formState.errors.contact_id ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                  form.formState.errors.email ? 'border-red-300 bg-red-50' : 'border-gray-200'
                 }`}
-              >
-                <option value="">
-                  {contactsLoading || customersLoading 
-                    ? "Cargando contactos..." 
-                    : availableContacts.length === 0
-                      ? "No hay contactos disponibles (deben tener Customer y Email)"
-                      : "Selecciona un contacto"}
-                </option>
-                {availableContacts.map((contact) => (
-                  <option key={contact.id} value={contact.id}>
-                    {contact.name} ({contact.email}) - {contact.customer_name}
-                  </option>
-                ))}
-              </select>
-              {form.formState.errors.contact_id && (
+                placeholder="usuario@ejemplo.com"
+              />
+              {form.formState.errors.email && (
                 <p className="mt-1 text-xs text-red-600">
-                  {form.formState.errors.contact_id.message}
+                  {form.formState.errors.email.message}
                 </p>
               )}
               <p className="mt-1 text-xs text-gray-500">
-                Selecciona un contacto que esté relacionado con un Customer y tenga un email válido.
-                El email debe ser único en la organización.
+                El email debe ser único en la organización y será usado para identificar al usuario.
               </p>
-              {availableContacts.length === 0 && !contactsLoading && !customersLoading && (
-                <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded">
-                  <p className="text-xs text-yellow-800 font-medium">⚠️ No hay contactos disponibles</p>
-                  <p className="text-xs text-yellow-700 mt-1">
-                    Los contactos deben cumplir:
-                  </p>
-                  <ul className="text-xs text-yellow-700 mt-1 list-disc list-inside ml-2">
-                    <li>Estar relacionados con un Customer</li>
-                    <li>Tener un email válido</li>
-                    <li>No estar archivados</li>
-                  </ul>
-                </div>
-              )}
             </div>
 
-            {/* Información del contacto seleccionado (solo lectura) */}
-            {selectedContact && (
-              <>
-                <div>
-                  <Label className="text-xs">Nombre</Label>
-                  <Input
-                    type="text"
-                    value={selectedContact.name}
-                    disabled
-                    className="py-1 text-xs bg-gray-50"
-                    readOnly
-                  />
-                  <p className="mt-1 text-xs text-gray-400">Tomado del contacto seleccionado (contact_name)</p>
-                </div>
-
-                <div>
-                  <Label className="text-xs">Email (Único)</Label>
-                  <Input
-                    type="email"
-                    value={selectedContact.email}
-                    disabled
-                    className="py-1 text-xs bg-gray-50"
-                    readOnly
-                  />
-                  <p className="mt-1 text-xs text-gray-400">
-                    Este email debe ser único en la organización
-                  </p>
-                </div>
-
-                <div>
-                  <Label className="text-xs">Customer</Label>
-                  <Input
-                    type="text"
-                    value={selectedContact.customer_name}
-                    disabled
-                    className="py-1 text-xs bg-gray-50"
-                    readOnly
-                  />
-                  <p className="mt-1 text-xs text-gray-400">Customer asociado al contacto (customer_name)</p>
-                </div>
-              </>
-            )}
-
-            {/* Rol - Solo 3 opciones */}
+            {/* Rol - Campo obligatorio */}
             <div>
               <Label htmlFor="role" className="text-xs" required>
                 Rol
@@ -434,6 +460,113 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               </p>
             </div>
 
+            {/* Sección opcional: Vincular Customer/Contact */}
+            <div className="border-t border-gray-200 pt-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkSection(!showLinkSection);
+                  if (!showLinkSection && activeOrganizationId) {
+                    // Trigger load when opening
+                  }
+                }}
+                className="flex items-center justify-between w-full text-left mb-4"
+              >
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900">Vincular (Opcional)</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Opcionalmente puedes vincular este usuario a un Customer y/o Contact existente.
+                  </p>
+                </div>
+                <span className="text-xs text-gray-400">
+                  {showLinkSection ? 'Ocultar' : 'Mostrar'}
+                </span>
+              </button>
+
+              {showLinkSection && (
+                <div className="space-y-4">
+                  {/* Customer - Opcional */}
+                  <div>
+                    <Label htmlFor="customer_id" className="text-xs">
+                      Customer
+                    </Label>
+                    {loadingCustomers ? (
+                      <div className="text-xs text-gray-400 py-2">Cargando customers...</div>
+                    ) : (
+                      <select
+                        id="customer_id"
+                        {...form.register('customer_id')}
+                        onChange={(e) => {
+                          const value = e.target.value || null;
+                          form.setValue('customer_id', value);
+                          // Si se deselecciona customer, limpiar contact
+                          if (!value) {
+                            form.setValue('contact_id', null);
+                          }
+                        }}
+                        className="w-full py-1.5 px-2.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                      >
+                        <option value="">Ninguno (opcional)</option>
+                        {customers.length === 0 ? (
+                          <option value="" disabled>No hay customers disponibles</option>
+                        ) : (
+                          customers.map((customer) => (
+                            <option key={customer.id} value={customer.id}>
+                              {customer.companyName || customer.customerName || 'N/A'}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    )}
+                    <p className="mt-1 text-xs text-gray-400">
+                      Selecciona un Customer si deseas vincular este usuario a uno existente.
+                    </p>
+                  </div>
+
+                  {/* Contact - Opcional (filtrado por customer) */}
+                  <div>
+                    <Label htmlFor="contact_id" className="text-xs">
+                      Contact
+                    </Label>
+                    {loadingContacts ? (
+                      <div className="text-xs text-gray-400 py-2">Cargando contactos...</div>
+                    ) : (
+                      <select
+                        id="contact_id"
+                        {...form.register('contact_id')}
+                        disabled={!selectedCustomerId && filteredContacts.length === 0}
+                        className={`w-full py-1.5 px-2.5 text-xs border rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 ${
+                          form.formState.errors.contact_id ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                        } ${!selectedCustomerId && filteredContacts.length === 0 ? 'bg-gray-50 cursor-not-allowed' : ''}`}
+                      >
+                        <option value="">
+                          {!selectedCustomerId
+                            ? "Selecciona primero un Customer (opcional)"
+                            : filteredContacts.length === 0
+                              ? "No hay contactos disponibles para este Customer"
+                              : "Ninguno (opcional)"}
+                        </option>
+                        {filteredContacts.map((contact) => (
+                          <option key={contact.id} value={contact.id}>
+                            {contact.name} ({contact.email})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {form.formState.errors.contact_id && (
+                      <p className="mt-1 text-xs text-red-600">
+                        {form.formState.errors.contact_id.message}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-gray-400">
+                      Si seleccionas un Contact, debe pertenecer al Customer seleccionado.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+
             {/* Error Message */}
             {saveError && (
               <div className="bg-red-50 border border-red-200 rounded p-3">
@@ -453,7 +586,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               </button>
               <button
                 type="submit"
-                disabled={isSaving || !selectedContact}
+                disabled={isSaving}
                 className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
                 style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               >

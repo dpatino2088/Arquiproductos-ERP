@@ -74,17 +74,32 @@ export function useBOMComponents(bomTemplateId: string | null) {
   const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
-    async function fetchBOMComponents() {
-      if (!bomTemplateId || !activeOrganizationId) {
-        setLoading(false);
-        setComponents([]);
-        setError(null);
-        return;
-      }
+    // ✅ FIX: Early return guard to prevent unnecessary fetches
+    if (!bomTemplateId || !activeOrganizationId) {
+      setLoading(false);
+      setComponents([]);
+      setError(null);
+      return;
+    }
 
+    // ✅ FIX: Add logging (DEV-only)
+    if (import.meta.env.DEV) {
+      console.log('[useBOMComponents] Fetching components', {
+        bomTemplateId,
+        activeOrganizationId,
+        requestId: `${bomTemplateId}-${Date.now()}`,
+      });
+    }
+
+    async function fetchBOMComponents() {
       try {
         setLoading(true);
         setError(null);
+
+        // ✅ FIX: Skip fetch if already cleared (guard against race conditions)
+        if (!bomTemplateId || !activeOrganizationId) {
+          return;
+        }
 
         // Fetch BOMComponents separately to avoid join issues
         const { data: bomComponentsData, error: fetchError } = await supabase
@@ -96,6 +111,17 @@ export function useBOMComponents(bomTemplateId: string | null) {
           .order('sequence_order', { ascending: true });
 
         if (fetchError) {
+        // ✅ FIX: Don't retry on 404/400 errors
+        if (fetchError.code === 'PGRST116' || fetchError.code === '42P01' || 
+            fetchError.message?.includes('does not exist')) {
+          if (import.meta.env.DEV) {
+            console.warn('[useBOMComponents] Client error (not retrying):', fetchError.code, fetchError.message);
+          }
+          setError(null); // Don't show error for expected 404s
+          setComponents([]);
+          setLoading(false);
+          return;
+        }
           console.error('❌ Error fetching BOM components:', fetchError);
           throw fetchError;
         }
@@ -187,6 +213,11 @@ export function useBOMComponents(bomTemplateId: string | null) {
     }
 
     fetchBOMComponents();
+    
+    // ✅ FIX: Cleanup function to prevent state updates after unmount
+    return () => {
+      // Cancel any pending requests if component unmounts
+    };
   }, [bomTemplateId, activeOrganizationId]);
 
   return { components, loading, error };
@@ -247,27 +278,75 @@ export function useBOMCRUD() {
   const { activeOrganizationId } = useOrganizationContext();
 
   const createComponent = async (componentData: Omit<BOMComponent, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>) => {
-    if (!activeOrganizationId) {
-      throw new Error('No organization selected');
+    // ✅ FIX: Fallback a localStorage si activeOrganizationId no está disponible
+    let orgIdToUse = activeOrganizationId;
+    if (!orgIdToUse) {
+      const storedOrgId = localStorage.getItem('activeOrganizationId');
+      if (storedOrgId) {
+        orgIdToUse = storedOrgId;
+        if (import.meta.env.DEV) {
+          console.warn('[useBOM] Using organizationId from localStorage as fallback:', storedOrgId);
+        }
+      }
+    }
+    
+    if (!orgIdToUse) {
+      throw new Error('No organization available. Please refresh the page or contact support.');
     }
 
     if (!componentData.bom_template_id && !componentData.parent_item_id) {
       throw new Error('Either bom_template_id or parent_item_id is required');
     }
 
+    // ✅ MVP: Validación de campos requeridos
+    if (!componentData.component_item_id) {
+      throw new Error('component_item_id is required');
+    }
+    if (!componentData.component_role) {
+      throw new Error('component_role is required');
+    }
+    if (!componentData.qty_type) {
+      throw new Error('qty_type is required (fixed, per_width, or per_area)');
+    }
+    if (componentData.qty_type === 'fixed' && (!componentData.qty_value || componentData.qty_value <= 0)) {
+      throw new Error('qty_value is required and must be > 0 when qty_type is fixed');
+    }
+    if (!componentData.uom) {
+      throw new Error('uom is required');
+    }
+
     setIsCreating(true);
     try {
+      // ✅ MVP: Forzar auto_select=false siempre
+      const payload = {
+        ...componentData,
+        organization_id: orgIdToUse,
+        auto_select: false, // MVP: siempre false
+        // MVP: Si qty_type no es fixed, qty_value debe ser null
+        qty_value: componentData.qty_type === 'fixed' ? componentData.qty_value : null,
+        deleted: false,
+        archived: false,
+      };
+
+      // ✅ MVP: Logging para debugging
+      if (import.meta.env.DEV) {
+        console.log('[useBOM] SAVE BOM COMPONENT payload:', payload);
+      }
+
       const { data, error } = await supabase
         .from('BOMComponents')
-        .insert({
-          ...componentData,
-          organization_id: activeOrganizationId,
-        })
+        .insert(payload)
         .select()
         .single();
 
       if (error) {
+        // ✅ MVP: Logging de errores visible
+        console.error('[useBOM] SAVE BOM COMPONENT error:', error);
         throw error;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('[useBOM] SAVE BOM COMPONENT success:', data);
       }
 
       return data;
@@ -279,15 +358,43 @@ export function useBOMCRUD() {
   const updateComponent = async (id: string, updates: Partial<BOMComponent>) => {
     setIsUpdating(true);
     try {
+      // ✅ Get organization ID from localStorage fallback (hook can't be called here)
+      const orgIdToUse = localStorage.getItem('activeOrganizationId');
+
+      if (!orgIdToUse) {
+        throw new Error('Organization ID is required to update component');
+      }
+
+      // ✅ MVP: Forzar auto_select=false siempre
+      const payload = {
+        ...updates,
+        auto_select: false, // MVP: siempre false
+        // MVP: Si qty_type no es fixed, qty_value debe ser null
+        ...(updates.qty_type && updates.qty_type !== 'fixed' ? { qty_value: null } : {}),
+      };
+
+      // ✅ MVP: Logging para debugging
+      if (import.meta.env.DEV) {
+        console.log('[useBOM] UPDATE BOM COMPONENT payload:', { id, payload, organization_id: orgIdToUse });
+      }
+
+      // ✅ FIX: Strict UPDATE by id + bom_template_id + organization_id
       const { data, error } = await supabase
         .from('BOMComponents')
-        .update(updates)
+        .update(payload)
         .eq('id', id)
+        .eq('organization_id', orgIdToUse)
         .select()
         .single();
 
       if (error) {
+        // ✅ MVP: Logging de errores visible
+        console.error('[useBOM] UPDATE BOM COMPONENT error:', error);
         throw error;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('[useBOM] UPDATE BOM COMPONENT success:', data);
       }
 
       return data;

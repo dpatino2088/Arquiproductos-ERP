@@ -8,7 +8,7 @@ import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 
 interface ApprovedBOMItem {
-  sale_order_id: string;
+  sales_order_id: string;
   sale_order_no: string;
   quote_line_id: string;
   product_type_name: string;
@@ -23,7 +23,7 @@ interface ApprovedBOMItem {
 }
 
 interface SaleOrderGroup {
-  sale_order_id: string;
+  sales_order_id: string;
   sale_order_no: string;
   customer_name: string;
   created_at: string;
@@ -85,7 +85,7 @@ export default function ApprovedBOMList() {
           .from('ManufacturingOrders')
           .select(`
             id,
-            sale_order_id,
+            sales_order_id,
             status,
             organization_id
           `)
@@ -116,7 +116,7 @@ export default function ApprovedBOMList() {
         }
 
         // Get unique sale_order_ids from active MOs
-        const saleOrderIds = [...new Set(activeMOs.map((mo: any) => mo.sale_order_id).filter(Boolean))];
+        const saleOrderIds = [...new Set(activeMOs.map((mo: any) => mo.sales_order_id).filter(Boolean))];
 
         // Step 2: Get SalesOrders for these ManufacturingOrders
         const { data: saleOrders, error: soError } = await supabase
@@ -150,14 +150,14 @@ export default function ApprovedBOMList() {
           console.log('✅ ApprovedBOMList: Found', saleOrders.length, 'SalesOrders');
         }
 
-        // Create a map of sale_order_id -> ManufacturingOrder
+        // Create a map of sales_order_id -> ManufacturingOrder
         const moBySaleOrderId = new Map();
         manufacturingOrders.forEach((mo: any) => {
-          if (mo.sale_order_id) {
-            if (!moBySaleOrderId.has(mo.sale_order_id)) {
-              moBySaleOrderId.set(mo.sale_order_id, []);
+          if (mo.sales_order_id) {
+            if (!moBySaleOrderId.has(mo.sales_order_id)) {
+              moBySaleOrderId.set(mo.sales_order_id, []);
             }
-            moBySaleOrderId.get(mo.sale_order_id).push(mo);
+            moBySaleOrderId.get(mo.sales_order_id).push(mo);
           }
         });
 
@@ -175,8 +175,8 @@ export default function ApprovedBOMList() {
         
         const { data: allSalesOrderLines, error: solError } = await supabase
           .from('SalesOrderLines')
-          .select('id, sale_order_id, organization_id')
-          .in('sale_order_id', saleOrderIds)
+          .select('id, sales_order_id, organization_id')
+          .in('sales_order_id', saleOrderIds)
           .eq('deleted', false);
 
         if (solError) {
@@ -196,7 +196,7 @@ export default function ApprovedBOMList() {
         const saleOrderLineIds = allSalesOrderLines.map((sol: any) => sol.id);
         const saleOrderLineToSO = new Map<string, string>();
         allSalesOrderLines.forEach((sol: any) => {
-          saleOrderLineToSO.set(sol.id, sol.sale_order_id);
+          saleOrderLineToSO.set(sol.id, sol.sales_order_id);
         });
 
         if (import.meta.env.DEV) {
@@ -214,9 +214,9 @@ export default function ApprovedBOMList() {
           }
           
           const { data: bomInstancesData, error: bomError } = await supabase
-            .from('BomInstances')
-            .select('id, sale_order_line_id, quote_line_id, organization_id')
-            .in('sale_order_line_id', saleOrderLineIds)
+            .from('vw_bom_instances_safe')
+            .select('id, sales_order_line_id_safe, quote_line_id, organization_id')
+            .in('sales_order_line_id_safe', saleOrderLineIds)
             .eq('deleted', false)
             .eq('organization_id', activeOrganizationId);
           
@@ -389,7 +389,7 @@ export default function ApprovedBOMList() {
               bomLines.forEach((bil: any) => {
                 const bomInstance = bomInstances.find((bi: any) => bi.id === bil.bom_instance_id);
                 if (bomInstance) {
-                  const saleOrderId = saleOrderLineToSO.get(bomInstance.sale_order_line_id);
+                  const saleOrderId = saleOrderLineToSO.get(bomInstance.sales_order_line_id_safe);
                   if (saleOrderId) {
                     // component_name: Fabric names come from collection + variant, not item_name
                     // Detect fabric using part_role first, then fallback to CatalogItems fields
@@ -416,7 +416,7 @@ export default function ApprovedBOMList() {
                       : 'Product';
                     
                     materialList.push({
-                      sale_order_id: saleOrderId,
+                      sales_order_id: saleOrderId,
                       sku: bil.resolved_sku || 'N/A',
                       item_name: component_name,
                       product_type_name: productTypeName,
@@ -485,8 +485,8 @@ export default function ApprovedBOMList() {
         const groupsMap = new Map<string, SaleOrderGroup>();
 
         saleOrders.forEach((so: any) => {
-          const soMaterials = materialList?.filter((m: any) => m.sale_order_id === so.id) || [];
-          const soLines = allSalesOrderLines.filter((sol: any) => sol.sale_order_id === so.id);
+          const soMaterials = materialList?.filter((m: any) => m.sales_order_id === so.id) || [];
+          const soLines = allSalesOrderLines.filter((sol: any) => sol.sales_order_id === so.id);
           
           // NO saltar Sale Orders sin materiales - mostrar todos
           const customerName = customersMap.get(so.customer_id) || 'N/A';
@@ -495,7 +495,7 @@ export default function ApprovedBOMList() {
           const components: ApprovedBOMItem[] = soMaterials.length > 0
             ? soMaterials.map((m: any) => {
                 return {
-                  sale_order_id: so.id,
+                  sales_order_id: so.id,
                   sale_order_no: so.sale_order_no,
                   quote_line_id: soLines[0]?.id || '',
                   // product_type_name: from ProductTypes via QuoteLines (already fetched in query)
@@ -517,7 +517,7 @@ export default function ApprovedBOMList() {
           const total_cost = components.reduce((sum, c) => sum + c.total_cost, 0);
 
           groupsMap.set(so.id, {
-            sale_order_id: so.id,
+            sales_order_id: so.id,
             sale_order_no: so.sale_order_no,
             customer_name: customerName,
             created_at: so.created_at || new Date().toISOString(),
@@ -708,7 +708,7 @@ export default function ApprovedBOMList() {
           {/* Sale Order Groups */}
           <div className="space-y-6">
             {paginatedGroups.map((group) => (
-              <div key={group.sale_order_id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div key={group.sales_order_id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 {/* Sale Order Header */}
                 <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
                   <div className="flex items-center justify-between">
@@ -750,7 +750,7 @@ export default function ApprovedBOMList() {
                       </thead>
                       <tbody className="divide-y divide-gray-200">
                         {group.components.map((item, idx) => (
-                          <tr key={`${item.sale_order_id}-${item.component_sku}-${idx}`} className="hover:bg-gray-50">
+                          <tr key={`${item.sales_order_id}-${item.component_sku}-${idx}`} className="hover:bg-gray-50">
                             <td className="py-3 px-6 text-sm text-gray-700">{item.product_type_name}</td>
                             <td className="py-3 px-6 text-sm text-gray-700 font-mono">{item.component_sku}</td>
                             <td className="py-3 px-6 text-sm text-gray-700">{item.component_name}</td>

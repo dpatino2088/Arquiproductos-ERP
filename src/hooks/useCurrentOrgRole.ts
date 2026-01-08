@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
 import type { OrgRole } from '../types/roles';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useAuthSession } from './useAuthSession';
 
 type UseCurrentOrgRoleOptions = {
   organizationId?: string | null;
@@ -36,11 +37,32 @@ export function useCurrentOrgRole(
 ): UseCurrentOrgRoleResult {
   const { activeOrganizationId } = useOrganizationContext();
   const effectiveOrgId = options.organizationId ?? activeOrganizationId ?? null;
+  const { user, userId, loading: sessionLoading } = useAuthSession();
   const [role, setRole] = useState<OrgRole>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const lastKeyRef = useRef<string>('');
 
   useEffect(() => {
+    // ✅ FIX: Guard para evitar doble ejecución
+    const key = `${userId || ''}:${effectiveOrgId || ''}`;
+    if (lastKeyRef.current === key) {
+      return;
+    }
+    lastKeyRef.current = key;
+
+    // ✅ FIX: Si session está cargando, esperar
+    if (sessionLoading) {
+      return;
+    }
+
+    // ✅ FIX: Si no hay userId, retornar sin rol
+    if (!userId || !user) {
+      setRole(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     async function loadRole() {
@@ -48,28 +70,15 @@ export function useCurrentOrgRole(
         setLoading(true);
         setError(null);
 
-        // 1) Usuario actual
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-
-        if (userError) throw userError;
-
-        if (!user) {
-          if (!cancelled) {
-            setRole(null);
-            setLoading(false);
-          }
-          return;
-        }
+        // ✅ FIX: Usar userId de useAuthSession en lugar de getUser()
+        // Ya no llamamos supabase.auth.getUser() aquí
 
         // 2) SUPERADMIN = fila en PlatformAdmins
         // Nota: Si la tabla no existe, esto fallará silenciosamente
         const { data: platformAdmin, error: paError } = await supabase
           .from('PlatformAdmins')
           .select('user_id')
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .maybeSingle();
 
         // Si la tabla no existe (PGRST116 o 42P01), continuamos sin superadmin
@@ -100,7 +109,7 @@ export function useCurrentOrgRole(
           .from('OrganizationUsers')
           .select('role')
           .eq('organization_id', effectiveOrgId)
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .eq('deleted', false)
           .maybeSingle();
 
@@ -128,7 +137,7 @@ export function useCurrentOrgRole(
     return () => {
       cancelled = true;
     };
-  }, [effectiveOrgId]);
+  }, [userId, effectiveOrgId, sessionLoading]);
 
   // flags de rol (solo 3 roles: superadmin, admin, member)
   const isSuperAdmin = role === 'superadmin';

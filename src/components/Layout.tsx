@@ -8,6 +8,7 @@ import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
 import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
+import { usePermissions } from '../hooks/usePermissions';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { 
   getSidebarStyles, 
@@ -136,6 +137,7 @@ function Layout({ children }: LayoutProps) {
   const { tabs: submoduleTabs, breadcrumbs, clearSubmoduleNav } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
   const { isMember } = useCurrentOrgRole();
+  const { can, loading: permissionsLoading } = usePermissions();
   
   // Use UI store for sidebar and view mode state
   const { 
@@ -415,33 +417,37 @@ function Layout({ children }: LayoutProps) {
     }
   }, [currentRoute]);
 
-  // Memoized navigation items for management view
+  // Memoized navigation items for management view (filtered by permissions)
   const navigation = useMemo(() => {
     // Create base navigation with new tabs according to design
     const dashboardItem = baseNavigation[0]; // Dashboard
     
-    // Navigation items in order: Directory, Sales, Sales Orders, Catalog, Inventory, Manufacturing, Financials, Reports
-    const directoryItem = { name: 'Directory', href: '/directory', icon: BookOpen };
-    const salesItem = { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag };
-    const saleOrdersItem = { name: 'Sales Orders', href: '/sale-orders', icon: FileText };
-    const catalogItem = { name: 'Catalog', href: '/catalog', icon: Book };
-    const inventoryItem = { name: 'Inventory', href: '/inventory', icon: Package };
-    const manufacturingItem = { name: 'Manufacturing', href: '/manufacturing', icon: Wrench };
-    const financialsItem = { name: 'Financials', href: '/financials', icon: DollarSign };
-    const reportsItem = { name: 'Reports', href: '/reports/company-reports', icon: Printer };
-    
-    return [
-      dashboardItem, 
-      directoryItem, 
-      salesItem, 
-      saleOrdersItem,
-      catalogItem, 
-      inventoryItem, 
-      manufacturingItem, 
-      financialsItem, 
-      reportsItem
+    // Navigation items with permission requirements
+    const allItems = [
+      dashboardItem, // Always visible
+      { name: 'Directory', href: '/directory', icon: BookOpen, permission: 'directory.read' },
+      { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, permission: 'quotes.read' },
+      { name: 'Sales Orders', href: '/sale-orders', icon: FileText, permission: 'sales_orders.read' },
+      { name: 'Catalog', href: '/catalog', icon: Book, permission: 'catalog.read' },
+      { name: 'Inventory', href: '/inventory', icon: Package, permission: 'inventory.read' },
+      { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, permission: 'manufacturing.read' },
+      { name: 'Financials', href: '/financials', icon: DollarSign, permission: 'financials.read' },
+      { name: 'Reports', href: '/reports/company-reports', icon: Printer, permission: 'reports.read' },
     ];
-  }, []);
+    
+    // Filter items based on permissions (if permissions are loaded)
+    if (permissionsLoading) {
+      // Show all items while loading (will be filtered once loaded)
+      return allItems;
+    }
+    
+    return allItems.filter(item => {
+      // Dashboard is always visible
+      if (!item.permission) return true;
+      // Check if user has the required permission
+      return can(item.permission);
+    });
+  }, [can, permissionsLoading]);
 
   const dashboardItem = useMemo(() => 
     navigation.find(item => item?.name === 'Dashboard' || item?.name === 'Home'), [navigation]
@@ -721,17 +727,20 @@ function Layout({ children }: LayoutProps) {
 
 
               {/* Settings Button - Oculto para Members */}
-              {!isMember && (() => {
+              {(() => {
+                // Show Settings only if user has settings.read permission
+                if (!can('settings.read')) return null;
+                
                 const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
                 return (
-              <button
+                  <button
                     {...getNavigationButtonProps(viewMode, isActive, () => handleNavigation(settingsUrl))}
-              title="Settings"
+                    title="Settings"
                     aria-label={`Settings${isActive ? ' (current page)' : ''}`}
                     aria-current={isActive ? 'page' : undefined}
                   >
                     {createNavItemContent(Settings, 'Settings', isCollapsed)}
-            </button>
+                  </button>
                 );
               })()}
 

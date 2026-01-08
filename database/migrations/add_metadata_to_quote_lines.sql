@@ -35,3 +35,5 @@ CREATE INDEX IF NOT EXISTS idx_quote_lines_metadata ON "QuoteLines" USING GIN (m
 
 
 
+
+

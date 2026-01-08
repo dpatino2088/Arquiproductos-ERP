@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { getSupabaseErrorMessage, isRLSError } from '../../lib/supabase-error-utils';
 import { 
   Search, 
   Filter,
@@ -106,6 +107,7 @@ export default function Quotes() {
     return quotes.map(quote => {
       // Calculate total from QuoteLines (sum of all line_total)
       const quoteLines = (quote as any).QuoteLines || [];
+      
       const linesTotal = quoteLines
         .filter((line: any) => !line.deleted)
         .reduce((sum: number, line: any) => sum + (line.line_total || 0), 0);
@@ -239,11 +241,24 @@ export default function Quotes() {
       
       refetch();
     } catch (error) {
+      const errorMessage = getSupabaseErrorMessage(error);
+      const isRLS = isRLSError(error);
+      
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error al archivar',
-        message: error instanceof Error ? error.message : 'Error desconocido',
+        title: isRLS ? 'Error de permisos' : 'Error al archivar',
+        message: errorMessage,
       });
+      
+      if (import.meta.env.DEV) {
+        console.error('❌ Error archiving quote:', {
+          quoteId: quote.id,
+          quoteNo: quote.quoteNo,
+          errorCode: (error as any)?.code,
+          errorMessage: (error as any)?.message,
+          isRLS,
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -368,6 +383,16 @@ export default function Quotes() {
   const handleDeleteQuote = async (quote: QuoteItem, e: React.MouseEvent) => {
     e.stopPropagation();
     
+    // ✅ Bloquear borrado si el Quote está approved
+    if (quote.status === 'approved') {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'No se puede eliminar',
+        message: 'No se puede eliminar una cotización que está aprobada. Primero debe ser rechazada o cancelada.',
+      });
+      return;
+    }
+    
     const confirmed = await showConfirm({
       title: 'Eliminar Cotización',
       message: `¿Estás seguro de que deseas eliminar la cotización "${quote.quoteNo}"? Esta acción no se puede deshacer.`,
@@ -382,13 +407,48 @@ export default function Quotes() {
       if (!activeOrganizationId) return;
       
       setLoading(true);
+      
+      // ✅ Soft delete: update({ deleted: true })
       const { error } = await supabase
         .from('Quotes')
         .update({ deleted: true })
         .eq('id', quote.id)
         .eq('organization_id', activeOrganizationId);
 
-      if (error) throw error;
+      if (error) {
+        // ✅ Mejorar manejo de errores: detectar RLS y otros errores
+        const errorMessage = getSupabaseErrorMessage(error);
+        const isRLS = isRLSError(error);
+        
+        if (isRLS) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error de permisos',
+            message: 'No tienes permisos para eliminar esta cotización. Por favor, contacta al administrador.',
+          });
+        } else {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error al eliminar',
+            message: errorMessage,
+          });
+        }
+        
+        // Log detallado en DEV
+        if (import.meta.env.DEV) {
+          console.error('❌ Error deleting quote:', {
+            quoteId: quote.id,
+            quoteNo: quote.quoteNo,
+            status: quote.status,
+            errorCode: (error as any)?.code,
+            errorMessage: (error as any)?.message,
+            errorHint: (error as any)?.hint,
+            isRLS,
+          });
+        }
+        
+        return;
+      }
 
       useUIStore.getState().addNotification({
         type: 'success',
@@ -398,11 +458,19 @@ export default function Quotes() {
       
       refetch();
     } catch (error) {
+      // ✅ Catch para errores inesperados
+      const errorMessage = getSupabaseErrorMessage(error);
+      const isRLS = isRLSError(error);
+      
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error al eliminar',
-        message: error instanceof Error ? error.message : 'Error desconocido',
+        title: isRLS ? 'Error de permisos' : 'Error al eliminar',
+        message: errorMessage,
       });
+      
+      if (import.meta.env.DEV) {
+        console.error('❌ Unexpected error deleting quote:', error);
+      }
     } finally {
       setLoading(false);
     }

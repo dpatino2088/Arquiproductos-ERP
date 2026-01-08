@@ -1,4 +1,7 @@
 /// <reference types="vite/client" />
+// ✅ CRITICAL: Import supabase client FIRST to ensure fetch interceptor is active before any other code
+import './lib/supabase/client' // This sets up the fetch interceptor that blocks telemetry requests
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -15,6 +18,7 @@ import './lib/rum-monitoring' // Initialize RUM
 import './lib/performance-budgets' // Initialize performance budgets
 import { useAuthStore } from './stores/auth-store'
 import { OrganizationProvider } from './context/OrganizationContext'
+import { PermissionProvider } from './context/PermissionContext'
 
 // Initialize performance monitoring
 performanceMonitor.init()
@@ -34,8 +38,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <OrganizationProvider>
-        <App />
-        <ReactQueryDevtools initialIsOpen={false} />
+        <PermissionProvider>
+          <App />
+          <ReactQueryDevtools initialIsOpen={false} />
+        </PermissionProvider>
       </OrganizationProvider>
     </QueryClientProvider>
   </React.StrictMode>

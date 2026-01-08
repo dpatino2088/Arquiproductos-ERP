@@ -11,7 +11,7 @@ import Label from '../ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/SelectShadcn';
 
 const createMOSchema = z.object({
-  sale_order_id: z.string().uuid('Sale Order is required'),
+  sales_order_id: z.string().uuid('Sale Order is required'),
   scheduled_start_date: z.string().optional(),
   scheduled_end_date: z.string().optional(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
@@ -78,7 +78,7 @@ export default function CreateManufacturingOrderModal({
   const onSubmit = async (data: CreateMOFormValues) => {
     try {
       const mo = await createManufacturingOrder({
-        sale_order_id: data.sale_order_id,
+        sales_order_id: data.sales_order_id,
         scheduled_start_date: data.scheduled_start_date || undefined,
         scheduled_end_date: data.scheduled_end_date || undefined,
         priority: (data.priority as ManufacturingOrderPriority) || 'normal',
@@ -124,7 +124,7 @@ export default function CreateManufacturingOrderModal({
           <div className="space-y-4">
             {/* Sale Order Selection */}
             <div>
-              <Label htmlFor="sale_order_id">Sale Order *</Label>
+              <Label htmlFor="sales_order_id">Sale Order *</Label>
               <div className="mt-1">
                 <input
                   type="text"
@@ -134,8 +134,8 @@ export default function CreateManufacturingOrderModal({
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-2"
                 />
                 <SelectShadcn
-                  value={watch('sale_order_id') || ''}
-                  onValueChange={(value) => setValue('sale_order_id', value)}
+                  value={watch('sales_order_id') || ''}
+                  onValueChange={(value) => setValue('sales_order_id', value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a sale order" />
@@ -156,8 +156,8 @@ export default function CreateManufacturingOrderModal({
                   </SelectContent>
                 </SelectShadcn>
               </div>
-              {errors.sale_order_id && (
-                <p className="text-red-600 text-xs mt-1">{errors.sale_order_id.message}</p>
+              {errors.sales_order_id && (
+                <p className="text-red-600 text-xs mt-1">{errors.sales_order_id.message}</p>
               )}
             </div>
 

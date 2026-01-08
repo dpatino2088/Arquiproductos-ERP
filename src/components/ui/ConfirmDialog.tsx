@@ -62,7 +62,10 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
       onClick={handleBackdropClick}
     >
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full transform transition-all">
+      <div 
+        className="bg-white rounded-lg shadow-xl max-w-md w-full transform transition-all"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center gap-3">
@@ -113,6 +116,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 };
 
 export default ConfirmDialog;
+
+
 
 
 

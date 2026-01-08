@@ -16,7 +16,8 @@ import { useBOMTemplates, useBOMTemplateCRUD } from '../../hooks/useBOMTemplates
 import { Folder, X } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../../components/ui/Tooltip';
 import { CANONICAL_COMPONENT_ROLES, normalizeRole, normalizeSubRole, isValidRole, isValidSubRole, getRoleLabel, getSubRoleLabel, getSubRolesForRole, hasSubRoles } from '../../lib/bom/roles';
-import { getValidUomOptions, normalizeMeasureBasis } from '../../lib/uom';
+import { getValidUomOptions, normalizeMeasureBasis, normalizeUom } from '../../lib/uom';
+import { calculateFabricLinearM, getFabricCalculationPreview } from '../../lib/bom/fabric-calculations';
 
 // Helper functions for conditional UI rendering based on role
 const shouldShowHardwareColor = (role: string | null | undefined): boolean => {
@@ -116,29 +117,6 @@ const isQtyAlwaysFixed = (role: string | null | undefined): boolean => {
   return ['drive_manual', 'drive_motorized', 'remote_control', 'battery', 'tool', 'accessory'].includes(normalized);
 };
 
-const getRoleHelperText = (role: string | null | undefined): string => {
-  if (!role) return '';
-  const normalized = normalizeRole(role);
-  if (!normalized) return '';
-  
-  const helperTexts: Record<string, string> = {
-    bracket: 'Soporte o bracket del sistema',
-    tube: 'Tubo/barra principal del sistema',
-    cassette: 'Cassette del sistema',
-    side_channel: 'Canal lateral',
-    bottom_bar: 'Barra inferior',
-    bottom_rail: 'Riel inferior',
-    top_rail: 'Riel superior',
-    drive_manual: 'Sistema de control manual',
-    drive_motorized: 'Motor o sistema motorizado',
-    operating_system: 'Sistema operativo (cadena, etc.)',
-    end_cap: 'Tapa o terminación',
-    hardware: 'Herrajes y accesorios',
-    fabric: 'Tela/textil',
-  };
-  
-  return helperTexts[normalized] || '';
-};
 
 // Get UOM for tube component based on measure_basis
 const getUomForTubeFromMeasureBasis = (measureBasis: string | null | undefined): string => {
@@ -153,7 +131,7 @@ const getUomForTubeFromMeasureBasis = (measureBasis: string | null | undefined):
   
   // For other measure basis, return first valid UOM option
   const validUoms = getValidUomOptions(normalized);
-  return validUoms.length > 0 ? validUoms[0] : 'm';
+  return validUoms.length > 0 ? (validUoms[0] || 'm') : 'm';
 };
 
 // Check if UOM should be readonly for a component
@@ -180,8 +158,11 @@ interface BOMTemplate {
   };
 }
 
-type BOMQtyType = 'fixed' | 'per_width' | 'per_area' | 'by_option';
-type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | string;
+// ✅ FIX: Shared constants for bom_qty_type enum (must match DB enum exactly)
+export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_area'] as const;
+export type BOMQtyType = typeof BOM_QTY_TYPES[number];
+
+type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | 'CATEGORY_FIRST_MATCH' | string;
 type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
 
 interface BOMComponent {
@@ -200,6 +181,8 @@ interface BOMComponent {
   select_rule?: Record<string, any> | null;
   qty_type?: BOMQtyType | null;
   qty_value?: number | null;
+  qty_formula_code?: string | null; // Formula code (e.g., 'CHAIN_HEIGHT_FACTOR')
+  qty_formula_params?: Record<string, any> | null; // Formula parameters (JSON)
   auto_select?: boolean; // DB field (boolean)
   selection_mode?: 'fixed' | 'auto_select'; // UI field (derived from auto_select)
   sequence_order: number;
@@ -270,12 +253,22 @@ export default function BOMTemplates() {
 
   // Load BOM templates
   useEffect(() => {
-    const loadTemplates = async () => {
-      if (!activeOrganizationId) {
-        setLoading(false);
-        return;
-      }
+    // ✅ FIX: Early return guard to prevent unnecessary fetches
+    if (!activeOrganizationId) {
+      setLoading(false);
+      return;
+    }
 
+    // ✅ FIX: Add request counter and logging (DEV-only)
+    if (import.meta.env.DEV) {
+      console.log('[BOMTemplates] Fetching templates', {
+        activeOrganizationId,
+        requestId: `${activeOrganizationId}-${Date.now()}`,
+        stack: new Error().stack?.split('\n').slice(1, 4).join('\n'),
+      });
+    }
+
+    const loadTemplates = async () => {
       try {
         setLoading(true);
         setError(null);
@@ -294,27 +287,46 @@ export default function BOMTemplates() {
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
-        if (error) throw error;
+        // ✅ FIX: Don't retry on 404/400 errors
+        if (error) {
+          if (error.code === 'PGRST116' || error.code === '42P01' || 
+              error.message?.includes('does not exist')) {
+            if (import.meta.env.DEV) {
+              console.warn('[BOMTemplates] Client error (not retrying):', error.code, error.message);
+            }
+            setError(null); // Don't show error for expected 404s
+            setTemplates([]);
+            setLoading(false);
+            return;
+          }
+          throw error;
+        }
+
         setTemplates(data || []);
 
         // Load components for each template
         if (data && data.length > 0) {
           const templateIds = data.map(t => t.id);
+          // ✅ FIX: No usar join relacional (PGRST200) - traer plano y resolver en memoria
           const { data: componentsData, error: componentsError } = await supabase
             .from('BOMComponents')
-            .select(`
-              *,
-              CatalogItems:component_item_id (
-                id,
-                sku,
-                item_name
-              )
-            `)
+            .select('*') // ✅ Solo campos de BOMComponents, sin join
             .in('bom_template_id', templateIds)
             .eq('deleted', false)
             .order('sequence_order', { ascending: true });
 
-          if (!componentsError && componentsData) {
+          // ✅ FIX: Handle 404/400 errors gracefully
+          if (componentsError) {
+            if (componentsError.code === 'PGRST116' || componentsError.code === '42P01' || 
+                componentsError.message?.includes('does not exist')) {
+              if (import.meta.env.DEV) {
+                console.warn('[BOMTemplates] Components fetch error (not retrying):', componentsError.code, componentsError.message);
+              }
+              setComponents(new Map()); // Set empty map on expected errors
+            } else {
+              console.error('[BOMTemplates] Unexpected error fetching components:', componentsError);
+            }
+          } else if (componentsData) {
             const componentsMap = new Map<string, BOMComponent[]>();
             componentsData.forEach((comp: BOMComponent) => {
               const templateId = comp.bom_template_id;
@@ -557,13 +569,16 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   const { categories } = useItemCategories();
   const { categories: leafCategories = [] } = useLeafItemCategories();
   const { createTemplate, updateTemplate, isCreating, isUpdating } = useBOMTemplateCRUD();
-  const { createComponent } = useBOMCRUD();
+  const { createComponent, updateComponent } = useBOMCRUD();
   const { components: existingComponents } = useBOMComponents(editingTemplateId || null);
 
   const [productTypeId, setProductTypeId] = useState<string>('');
+  const [templateCode, setTemplateCode] = useState<string>(''); // ✅ Template code (unique)
   const [templateName, setTemplateName] = useState<string>('');
   const [templateDescription, setTemplateDescription] = useState<string>('');
   const [components, setComponents] = useState<any[]>([]);
+  const [componentsToDelete, setComponentsToDelete] = useState<string[]>([]); // ✅ IDs de componentes a borrar en save
+  const initialComponentsRef = useRef<any[]>([]); // ✅ Snapshot inicial para comparar
   const [showAddComponentForm, setShowAddComponentForm] = useState(false);
   const [editingComponentId, setEditingComponentId] = useState<string | null>(null);
   const [componentSearchTerm, setComponentSearchTerm] = useState<string>('');
@@ -580,32 +595,23 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     cut_delta_mm: null as number | null,
     cut_delta_scope: 'none' as 'per_side' | 'per_item' | 'none',
   });
+  // ✅ MVP: Simplified form state - only MVP fields
   const [formData, setFormData] = useState<{
     component_item_id: string;
     component_role: string;
-    component_sub_role?: string | null;
-    qty_per_unit: number;
+    qty_type: BOMQtyType;
+    qty_value: number | null;
     uom: string;
-    is_required: boolean;
     sequence_order: number;
-    selection_mode?: 'fixed' | 'auto_select';
-    hardware_color?: HardwareColor | null;
-    sku_resolution_rule?: SKUResolutionRule | null;
-    select_rule?: Record<string, any> | null;
-    block_condition?: Record<string, any> | null;
-    qty_type?: BOMQtyType | null;
-    qty_value?: number | null;
-    applies_color?: boolean;
-    _original_component_item_id?: string; // Preserve original component_item_id when switching modes
+    is_required: boolean;
   }>({
     component_item_id: '',
     component_role: '',
-    component_sub_role: null,
-    qty_per_unit: 1,
+    qty_type: 'fixed',
+    qty_value: null,
     uom: 'ea',
-    is_required: true,
     sequence_order: 0,
-    selection_mode: 'fixed',
+    is_required: true,
   });
 
   // Load template data if editing
@@ -619,66 +625,140 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         .then(({ data, error }) => {
           if (!error && data) {
             setProductTypeId(data.product_type_id);
+            setTemplateCode(data.code || ''); // ✅ Load code
             setTemplateName(data.name || data.template_name || '');
             setTemplateDescription(data.description || '');
+            // ✅ Backend still saves metadata (as {}), but UI doesn't use it
           }
         });
     } else if (!editingTemplateId) {
+      // ✅ Reset completo cuando no hay template
       setProductTypeId('');
+      setTemplateCode('');
       setTemplateName('');
       setTemplateDescription('');
       setComponents([]);
+      setComponentsToDelete([]);
+      initialComponentsRef.current = [];
     }
   }, [editingTemplateId, activeOrganizationId]);
 
-  // Update UOM for tube component when productTypeId, component_role, or selection_mode changes
-  // NOTE: measure_basis is not currently in ProductTypes table, so UOM calculation for tube is deferred
-  // For now, UOM will default to 'm' for tube components in auto_select mode
-  useEffect(() => {
-    if (productTypeId && formData.component_role === 'tube' && (formData.selection_mode || 'fixed') === 'auto_select') {
-      // TODO: When measure_basis is added to ProductTypes or determined from CatalogItems,
-      // calculate UOM from measure_basis. For now, default to 'm' (meters)
-      if (formData.uom !== 'm') {
-        setFormData(prev => ({ ...prev, uom: 'm' }));
-      }
-    }
-  }, [productTypeId, productTypes, formData.component_role, formData.selection_mode, formData.uom]);
+  // ✅ MVP: Removed auto-select UOM logic - UOM is always user-selected
 
-  // Load existing components when template is loaded
+  // ✅ FIX: Reset total de estado al cargar template - SIEMPRE REEMPLAZAR, NUNCA MERGE
   useEffect(() => {
-    if (editingTemplateId && existingComponents && Array.isArray(existingComponents)) {
-      console.log('📦 Loading existing components:', existingComponents.length, 'components');
-      console.log('📦 Components data:', existingComponents);
-      const mappedComponents = existingComponents.map((comp: any) => {
-        // Convert auto_select (boolean) to selection_mode ('fixed' | 'auto_select')
-        const selectionMode: 'fixed' | 'auto_select' = comp.auto_select === true ? 'auto_select' : 'fixed';
-        
-        return {
-          ...comp,
-          id: comp.id,
-          component_role: comp.component_role || null,
-          component_sub_role: comp.component_sub_role || null,
-          auto_select: comp.auto_select || false, // Preserve auto_select field for DB
-          selection_mode: selectionMode, // Add selection_mode for UI
-          affects_role: comp.affects_role || null,
-          cut_axis: comp.cut_axis || 'none',
-          cut_delta_mm: comp.cut_delta_mm || null,
-          cut_delta_scope: comp.cut_delta_scope || 'none',
-          qty_per_unit: Math.round(comp.qty_per_unit || 1),
-          // Preserve auto-select fields
-          hardware_color: comp.hardware_color || null,
-          sku_resolution_rule: comp.sku_resolution_rule || null,
-          select_rule: comp.select_rule || null,
-          block_condition: comp.block_condition || null,
-          qty_type: comp.qty_type || null,
-          qty_value: comp.qty_value || null,
-          applies_color: comp.applies_color || false,
-        };
-      });
-      console.log('📦 Mapped components:', mappedComponents.length, 'components');
-      setComponents(mappedComponents);
-    } else if (!editingTemplateId) {
+    // ✅ Limpiar estado ANTES de cargar cuando cambia templateId
+    if (editingTemplateId) {
+      // ✅ Limpiar inmediatamente cuando cambia templateId
       setComponents([]);
+      setComponentsToDelete([]);
+      setEditingComponentId(null);
+      setShowAddComponentForm(false);
+      setComponentSearchTerm('');
+      setSelectedCategoryFilter('');
+      setShowComponentDropdown(false);
+      setHighlightedIndex(-1);
+      initialComponentsRef.current = [];
+    } else {
+      // ✅ Reset completo cuando no hay template
+      setComponents([]);
+      setComponentsToDelete([]);
+      setEditingComponentId(null);
+      setShowAddComponentForm(false);
+      setComponentSearchTerm('');
+      setSelectedCategoryFilter('');
+      setShowComponentDropdown(false);
+      setHighlightedIndex(-1);
+      setFormData({
+        component_item_id: '',
+        component_role: '',
+        qty_type: 'fixed',
+        qty_value: null,
+        uom: 'ea',
+        sequence_order: 0,
+        is_required: true,
+      });
+      initialComponentsRef.current = [];
+      return;
+    }
+  }, [editingTemplateId]);
+
+  // ✅ FIX: Cargar componentes SOLO cuando existingComponents cambia y templateId existe
+  useEffect(() => {
+    if (!editingTemplateId) {
+      return;
+    }
+
+    // ✅ Cargar componentes desde DB - SIEMPRE REEMPLAZAR
+    if (existingComponents && Array.isArray(existingComponents)) {
+      if (import.meta.env.DEV) {
+        console.log('[BOMTemplates] Loading existing components', {
+          editingTemplateId,
+          componentCount: existingComponents.length,
+        });
+      }
+
+      // ✅ MVP: Mapear solo campos MVP necesarios
+      const mappedComponents = existingComponents.map((comp: any) => ({
+        id: comp.id,
+        component_item_id: comp.component_item_id,
+        component_role: comp.component_role || null,
+        qty_type: comp.qty_type || 'fixed',
+        qty_value: comp.qty_value || (comp.qty_type === 'fixed' ? comp.qty_per_unit : null),
+        qty_per_unit: comp.qty_per_unit || (comp.qty_type === 'fixed' ? comp.qty_value || 1 : 1),
+        uom: comp.uom || 'ea',
+        sequence_order: comp.sequence_order || 0,
+        is_required: comp.is_required !== false,
+        auto_select: false, // ✅ MVP: siempre false
+      }));
+
+      // ✅ FIX: Deduplicación defensiva por ID (O(n))
+      const uniqueById = Array.from(
+        mappedComponents.reduce((acc, comp) => {
+          acc.set(comp.id, comp);
+          return acc;
+        }, new Map<string, any>()).values()
+      );
+
+      // ✅ SIEMPRE REEMPLAZAR estado, NUNCA merge
+      setComponents(uniqueById);
+      setComponentsToDelete([]); // ✅ Limpiar deletions al cargar
+      setEditingComponentId(null);
+      setShowAddComponentForm(false);
+      setComponentSearchTerm('');
+      setSelectedCategoryFilter('');
+      setShowComponentDropdown(false);
+      setHighlightedIndex(-1);
+      setFormData({
+        component_item_id: '',
+        component_role: '',
+        qty_type: 'fixed',
+        qty_value: null,
+        uom: 'ea',
+        sequence_order: uniqueById.length || 0,
+        is_required: true,
+      });
+      
+      // ✅ Guardar snapshot inicial
+      initialComponentsRef.current = uniqueById.map(c => ({ ...c }));
+
+      if (import.meta.env.DEV) {
+        console.log('[BOMTemplates] Components loaded and state reset:', uniqueById.length, 'components (deduplicated by ID)');
+      }
+    } else if (editingTemplateId) {
+      // ✅ Si templateId existe pero no hay componentes válidos, limpiar estado
+      if (!existingComponents || !Array.isArray(existingComponents)) {
+        setComponents([]);
+        setComponentsToDelete([]);
+        initialComponentsRef.current = [];
+      } else {
+        const componentsArray = existingComponents as any[];
+        if (componentsArray.length === 0) {
+          setComponents([]);
+          setComponentsToDelete([]);
+          initialComponentsRef.current = [];
+        }
+      }
     }
   }, [editingTemplateId, existingComponents]);
 
@@ -884,31 +964,27 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
 
   const handleSelectComponent = (itemId: string) => {
     const selectedItem = catalogItems.find(item => item.id === itemId);
-    const catalogUom = selectedItem?.uom || 'ea';
-    const displayText = selectedItem ? `${selectedItem.sku} - ${selectedItem.name || selectedItem.item_name || 'Unnamed'}` : '';
+    
+    // ✅ FIX: For fabrics, force UOM to 'm' (linear meters)
+    const isFabric = selectedItem?.is_fabric || false;
+    const isFabricRole = formData.component_role === 'fabric';
+    const shouldUseMeters = isFabric || isFabricRole;
+    const catalogUom = shouldUseMeters ? 'm' : (selectedItem?.uom || 'ea');
     
     setFormData({ 
       ...formData, 
       component_item_id: itemId,
-      uom: catalogUom
+      uom: catalogUom // ✅ Force 'm' for fabrics
     });
-    setComponentSearchTerm(displayText);
+    // ✅ FIX: Set search term to show selected item
+    if (selectedItem) {
+      setComponentSearchTerm(`${selectedItem.sku} - ${selectedItem.name || selectedItem.item_name || ''}`);
+    }
     setShowComponentDropdown(false);
     setHighlightedIndex(-1);
   };
 
-  // Update search term when component is selected (for display)
-  useEffect(() => {
-    if (formData.component_item_id && !showComponentDropdown) {
-      const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
-      if (selectedItem) {
-        // Don't update if user is typing
-        if (!componentInputFieldRef.current || document.activeElement !== componentInputFieldRef.current) {
-          setComponentSearchTerm(`${selectedItem.sku} - ${selectedItem.name || selectedItem.item_name || 'Unnamed'}`);
-        }
-      }
-    }
-  }, [formData.component_item_id, catalogItems, showComponentDropdown]);
+  // Note: Search term is now controlled by the Input value directly (shows selected component when selected)
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -932,18 +1008,25 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     }
   }, [showComponentDropdown]);
 
+  // ✅ MVP: Simplified handleAddComponent - only MVP fields
   const handleAddComponent = () => {
-    // Validation
-    if (formData.selection_mode === 'fixed' && !formData.component_item_id) {
+    if (import.meta.env.DEV) {
+      console.log('[handleAddComponent] Called with formData:', formData);
+    }
+    
+    // MVP Validations
+    if (!formData.component_item_id) {
+      if (import.meta.env.DEV) {
+        console.log('[handleAddComponent] Validation failed: component_item_id missing');
+      }
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Validation Error',
-        message: 'Please select a component.',
+        message: 'Selecciona un componente (SKU)',
       });
       return;
     }
 
-    // Component role is always required
     if (!formData.component_role) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -961,27 +1044,62 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       });
       return;
     }
+    
+    const normalizedRole = normalizeRole(formData.component_role);
+    // ✅ MVP: Dropdown already provides canonical snake_case values, so normalization check is redundant
+    
+    if (!formData.qty_type) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Quantity Type is required.',
+      });
+      return;
+    }
 
+    if (formData.qty_type === 'fixed' && (!formData.qty_value || formData.qty_value <= 0)) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Quantity Value is required and must be > 0 when Quantity Type is fixed.',
+      });
+      return;
+    }
+
+    if (!formData.uom) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'UOM is required.',
+      });
+      return;
+    }
+
+    // ✅ FIX: For fabric role, ensure UOM is 'm' and set qty_type to allow formula
+    const isFabricRole = normalizedRole === 'fabric';
+    const finalUom = isFabricRole ? 'm' : normalizeUom(formData.uom) || 'ea';
+    const finalQtyType = isFabricRole && formData.qty_type === 'fixed' 
+      ? 'per_area' // ✅ Fabric should use formula, not fixed
+      : formData.qty_type;
+    
+    const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
+    
+    // ✅ MVP: Build component with only MVP fields
     const newComponent = {
-      ...formData,
-      component_item_id: formData.selection_mode === 'fixed' ? formData.component_item_id : null,
-      component_role: normalizeRole(formData.component_role || ''),
-      component_sub_role: normalizeSubRole(formData.component_sub_role || null),
-      qty_per_unit: Math.round(formData.qty_per_unit || 1),
-      // For auto-select: don't persist UOM (it comes from CatalogItems.uom at BOM generation time)
-      // For fixed: UOM comes from selected CatalogItem, so we don't persist it either
-      // uom: not persisted - always comes from CatalogItems.uom at BOM generation
-      auto_select: formData.selection_mode === 'auto_select', // DB field
-      selection_mode: formData.selection_mode, // UI field
-      id: `temp-${Date.now()}`,
-      // Auto-select fields
-      hardware_color: formData.selection_mode === 'auto_select' ? formData.hardware_color : null,
-      sku_resolution_rule: formData.selection_mode === 'auto_select' ? formData.sku_resolution_rule : null,
-      select_rule: formData.selection_mode === 'auto_select' ? formData.select_rule : null,
-      block_condition: formData.selection_mode === 'auto_select' ? formData.block_condition : null,
-      qty_type: formData.selection_mode === 'auto_select' ? (formData.qty_type || 'fixed') : null,
-      qty_value: formData.selection_mode === 'auto_select' ? formData.qty_value : null,
-      applies_color: formData.selection_mode === 'auto_select' ? (formData.applies_color || false) : false,
+      id: `temp-${crypto.randomUUID()}`,
+      component_item_id: formData.component_item_id,
+      component_role: normalizedRole,
+      qty_type: finalQtyType,
+      qty_value: finalQtyType === 'fixed' ? formData.qty_value : null,
+      qty_formula_code: isFabricRole ? 'FABRIC_LINEAR_M' : null, // ✅ Set formula for fabric
+      qty_formula_params: isFabricRole ? { 
+        roll_width_m: selectedItem?.roll_width_m || null,
+        allowance_m: 0.1, // Default allowance
+      } : null,
+      uom: finalUom, // ✅ Normalized UOM (forced 'm' for fabric)
+      sequence_order: formData.sequence_order ?? 0,
+      is_required: formData.is_required ?? true,
+      auto_select: false, // ✅ MVP: Always false
     };
     
     setComponents([...components, newComponent]);
@@ -994,7 +1112,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     });
   };
 
-  const handleUpdateComponent = () => {
+  // ✅ MVP: Simplified handleUpdateComponent - only MVP fields
+  const handleUpdateComponent = async () => {
     if (!editingComponentId) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -1004,8 +1123,16 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       return;
     }
 
-    // Validation
-    // Component role is always required
+    // MVP Validations (same as handleAddComponent)
+    if (!formData.component_item_id) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Selecciona un componente (SKU)',
+      });
+      return;
+    }
+
     if (!formData.component_role) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -1014,17 +1141,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       });
       return;
     }
-    
-    if (formData.selection_mode === 'fixed' && !formData.component_item_id) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Validation Error',
-        message: 'Please select a component.',
-      });
-      return;
-    }
 
-    if (formData.component_role && !isValidRole(formData.component_role)) {
+    if (!isValidRole(formData.component_role)) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Invalid Role',
@@ -1032,7 +1150,48 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       });
       return;
     }
+    
+    const normalizedRole = normalizeRole(formData.component_role);
+    // ✅ MVP: Dropdown already provides canonical snake_case values, so normalization check is redundant
+    
+    if (!formData.qty_type) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Quantity Type is required.',
+      });
+      return;
+    }
 
+    if (formData.qty_type === 'fixed' && (!formData.qty_value || formData.qty_value <= 0)) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Quantity Value is required and must be > 0 when Quantity Type is fixed.',
+      });
+      return;
+    }
+
+    if (!formData.uom) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'UOM is required.',
+      });
+      return;
+    }
+
+    // ✅ FIX: UPDATE by id - never insert when editing
+    if (!editingTemplateId || !activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Template ID or Organization ID missing. Cannot update component.',
+      });
+      return;
+    }
+
+    // ✅ Verify component exists
     const componentExists = components.some(c => c.id === editingComponentId);
     if (!componentExists) {
       useUIStore.getState().addNotification({
@@ -1043,72 +1202,142 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       return;
     }
 
-    const updatedComponents = components.map(c => {
-      if (c.id === editingComponentId) {
-        // Restore component_item_id if switching back to fixed mode
-        const finalComponentItemId = formData.selection_mode === 'fixed' 
-          ? (formData.component_item_id || formData._original_component_item_id || '')
-          : null;
-        
-        const updated = { 
-          ...c, 
-          ...formData,
-          component_item_id: finalComponentItemId,
-          component_role: normalizeRole(formData.component_role || ''),
-          component_sub_role: normalizeSubRole(formData.component_sub_role || null),
-          qty_per_unit: Math.round(formData.qty_per_unit || 1),
-          // For auto-select: don't persist UOM (it comes from CatalogItems.uom at BOM generation time)
-          // For fixed: UOM comes from selected CatalogItem, so we don't persist it either
-          // uom: not persisted - always comes from CatalogItems.uom at BOM generation
-          auto_select: formData.selection_mode === 'auto_select', // DB field
-          selection_mode: formData.selection_mode, // UI field
-          // Auto-select fields
-          hardware_color: formData.selection_mode === 'auto_select' ? formData.hardware_color : null,
-          sku_resolution_rule: formData.selection_mode === 'auto_select' ? formData.sku_resolution_rule : null,
-          select_rule: formData.selection_mode === 'auto_select' ? formData.select_rule : null,
-          block_condition: formData.selection_mode === 'auto_select' ? formData.block_condition : null,
-          qty_type: formData.selection_mode === 'auto_select' ? (formData.qty_type || 'fixed') : null,
-          qty_value: formData.selection_mode === 'auto_select' ? formData.qty_value : null,
-          applies_color: formData.selection_mode === 'auto_select' ? (formData.applies_color || false) : false,
-        };
-        if (!c.id.startsWith('temp-')) {
-          updated.id = `temp-${Date.now()}-${c.id}`;
-          (updated as any)._originalId = c.id;
-        }
-        return updated;
+    try {
+      // ✅ FIX: For fabric role, ensure UOM is 'm' and set qty_type/formula
+      const isFabricRole = normalizedRole === 'fabric';
+      const normalizedUom = isFabricRole ? 'm' : (normalizeUom(formData.uom) || 'ea');
+      const finalQtyType = isFabricRole && formData.qty_type === 'fixed' 
+        ? 'per_area' // ✅ Fabric should use formula, not fixed
+        : formData.qty_type;
+      
+      const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
+      
+      const updateData = {
+        component_item_id: formData.component_item_id,
+        component_role: normalizedRole,
+        qty_type: finalQtyType,
+        qty_value: finalQtyType === 'fixed' ? formData.qty_value : null,
+        qty_per_unit: finalQtyType === 'fixed' ? (formData.qty_value || 1) : 1,
+        qty_formula_code: isFabricRole ? 'FABRIC_LINEAR_M' : null, // ✅ Set formula for fabric
+        qty_formula_params: isFabricRole ? { 
+          roll_width_m: selectedItem?.roll_width_m || null,
+          allowance_m: 0.1, // Default allowance
+        } : null,
+        uom: normalizedUom, // ✅ Normalized UOM (forced 'm' for fabric)
+        sequence_order: formData.sequence_order ?? 0,
+        is_required: formData.is_required ?? true,
+        auto_select: false,
+      };
+
+      if (import.meta.env.DEV) {
+        console.log('[handleUpdateComponent] Updating component:', {
+          componentId: editingComponentId,
+          originalUom: formData.uom,
+          normalizedUom,
+          updateData,
+        });
       }
-      return c;
-    });
-    
-    setComponents(updatedComponents);
-    resetForm();
-    
-    useUIStore.getState().addNotification({
-      type: 'success',
-      title: 'Success',
-      message: 'Component updated successfully.',
-    });
+
+      // ✅ FIX: UPDATE by BOMComponent.id (not catalog_item_id) - NEVER INSERT
+      await updateComponent(editingComponentId, updateData);
+
+      // ✅ FIX: Recargar desde DB para asegurar estado sincronizado (igual que en handleSave)
+      if (editingTemplateId) {
+        const { data: refreshedComponents, error: refreshError } = await supabase
+          .from('BOMComponents')
+          .select('*')
+          .eq('bom_template_id', editingTemplateId)
+          .eq('deleted', false)
+          .order('sequence_order', { ascending: true });
+        
+        if (!refreshError && refreshedComponents) {
+          const mappedComponents = refreshedComponents.map((comp: any) => ({
+            id: comp.id,
+            component_item_id: comp.component_item_id,
+            component_role: comp.component_role || null,
+            qty_type: comp.qty_type || 'fixed',
+            qty_value: comp.qty_value || (comp.qty_type === 'fixed' ? comp.qty_per_unit : null),
+            qty_per_unit: comp.qty_per_unit || (comp.qty_type === 'fixed' ? comp.qty_value || 1 : 1),
+            uom: normalizeUom(comp.uom) || 'ea', // ✅ Normalize UOM from DB
+            sequence_order: comp.sequence_order || 0,
+            is_required: comp.is_required !== false,
+            auto_select: false,
+          }));
+          
+          // ✅ Deduplicación defensiva por ID
+          const uniqueById = Array.from(
+            mappedComponents.reduce((acc, comp) => {
+              acc.set(comp.id, comp);
+              return acc;
+            }, new Map<string, any>()).values()
+          );
+          
+          setComponents(uniqueById);
+          initialComponentsRef.current = uniqueById.map(c => ({ ...c }));
+          
+          if (import.meta.env.DEV) {
+            console.log('[handleUpdateComponent] Components reloaded from DB:', {
+              componentId: editingComponentId,
+              updatedUom: uniqueById.find(c => c.id === editingComponentId)?.uom,
+              totalComponents: uniqueById.length,
+            });
+          }
+        } else if (refreshError) {
+          console.warn('[handleUpdateComponent] Error reloading components (non-critical):', refreshError);
+          // Fallback: update local state with updateData
+          const updatedComponents = components.map(c => {
+            if (c.id === editingComponentId) {
+              return {
+                ...c,
+                ...updateData,
+              };
+            }
+            return c;
+          });
+          setComponents(updatedComponents);
+        }
+      } else {
+        // Fallback: update local state if no templateId
+        const updatedComponents = components.map(c => {
+          if (c.id === editingComponentId) {
+            return {
+              ...c,
+              ...updateData,
+            };
+          }
+          return c;
+        });
+        setComponents(updatedComponents);
+      }
+      
+      resetForm();
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Success',
+        message: 'Component updated successfully.',
+      });
+    } catch (error) {
+      console.error('[handleUpdateComponent] Error updating component:', error);
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to update component.',
+      });
+    }
   };
 
+  // ✅ MVP: Simplified resetForm - only MVP fields
   const resetForm = () => {
     setEditingComponentId(null);
     setFormData({
       component_item_id: '',
       component_role: '',
-      component_sub_role: null,
-      qty_per_unit: 1,
-      uom: 'ea',
-      is_required: true,
-      _original_component_item_id: undefined,
-      sequence_order: components.length,
-      selection_mode: 'fixed',
-      hardware_color: null,
-      sku_resolution_rule: null,
-      select_rule: null,
-      block_condition: null,
       qty_type: 'fixed',
       qty_value: null,
-      applies_color: false,
+      uom: 'ea',
+      sequence_order: components.length,
+      is_required: true,
     });
     setShowAddComponentForm(false);
     setComponentSearchTerm('');
@@ -1117,46 +1346,60 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     setHighlightedIndex(-1);
   };
 
+  // ✅ FIX: Borrado solo local - se confirma en save
   const handleDeleteComponent = (componentId: string) => {
-    setComponents(components.filter(c => c.id !== componentId));
+    if (componentId.startsWith('temp-')) {
+      // ✅ Componente temporal: solo remover de lista
+      setComponents(components.filter(c => c.id !== componentId));
+    } else {
+      // ✅ Componente real: remover de lista y marcar para borrado
+      setComponents(components.filter(c => c.id !== componentId));
+      setComponentsToDelete(prev => [...prev, componentId]);
+    }
+    
+    if (import.meta.env.DEV) {
+      console.log('[BOMTemplates] Component deleted locally:', {
+        componentId,
+        isTemp: componentId.startsWith('temp-'),
+        componentsToDeleteCount: componentId.startsWith('temp-') ? componentsToDelete.length : componentsToDelete.length + 1,
+      });
+    }
   };
 
+  // ✅ MVP: Simplified handleEditComponent - only MVP fields
   const handleEditComponent = (component: any) => {
     const componentItemId = component.component_item_id || '';
     const componentItem = catalogItems.find(item => item.id === componentItemId);
     const displayText = componentItem ? `${componentItem.sku} - ${componentItem.name || componentItem.item_name || 'Unnamed'}` : '';
     
-    // Determine selection mode: use auto_select field if available, otherwise infer from component_item_id
-    const selectionMode: 'fixed' | 'auto_select' = component.auto_select === true ? 'auto_select' : (componentItemId ? 'fixed' : 'auto_select');
+    // ✅ FIX: Ensure UOM is properly initialized from component (prioritize component.uom)
+    // Normalize UOM from component (lowercase, trim)
+    // For fabric role, force UOM to 'm'
+    const isFabricRole = component.component_role === 'fabric';
+    const componentUomNormalized = isFabricRole ? 'm' : normalizeUom(component.uom);
+    const fallbackUom = isFabricRole ? 'm' : (normalizeUom(componentItem?.uom) || 'ea');
+    const finalUom = componentUomNormalized || fallbackUom;
     
-    // Calculate UOM: for tube in auto_select mode, default to 'm'; otherwise use catalog/component UOM
-    let initialUom: string;
-    const componentRole = normalizeRole(component.component_role || '');
-    if (componentRole === 'tube' && selectionMode === 'auto_select') {
-      // TODO: When measure_basis is available, calculate from it
-      initialUom = 'm'; // Default to meters for tube in auto_select mode
-    } else {
-      initialUom = componentItem?.uom || component.uom || 'ea';
+    if (import.meta.env.DEV) {
+      console.log('[handleEditComponent] Initializing form:', {
+        componentId: component.id,
+        componentUom: component.uom,
+        componentUomNormalized,
+        componentItemUom: componentItem?.uom,
+        fallbackUom,
+        finalUom,
+      });
     }
     
     setEditingComponentId(component.id);
     setFormData({
       component_item_id: componentItemId,
       component_role: component.component_role || '',
-      component_sub_role: component.component_sub_role || null,
-      qty_per_unit: Math.round(component.qty_per_unit || 1),
-      uom: initialUom,
-      is_required: component.is_required ?? true,
-      sequence_order: component.sequence_order || 0,
-      selection_mode: selectionMode,
-      hardware_color: component.hardware_color || null,
-      sku_resolution_rule: component.sku_resolution_rule || null,
-      select_rule: component.select_rule || null,
-      block_condition: component.block_condition || null,
       qty_type: component.qty_type || 'fixed',
-      qty_value: component.qty_value || null,
-      applies_color: component.applies_color || false,
-      _original_component_item_id: componentItemId, // Preserve original when editing
+      qty_value: component.qty_type === 'fixed' ? (component.qty_value || component.qty_per_unit || 1) : null,
+      uom: finalUom, // ✅ FIX: Use normalized UOM
+      sequence_order: component.sequence_order || 0,
+      is_required: component.is_required ?? true,
     });
     setShowAddComponentForm(true);
     setComponentSearchTerm(displayText);
@@ -1211,7 +1454,17 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   };
 
   const handleSave = async () => {
-    if (!productTypeId || !activeOrganizationId) {
+    // ✅ GATING: No hacer nada si no hay organization
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Organization Required',
+        message: 'Please select an organization before saving.',
+      });
+      return;
+    }
+
+    if (!productTypeId) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Validation Error',
@@ -1219,6 +1472,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       });
       return;
     }
+
 
     // Validate roles: strict for new components, allow legacy only if they come from DB (have temp- ID with _originalId)
     const invalidComponents: string[] = [];
@@ -1276,179 +1530,198 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     try {
       let templateId = editingTemplateId;
 
+      // ✅ MVP: Validar code requerido
+      if (!templateCode || templateCode.trim() === '') {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Validation Error',
+          message: 'Template Code is required',
+        });
+        return;
+      }
+      
+      // ✅ FIX: Save template first, then components
       if (editingTemplateId) {
         await updateTemplate(editingTemplateId, {
+          code: templateCode.trim(),
           name: templateName || null,
           description: templateDescription || null,
+          metadata: {},
         } as any);
         templateId = editingTemplateId;
       } else {
         const newTemplate = await createTemplate({
           product_type_id: productTypeId,
+          code: templateCode.trim(),
           name: templateName || null,
           description: templateDescription || null,
+          metadata: {},
         } as any);
         templateId = newTemplate.id;
       }
 
-      if (editingTemplateId) {
-        // Identify components that should be kept (existing components that are still in the list)
-        const existingComponentIds = new Set(existingComponents.map((c: any) => c.id));
-        const currentComponentIds = new Set(
-          components
-            .filter(c => !c.id.startsWith('temp-') && !(c as any)._originalId)
-            .map(c => c.id)
-        );
-        
-        // Components that were removed (exist in DB but not in current components list)
-        const removedComponentIds = Array.from(existingComponentIds).filter(
-          id => !currentComponentIds.has(id)
-        );
-        
-        // Soft delete removed components
-        if (removedComponentIds.length > 0) {
-          console.log('🗑️ Soft deleting removed components:', removedComponentIds);
-          await supabase
-            .from('BOMComponents')
-            .update({ deleted: true })
-            .in('id', removedComponentIds);
+      // ✅ FIX: Save flow determinístico - deletions, updates, inserts en orden
+      const componentsToDeleteSet = new Set(componentsToDelete);
+      
+      // 1) DELETIONS: Borrar componentes marcados para borrado
+      if (componentsToDelete.length > 0) {
+        if (import.meta.env.DEV) {
+          console.log('[handleSave] Deleting components:', componentsToDelete);
         }
         
-        // Update existing components (real IDs or edited components with _originalId)
-        for (const component of components) {
-          // Skip truly new components (will be created below)
-          if (component.id.startsWith('temp-') && !(component as any)._originalId) continue;
-          
-          // Determine the ID to use for update:
-          // - If component has _originalId, it was edited → use _originalId
-          // - Otherwise, use the component's real ID
-          const componentIdToUpdate = (component as any)._originalId || component.id;
-          
+        const { error: deleteError } = await supabase
+          .from('BOMComponents')
+          .update({ deleted: true })
+          .in('id', componentsToDelete)
+          .eq('bom_template_id', templateId);
+        
+        if (deleteError) {
+          console.error('[handleSave] Error deleting components:', deleteError);
+          throw new Error(`Error deleting components: ${deleteError.message}`);
+        }
+      }
+      
+      // 2) UPDATES: Actualizar componentes existentes (id real y NO en componentsToDelete)
+      const componentsToUpdate = components.filter(
+        c => !c.id.startsWith('temp-') && !componentsToDeleteSet.has(c.id)
+      );
+      
+      if (componentsToUpdate.length > 0) {
+        if (import.meta.env.DEV) {
+          console.log('[handleSave] Updating components:', componentsToUpdate.length);
+        }
+        
+        for (const component of componentsToUpdate) {
           const normalizedComponentRole = normalizeRole(component.component_role || '');
-          const normalizedAffectsRole = normalizeRole(component.affects_role || '');
-          const finalAffectsRole = (component.cut_axis === 'none' || !component.cut_axis) ? null : normalizedAffectsRole;
           
-          console.log('🔄 Updating component:', componentIdToUpdate, component.id.startsWith('temp-') ? '(was edited)' : '(unchanged)');
+          // ✅ FIX: Include formula fields for fabric components
+          const isFabricRole = normalizedComponentRole === 'fabric';
+          const selectedItem = catalogItems.find(item => item.id === component.component_item_id);
           
-          // For auto-select: don't persist UOM (it comes from CatalogItems.uom at BOM generation time)
-          // For fixed: UOM comes from CatalogItem, but we still store it for backward compatibility
-          // Note: The BOM generation function will use CatalogItems.uom regardless of what's stored here
-          // Build update data, excluding temporary fields and undefined values
-          const updateData: any = {
+          const updateData = {
             component_item_id: component.component_item_id || null,
             component_role: normalizedComponentRole || null,
-            component_sub_role: normalizeSubRole(component.component_sub_role || null),
-            qty_per_unit: Math.round(component.qty_per_unit || 1),
-            // UOM: For auto-select, use a default value (actual UOM comes from CatalogItems.uom at BOM generation)
-            // For fixed, use the component's UOM or default to 'ea'
-            uom: component.auto_select ? 'ea' : (component.uom || 'ea'),
-            is_required: component.is_required,
-            sequence_order: component.sequence_order,
-            affects_role: finalAffectsRole,
-            cut_axis: component.cut_axis === 'none' || !component.cut_axis ? null : component.cut_axis,
-            cut_delta_mm: component.cut_delta_mm || null,
-            cut_delta_scope: component.cut_delta_scope === 'none' || !component.cut_delta_scope ? null : component.cut_delta_scope,
-            // Auto-select fields
-            auto_select: component.auto_select || false,
-            hardware_color: component.hardware_color || null,
-            sku_resolution_rule: component.sku_resolution_rule || null,
-            select_rule: component.select_rule || null,
-            block_condition: component.block_condition || null,
-            qty_type: component.qty_type || null,
-            qty_value: component.qty_value || null,
-            applies_color: component.applies_color || false,
+            qty_type: component.qty_type || 'fixed',
+            qty_value: component.qty_type === 'fixed' ? (component.qty_value || component.qty_per_unit || 1) : null,
+            qty_per_unit: component.qty_per_unit || (component.qty_type === 'fixed' ? (component.qty_value || 1) : 1),
+            qty_formula_code: isFabricRole ? (component.qty_formula_code || 'FABRIC_LINEAR_M') : (component.qty_formula_code || null),
+            qty_formula_params: isFabricRole ? (component.qty_formula_params || { 
+              roll_width_m: selectedItem?.roll_width_m || null,
+              allowance_m: 0.1,
+            }) : (component.qty_formula_params || null),
+            uom: isFabricRole ? 'm' : (component.uom || 'ea'), // ✅ Force 'm' for fabric
+            sequence_order: component.sequence_order || 0,
+            is_required: component.is_required !== false,
+            auto_select: false,
           };
-          
-          // Remove any undefined values and temporary fields (fields starting with _)
-          Object.keys(updateData).forEach(key => {
-            if (updateData[key] === undefined || key.startsWith('_')) {
-              delete updateData[key];
-            }
-          });
           
           const { error: updateError } = await supabase
             .from('BOMComponents')
             .update(updateData)
-            .eq('id', componentIdToUpdate);
+            .eq('id', component.id)
+            .eq('bom_template_id', templateId);
           
           if (updateError) {
-            console.error('Error updating component:', updateError);
-            throw new Error(`Error updating component ${componentIdToUpdate}: ${updateError.message || JSON.stringify(updateError)}`);
+            console.error('[handleSave] Error updating component:', component.id, updateError);
+            throw new Error(`Error updating component ${component.id}: ${updateError.message}`);
           }
         }
       }
-
-      // Create new components (those with temp- IDs and no _originalId)
-      for (const component of components) {
-        // Only create truly new components (temp- ID without _originalId)
-        if (!component.id.startsWith('temp-') || (component as any)._originalId) continue;
-
-        const normalizedComponentRole = normalizeRole(component.component_role || '');
-        const normalizedAffectsRole = normalizeRole(component.affects_role || '');
+      
+      // 3) INSERTS: Crear componentes nuevos (id temp-)
+      const componentsToInsert = components.filter(c => c.id.startsWith('temp-'));
+      
+      if (componentsToInsert.length > 0) {
+        if (import.meta.env.DEV) {
+          console.log('[handleSave] Creating components:', componentsToInsert.length);
+        }
         
-        const finalAffectsRole = (component.cut_axis === 'none' || !component.cut_axis) ? null : normalizedAffectsRole;
-        
-        console.log('➕ Creating new component:', component.id);
-        
-        // For auto-select: don't persist UOM (it comes from CatalogItems.uom at BOM generation time)
-        // For fixed: UOM comes from CatalogItem, but we still store it for backward compatibility
-        // Note: The BOM generation function will use CatalogItems.uom regardless of what's stored here
-        
-        const componentData = {
-          bom_template_id: templateId,
-          component_item_id: component.component_item_id || null,
-          component_role: normalizedComponentRole || null,
-          component_sub_role: normalizeSubRole(component.component_sub_role || null),
-          auto_select: component.auto_select || false,
-          applies_color: component.applies_color || false,
-          allow_override: component.allow_override || false,
-          qty_per_unit: Math.round(component.qty_per_unit || 1),
-          // UOM: For auto-select, use a default value (actual UOM comes from CatalogItems.uom at BOM generation)
-          // For fixed, use the component's UOM or default to 'ea'
-          uom: component.auto_select ? 'ea' : (component.uom || 'ea'),
-          is_required: component.is_required,
-          sequence_order: component.sequence_order,
-          affects_role: finalAffectsRole,
-          cut_axis: component.cut_axis === 'none' || !component.cut_axis ? null : component.cut_axis,
-          cut_delta_mm: component.cut_delta_mm || null,
-          cut_delta_scope: component.cut_delta_scope === 'none' || !component.cut_delta_scope ? null : component.cut_delta_scope,
-          // Auto-select fields
-          hardware_color: component.hardware_color || null,
-          sku_resolution_rule: component.sku_resolution_rule || null,
-          select_rule: component.select_rule || null,
-          block_condition: component.block_condition || null,
-          qty_type: component.qty_type || null,
-          qty_value: component.qty_value || null,
-        };
-        
-        // Remove any undefined fields and temporary fields
-        const cleanComponentData: any = {};
-        Object.keys(componentData).forEach(key => {
-          const value = componentData[key as keyof typeof componentData];
-          // Only include defined values (not undefined) and exclude temporary fields
-          if (value !== undefined && !key.startsWith('_')) {
-            cleanComponentData[key] = value;
-          }
-        });
-        
-        try {
-          const result = await createComponent(cleanComponentData);
+        for (const component of componentsToInsert) {
+          const normalizedComponentRole = normalizeRole(component.component_role || '');
+          
+          // ✅ FIX: Include formula fields for fabric components
+          const isFabricRole = normalizedComponentRole === 'fabric';
+          const selectedItem = catalogItems.find(item => item.id === component.component_item_id);
+          
+          const componentData = {
+            bom_template_id: templateId,
+            component_item_id: component.component_item_id || null,
+            component_role: normalizedComponentRole || null,
+            qty_type: component.qty_type || 'fixed',
+            qty_value: component.qty_type === 'fixed' ? (component.qty_value || component.qty_per_unit || 1) : null,
+            qty_per_unit: component.qty_per_unit || (component.qty_type === 'fixed' ? (component.qty_value || 1) : 1),
+            qty_formula_code: isFabricRole ? (component.qty_formula_code || 'FABRIC_LINEAR_M') : (component.qty_formula_code || null),
+            qty_formula_params: isFabricRole ? (component.qty_formula_params || { 
+              roll_width_m: selectedItem?.roll_width_m || null,
+              allowance_m: 0.1,
+            }) : (component.qty_formula_params || null),
+            uom: isFabricRole ? 'm' : (component.uom || 'ea'), // ✅ Force 'm' for fabric
+            sequence_order: component.sequence_order || 0,
+            is_required: component.is_required !== false,
+            auto_select: false,
+          };
+          
+          const result = await createComponent(componentData);
+          
           if (!result) {
             throw new Error('Component creation returned no data');
           }
-        } catch (createError) {
-          console.error('Error creating component:', createError);
-          console.error('Component data sent:', cleanComponentData);
-          // Re-throw with better error message
-          if (createError instanceof Error) {
-            throw createError;
-          } else if (createError && typeof createError === 'object' && 'message' in createError) {
-            throw new Error(String(createError.message));
-          } else {
-            throw new Error(`Error creating component: ${JSON.stringify(createError)}`);
-          }
         }
       }
+      
+      // ✅ Limpiar estado de deletions
+      setComponentsToDelete([]);
+      
+      // ✅ Recargar desde DB para tener estado sincronizado (tanto para edit como create)
+      const { data: refreshedComponents, error: refreshError } = await supabase
+        .from('BOMComponents')
+        .select('*')
+        .eq('bom_template_id', templateId)
+        .eq('deleted', false)
+        .order('sequence_order', { ascending: true });
+      
+      if (!refreshError && refreshedComponents) {
+        const mappedComponents = refreshedComponents.map((comp: any) => ({
+          id: comp.id,
+          component_item_id: comp.component_item_id,
+          component_role: comp.component_role || null,
+          qty_type: comp.qty_type || 'fixed',
+          qty_value: comp.qty_value || (comp.qty_type === 'fixed' ? comp.qty_per_unit : null),
+          qty_per_unit: comp.qty_per_unit || (comp.qty_type === 'fixed' ? comp.qty_value || 1 : 1),
+          qty_formula_code: comp.qty_formula_code || null, // ✅ Include formula code
+          qty_formula_params: comp.qty_formula_params || null, // ✅ Include formula params
+          uom: normalizeUom(comp.uom) || 'ea', // ✅ Normalize UOM
+          sequence_order: comp.sequence_order || 0,
+          is_required: comp.is_required !== false,
+          auto_select: false,
+        }));
+        
+        // ✅ FIX: Deduplicación defensiva por ID (O(n))
+        const uniqueById = Array.from(
+          mappedComponents.reduce((acc, comp) => {
+            acc.set(comp.id, comp);
+            return acc;
+          }, new Map<string, any>()).values()
+        );
+        
+        // ✅ SIEMPRE REEMPLAZAR estado, NUNCA merge
+        setComponents(uniqueById);
+        initialComponentsRef.current = uniqueById.map(c => ({ ...c }));
+        
+        if (import.meta.env.DEV) {
+          console.log('[handleSave] Components reloaded from DB:', mappedComponents.length);
+        }
+      } else if (refreshError) {
+        if (import.meta.env.DEV) {
+          console.warn('[handleSave] Error reloading components (non-critical):', refreshError);
+        }
+      }
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Success',
+        message: 'BOM Template saved successfully.',
+      });
 
       onSave();
     } catch (error) {
@@ -1458,25 +1731,43 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       let errorMessage = 'Error saving BOM template';
       if (error instanceof Error) {
         errorMessage = error.message;
-      } else if (error && typeof error === 'object') {
-        // Handle Supabase PostgrestError
-        if ('message' in error) {
-          errorMessage = String(error.message);
-        } else if ('details' in error) {
-          errorMessage = `${error.message || 'Database error'}: ${error.details || ''}`;
-        } else if ('hint' in error) {
-          errorMessage = `${error.message || 'Database error'}: ${error.hint || ''}`;
-        } else {
-          errorMessage = JSON.stringify(error, null, 2);
-        }
-      } else if (error) {
+        } else if (error && typeof error === 'object') {
+          // Handle Supabase PostgrestError
+          if ('message' in error) {
+            errorMessage = String((error as any).message);
+          } else if ('details' in error) {
+            errorMessage = `${(error as any).message || 'Database error'}: ${(error as any).details || ''}`;
+          } else if ('hint' in error) {
+            errorMessage = `${(error as any).message || 'Database error'}: ${(error as any).hint || ''}`;
+          } else {
+            errorMessage = JSON.stringify(error, null, 2);
+          }
+        } else if (error) {
         errorMessage = String(error);
       }
       
+      // ✅ FIX: Extraer información de debugging para errores 23505
+      let debugInfo = '';
+      if (error && typeof error === 'object' && 'code' in error) {
+        const errorCode = (error as any).code;
+        if (errorCode === '23505') {
+          // Extraer code del mensaje de error
+          const codeMatch = errorMessage.match(/Code "([^"]+)"/);
+          const idMatch = errorMessage.match(/ID: ([a-f0-9-]+)/);
+          if (codeMatch || idMatch) {
+            debugInfo = `\n\nDebug: Code="${codeMatch?.[1] || 'unknown'}"${idMatch ? `, Existing ID=${idMatch[1]}` : ''}`;
+          } else {
+            // Si no está en el mensaje, intentar extraer del error original
+            const originalError = error instanceof Error ? error : (error as any);
+            debugInfo = `\n\nDebug: Error code 23505 (duplicate key constraint)`;
+          }
+        }
+      }
+
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: errorMessage,
+        message: errorMessage + debugInfo,
       });
     }
   };
@@ -1638,6 +1929,22 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
             </SelectShadcn>
           </div>
 
+          {/* ✅ Template Code */}
+          <div className="mb-6">
+            <Label htmlFor="template_code" className="text-sm" required>
+              Code
+            </Label>
+            <Input
+              id="template_code"
+              value={templateCode}
+              onChange={(e) => setTemplateCode(e.target.value.toUpperCase().replace(/\s+/g, '_'))}
+              className="mt-1"
+              placeholder="ROLLER_MANUAL_BASIC_WHITE"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">Unique template code (e.g., ROLLER_MANUAL_BASIC_WHITE)</p>
+          </div>
+
           {/* Template Name and Description */}
           <div className="mb-6 grid grid-cols-2 gap-4">
             <div>
@@ -1671,23 +1978,15 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                   onClick={() => {
                     setShowAddComponentForm(true);
                     setEditingComponentId(null);
+                    // ✅ MVP: Reset to MVP fields only
                     setFormData({
                       component_item_id: '',
                       component_role: '',
-                      component_sub_role: null,
-                      qty_per_unit: 1,
-                      uom: 'ea',
-                      is_required: true,
-                      _original_component_item_id: undefined,
-                      sequence_order: components.length,
-                      selection_mode: 'fixed',
-                      hardware_color: null,
-                      sku_resolution_rule: null,
-                      select_rule: null,
-                      block_condition: null,
                       qty_type: 'fixed',
                       qty_value: null,
-                      applies_color: false,
+                      uom: 'ea',
+                      sequence_order: components.length,
+                      is_required: true,
                     });
                   }}
                   className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
@@ -1698,169 +1997,100 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
               )}
             </div>
 
-            {/* Add/Edit Component Form */}
+            {/* ✅ MVP: Add/Edit Component Form - Simplified (No Auto-Select) */}
             {showAddComponentForm && (
+              <div
+                onKeyDown={(e) => {
+                  // ✅ FIX: Prevent Enter key from submitting form
+                  if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
+                    e.preventDefault();
+                  }
+                }}
+              >
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-                {/* Selection Mode Toggle */}
-                <div className="mb-4 pb-4 border-b border-gray-200">
-                  <Label htmlFor="selection_mode" className="font-semibold mb-2 block">Selection Mode</Label>
-                  <div className="flex gap-2 mb-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Restore original component_item_id if switching from auto_select
-                        const restoredComponentItemId = formData.selection_mode === 'auto_select' 
-                          ? (formData._original_component_item_id || '')
-                          : formData.component_item_id;
-                        
-                        setFormData({ 
-                          ...formData, 
-                          selection_mode: 'fixed',
-                          component_item_id: restoredComponentItemId,
-                          _original_component_item_id: undefined, // Clear after restore
-                        });
-                        if (formData.selection_mode === 'auto_select') {
-                          setComponentSearchTerm(restoredComponentItemId ? '' : '');
-                        }
+                <div className="grid grid-cols-12 gap-4">
+                  {/* Filter by Category - Above the main fields row */}
+                  <div className="col-span-12 mb-1">
+                    <Label htmlFor="category_filter" className="text-xs text-gray-600 mb-0.5 block">
+                      Filter by Category (Optional)
+                    </Label>
+                    <SelectShadcn
+                      value={selectedCategoryFilter || '__all__'}
+                      onValueChange={(value) => {
+                        setSelectedCategoryFilter(value === '__all__' ? '' : value);
+                        setShowComponentDropdown(true);
                       }}
-                      className={`px-4 py-2 text-xs font-medium rounded-lg transition-colors ${
-                        formData.selection_mode === 'fixed'
-                          ? 'bg-primary text-white'
-                          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                      }`}
                     >
-                      Fixed SKU (Siempre el mismo)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // If switching to auto_select and component is tube, default UOM to 'm'
-                        let newUom = formData.uom;
-                        if (formData.component_role === 'tube') {
-                          newUom = 'm'; // Default to meters for tube in auto_select mode
-                        }
-                        
-                        // Preserve original component_item_id before clearing it
-                        const originalComponentItemId = formData.selection_mode === 'fixed' && formData.component_item_id
-                          ? formData.component_item_id
-                          : formData._original_component_item_id;
-                        
-                        setFormData({ 
-                          ...formData, 
-                          selection_mode: 'auto_select',
-                          component_item_id: '', // Clear fixed selection when switching to auto-select
-                          _original_component_item_id: originalComponentItemId, // Preserve original for restoration
-                          qty_type: formData.qty_type || 'fixed',
-                          uom: newUom,
-                        });
-                        setComponentSearchTerm('');
-                      }}
-                      className={`px-4 py-2 text-xs font-medium rounded-lg transition-colors ${
-                        formData.selection_mode === 'auto_select'
-                          ? 'bg-primary text-white'
-                          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      Auto-Select (Depende del sistema)
-                    </button>
+                      <SelectTrigger className="h-9 w-full max-w-xs">
+                        <SelectValue placeholder="All Categories" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">All Categories</SelectItem>
+                        {leafCategories && leafCategories.length > 0 ? leafCategories.map((category) => (
+                          category?.id ? (
+                            <SelectItem key={category.id} value={category.id}>
+                              {category.name}
+                              {category.code && (
+                                <span className="text-gray-500 ml-1">({category.code})</span>
+                              )}
+                            </SelectItem>
+                          ) : null
+                        )) : null}
+                      </SelectContent>
+                    </SelectShadcn>
                   </div>
-                  {/* Helper text for selection mode */}
-                  <div className="text-xs text-gray-600">
-                    {formData.selection_mode === 'fixed' ? (
-                      <span>El SKU seleccionado se usará siempre en este template.</span>
-                    ) : (
-                      <span>El SKU se seleccionará automáticamente según las reglas configuradas (color, sistema, etc.).</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-12 gap-3 items-end">
-                  {/* Component Selector - Only shown in Fixed mode */}
-                  {(formData.selection_mode || 'fixed') === 'fixed' && (
-                    <div className="col-span-4">
-                      <Label htmlFor="component_item_id" required>Component</Label>
-                    
-                    <div className="mb-2">
-                      <Label htmlFor="category_filter" className="text-xs text-gray-600 mb-1 block">
-                        Filter by Category (Optional)
-                      </Label>
-                      <SelectShadcn
-                        value={selectedCategoryFilter || '__all__'}
-                        onValueChange={(value) => {
-                          setSelectedCategoryFilter(value === '__all__' ? '' : value);
+                  
+                  {/* ✅ MVP: Component Selector - Aligned with other fields */}
+                  <div className="col-span-4">
+                    <Label htmlFor="component_item_id" required className="mb-1.5">Component</Label>
+                    <div className="relative" ref={componentInputRef}>
+                      <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
+                      <Input
+                        ref={componentInputFieldRef}
+                        type="text"
+                        placeholder="Type SKU or name to search and select..."
+                        value={componentSearchTerm}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setComponentSearchTerm(value);
                           setShowComponentDropdown(true);
+                          setHighlightedIndex(-1);
+                          // Clear component_item_id if user starts typing
+                          if (value && formData.component_item_id) {
+                            setFormData({ ...formData, component_item_id: '' });
+                          }
                         }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="All Categories" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__all__">All Categories</SelectItem>
-                          {leafCategories && leafCategories.length > 0 ? leafCategories.map((category) => (
-                            category?.id ? (
-                              <SelectItem key={category.id} value={category.id}>
-                                {category.name}
-                                {category.code && (
-                                  <span className="text-gray-500 ml-1">({category.code})</span>
-                                )}
-                              </SelectItem>
-                            ) : null
-                          )) : null}
-                        </SelectContent>
-                      </SelectShadcn>
-                    </div>
-                    
-                    <div className="relative">
-                      <div className="relative" ref={componentInputRef}>
-                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
-                        <Input
-                          ref={componentInputFieldRef}
-                          type="text"
-                          placeholder="Type SKU or name to search and select..."
-                          value={componentSearchTerm}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setComponentSearchTerm(value);
+                        onFocus={() => {
+                          if (flatFilteredItems.length > 0 || componentSearchTerm.trim()) {
                             setShowComponentDropdown(true);
+                          }
+                        }}
+                        onKeyDown={handleKeyDown}
+                        className="pl-8 pr-8 h-9"
+                        autoComplete="off"
+                      />
+                      {componentSearchTerm && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setFormData({ ...formData, component_item_id: '' });
+                            setComponentSearchTerm('');
+                            setShowComponentDropdown(false);
                             setHighlightedIndex(-1);
-                            // Clear selection if user is typing
-                            if (value !== `${formData.component_item_id}`) {
-                              const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
-                              const selectedText = selectedItem ? `${selectedItem.sku} - ${selectedItem.name || selectedItem.item_name || 'Unnamed'}` : '';
-                              if (value !== selectedText) {
-                                setFormData({ ...formData, component_item_id: '' });
-                              }
-                            }
+                            componentInputFieldRef.current?.focus();
                           }}
-                          onFocus={() => {
-                            if (flatFilteredItems.length > 0 || componentSearchTerm.trim()) {
-                              setShowComponentDropdown(true);
-                            }
-                          }}
-                          onKeyDown={handleKeyDown}
-                          className="pl-8 pr-8"
-                          autoComplete="off"
-                        />
-                        {componentSearchTerm && (
-                          <button
-                            onClick={() => {
-                              setComponentSearchTerm('');
-                              setFormData({ ...formData, component_item_id: '' });
-                              setShowComponentDropdown(false);
-                              setHighlightedIndex(-1);
-                              componentInputFieldRef.current?.focus();
-                            }}
-                            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                            type="button"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          type="button"
+                          title="Clear"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
 
                       {/* Autocomplete Dropdown */}
                       {showComponentDropdown && (flatFilteredItems.length > 0 || componentSearchTerm.trim()) && (
-                        <div className="component-autocomplete-dropdown absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[300px] overflow-y-auto">
+                        <div className="absolute left-0 top-full mt-1 z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-[300px] overflow-y-auto">
                           {flatFilteredItems.length > 0 ? (
                             <>
                               {/* Group by category */}
@@ -1944,153 +2174,156 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                           )}
                         </div>
                       )}
-
-                      {/* Show selected component info when dropdown is closed */}
-                      {formData.component_item_id && !showComponentDropdown && (
-                        <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded text-xs">
-                          <div className="font-medium text-gray-900">
-                            {(() => {
-                              const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
-                              return selectedItem ? `${selectedItem.sku} - ${selectedItem.name || selectedItem.item_name || 'Unnamed'}` : 'Component selected';
-                            })()}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormData({ ...formData, component_item_id: '' });
-                              setComponentSearchTerm('');
-                              componentInputFieldRef.current?.focus();
-                            }}
-                            className="mt-1 text-primary hover:underline text-xs"
-                          >
-                            Change component
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
-                  )}
 
-                  {/* Component Role - Always Required */}
-                  <div className={`${(formData.selection_mode || 'fixed') === 'fixed' ? 'col-span-3' : 'col-span-4'} flex flex-col`}>
-                    <Label htmlFor="component_role" required>
+                  {/* ✅ MVP: Component Role - Always Required */}
+                  <div className="col-span-3">
+                    <Label htmlFor="component_role" required className="mb-1.5">
                       Component Role
                     </Label>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <SelectShadcn
-                        value={formData.component_role || ''}
-                        onValueChange={(value) => {
-                          const newRole = value === 'none' ? '' : value;
-                          // Clear sub_role if role changes and new role doesn't have sub_roles
-                          const newSubRole = hasSubRoles(newRole) ? formData.component_sub_role : null;
-                          
-                          // If role is tube and in auto_select mode, set UOM to 'm'
-                          let newUom = formData.uom;
-                          const normalizedNewRole = normalizeRole(newRole);
-                          if (normalizedNewRole === 'tube' && (formData.selection_mode || 'fixed') === 'auto_select') {
-                            newUom = 'm'; // Default to meters for tube in auto_select mode
-                          }
-                          
-                          setFormData({ ...formData, component_role: newRole, component_sub_role: newSubRole, uom: newUom });
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecciona el role" />
-                        </SelectTrigger>
-                      <SelectContent>
-                        {CANONICAL_COMPONENT_ROLES.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {getRoleLabel(role)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                      </SelectShadcn>
-                    </div>
-                    {/* Helper text for role */}
-                    {formData.component_role && getRoleHelperText(formData.component_role) && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        {getRoleHelperText(formData.component_role)}
-                      </p>
-                    )}
+                    <SelectShadcn
+                      value={formData.component_role || ''}
+                      onValueChange={(value) => {
+                        const newRole = value === 'none' ? '' : value;
+                        // ✅ FIX: When role='fabric', force UOM to 'm'
+                        const newUom = newRole === 'fabric' ? 'm' : formData.uom;
+                        setFormData({ 
+                          ...formData, 
+                          component_role: newRole,
+                          uom: newUom
+                        });
+                      }}
+                    >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Selecciona el role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CANONICAL_COMPONENT_ROLES.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {getRoleLabel(role)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                    </SelectShadcn>
                   </div>
-                  {/* Sub-Role - Only shown when role has sub_roles available */}
-                  {hasSubRoles(formData.component_role) && (
-                    <div className="col-span-3 flex flex-col">
-                      <Label htmlFor="component_sub_role">
-                        Sub-Role / Part Type (Optional)
-                      </Label>
-                      <div className="flex-1 flex flex-col justify-end">
-                        <SelectShadcn
-                          value={formData.component_sub_role || ''}
-                          onValueChange={(value) => setFormData({ ...formData, component_sub_role: value === 'none' ? null : value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select sub-role (optional)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">— None —</SelectItem>
-                            {getSubRolesForRole(formData.component_role)?.map((subRole) => (
-                              <SelectItem key={subRole} value={subRole}>
-                                {getSubRoleLabel(subRole)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </SelectShadcn>
-                      </div>
-                    </div>
-                  )}
-                  <div className="col-span-2 flex flex-col">
-                    <Label htmlFor="qty_per_unit" required>Qty/Unit</Label>
-                    <div className="flex-1 flex flex-col justify-end">
+                  
+                  {/* ✅ MVP: Qty Type */}
+                  <div className="col-span-2">
+                    <Label htmlFor="qty_type" required className="mb-1.5">Qty Type</Label>
+                    <SelectShadcn
+                      value={formData.qty_type || 'fixed'}
+                      onValueChange={(value) => {
+                        setFormData({ 
+                          ...formData, 
+                          qty_type: value as BOMQtyType,
+                          qty_value: value === 'fixed' ? (formData.qty_value || 1) : null
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixed">Fixed</SelectItem>
+                        <SelectItem value="per_width">Per Width</SelectItem>
+                        <SelectItem value="per_area">Per Area</SelectItem>
+                      </SelectContent>
+                    </SelectShadcn>
+                  </div>
+                  
+                  {/* ✅ MVP: Qty Value (only if fixed) */}
+                  {formData.qty_type === 'fixed' && (
+                    <div className="col-span-2">
+                      <Label htmlFor="qty_value" required className="mb-1.5">Qty Value</Label>
                       <Input
-                        id="qty_per_unit"
+                        id="qty_value"
                         type="number"
                         step="1"
                         min="1"
-                        value={formData.qty_per_unit}
+                        value={formData.qty_value || ''}
                         onChange={(e) => {
-                          const value = parseInt(e.target.value, 10) || 1;
-                          setFormData({ ...formData, qty_per_unit: Math.max(1, value) });
+                          const value = e.target.value === '' ? null : parseFloat(e.target.value);
+                          setFormData({ ...formData, qty_value: value });
                         }}
+                        placeholder="1"
+                        className="h-9"
                       />
                     </div>
-                  </div>
-                  <div className="col-span-2 flex flex-col">
-                    <Label htmlFor="uom" required>UOM</Label>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <Input
-                        id="uom"
-                        value={formData.uom}
-                        readOnly={isUomReadonlyForComponent(formData.component_role, formData.selection_mode)}
-                        disabled={isUomReadonlyForComponent(formData.component_role, formData.selection_mode)}
-                        className={isUomReadonlyForComponent(formData.component_role, formData.selection_mode) ? 'bg-gray-100 cursor-not-allowed' : ''}
-                        placeholder="ea"
-                        title={
-                          formData.selection_mode === 'auto_select'
-                            ? "UOM se define automáticamente según el SKU seleccionado al generar el BOM (CatalogItems.uom)"
-                            : "UOM se toma automáticamente del CatalogItem seleccionado"
+                  )}
+                  
+                  {/* ✅ MVP: UOM (always editable, but locked to 'm' for fabric role) */}
+                  <div className="col-span-2">
+                    <Label htmlFor="uom" required className="mb-1.5">UOM</Label>
+                    <SelectShadcn
+                      value={formData.uom || 'ea'}
+                      onValueChange={(value) => {
+                        // ✅ FIX: Prevent changing UOM if role='fabric' (must be 'm')
+                        if (formData.component_role === 'fabric' && value !== 'm') {
+                          useUIStore.getState().addNotification({
+                            type: 'warning',
+                            title: 'UOM Locked',
+                            message: 'Fabric components must use UOM: m (linear meters)',
+                          });
+                          return;
                         }
-                      />
-                      {/* Helper text for auto-select */}
-                      {(formData.selection_mode || 'fixed') === 'auto_select' && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          UOM se define automáticamente según el SKU seleccionado al generar el BOM.
-                        </p>
-                      )}
-                    </div>
+                        setFormData({ ...formData, uom: value });
+                      }}
+                      disabled={formData.component_role === 'fabric'} // ✅ Lock UOM for fabric
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select UOM" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ea">ea</SelectItem>
+                        <SelectItem value="m">m</SelectItem>
+                        <SelectItem value="m2">m²</SelectItem>
+                      </SelectContent>
+                    </SelectShadcn>
+                    {formData.component_role === 'fabric' && (
+                      <p className="text-xs text-gray-500 mt-1">Fabric uses linear meters (m)</p>
+                    )}
                   </div>
-                  <div className="col-span-2 flex flex-col">
-                    <Label htmlFor="sequence_order">Order</Label>
-                    <div className="flex-1 flex flex-col justify-end">
-                      <Input
-                        id="sequence_order"
-                        type="number"
-                        value={formData.sequence_order}
-                        onChange={(e) => setFormData({ ...formData, sequence_order: parseInt(e.target.value) || 0 })}
-                      />
-                    </div>
+                  
+                  {/* ✅ FABRIC: Show roll_width_m reference and calculation preview */}
+                  {formData.component_role === 'fabric' && formData.component_item_id && (() => {
+                    const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
+                    const rollWidthM = selectedItem?.roll_width_m;
+                    const isFabric = selectedItem?.is_fabric;
+                    
+                    return (
+                      <div className="col-span-full mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="text-xs">
+                          <div className="font-medium text-blue-900 mb-1">Fabric Information</div>
+                          {rollWidthM ? (
+                            <div className="text-blue-700">
+                              Roll Width: <span className="font-medium">{rollWidthM} m</span>
+                            </div>
+                          ) : (
+                            <div className="text-blue-600 italic">
+                              Roll width not set for this fabric item
+                            </div>
+                          )}
+                          {isFabric && (
+                            <div className="text-blue-600 text-xs mt-1">
+                              Fabric consumption will be calculated in linear meters (m) based on product dimensions and roll width.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="col-span-2">
+                    <Label htmlFor="sequence_order" className="mb-1.5">Order</Label>
+                    <Input
+                      id="sequence_order"
+                      type="number"
+                      value={formData.sequence_order}
+                      onChange={(e) => setFormData({ ...formData, sequence_order: parseInt(e.target.value) || 0 })}
+                      className="h-9"
+                    />
                   </div>
-                  <div className="col-span-1 flex items-end">
+                  <div className="col-span-1 flex items-end pb-0.5">
                     <div className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -2103,160 +2336,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                     </div>
                   </div>
                 </div>
-
-                {/* Auto-Select Fields - Only shown when selection_mode === 'auto_select' and conditionally by role */}
-                {(formData.selection_mode || 'fixed') === 'auto_select' && (
-                  <div className="mt-4 pt-4 border-t border-gray-300">
-                    <h4 className="text-xs font-semibold text-gray-900 mb-3">Auto-Select Configuration</h4>
-                    <div className="grid grid-cols-12 gap-3 items-end">
-                      {/* Hardware Color - Only for specific roles */}
-                      {shouldShowHardwareColor(formData.component_role) && (
-                        <div className="col-span-3 flex flex-col">
-                          <Label htmlFor="hardware_color">Hardware Color</Label>
-                          <div className="flex-1 flex flex-col justify-end">
-                            <SelectShadcn
-                              value={formData.hardware_color || 'none'}
-                              onValueChange={(value) => setFormData({ ...formData, hardware_color: value === 'none' ? null : value as HardwareColor })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select color" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">— None —</SelectItem>
-                                <SelectItem value="white">White</SelectItem>
-                                <SelectItem value="black">Black</SelectItem>
-                                <SelectItem value="silver">Silver</SelectItem>
-                                <SelectItem value="bronze">Bronze</SelectItem>
-                                <SelectItem value="grey">Grey</SelectItem>
-                              </SelectContent>
-                            </SelectShadcn>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* SKU Resolution Rule - Only for specific roles */}
-                      {shouldShowSKUResolutionRule(formData.component_role) && (
-                        <div className="col-span-3 flex flex-col">
-                          <Label htmlFor="sku_resolution_rule">Cómo se selecciona el SKU</Label>
-                          <div className="flex-1 flex flex-col justify-end">
-                            <SelectShadcn
-                              value={formData.sku_resolution_rule || 'ROLE_AND_COLOR'}
-                              onValueChange={(value) => setFormData({ ...formData, sku_resolution_rule: value as SKUResolutionRule })}
-                            >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecciona cómo se resuelve el SKU" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {getValidSKUResolutionRules(formData.component_role).map((rule) => (
-                                <SelectItem key={rule} value={rule}>
-                                  {getSKUResolutionRuleLabel(rule, formData.component_role)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                            </SelectShadcn>
-                          </div>
-                          {/* Helper text for SKU resolution */}
-                          {getSKUResolutionHelperText(formData.component_role) && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              {getSKUResolutionHelperText(formData.component_role)}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Quantity Type - Hide if always fixed for this role */}
-                      {!isQtyAlwaysFixed(formData.component_role) && (
-                        <>
-                          <div className="col-span-3 flex flex-col">
-                            <Label htmlFor="qty_type">Quantity Type</Label>
-                            <div className="flex-1 flex flex-col justify-end">
-                              <SelectShadcn
-                                value={formData.qty_type || 'fixed'}
-                                onValueChange={(value) => setFormData({ ...formData, qty_type: value as BOMQtyType, qty_value: value === 'fixed' ? (formData.qty_value || 1) : formData.qty_value })}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="fixed">Fixed</SelectItem>
-                                  <SelectItem value="per_width">Per Width (linear)</SelectItem>
-                                  <SelectItem value="per_area">Per Area</SelectItem>
-                                </SelectContent>
-                              </SelectShadcn>
-                            </div>
-                          </div>
-
-                          {/* Quantity Value */}
-                          <div className="col-span-3 flex flex-col">
-                            <Label htmlFor="qty_value">
-                              Quantity Value {formData.qty_type === 'fixed' ? '(count)' : '(multiplier)'}
-                            </Label>
-                            <div className="flex-1 flex flex-col justify-end">
-                              <Input
-                                id="qty_value"
-                                type="number"
-                                step="0.01"
-                                value={formData.qty_value || ''}
-                                onChange={(e) => {
-                                  const value = e.target.value === '' ? null : parseFloat(e.target.value);
-                                  setFormData({ ...formData, qty_value: value });
-                                }}
-                                placeholder={formData.qty_type === 'fixed' ? '1' : '1.0'}
-                              />
-                            </div>
-                          </div>
-                        </>
-                      )}
-
-                      {/* Show fixed quantity message for roles that always use fixed qty */}
-                      {isQtyAlwaysFixed(formData.component_role) && (
-                        <div className="col-span-6 flex items-center">
-                          <p className="text-xs text-gray-600">
-                            Cantidad fija: {formData.qty_per_unit || 1} unidad{formData.qty_per_unit !== 1 ? 'es' : ''}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Block Condition - Only for specific roles */}
-                    {shouldShowBlockCondition(formData.component_role) && (
-                      <div className="mt-3 pt-3 border-t border-gray-200">
-                        <Label className="text-xs font-medium mb-2 block">Block Condition (Opcional)</Label>
-                        <div className="text-xs text-gray-600 mb-2">
-                          Incluir este componente solo cuando estas condiciones se cumplan:
-                        </div>
-                        <div className="grid grid-cols-12 gap-2">
-                          <div className="col-span-3 flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              id="block_cassette"
-                              checked={(formData.block_condition as any)?.cassette === true}
-                              onChange={(e) => {
-                                const newBlockCondition = { ...(formData.block_condition || {}), cassette: e.target.checked };
-                                setFormData({ ...formData, block_condition: Object.keys(newBlockCondition).length > 0 ? newBlockCondition : null });
-                              }}
-                              className="h-4 w-4"
-                            />
-                            <Label htmlFor="block_cassette" className="mb-0">Cassette</Label>
-                          </div>
-                          <div className="col-span-3 flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              id="block_side_channel"
-                              checked={(formData.block_condition as any)?.side_channel === true}
-                              onChange={(e) => {
-                                const newBlockCondition = { ...(formData.block_condition || {}), side_channel: e.target.checked };
-                                setFormData({ ...formData, block_condition: Object.keys(newBlockCondition).length > 0 ? newBlockCondition : null });
-                              }}
-                              className="h-4 w-4"
-                            />
-                            <Label htmlFor="block_side_channel" className="mb-0">Side Channel</Label>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                
+                {/* ✅ MVP: Form Actions */}
                 <div className="flex items-center gap-2 mt-3">
                   <button
                     onClick={(e) => {
@@ -2281,6 +2362,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                     Cancel
                   </button>
                 </div>
+              </div>
               </div>
             )}
 
@@ -2332,80 +2414,88 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Condition</th>
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Color</th>
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Order</th>
+                            <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Required</th>
                             <th className="text-right py-2 px-4 text-xs font-semibold text-gray-900">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {categoryGroup.components.map((component) => {
                             const componentItem = catalogItems.find(item => item.id === component.component_item_id);
-                            const hasComponentRole = component.component_role && !component.component_item_id;
+                            // ✅ Resolve qty display: show qty_type + qty_value format
+                            const qtyDisplay = component.qty_type === 'fixed' 
+                              ? (component.qty_value || component.qty_per_unit || 1)
+                              : component.qty_type === 'per_width'
+                                ? 'per_width'
+                                : component.qty_type === 'per_area'
+                                  ? 'per_area'
+                                  : '-';
+                            
                             return (
                               <tr key={component.id} className="hover:bg-gray-50">
+                                {/* 1. Component (SKU + Name) */}
                                 <td className="py-2 px-4 text-xs text-gray-900">
-                                  {hasComponentRole ? (
+                                  {componentItem ? (
                                     <>
-                                      <span className="font-medium">{component.component_role}</span>
+                                      <div className="font-medium">{componentItem.name || componentItem.item_name || 'Unknown'}</div>
                                       <div className="text-gray-500 text-xs mt-0.5">
-                                        {component.auto_select ? 'Auto-select' : 'Manual'}
+                                        SKU: {componentItem.sku || 'N/A'}
                                       </div>
                                     </>
                                   ) : (
-                                    <>
-                                      {componentItem?.name || componentItem?.item_name || component.component_name || 'Unknown'}
-                                      <div className="text-gray-500 text-xs mt-0.5">
-                                        SKU: {componentItem?.sku || component.component_sku || 'N/A'}
-                                      </div>
-                                    </>
+                                    <span className="text-gray-400">—</span>
                                   )}
                                 </td>
+                                {/* 2. Qty/Unit (qty_type + qty_value) */}
                                 <td className="py-2 px-4 text-xs text-gray-700 text-right">
-                                  {Math.round(component.qty_per_unit || 0)}
+                                  {typeof qtyDisplay === 'number' 
+                                    ? qtyDisplay 
+                                    : <span className="text-gray-500 italic">{qtyDisplay}</span>}
                                 </td>
-                                <td className="py-2 px-4 text-xs text-gray-700">
-                                  {component.auto_select ? (
-                                    <span 
-                                      className="text-gray-500 italic" 
-                                      title="UOM se toma del SKU resuelto (CatalogItems.uom) al generar el BOM"
-                                    >
-                                      Auto
-                                    </span>
-                                  ) : (
-                                    componentItem?.uom || component.uom || 'ea'
-                                  )}
+                                {/* 3. UOM (actual uom value, NOT qty_type) */}
+                                <td className="py-2 px-4 text-xs text-center">
+                                  <span className="text-gray-700">
+                                    {(component.uom !== null && component.uom !== undefined && component.uom !== '') 
+                                      ? component.uom 
+                                      : (componentItem?.uom || 'ea')}
+                                  </span>
                                 </td>
+                                {/* 4. Role */}
                                 <td className="py-2 px-4 text-xs text-center">
                                   {component.component_role ? (
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                      isValidRole(component.component_role) 
-                                        ? 'bg-blue-100 text-blue-800' 
-                                        : 'bg-orange-100 text-orange-800'
-                                    }`} title={!isValidRole(component.component_role) ? 'Legacy role - please update to a valid role' : ''}>
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
                                       {getRoleLabel(component.component_role)}
                                     </span>
                                   ) : (
                                     <span className="text-gray-400">—</span>
                                   )}
                                 </td>
+                                {/* 5. Condition */}
                                 <td className="py-2 px-4 text-xs text-center">
                                   {component.block_condition ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800" title={JSON.stringify(component.block_condition)}>
-                                      Conditional
-                                    </span>
+                                    <span className="text-gray-700">{String(component.block_condition)}</span>
                                   ) : (
                                     <span className="text-gray-400">—</span>
                                   )}
                                 </td>
+                                {/* 6. Color (resolve from hardware_color or color_id if exists) */}
                                 <td className="py-2 px-4 text-xs text-center">
-                                  {component.applies_color ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                                      Color
-                                    </span>
+                                  {component.hardware_color ? (
+                                    <span className="text-gray-700">{String(component.hardware_color)}</span>
                                   ) : (
                                     <span className="text-gray-400">—</span>
                                   )}
                                 </td>
+                                {/* 7. Order/Priority */}
                                 <td className="py-2 px-4 text-xs text-gray-700 text-center">
                                   {component.sequence_order || 0}
+                                </td>
+                                {/* 8. Required (checkmark here) */}
+                                <td className="py-2 px-4 text-xs text-center">
+                                  {component.is_required !== false ? (
+                                    <span className="text-green-600 font-bold">✓</span>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
                                 </td>
                                 <td className="py-2 px-4 text-right">
                                   <div className="flex items-center gap-1 justify-end">
@@ -2461,7 +2551,9 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
             Cancel
           </button>
           <button
-            onClick={handleSave}
+            onClick={() => {
+              handleSave();
+            }}
             disabled={isCreating || isUpdating || !productTypeId || components.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >

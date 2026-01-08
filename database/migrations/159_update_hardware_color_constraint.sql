@@ -43,3 +43,5 @@ COMMENT ON CONSTRAINT check_hardware_color_mapping_color_valid ON public."Hardwa
 
 
 
+
+

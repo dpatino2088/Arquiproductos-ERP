@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { usePermissions } from '../../hooks/usePermissions';
 import { Search, Eye, Trash2, SortAsc, SortDesc } from 'lucide-react';
 import Input from '../../components/ui/Input';
 
@@ -69,12 +70,17 @@ export default function ManufacturingOrders() {
   const { activeOrganizationId } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
   const { manufacturingOrders, loading, error, refetch } = useManufacturingOrders();
+  const { can } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'scheduled_start_date' | 'priority'>('manufacturing_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedStatus, setSelectedStatus] = useState<ManufacturingOrderStatus[]>([]);
+
+  // Permission checks
+  const canRead = can('manufacturing.read');
+  const canWrite = can('manufacturing.write');
 
   // Register Manufacturing submodules
   useEffect(() => {
@@ -175,6 +181,16 @@ export default function ManufacturingOrders() {
   };
 
   const handleDelete = async (id: string, orderNo: string) => {
+    // Check write permission
+    if (!canWrite) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Sin permisos',
+        message: 'No tienes permisos para eliminar Manufacturing Orders. Se requiere el permiso "manufacturing.write".',
+      });
+      return;
+    }
+
     const confirmed = await showConfirm({
       title: 'Delete Manufacturing Order',
       message: `Are you sure you want to delete Manufacturing Order "${orderNo}"? This action cannot be undone.`,
@@ -222,6 +238,21 @@ export default function ManufacturingOrders() {
       setSortOrder('desc');
     }
   };
+
+  // Check read permission
+  if (!canRead) {
+    return (
+      <div className="py-6 px-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800 font-medium">Sin permisos</p>
+          <p className="text-sm text-yellow-700 mt-1">
+            No tienes permisos para ver Manufacturing Orders. 
+            Contacta a un administrador para solicitar el permiso 'manufacturing.read'.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="py-6 px-6">
@@ -396,13 +427,15 @@ export default function ManufacturingOrders() {
                         >
                           <Eye className="w-4 h-4 text-gray-600" />
                         </button>
-                        <button
-                          onClick={() => handleDelete(mo.id, mo.manufacturingOrderNo)}
-                          className="p-1.5 hover:bg-red-50 rounded transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4 text-red-600" />
-                        </button>
+                        {canWrite && (
+                          <button
+                            onClick={() => handleDelete(mo.id, mo.manufacturingOrderNo)}
+                            className="p-1.5 hover:bg-red-50 rounded transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

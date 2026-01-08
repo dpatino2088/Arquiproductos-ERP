@@ -39,22 +39,80 @@ const baseClient = createClient(
   }
 );
 
+// ✅ FIX: Simple rate limiter for DEV (prevent request storms)
+const requestHistory = new Map<string, number[]>();
+const RATE_LIMIT_WINDOW_MS = 5000; // 5 seconds
+const RATE_LIMIT_MAX_REQUESTS = 5; // Max 5 requests per window
+
+function checkRateLimit(url: string): boolean {
+  if (!import.meta.env.DEV) return true; // Only in DEV
+  
+  const now = Date.now();
+  const requests = requestHistory.get(url) || [];
+  
+  // Remove old requests outside the window
+  const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW_MS);
+  
+  if (recentRequests.length >= RATE_LIMIT_MAX_REQUESTS) {
+    console.error('🚨 Request storm prevented:', {
+      url,
+      count: recentRequests.length,
+      window: RATE_LIMIT_WINDOW_MS,
+      max: RATE_LIMIT_MAX_REQUESTS,
+    });
+    return false;
+  }
+  
+  recentRequests.push(now);
+  requestHistory.set(url, recentRequests);
+  return true;
+}
+
 // Setup fetch interceptor for error tracking
+// ✅ CRITICAL: This must run BEFORE any other code that might use fetch
 if (typeof window !== 'undefined') {
   const originalFetch = window.fetch;
   window.fetch = async (...args) => {
     const url = args[0]?.toString() || '';
+    
+    // ✅ BLOCK telemetry/agent log requests immediately (CSP violation prevention)
+    // This prevents CSP errors by rejecting the request before it's attempted
+    if (url.includes('127.0.0.1:7242') || url.includes('/ingest/') || url.includes(':7242')) {
+      // Silently reject telemetry requests to prevent CSP errors
+      // Don't log to avoid console spam
+      return Promise.reject(new Error('Telemetry requests are disabled'));
+    }
+    
     const isSupabaseRequest = url.includes(supabaseUrl) || 
                               url.includes('/auth/') || 
                               url.includes('/rest/v1/');
 
     if (isSupabaseRequest) {
+      // ✅ FIX: Rate limit check (DEV-only)
+      if (!checkRateLimit(url)) {
+        // Return a rejected promise to prevent the request
+        throw new Error(`Rate limit exceeded for ${url}`);
+      }
+
       const timestamp = new Date().toISOString();
       const startTime = Date.now();
 
       try {
         const response = await originalFetch(...args);
         const duration = Date.now() - startTime;
+
+        // ✅ FIX: Don't retry on 404/400 errors
+        if (response.status >= 400 && response.status < 500) {
+          // Client errors (404, 400, etc.) should not be retried
+          // Log only in DEV to reduce overhead
+          if (import.meta.env.DEV && response.status === 404) {
+            console.warn('[Supabase] Client error (not retrying):', {
+              url,
+              status: response.status,
+              statusText: response.statusText,
+            });
+          }
+        }
 
         // SOLO loguear errores críticos para reducir overhead
         // No loguear requests exitosos ni lentos para reducir carga

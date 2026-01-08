@@ -207,7 +207,7 @@ export default function OrderList() {
       // IMPORTANT: This query must include ALL MOs, including newly created ones
       const { data: manufacturingOrders, error: moError } = await supabase
         .from('ManufacturingOrders')
-        .select('sale_order_id, status, manufacturing_order_no, created_at')
+        .select('sales_order_id, status, manufacturing_order_no, created_at')
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .order('created_at', { ascending: false }); // Most recent first for debugging
@@ -227,11 +227,11 @@ export default function OrderList() {
           console.log('📋 OrderList: Found', manufacturingOrders.length, 'ManufacturingOrders');
         }
         manufacturingOrders.forEach((mo: any) => {
-          if (mo.sale_order_id) {
+          if (mo.sales_order_id) {
             // If multiple MOs exist for same SO, keep the most recent one
-            const existingMO = saleOrderToMO.get(mo.sale_order_id);
+            const existingMO = saleOrderToMO.get(mo.sales_order_id);
             if (!existingMO || (mo.created_at && existingMO.created_at && mo.created_at > existingMO.created_at)) {
-              saleOrderToMO.set(mo.sale_order_id, mo);
+              saleOrderToMO.set(mo.sales_order_id, mo);
             }
           }
         });
@@ -356,7 +356,7 @@ export default function OrderList() {
       // Debug: Log payload before creating MO
       if (import.meta.env.DEV) {
         console.log('🔍 Create MO - Payload:', {
-          sale_order_id: saleOrderId,
+          sales_order_id: saleOrderId,
           sale_order_no: saleOrderNo,
           organization_id: activeOrganizationId,
           user_id: (await supabase.auth.getUser()).data.user?.id
@@ -368,7 +368,7 @@ export default function OrderList() {
       const { data: saleOrderLines, error: solError } = await supabase
         .from('SalesOrderLines')
         .select('id')
-        .eq('sale_order_id', saleOrderId)
+          .eq('sales_order_id', saleOrderId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false);
 
@@ -376,7 +376,7 @@ export default function OrderList() {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Error',
-          message: 'No Sales Order Lines found. Cannot create Manufacturing Order.',
+          message: 'Sales Order has no active lines. Cannot generate BOM.',
         });
         return;
       }
@@ -385,9 +385,9 @@ export default function OrderList() {
 
       // Get BomInstances
       const { data: bomInstances, error: biError } = await supabase
-        .from('BomInstances')
+        .from('vw_bom_instances_safe')
         .select('id')
-        .in('sale_order_line_id', saleOrderLineIds)
+        .in('sales_order_line_id_safe', saleOrderLineIds)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false);
 
@@ -609,7 +609,7 @@ export default function OrderList() {
       // Only generate_bom_for_manufacturing_order can change to 'planned'
       const moPayload = {
         organization_id: activeOrganizationId,
-        sale_order_id: saleOrderId,
+        sales_order_id: saleOrderId,
         manufacturing_order_no: manufacturingOrderNo,
         status: 'draft', // Must be DRAFT - will change to PLANNED only after BOM generation
         priority: 'normal',
@@ -619,6 +619,7 @@ export default function OrderList() {
       // Debug: Log exact payload
       if (import.meta.env.DEV) {
         console.log('🔍 Create MO - Insert payload:', moPayload);
+        console.log('✅ Payload verification: sales_order_id =', moPayload.sales_order_id, '(NOT sale_order_id)');
       }
       
       const { data: moData, error: moError } = await supabase
@@ -708,7 +709,7 @@ export default function OrderList() {
         const { data: verifyMO } = await supabase
           .from('ManufacturingOrders')
           .select('id, manufacturing_order_no')
-          .eq('sale_order_id', saleOrderId)
+          .eq('sales_order_id', saleOrderId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false })

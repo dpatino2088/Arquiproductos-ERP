@@ -39,16 +39,27 @@ export interface SaleOrder {
 export interface SaleOrderLine {
   id: string;
   organization_id: string;
-  sale_order_id: string;
+  sales_order_id: string;
   quote_line_id?: string | null;
   catalog_item_id: string;
   line_number: number;
   description?: string | null;
   qty: number;
-  unit_price: number;
-  discount_percentage: number;
-  discount_amount: number;
-  line_total: number;
+  unit_price?: number | null;
+  discount_percentage?: number | null;
+  discount_amount?: number | null;
+  line_total?: number | null;
+  // ✅ Pricing fields (copied from QuoteLines)
+  list_unit_price_snapshot?: number | null; // MSRP Sale Out (PVP)
+  unit_price_snapshot?: number | null; // Net price with tier discount
+  unit_cost_snapshot?: number | null;
+  total_unit_cost_snapshot?: number | null;
+  computed_qty?: number | null;
+  discount_pct_used?: number | null; // Tier discount percentage
+  customer_type_snapshot?: string | null; // Customer tier (VIP, Partner, Reseller, Distributor)
+  price_basis?: string | null;
+  margin_pct_used?: number | null;
+  measure_basis_snapshot?: string | null;
   width_m?: number | null;
   height_m?: number | null;
   area?: string | null;
@@ -206,7 +217,7 @@ export function useSaleOrderLines(saleOrderId: string | null) {
               sku
             )
           `)
-          .eq('sale_order_id', saleOrderId)
+          .eq('sales_order_id', saleOrderId)
           .eq('deleted', false)
           .order('line_number', { ascending: true });
 

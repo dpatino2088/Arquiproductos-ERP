@@ -5,12 +5,12 @@
  * It ensures consistency between frontend validation and database storage.
  */
 
-// Valid UOM options by measure basis
+// Valid UOM options by measure basis (for non-fabric items)
 export const UOM_OPTIONS_BY_MEASURE_BASIS = {
   linear_m: ['m', 'ft', 'yd'],
   area: ['m2'],
-  unit: ['ea', 'pcs', 'set'],
-  fabric: ['m2', 'm', 'yd', 'roll'],
+  unit: ['ea', 'pcs', 'set', 'pair'],
+  fabric: ['m2', 'm', 'yd', 'roll'], // Legacy: kept for backward compatibility
 } as const;
 
 // Measure basis options (lowercase)
@@ -103,6 +103,8 @@ export function validateAndNormalizeUom(
   
   return normalized;
 }
+
+
 
 
 

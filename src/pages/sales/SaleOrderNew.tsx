@@ -218,17 +218,29 @@ export default function SaleOrderNew() {
   }, [selectedCustomerId, activeOrganizationId]);
 
   // Helper function to calculate price with tier discount for Sales Orders
-  // Sales Orders always show MSRP with tier discounts applied (In-Sell price)
+  // Sales Orders show MSRP Sale Out (PVP) - tier discount according to customer tier
+  // Formula: Final Price = MSRP Sale Out × (1 - discount_tier%)
   const calculatePriceWithDiscount = (line: any) => {
-    const msrp = line.unit_price_snapshot || line.unit_price || 0;
+    // ✅ MSRP Sale Out (PVP) = list_unit_price_snapshot (precio lista público)
+    // This is the base price before any tier discounts
+    const msrpSaleOut = line.list_unit_price_snapshot || line.unit_price_snapshot || line.unit_price || 0;
+    
+    // ✅ Discount percentage from customer tier (saved when Quote was created)
+    // This comes from QuoteLines.discount_pct_used which was calculated based on customer_type
     const discountPct = line.discount_pct_used || 0;
+    
+    // Quantity for calculation
     const computedQty = line.computed_qty || line.qty || 1;
     
-    // Calculate price after discount: MSRP * (1 - discount%)
-    const unitPriceWithDiscount = msrp * (1 - discountPct / 100);
+    // ✅ Calculate final price: MSRP Sale Out × (1 - discount_tier%)
+    // This shows the price the customer pays after tier discount
+    const unitPriceWithDiscount = msrpSaleOut > 0 && discountPct > 0
+      ? msrpSaleOut * (1 - discountPct / 100)
+      : msrpSaleOut; // If no discount, use MSRP Sale Out as-is
+    
     const lineTotalWithDiscount = unitPriceWithDiscount * computedQty;
     
-    return { unitPriceWithDiscount, lineTotalWithDiscount };
+    return { unitPriceWithDiscount, lineTotalWithDiscount, msrpSaleOut, discountPct };
   };
 
   // Calculate totals from sale order lines
@@ -664,25 +676,27 @@ export default function SaleOrderNew() {
                         </td>
                         <td className="py-4 px-6 text-right text-gray-900 text-sm">
                           {(() => {
-                            const { unitPriceWithDiscount } = calculatePriceWithDiscount(line);
-                            return formatCurrency(unitPriceWithDiscount, watch('currency'));
+                            const { unitPriceWithDiscount, msrpSaleOut, discountPct } = calculatePriceWithDiscount(line);
+                            return (
+                              <div>
+                                <div className="font-medium">
+                                  {formatCurrency(unitPriceWithDiscount, watch('currency'))}
+                                </div>
+                                {msrpSaleOut > 0 && discountPct > 0 && (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    <div>MSRP: {formatCurrency(msrpSaleOut, watch('currency'))}</div>
+                                    <div>-{discountPct.toFixed(1)}% ({line.customer_type_snapshot || 'tier'})</div>
+                                  </div>
+                                )}
+                              </div>
+                            );
                           })()}
                         </td>
                         <td className="py-4 px-6 text-right text-gray-900 text-sm">
                           <div className="font-medium">
                             {(() => {
                               const { lineTotalWithDiscount } = calculatePriceWithDiscount(line);
-                              const discountPct = line.discount_pct_used || 0;
-                              return (
-                                <>
-                                  {formatCurrency(lineTotalWithDiscount, watch('currency'))}
-                                  {discountPct > 0 && (
-                                    <div className="text-xs text-gray-500 mt-1 font-normal">
-                                      {discountPct.toFixed(1)}% tier discount
-                                    </div>
-                                  )}
-                                </>
-                              );
+                              return formatCurrency(lineTotalWithDiscount, watch('currency'));
                             })()}
                           </div>
                         </td>

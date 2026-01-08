@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
+import { useBOMTemplateQuestions } from '../../../hooks/useBOMTemplateQuestions';
 
 interface HardwareStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -39,13 +40,22 @@ const SIDE_CHANNEL_TYPE_OPTIONS = [
 ];
 
 export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
+  // ✅ Get BOM template questions to determine what to show
+  const bomTemplateId = (config as any).bom_template_id;
+  const questions = useBOMTemplateQuestions(bomTemplateId);
+  
+  // ✅ Determine what to show (fallback to show all if no bomTemplateId)
+  const showHardwareColor = questions.selectQuestions.hardware_color;
+  const showCassette = questions.booleanQuestions.cassette;
+  const showSideChannel = questions.booleanQuestions.side_channel;
+  
   // Initialize default values if they don't exist
   useEffect(() => {
     const updates: Partial<ProductConfig> = {};
     let hasUpdates = false;
     
-    // Set default hardware_color if not present
-    if (!(config as any).hardwareColor && !(config as any).hardware_color && !((config as any).operatingSystemColor)) {
+    // Set default hardware_color if not present (only if hardware color is required)
+    if (showHardwareColor && !(config as any).hardwareColor && !(config as any).hardware_color && !((config as any).operatingSystemColor)) {
       (updates as any).hardwareColor = 'white';
       (updates as any).hardware_color = 'white';
       (updates as any).operatingSystemColor = 'white';
@@ -58,14 +68,14 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
       hasUpdates = true;
     }
     
-    // Set default cassette_shape if not present
-    if (!(config as any).cassette_shape) {
+    // Set default cassette_shape if not present (only if cassette is shown)
+    if (showCassette && !(config as any).cassette_shape) {
       (updates as any).cassette_shape = 'none';
       hasUpdates = true;
     }
     
-    // Set default side_channel to NO (optional feature)
-    if ((config as any).side_channel === undefined && (config as any).side_channel === null) {
+    // Set default side_channel to NO (optional feature, only if side_channel is shown)
+    if (showSideChannel && (config as any).side_channel === undefined && (config as any).side_channel === null) {
       (updates as any).side_channel = false;
       (updates as any).side_channel_type = null;
       hasUpdates = true;
@@ -74,7 +84,7 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
     if (hasUpdates) {
       onUpdate(updates);
     }
-  }, []); // Only run once on mount
+  }, [showHardwareColor, showCassette, showSideChannel]); // Re-run if visibility changes
 
   // Get current selections
   const hardwareColor = (config as any).hardwareColor || (config as any).hardware_color || ((config as any).operatingSystemColor) || 'white';
@@ -89,7 +99,8 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
-        {/* Hardware Color - Cards */}
+        {/* ✅ Hardware Color - Cards (only show if required) */}
+        {showHardwareColor && (
         <div>
           <Label className="text-sm font-medium mb-4 block">HARDWARE COLOR</Label>
           <div className="grid grid-cols-4 gap-6">
@@ -125,6 +136,7 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
             })}
           </div>
         </div>
+        )}
 
         {/* Bottom Bar Finish - Cards */}
         <div>
@@ -164,7 +176,8 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
           </div>
         </div>
 
-        {/* Cassette Shape - Cards */}
+        {/* ✅ Cassette Shape - Cards (only show if required) */}
+        {showCassette && (
         <div>
           <Label className="text-sm font-medium mb-4 block">CASSETTE SHAPE</Label>
           <div className="grid grid-cols-4 gap-6">
@@ -200,8 +213,10 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
             })}
           </div>
         </div>
+        )}
 
-        {/* Side Channel - STEP 1: Enable/Disable (Checkbox) */}
+        {/* ✅ Side Channel - STEP 1: Enable/Disable (Checkbox) (only show if required) */}
+        {showSideChannel && (
         <div>
           <div className="flex items-center gap-3 mb-4">
             <Label htmlFor="side_channel_checkbox" className="text-sm font-medium cursor-pointer">
@@ -229,47 +244,48 @@ export default function HardwareStep({ config, onUpdate }: HardwareStepProps) {
               Side Channel Type is required when Side Channel is enabled.
             </p>
           )}
-        </div>
 
-        {/* Side Channel Type - STEP 2: Type (only shown if Side Channel = YES) */}
-        {sideChannel && (
-          <div>
-            <Label className="text-sm font-medium mb-4 block">
-              SIDE CHANNEL TYPE
-              {!sideChannelType && (
-                <span className="text-red-500 ml-1">* Required</span>
-              )}
-            </Label>
-            <div className="grid grid-cols-4 gap-6">
-              {SIDE_CHANNEL_TYPE_OPTIONS.map((option) => {
-                const isSelected = sideChannelType === option.id;
-                return (
-                  <div key={option.id} className="flex flex-col items-center">
-                    <button
-                      onClick={() => {
-                        onUpdate({ 
-                          side_channel_type: option.id,
-                          side_channel: true // Keep enabled
-                        });
-                      }}
-                      className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                        isSelected
-                          ? 'border-2 border-gray-400 bg-gray-600'
-                          : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                      }`}
-                      style={{ padding: '2px' }}
-                    >
-                      <div className="w-full h-full rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                      </div>
-                    </button>
-                    <span className={`text-sm font-semibold block mt-2 text-center ${isSelected ? 'text-gray-900' : 'text-gray-900'}`}>
-                      {option.name}
-                    </span>
-                  </div>
-                );
-              })}
+          {/* Side Channel Type - STEP 2: Type (only shown if Side Channel = YES) */}
+          {sideChannel && (
+            <div>
+              <Label className="text-sm font-medium mb-4 block">
+                SIDE CHANNEL TYPE
+                {!sideChannelType && (
+                  <span className="text-red-500 ml-1">* Required</span>
+                )}
+              </Label>
+              <div className="grid grid-cols-4 gap-6">
+                {SIDE_CHANNEL_TYPE_OPTIONS.map((option) => {
+                  const isSelected = sideChannelType === option.id;
+                  return (
+                    <div key={option.id} className="flex flex-col items-center">
+                      <button
+                        onClick={() => {
+                          onUpdate({ 
+                            side_channel_type: option.id,
+                            side_channel: true // Keep enabled
+                          });
+                        }}
+                        className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
+                          isSelected
+                            ? 'border-2 border-gray-400 bg-gray-600'
+                            : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
+                        }`}
+                        style={{ padding: '2px' }}
+                      >
+                        <div className="w-full h-full rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
+                        </div>
+                      </button>
+                      <span className={`text-sm font-semibold block mt-2 text-center ${isSelected ? 'text-gray-900' : 'text-gray-900'}`}>
+                        {option.name}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
+        </div>
         )}
       </div>
     </div>

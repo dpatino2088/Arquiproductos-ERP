@@ -6,6 +6,7 @@ import ConfirmDialog from '../../ui/ConfirmDialog';
 import { CheckCircle, Circle, Clock } from 'lucide-react';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { normalizeUUID } from '../../../utils/uuid';
 
 interface ProductionStepsTabProps {
   moId: string;
@@ -23,7 +24,7 @@ const STATUS_LABELS: Record<ManufacturingOrderStatus, string> = {
 
 export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
   const { manufacturingOrder, loading, refetch } = useManufacturingOrder(moId);
-  const { materials } = useManufacturingMaterials(manufacturingOrder?.sale_order_id || null);
+  const { materials } = useManufacturingMaterials(moId);
   const { updateManufacturingOrder, isUpdating } = useUpdateManufacturingOrder();
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
   const [updatingStatus, setUpdatingStatus] = useState<ManufacturingOrderStatus | null>(null);
@@ -41,32 +42,22 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     // DRAFT → PLANNED: Requires valid BOM (BomInstanceLines > 0)
     if (newStatus === 'planned') {
       try {
-        // Get SalesOrderLines for this ManufacturingOrder
-        const { data: saleOrderLines, error: solError } = await supabase
-          .from('SalesOrderLines')
-          .select('id')
-          .eq('sale_order_id', manufacturingOrder.sale_order_id)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (solError) throw solError;
-
-        if (!saleOrderLines || saleOrderLines.length === 0) {
+        // Normalize UUID before query
+        const safeMoId = normalizeUUID(moId);
+        if (!safeMoId) {
           useUIStore.getState().addNotification({
             type: 'error',
-            title: 'Cannot Advance to Planned',
-            message: 'No Sales Order Lines found. Cannot advance to Planned status.',
+            title: 'Error',
+            message: 'Invalid manufacturing order ID',
           });
           return;
         }
 
-        const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
-
-        // Get BomInstances for these SalesOrderLines
+        // Get BomInstances for this ManufacturingOrder
         const { data: bomInstances, error: biError } = await supabase
           .from('BomInstances')
           .select('id')
-          .in('sale_order_line_id', saleOrderLineIds)
+          .eq('manufacturing_order_id', safeMoId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
@@ -115,32 +106,22 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     // 🛡️ Guard Rail: Check if BOM has lines before starting production
     if (newStatus === 'in_production') {
       try {
-        // Get SalesOrderLines for this ManufacturingOrder
-        const { data: saleOrderLines, error: solError } = await supabase
-          .from('SalesOrderLines')
-          .select('id')
-          .eq('sale_order_id', manufacturingOrder.sale_order_id)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (solError) throw solError;
-
-        if (!saleOrderLines || saleOrderLines.length === 0) {
+        // Normalize UUID before query
+        const safeMoId = normalizeUUID(moId);
+        if (!safeMoId) {
           useUIStore.getState().addNotification({
             type: 'error',
-            title: 'Cannot Start Production',
-            message: 'No Sales Order Lines found for this Manufacturing Order',
+            title: 'Error',
+            message: 'Invalid manufacturing order ID',
           });
           return;
         }
 
-        const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
-
-        // Get BomInstances for these SalesOrderLines
+        // Get BomInstances for this ManufacturingOrder
         const { data: bomInstances, error: biError } = await supabase
           .from('BomInstances')
           .select('id')
-          .in('sale_order_line_id', saleOrderLineIds)
+          .eq('manufacturing_order_id', safeMoId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
@@ -164,7 +145,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
           .in('bom_instance_id', bomInstanceIds)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
-          .limit(1); // Only need to check if any exist
+          .limit(1);
 
         if (bilError) throw bilError;
 

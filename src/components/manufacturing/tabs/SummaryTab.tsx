@@ -4,6 +4,7 @@ import { formatCurrency } from '../../../lib/utils';
 import { supabase } from '../../../lib/supabase/client';
 import { useUIStore } from '../../../stores/ui-store';
 import { RefreshCw } from 'lucide-react';
+import { normalizeUUID } from '../../../utils/uuid';
 
 interface SummaryTabProps {
   moId: string;
@@ -11,9 +12,7 @@ interface SummaryTabProps {
 
 export default function SummaryTab({ moId }: SummaryTabProps) {
   const { manufacturingOrder, loading, refetch } = useManufacturingOrder(moId);
-  const { materials, loading: loadingMaterials, refetch: refetchMaterials } = useManufacturingMaterials(
-    manufacturingOrder?.sale_order_id || null
-  );
+  const { materials, loading: loadingMaterials, refetch: refetchMaterials, hasBomInstances, hasBomLines, debugCounts } = useManufacturingMaterials(moId);
   const [generatingBOM, setGeneratingBOM] = useState(false);
 
   if (loading) {
@@ -51,12 +50,26 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
   const handleGenerateBOM = async () => {
     if (!moId || generatingBOM) return;
 
+    // Normalize UUID before RPC call
+    const safeMoId = normalizeUUID(moId);
+    if (!safeMoId) {
+      if (import.meta.env.DEV) {
+        console.warn('⚠️ RPC aborted: invalid UUID', moId);
+      }
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Invalid manufacturing order ID',
+      });
+      return;
+    }
+
     try {
       setGeneratingBOM(true);
       
       // Call RPC to generate BOM
       const { data, error } = await supabase.rpc('generate_bom_for_manufacturing_order', {
-        p_manufacturing_order_id: moId
+        p_manufacturing_order_id: safeMoId
       });
 
       if (error) {
@@ -82,13 +95,13 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
       const { data: bomData, error: bomError } = await supabase
         .from('BomInstanceLines')
         .select('id', { count: 'exact', head: true })
-        .eq('bom_instance_id', (await supabase
-          .from('BomInstances')
+          .eq('bom_instance_id', (await supabase
+          .from('vw_bom_instances_safe')
           .select('id')
-          .eq('sale_order_line_id', (await supabase
+          .eq('sales_order_line_id_safe', (await supabase
             .from('SalesOrderLines')
             .select('id')
-            .eq('sale_order_id', manufacturingOrder?.sale_order_id)
+            .eq('sales_order_id', manufacturingOrder?.sales_order_id)
             .limit(1)
             .single()).data?.id)
           .limit(1)

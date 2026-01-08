@@ -105,16 +105,24 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
     onUpdate({ panels: newPanels } as any);
     
     // Also update legacy width_mm for backward compatibility (use first panel)
+    // FASE 2: Also update width_m in meters for unified contract
     if (index === 0 && newPanels[0]) {
+      const width_m = newPanels[0].width_mm ? newPanels[0].width_mm / 1000 : null;
       onUpdate({
         width_mm: newPanels[0].width_mm || undefined,
-      });
+        width_m: width_m,
+      } as any);
     }
   };
   
   // Handle global height update (applies to all panels)
   const handleHeightUpdate = (value: number) => {
-    onUpdate({ height_mm: value || undefined });
+    // FASE 2: Also update height_m in meters for unified contract
+    const height_m = value ? value / 1000 : null;
+    onUpdate({ 
+      height_mm: value || undefined,
+      height_m: height_m,
+    } as any);
   };
   
   return (
@@ -294,7 +302,11 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     type="number"
                     min="0"
                     value={config.width_mm || ''}
-                    onChange={(e) => onUpdate({ width_mm: parseInt(e.target.value) || undefined })}
+                    onChange={(e) => {
+                      const width_mm = parseInt(e.target.value) || undefined;
+                      const width_m = width_mm ? width_mm / 1000 : null;
+                      onUpdate({ width_mm, width_m } as any);
+                    }}
                     placeholder="400"
                   />
                 </div>
@@ -305,7 +317,11 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     type="number"
                     min="0"
                     value={config.height_mm || ''}
-                    onChange={(e) => onUpdate({ height_mm: parseInt(e.target.value) || undefined })}
+                    onChange={(e) => {
+                      const height_mm = parseInt(e.target.value) || undefined;
+                      const height_m = height_mm ? height_mm / 1000 : null;
+                      onUpdate({ height_mm, height_m } as any);
+                    }}
                     placeholder="700"
                   />
                 </div>

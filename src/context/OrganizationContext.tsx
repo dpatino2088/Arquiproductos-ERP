@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import type { OrgRole } from '../types/roles';
+import { useAuthSession } from '../hooks/useAuthSession';
 
 export type OrganizationSummary = {
   id: string;
@@ -24,10 +25,12 @@ const OrganizationContext = createContext<OrganizationContextValue | undefined>(
 const STORAGE_KEY = 'activeOrganizationId';
 
 export function OrganizationProvider({ children }: { children: ReactNode }) {
+  const { session, userId, loading: sessionLoading } = useAuthSession();
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [activeOrganizationId, setActiveOrganizationIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const setActiveOrganizationId = (id: string | null) => {
     setActiveOrganizationIdState(id);
@@ -38,104 +41,24 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loadOrganizations = async () => {
+  const loadOrganizations = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // 1) Get current user
-      let user = null;
-      let userError = null;
-      
-      try {
-        const result = await supabase.auth.getUser();
-        user = result.data?.user || null;
-        userError = result.error;
-      } catch (err: any) {
-        userError = err;
-      }
-
-      // Manejar error de sesión faltante
-      if (userError) {
-        if (userError.message?.includes('session') || userError.message?.includes('Auth session missing')) {
-          if (import.meta.env.DEV) {
-            console.warn('⚠️ OrganizationContext - Sesión de autenticación faltante, intentando refrescar...');
-          }
-          
-          // Intentar refrescar la sesión
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          
-          if (sessionError || !session) {
-            if (import.meta.env.DEV) {
-              console.warn('⚠️ OrganizationContext - No hay sesión disponible. El usuario necesita hacer login.');
-            }
-            // No establecer error aquí, simplemente retornar sin organizaciones
-            // El usuario verá el mensaje de "No organizations available" que es correcto
-            setOrganizations([]);
-            setActiveOrganizationIdState(null);
-            setLoading(false);
-            return; // No establecer error, solo retornar silenciosamente
-          }
-          
-          // Si tenemos sesión, intentar obtener el usuario nuevamente
-          const { data: { user: retryUser }, error: retryError } = await supabase.auth.getUser();
-          
-          if (retryError || !retryUser) {
-            if (import.meta.env.DEV) {
-              console.error('❌ OrganizationContext - No se pudo obtener usuario después de refrescar sesión:', retryError);
-            }
-            setOrganizations([]);
-            setActiveOrganizationIdState(null);
-            setLoading(false);
-            setError('Please log in to view organizations');
-            return;
-          }
-          
-          // Continuar con el usuario obtenido
-          user = retryUser;
-        } else {
-          // Log detailed error information for debugging
-          const errorDetails = {
-            message: userError?.message,
-            name: userError?.name,
-            code: (userError as any)?.code,
-            status: (userError as any)?.status,
-            stack: userError?.stack,
-          };
-          
-          console.error('❌ OrganizationContext - Error obteniendo usuario:', {
-            error: userError,
-            details: errorDetails,
-            timestamp: new Date().toISOString(),
-          });
-          
-          // Check if it's a network/fetch error
-          if (userError?.message?.includes('Failed to fetch') || 
-              userError?.message?.includes('ERR_INTERNET_DISCONNECTED') ||
-              userError?.name === 'AuthRetryableFetchError') {
-            const networkError = 'Network error: Unable to connect to Supabase. Please check your internet connection and Supabase configuration.';
-            console.error('❌ OrganizationContext - Network/Fetch Error:', networkError);
-            setError(networkError);
-          } else {
-            setError(userError?.message || 'Error loading organizations');
-          }
-          
-          setOrganizations([]);
-          setActiveOrganizationIdState(null);
-          setLoading(false);
-          return;
-        }
-      }
-
-      if (!user) {
+      // ✅ FIX: Usar userId de useAuthSession en lugar de getUser()
+      // No llamamos supabase.auth.getUser() aquí
+      if (!userId || !session?.user) {
         if (import.meta.env.DEV) {
-          console.warn('⚠️ OrganizationContext - No hay usuario autenticado');
+          console.warn('⚠️ OrganizationContext - No hay usuario autenticado (session)');
         }
         setOrganizations([]);
         setActiveOrganizationIdState(null);
         setLoading(false);
         return;
       }
+
+      const user = session.user;
 
       // 2) Query OrganizationUsers joined with Organizations
       console.log('🔍 OrganizationContext - Buscando organizaciones para user_id:', user.id);
@@ -329,52 +252,33 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         setActiveOrganizationIdState(null);
         setLoading(false);
       }
-  };
+  }, [session, userId]);
 
   useEffect(() => {
-    // Verificar primero si hay una sesión antes de cargar organizaciones
-    const checkSessionAndLoad = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        // Solo cargar organizaciones si hay una sesión válida
-        loadOrganizations();
-      } else {
-        // No hay sesión, establecer estado vacío sin error
-        if (import.meta.env.DEV) {
-          console.log('ℹ️ OrganizationContext - No hay sesión, no se cargarán organizaciones');
-        }
-        setOrganizations([]);
-        setActiveOrganizationIdState(null);
-        setLoading(false);
+    // ✅ FIX: Guard para evitar cargar múltiples veces con el mismo userId
+    if (sessionLoading) {
+      return; // Esperar a que la sesión cargue
+    }
+
+    const currentUserId = userId;
+    if (lastUserIdRef.current === currentUserId) {
+      return; // Ya se cargó para este userId
+    }
+    lastUserIdRef.current = currentUserId || null;
+
+    // ✅ FIX: Depender SOLO de session?.user?.id (no hacer polling)
+    if (session?.user?.id) {
+      loadOrganizations();
+    } else {
+      // No hay sesión, establecer estado vacío sin error
+      if (import.meta.env.DEV) {
+        console.log('ℹ️ OrganizationContext - No hay sesión, no se cargarán organizaciones');
       }
-    };
-
-    checkSessionAndLoad();
-
-    // Listen for auth state changes - OPTIMIZED: Solo recargar en eventos críticos
-    // Esto evita recargas innecesarias en cada TOKEN_REFRESHED
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      // Solo recargar en eventos importantes, no en cada cambio de token
-      if (event === 'SIGNED_IN' && session) {
-        loadOrganizations();
-      } else if (event === 'SIGNED_OUT') {
-        // Limpiar organizaciones al cerrar sesión
-        setOrganizations([]);
-        setActiveOrganizationIdState(null);
-        setLoading(false);
-      } else if (event === 'USER_UPDATED' && session) {
-        loadOrganizations();
-      }
-      // Ignorar: TOKEN_REFRESHED, PASSWORD_RECOVERY, etc. para reducir peticiones
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+      setOrganizations([]);
+      setActiveOrganizationIdState(null);
+      setLoading(false);
+    }
+  }, [session?.user?.id, sessionLoading, loadOrganizations]);
 
   const activeOrganization =
     organizations.find((org) => org.id === activeOrganizationId) || null;

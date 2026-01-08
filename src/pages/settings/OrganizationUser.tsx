@@ -1,9 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
+import { SettingsPageHeader } from '../../components/settings/SettingsPageHeader';
 import { 
   User, 
   Search, 
@@ -21,16 +22,23 @@ import {
   SortAsc,
   SortDesc,
   Calendar,
-  Building
+  Building,
+  Trash2,
+  Send,
+  CheckCircle
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 import { useAuthStore } from '../../stores/auth-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { useUIStore } from '../../stores/ui-store';
 
 interface OrganizationUser {
   id: string;
   role: 'superadmin' | 'admin' | 'member';
   created_at: string;
-  user_id: string;
+  user_id: string | null;
+  status?: string;
   name?: string;
   email?: string;
   user_name?: string; // From DirectoryContacts via contact_id
@@ -44,6 +52,7 @@ export default function OrganizationUser() {
   const { activeOrganizationId, loading: orgLoading, hasOrganizations } = useOrganizationContext();
   const { user } = useAuthStore();
   const { canManageUsers, loading: roleLoading, role, isAdmin, isSuperAdmin } = useCurrentOrgRole();
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -58,12 +67,31 @@ export default function OrganizationUser() {
   
   const [users, setUsers] = useState<OrganizationUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [authorizingId, setAuthorizingId] = useState<string | null>(null);
+  const [invitingId, setInvitingId] = useState<string | null>(null);
+  const loadingRef = useRef(false);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     registerSubmodules('Settings', [
       { id: 'organization-user', label: 'Organization User', href: '/settings/organization-user' },
     ]);
   }, [registerSubmodules]);
+
+  // Load users only once when organization changes
+  useEffect(() => {
+    // Reset when organization changes
+    hasLoadedRef.current = false;
+    
+    if (loadingRef.current) return;
+    if (!activeOrganizationId) {
+      setUsers([]);
+      setIsLoading(false);
+      return;
+    }
+    loadUsers();
+  }, [activeOrganizationId]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -89,125 +117,56 @@ export default function OrganizationUser() {
       return;
     }
 
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setIsLoading(true);
     try {
-      // First, try direct query (simpler and faster if RLS allows it)
-      const { data: directData, error: directError } = await supabase
-        .from('OrganizationUsers')
-        .select(`
-          id, 
-          role, 
-          created_at, 
-          user_id, 
-          email, 
-          invited_by,
-          contact_id,
-          customer_id,
-          DirectoryCustomers:customer_id (
-            id,
-            customer_name
-          ),
-          DirectoryContacts:contact_id (
-            id,
-            contact_name
-          )
-        `)
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
-        .eq('is_system', false)
-        .order('created_at', { ascending: false });
-
-      if (!directError && directData) {
-        // Transform data to include customer_name and user_name from contact
-        const transformedData = directData.map((user: any) => ({
-          ...user,
-          customer_name: user.DirectoryCustomers?.customer_name || 'N/A',
-          user_name: user.DirectoryContacts?.contact_name || null,
-        }));
-        
-        // Success with direct query
-        setUsers(transformedData);
-        setIsLoading(false);
-        return;
-      }
-
-      // If direct query fails, check if it's a recursion error
-      if (directError) {
-        // Check for stack depth error (RLS recursion)
-        if (directError.message?.includes('stack depth') || directError.message?.includes('54001')) {
-          if (import.meta.env.DEV) {
-            console.error('RLS recursion error detected. Please run fix_organization_users_rls_recursion.sql migration:', directError);
-          }
-          // Still try Edge Function as fallback
-        } else if (import.meta.env.DEV) {
-          console.warn('Direct query failed, trying Edge Function:', directError);
-        }
-      }
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('VITE_SUPABASE_URL is not configured');
-      }
-
-      const { data: session, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session?.session) {
-        if (import.meta.env.DEV) {
-          console.error('Error getting session:', sessionError);
-        }
-        setUsers([]);
-        setIsLoading(false);
-        return;
-      }
-      
-      // Call Edge Function to get users with emails
-      const functionUrl = `${supabaseUrl}/functions/v1/get-organization-users`;
-      
-      try {
-        const response = await fetch(functionUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.session.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-          },
-          body: JSON.stringify({ organizationId: activeOrganizationId }),
+      // ✅ Use RPC function get_organization_users
+      const { data, error } = await supabase
+        .rpc('get_organization_users', {
+          p_organization_id: activeOrganizationId
         });
 
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && result.users) {
-            setUsers(result.users);
-            setIsLoading(false);
-            return;
-          }
-        }
-      } catch (fetchError) {
+      if (error) {
+        // ✅ Improved error handling
         if (import.meta.env.DEV) {
-          console.warn('Edge Function also failed:', fetchError);
+          console.error('❌ Error calling get_organization_users RPC:', {
+            errorCode: error.code,
+            errorMessage: error.message,
+            errorHint: error.hint,
+            organizationId: activeOrganizationId,
+          });
         }
+        
+        // Check for specific error types
+        if (error.message?.includes('SET is not allowed')) {
+          console.error('❌ Function should be STABLE (not VOLATILE). Please run migration 446_make_organization_users_hybrid.sql');
+        }
+        
+        throw error;
       }
 
-      // If both fail, show empty array but log the error
-      if (import.meta.env.DEV) {
-        console.error('Both direct query and Edge Function failed. Direct error:', directError);
+      if (data) {
+        // ✅ Data is already transformed by the RPC function
+        setUsers(data);
+        setIsLoading(false);
+        return;
       }
+
+      // No data returned
       setUsers([]);
       
     } catch (err: any) {
       if (import.meta.env.DEV) {
-        console.error('Error loading users:', err);
+        console.error('❌ Error loading users:', err);
       }
       setUsers([]);
     } finally {
       setIsLoading(false);
+      loadingRef.current = false;
+      hasLoadedRef.current = true;
     }
   };
-
-  // Load users when organization changes
-  useEffect(() => {
-    loadUsers();
-  }, [activeOrganizationId]);
 
   // Filter and sort users
   const filteredUsers = useMemo(() => {
@@ -342,6 +301,200 @@ export default function OrganizationUser() {
     }
   };
 
+  // Handle Authorize action
+  const handleAuthorize = async (userId: string) => {
+    if (!activeOrganizationId) return;
+    
+    setAuthorizingId(userId);
+    try {
+      const { error } = await supabase
+        .from('OrganizationUsers')
+        .update({ status: 'authorized', updated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .eq('organization_id', activeOrganizationId);
+
+      if (error) throw error;
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'User Authorized',
+        message: 'Organization user has been authorized.',
+      });
+
+      loadUsers();
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: err.message || 'Failed to authorize user',
+      });
+    } finally {
+      setAuthorizingId(null);
+    }
+  };
+
+  // Handle Send Invite action
+  const handleSendInvite = async (user: OrganizationUser) => {
+    if (!activeOrganizationId || !user.email || !user) return;
+    
+    setInvitingId(user.id);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('VITE_SUPABASE_URL is not configured');
+      }
+
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session) {
+        throw new Error('You must be logged in to send invites');
+      }
+
+      const functionUrl = `${supabaseUrl}/functions/v1/invite_user_and_link`;
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+        },
+        body: JSON.stringify({
+          organization_id: activeOrganizationId,
+          target: 'org',
+          record_id: user.id,
+          email: user.email,
+          redirect_to: `${window.location.origin}/auth/callback?next=/dashboard`,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to send invite');
+      }
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Invite Sent',
+        message: 'Invitation email has been sent successfully.',
+      });
+
+      loadUsers();
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: err.message || 'Failed to send invite',
+      });
+    } finally {
+      setInvitingId(null);
+    }
+  };
+
+  // Handle delete user
+  const handleDeleteUser = async (userId: string, userEmail?: string) => {
+    if (!isSuperAdmin) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Sin permisos',
+        message: 'Solo los Superadmins pueden eliminar usuarios.',
+      });
+      return;
+    }
+
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'No hay organización seleccionada.',
+      });
+      return;
+    }
+
+    const confirmed = await showConfirm({
+      title: 'Eliminar Usuario',
+      message: `¿Estás seguro de que deseas eliminar al usuario ${userEmail || userId}? Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      variant: 'danger',
+    });
+
+    if (!confirmed) {
+      return; // Dialog already closed by showConfirm
+    }
+
+    setDeletingUserId(userId);
+    setIsLoading(true);
+    setLoading(true); // Set dialog loading state
+    
+    try {
+      if (!activeOrganizationId) {
+        throw new Error('No hay organización seleccionada.');
+      }
+
+      const { data, error } = await supabase
+        .from('OrganizationUsers')
+        .update({ 
+          deleted: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId)
+        .eq('organization_id', activeOrganizationId)
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        if (import.meta.env.DEV) {
+          console.error('Error deleting user:', {
+            error,
+            userId,
+            organizationId: activeOrganizationId,
+            errorCode: error.code,
+            errorMessage: error.message,
+            errorDetails: error.details,
+            errorHint: error.hint,
+          });
+        }
+
+        // Check for specific error types
+        if (error.code === '42501' || error.message?.includes('permission denied') || error.message?.includes('row-level security')) {
+          throw new Error('No tienes permisos para eliminar usuarios. Verifica las políticas de seguridad (RLS).');
+        }
+
+        throw new Error(error.message || 'Error al eliminar el usuario. Por favor, intenta de nuevo.');
+      }
+
+      if (!data) {
+        throw new Error('No se pudo eliminar el usuario. El usuario no fue encontrado.');
+      }
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Usuario Eliminado',
+        message: 'El usuario ha sido eliminado exitosamente.',
+      });
+
+      // Reset loading ref to allow reload
+      hasLoadedRef.current = false;
+      // Reload users
+      await loadUsers();
+    } catch (err: any) {
+      const errorMessage = err.message || 'Error al eliminar el usuario. Por favor, intenta de nuevo.';
+      if (import.meta.env.DEV) {
+        console.error('Error in handleDeleteUser:', err);
+      }
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al Eliminar',
+        message: errorMessage,
+      });
+    } finally {
+      setDeletingUserId(null);
+      setIsLoading(false);
+      setLoading(false); // Clear dialog loading state
+      closeDialog();
+    }
+  };
+
   // Show loading state
   if (orgLoading || isLoading || roleLoading) {
     return (
@@ -357,32 +510,16 @@ export default function OrganizationUser() {
   }
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Customer and User</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {`Manage ${filteredUsers.length} organization users${filteredUsers.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {canManageUsers ? (
-            <button 
-              onClick={() => router.navigate('/settings/organization-users/new')}
-              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
-              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            >
-              <Plus style={{ width: '14px', height: '14px' }} />
-              Add User
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              Role: {role ?? 'no role'} — You don't have permission to manage users.
-            </span>
-          )}
-        </div>
-      </div>
+    <div className="py-6">
+      {/* Page Header */}
+      <SettingsPageHeader
+        title="Organization Users"
+        subtitle="Configure and manage your organization users"
+        actionLabel="Add User"
+        onAction={() => router.navigate('/settings/organization-users/new')}
+        actionDisabled={!canManageUsers}
+        contextInfo={filteredUsers.length}
+      />
 
       {/* Search and Filters */}
       <div className="mb-4">
@@ -547,14 +684,14 @@ export default function OrganizationUser() {
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
+              <thead>
+                <tr className="bg-gray-100 border-b border-gray-200">
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('email')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Name / Email
+                      Email
                       {sortBy === 'email' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
@@ -576,13 +713,13 @@ export default function OrganizationUser() {
                       {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 text-center">
+                    <td colSpan={4} className="py-12 text-center">
                       <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No users found</p>
                       <p className="text-sm text-gray-500">
@@ -605,17 +742,11 @@ export default function OrganizationUser() {
                             <User className="w-4 h-4 text-gray-600" />
                           </div>
                           <div>
-                            <div className="font-medium">{orgUser.user_name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}</div>
+                            <div className="font-medium">{orgUser.email || orgUser.user_id.substring(0, 8) + '...'}</div>
                             {orgUser.user_name && orgUser.email && (
-                              <div className="text-xs text-gray-500">{orgUser.email}</div>
+                              <div className="text-xs text-gray-500">{orgUser.user_name}</div>
                             )}
                           </div>
-                        </div>
-                      </td>
-                      <td className="py-4 px-4 text-gray-900 text-sm">
-                        <div className="flex items-center gap-2">
-                          <Building className="w-4 h-4 text-gray-400" />
-                          <span className="font-medium">{orgUser.customer_name || 'N/A'}</span>
                         </div>
                       </td>
                       <td className="py-4 px-4">
@@ -627,15 +758,61 @@ export default function OrganizationUser() {
                         {new Date(orgUser.created_at).toLocaleDateString()}
                       </td>
                       <td className="py-4 px-4">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
-                          }}
-                          className="text-gray-400 hover:text-primary transition-colors"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          {/* Authorize button - show if status is not 'authorized' */}
+                          {orgUser.status !== 'authorized' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAuthorize(orgUser.id);
+                              }}
+                              disabled={authorizingId === orgUser.id}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                              title="Authorize user"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                          
+                          {/* Send Invite button - show if user_id is NULL and status is 'authorized' */}
+                          {!orgUser.user_id && orgUser.status === 'authorized' && orgUser.email && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSendInvite(orgUser);
+                              }}
+                              disabled={invitingId === orgUser.id}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                              title="Send invitation email"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                          )}
+                          
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
+                            }}
+                            className="text-gray-400 hover:text-primary transition-colors"
+                            title="Edit user"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          {isSuperAdmin && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteUser(orgUser.id, orgUser.email);
+                              }}
+                              disabled={deletingUserId === orgUser.id}
+                              className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Delete user"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -689,17 +866,33 @@ export default function OrganizationUser() {
                         </span>
                       </div>
                     </div>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-primary"
-                      aria-label={`Edit ${orgUser.email}`}
-                      title={`Edit ${orgUser.email}`}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
+                        }}
+                        className="text-gray-400 hover:text-primary transition-colors"
+                        aria-label={`Edit ${orgUser.email}`}
+                        title={`Edit ${orgUser.email}`}
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      {isSuperAdmin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteUser(orgUser.id, orgUser.email);
+                          }}
+                          disabled={deletingUserId === orgUser.id}
+                          className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          aria-label={`Delete ${orgUser.email}`}
+                          title={`Delete ${orgUser.email}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* User Info */}
@@ -806,6 +999,19 @@ export default function OrganizationUser() {
           )}
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

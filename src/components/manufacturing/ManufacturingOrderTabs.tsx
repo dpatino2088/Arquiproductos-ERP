@@ -59,7 +59,7 @@ export default function ManufacturingOrderTabs({ moId }: ManufacturingOrderTabsP
         {activeTab === 'materials' && (
           <MaterialsTab
             moId={moId}
-            saleOrderId={manufacturingOrder?.sale_order_id || null}
+            saleOrderId={manufacturingOrder?.sales_order_id || null}
             moStatus={manufacturingOrder?.status || 'draft'}
             currency={manufacturingOrder?.SalesOrders?.currency || 'USD'}
           />

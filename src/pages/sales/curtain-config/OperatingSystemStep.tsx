@@ -7,6 +7,7 @@ import { useBOMComponents } from '../../../hooks/useBOM';
 import { useBOMTemplates } from '../../../hooks/useBOMTemplates';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { supabase } from '../../../lib/supabase/client';
+import { useBOMTemplateQuestions } from '../../../hooks/useBOMTemplateQuestions';
 
 interface OperatingSystemStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -72,7 +73,13 @@ function isValidTubeForWidth(tubeType: 'RTU-42' | 'RTU-50' | 'RTU-65' | 'RTU-80'
 export default function OperatingSystemStep({ config, onUpdate }: OperatingSystemStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
   const productTypeId = (config as any).productTypeId;
+  const bomTemplateId = (config as any).bom_template_id;
   const [motorDescriptions, setMotorDescriptions] = useState<Record<string, string>>({});
+  
+  // ✅ Get BOM template questions to determine if operating system step should be shown
+  const questions = useBOMTemplateQuestions(bomTemplateId);
+  const showOperatingSystem = questions.requiredSteps.operatingSystem;
+  const showDriveType = questions.selectQuestions.drive_type;
   
   // Fetch motor descriptions from CatalogItems
   useEffect(() => {
@@ -228,6 +235,11 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
   }, [width_mm, requiresRTU42]);
   const isTubeAutoSelected = !tubeTypeManual;
   
+  // ✅ Don't render if operating system step is not required
+  if (!showOperatingSystem) {
+    return null;
+  }
+  
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
@@ -272,7 +284,8 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
           </div>
         </div>
 
-        {/* Operation Type - Dropdown (as before) */}
+        {/* ✅ Operation Type - Dropdown (only show if drive_type is required) */}
+        {showDriveType && (
         <div>
           <Label className="text-sm font-medium mb-4 block">OPERATION TYPE</Label>
           <div className="mb-4">
@@ -317,6 +330,7 @@ export default function OperatingSystemStep({ config, onUpdate }: OperatingSyste
             </p>
           </div>
         </div>
+        )}
 
         {/* Drive (Motor Family) - Only show if Motor selected - Cards */}
         {isMotor && (

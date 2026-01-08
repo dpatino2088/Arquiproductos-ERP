@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
@@ -105,16 +105,48 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   // Load ProductTypes from database
   const { productTypes, loading: loadingProductTypes } = useProductTypes();
   
+  // FASE 1: Support both productTypeId (legacy) and product_type_id (unified contract)
+  const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
+  const prevProductTypeIdRef = useRef<string | null | undefined>(productTypeId);
+  const autoSelectAttemptedRef = useRef<string | null>(null); // Track which productTypeId we've attempted auto-select for
+  
   // Load BOM Templates for selected product type
-  const productTypeId = (config as any).productTypeId;
   const { templates: bomTemplates, loading: loadingBOMTemplates } = useBOMTemplates(productTypeId || undefined);
   
-  // Auto-select BOM template if exactly 1 is available
+  // DEBUG: Log templates loading
+  console.log('[ProductStep] 🔍 BOM Templates state', { 
+    productTypeId, 
+    templatesCount: bomTemplates.length, 
+    loading: loadingBOMTemplates,
+    templates: bomTemplates.map(t => ({ id: t.id, name: t.name, product_type_id: t.product_type_id })),
+    currentBomTemplateId: (config as any).bom_template_id,
+    shouldAutoSelect: bomTemplates.length === 1 && !(config as any).bom_template_id && productTypeId && !loadingBOMTemplates,
+  });
+  
+  // FASE 1: CRITICAL - Clear bom_template_id when product_type_id changes
   useEffect(() => {
-    if (bomTemplates.length === 1 && !(config as any).bom_template_id) {
-      onUpdate({ bom_template_id: bomTemplates[0].id } as any);
+    const prevProductTypeId = prevProductTypeIdRef.current;
+    const currentProductTypeId = productTypeId;
+    
+    const willClear = prevProductTypeId !== undefined && prevProductTypeId !== null && prevProductTypeId !== currentProductTypeId && currentProductTypeId;
+    console.log('[ProductStep] Clear bom_template_id effect', {
+      prevProductTypeId,
+      currentProductTypeId,
+      willClear,
+    });
+    
+    // If product type changed (not initial load), clear bom_template_id and reset auto-select tracking
+    if (willClear) {
+      console.log('[ProductStep] CLEARING bom_template_id because productType changed');
+      autoSelectAttemptedRef.current = null; // Reset auto-select tracking
+      onUpdate({ bom_template_id: null } as any);
     }
-  }, [bomTemplates, config, onUpdate]);
+    
+    prevProductTypeIdRef.current = currentProductTypeId;
+  }, [productTypeId, onUpdate]);
+  
+  // ✅ FIX A: Auto-select removed from ProductStep - now handled in ProductConfigurator
+  // This component only shows UI selector if multiple templates exist
   
   // Build product cards from DB ProductTypes + UI metadata
   const productCards = useMemo(() => {
@@ -122,10 +154,35 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     
     return productTypes
       .map(pt => {
-        const metadata = PRODUCT_UI_METADATA[pt.code || ''];
+        // ✅ FIX: Try exact match first, then case-insensitive, then name-based matching
+        let metadata = PRODUCT_UI_METADATA[pt.code || ''];
+        
+        // If no exact match, try case-insensitive match
+        if (!metadata && pt.code) {
+          const codeUpper = pt.code.toUpperCase();
+          metadata = PRODUCT_UI_METADATA[codeUpper];
+        }
+        
+        // If still no match, try matching by name (e.g., "Roller Shade" -> ROLLER)
+        if (!metadata && pt.name) {
+          const nameUpper = pt.name.toUpperCase();
+          // Try to find matching metadata by checking if name contains key words
+          for (const [key, meta] of Object.entries(PRODUCT_UI_METADATA)) {
+            const keyWords = key.split('_').map(w => w.toLowerCase());
+            const nameLower = pt.name.toLowerCase();
+            if (keyWords.some(word => nameLower.includes(word))) {
+              metadata = meta;
+              if (import.meta.env.DEV) {
+                console.log(`ProductStep: Matched ProductType "${pt.name}" (code: ${pt.code}) to metadata key "${key}" by name`);
+              }
+              break;
+            }
+          }
+        }
+        
         if (!metadata) {
           if (import.meta.env.DEV) {
-            console.warn(`ProductStep: No UI metadata for ProductType code: ${pt.code}`);
+            console.warn(`ProductStep: No UI metadata for ProductType code: ${pt.code}, name: ${pt.name}`);
           }
           return null;
         }
@@ -152,25 +209,37 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     });
   }
   
-  // Handle product type selection
-  const handleProductTypeSelect = (productTypeId: string, uiCode: string) => {
+  // FASE 1: Handle product type selection
+  const handleProductTypeSelect = (selectedProductTypeId: string, uiCode: string) => {
     if (import.meta.env.DEV) {
-      console.log('ProductStep: Selecting product type', {
-        productTypeId,
-        uiCode,
-      });
+      console.log('[ProductStep] ProductType selected', { productTypeId: selectedProductTypeId, uiCode, currentBomTemplateId: (config as any).bom_template_id });
     }
     
-    onUpdate({ 
+    // FASE 1: Set product_type_id (unified contract) and clear bom_template_id when ProductType changes
+    // CRITICAL: Reset auto-select tracking when ProductType changes
+    autoSelectAttemptedRef.current = null;
+    
+    const updates: any = {
       productType: uiCode as any,      // UI code for ProductConfig
-      productTypeId: productTypeId,    // DB UUID for filtering
-    } as any);
+      product_type_id: selectedProductTypeId,  // Unified contract field
+      productTypeId: selectedProductTypeId,    // Legacy field (for backward compatibility)
+      bom_template_id: null,  // CRITICAL: Clear bom_template_id when ProductType changes
+    };
+    
+    console.log('[ProductStep] Calling onUpdate with ProductType selection', { updates });
+    onUpdate(updates);
   };
   
   const handleProductTypeDeselect = () => {
+    if (import.meta.env.DEV) {
+      console.log('[ProductStep] ProductType deselected');
+    }
+    
     onUpdate({ 
       productType: undefined,
+      product_type_id: null,
       productTypeId: undefined,
+      bom_template_id: null,
     });
   };
   
@@ -210,8 +279,9 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
           {productCards.map((product) => {
             if (!product) return null;
             
-            // Check if selected by comparing UUID (more reliable than uiCode)
-            const isSelected = (config as any).productTypeId === product.id || 
+            // Check if selected by comparing UUID (support both unified contract and legacy)
+            const isSelected = (config as any).product_type_id === product.id || 
+                              (config as any).productTypeId === product.id || 
                               config.productType === product.uiCode;
             
             return (
@@ -259,7 +329,10 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
               <SelectShadcn
                 value={(config as any).bom_template_id || ''}
                 onValueChange={(value) => {
-                  onUpdate({ bom_template_id: value || undefined } as any);
+                  if (import.meta.env.DEV) {
+                    console.log('[ProductStep] BOM Template selected', { bomTemplateId: value, productTypeId });
+                  }
+                  onUpdate({ bom_template_id: value || null } as any);
                 }}
               >
                 <SelectTrigger>

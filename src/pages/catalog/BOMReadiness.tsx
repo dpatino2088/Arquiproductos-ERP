@@ -68,13 +68,20 @@ export default function BOMReadiness() {
   }, [registerSubmodules]);
   
   useEffect(() => {
+    // Don't fetch if no organization, but don't show warning either
+    // The component will just show empty state
     if (!activeOrganizationId) {
       setLoading(false);
-      useUIStore.getState().addNotification({
-        type: 'warning',
-        title: 'Warning',
-        message: 'No organization selected. Please select an organization to view BOM readiness.'
+      setReport({
+        summary: {
+          total_product_types: 0,
+          ready: 0,
+          blockers: 0,
+          warnings: 0
+        },
+        items: []
       });
+      setReadiness([]);
       return;
     }
     
@@ -224,6 +231,16 @@ ${seed.sql}`).join('\n\n')}
             ))}
           </div>
         </div>
+      </div>
+    );
+  }
+  
+  // Don't show warning if no organization - just show empty state
+  if (!activeOrganizationId) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">BOM Readiness Dashboard</h1>
+        <p className="text-gray-600">Please select an organization to view BOM readiness.</p>
       </div>
     );
   }

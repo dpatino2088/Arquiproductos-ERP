@@ -125,6 +125,8 @@ export class Router {
     
     if (pushState) {
       window.history.pushState({}, '', path);
+    } else {
+      window.history.replaceState({}, '', path);
     }
     
     const oldRoute = this.currentRoute;
@@ -145,9 +147,11 @@ export class Router {
     
     if (handler) {
       handler();
+      
       // Scroll to top after navigation
       window.scrollTo(0, 0);
     } else {
+      
       // No route found - trigger 404 page
       const notFoundHandler = this.routes.get('*');
       if (notFoundHandler) {

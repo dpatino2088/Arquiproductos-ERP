@@ -4,13 +4,16 @@ import { useManufacturingOrder } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import ManufacturingOrderTabs from '../../components/manufacturing/ManufacturingOrderTabs';
 import { ArrowLeft } from 'lucide-react';
+import { normalizeUUID } from '../../utils/uuid';
 
 interface ManufacturingOrderDetailProps {
   moId?: string;
 }
 
 export default function ManufacturingOrderDetail({ moId: propMoId }: ManufacturingOrderDetailProps) {
-  const [moId, setMoId] = useState<string | null>(propMoId || null);
+  // Normalize propMoId if provided
+  const normalizedPropMoId = propMoId ? normalizeUUID(propMoId) : null;
+  const [moId, setMoId] = useState<string | null>(normalizedPropMoId);
   const { manufacturingOrder, loading, error } = useManufacturingOrder(moId);
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
 
@@ -20,13 +23,31 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       const path = window.location.pathname;
       const match = path.match(/\/manufacturing\/manufacturing-orders\/([^/]+)/);
       if (match) {
-        const urlMoId = match[1];
-        setMoId(urlMoId);
-        sessionStorage.setItem('currentManufacturingOrderId', urlMoId);
+        const rawUrlMoId = match[1];
+        const normalizedMoId = normalizeUUID(rawUrlMoId);
+        
+        if (import.meta.env.DEV && rawUrlMoId !== normalizedMoId) {
+          console.log('🔍 UUID normalized in ManufacturingOrderDetail', {
+            raw: rawUrlMoId,
+            normalized: normalizedMoId,
+            rawLength: rawUrlMoId?.length,
+            normalizedLength: normalizedMoId?.length,
+          });
+        }
+        
+        if (normalizedMoId) {
+          setMoId(normalizedMoId);
+          sessionStorage.setItem('currentManufacturingOrderId', normalizedMoId);
+        } else {
+          console.warn('⚠️ Invalid manufacturingOrderId after normalization:', rawUrlMoId);
+        }
       } else {
         const storedId = sessionStorage.getItem('currentManufacturingOrderId');
         if (storedId) {
-          setMoId(storedId);
+          const normalizedStoredId = normalizeUUID(storedId);
+          if (normalizedStoredId) {
+            setMoId(normalizedStoredId);
+          }
         }
       }
     }

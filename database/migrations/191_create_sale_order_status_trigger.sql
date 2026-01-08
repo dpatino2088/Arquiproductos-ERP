@@ -258,3 +258,5 @@ COMMENT ON TRIGGER trg_on_sale_order_status_changed_generate_bom ON "SaleOrders"
 
 
 
+
+

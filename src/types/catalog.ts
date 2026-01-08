@@ -261,8 +261,10 @@ export interface BOMTemplate {
   id: string;
   organization_id: string;
   product_type_id: string;
+  code?: string | null; // Unique template code within organization (e.g., ROLLER_MANUAL_BASIC_WHITE)
   name?: string | null;
   description?: string | null;
+  metadata?: Record<string, any> | null; // Template metadata: { drive, cassette, hardware_color, system, notes }
   active: boolean;
   deleted: boolean;
   archived: boolean;
@@ -283,4 +285,3 @@ export interface BOMComponentWithTemplate extends Omit<BOMComponent, 'parent_ite
     code: string;
   };
 }
-

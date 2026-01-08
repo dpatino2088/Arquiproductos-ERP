@@ -330,8 +330,9 @@ export default function QuoteNew() {
       if (productConfig.productType === 'roller-shade') {
         const operatingSystemVariant = (productConfig as any).operating_system_variant;
         const tubeType = (productConfig as any).tube_type;
-        const width_m = (productConfig as any).widthM || ((productConfig as any).width_mm ? (productConfig as any).width_mm / 1000 : null);
-        const height_m = (productConfig as any).heightM || ((productConfig as any).height_mm ? (productConfig as any).height_mm / 1000 : null);
+        // ✅ CRITICAL: Buscar width_m primero (unified contract), luego widthM (legacy), luego calcular desde width_mm
+        const width_m = (productConfig as any).width_m || (productConfig as any).widthM || ((productConfig as any).width_mm ? (productConfig as any).width_mm / 1000 : null);
+        const height_m = (productConfig as any).height_m || (productConfig as any).heightM || ((productConfig as any).height_mm ? (productConfig as any).height_mm / 1000 : null);
         const driveType = (productConfig as any).operation_type || (productConfig as any).drive_type;
         const sideChannel = (productConfig as any).side_channel;
         const sideChannelType = (productConfig as any).side_channel_type;
@@ -357,8 +358,9 @@ export default function QuoteNew() {
       // Extract data from productConfig
       const area = productConfig.area || null;
       const position = productConfig.position || null;
-      const width_m = (productConfig as any).widthM || ((productConfig as any).width_mm ? (productConfig as any).width_mm / 1000 : null);
-      const height_m = (productConfig as any).heightM || ((productConfig as any).height_mm ? (productConfig as any).height_mm / 1000 : null);
+      // ✅ CRITICAL: Buscar width_m primero (unified contract), luego widthM (legacy), luego calcular desde width_mm
+      const width_m = (productConfig as any).width_m || (productConfig as any).widthM || ((productConfig as any).width_mm ? (productConfig as any).width_mm / 1000 : null);
+      const height_m = (productConfig as any).height_m || (productConfig as any).heightM || ((productConfig as any).height_mm ? (productConfig as any).height_mm / 1000 : null);
       const quantity = productConfig.quantity || 1;
 
       // Get catalog item ID (from productConfig)
@@ -471,8 +473,42 @@ export default function QuoteNew() {
       const collectionName = catalogItem?.collection_name || null;
       const variantName = catalogItem?.variant_name || null;
 
-      // Calculate computed_qty (for pricing)
-      const computedQty = width_m && height_m ? width_m * height_m : quantity;
+      // Determine measure_basis based on item category
+      // Get category code to determine if it's area-based (FABRIC) or linear-based (tube, cassette, etc.)
+      let measureBasis: 'area' | 'linear' = 'area'; // Default to area
+      let computedQty: number = quantity; // Default fallback
+      
+      if (catalogItem.item_category_id) {
+        const { data: itemCategory } = await supabase
+          .from('ItemCategories')
+          .select('code')
+          .eq('id', catalogItem.item_category_id)
+          .eq('deleted', false)
+          .maybeSingle();
+        
+        if (itemCategory?.code) {
+          const categoryCode = itemCategory.code.toUpperCase();
+          // FABRIC is area-based (width × height)
+          // All other categories (COMP-TUBE, COMP-CASSETTE, COMP-BOTTOM-BAR, COMP-SIDE, etc.) are linear (width only)
+          if (categoryCode.includes('FABRIC')) {
+            measureBasis = 'area';
+            // For area: computed_qty = width_m × height_m
+            computedQty = width_m && height_m ? width_m * height_m : quantity;
+        } else {
+            measureBasis = 'linear_m';
+            // For linear: computed_qty = width_m (or height_m if width is not available)
+            computedQty = width_m || height_m || quantity;
+        }
+        } else {
+          // If category not found, default to area calculation
+          measureBasis = 'area';
+          computedQty = width_m && height_m ? width_m * height_m : quantity;
+        }
+      } else {
+        // If no category, default to area calculation
+        measureBasis = 'area';
+        computedQty = width_m && height_m ? width_m * height_m : quantity;
+      }
 
       // Get customer type for pricing tier (from quote's customer)
       const quoteCustomerId = quoteData?.customer_id || watch('customer_id');
@@ -506,8 +542,28 @@ export default function QuoteNew() {
       // Net unit price (after tier discount + margin floor) - distributor pays this
       const netUnitPrice = pricingResult.unitPrice;
       
-      // Line total = net price * quantity (distributor pays this total)
+      // Line total = net price * computed_qty (distributor pays this total)
+      // computed_qty accounts for measure_basis:
+      // - For area (fabric): computed_qty = width_m × height_m
+      // - For linear (tube, cassette, etc.): computed_qty = width_m
       const lineTotal = netUnitPrice * computedQty;
+      
+      // Debug log for pricing calculation
+      if (import.meta.env.DEV) {
+        console.log('QuoteNew: Pricing calculation', {
+          catalogItemId,
+          sku: catalogItem.sku,
+          measureBasis,
+          width_m,
+          height_m,
+          quantity,
+          computedQty,
+          listPrice,
+          netUnitPrice,
+          lineTotal,
+          categoryCode: catalogItem.item_category_id ? 'fetched' : 'none'
+        });
+      }
 
       // NORMALIZE side_channel to boolean (CRITICAL: prevent string contamination)
       // Handle ALL possible truthy/falsy values defensively
@@ -596,6 +652,8 @@ export default function QuoteNew() {
         variant_name: variantName,
         product_type: productConfig.productType || null,
         product_type_id: productTypeId,
+        // ✅ SOLUCIÓN DEFINITIVA: Usar effectiveBomTemplateId si config.bom_template_id no existe
+        // El effectiveBomTemplateId viene del config normalizado que ya incluye el valor efectivo
         bom_template_id: (productConfig as any).bom_template_id || null,
         operating_system_variant: (productConfig as any).operating_system_variant || null,
         tube_type: (productConfig as any).tube_type || null,
@@ -631,7 +689,7 @@ export default function QuoteNew() {
         margin_pct_used: pricingResult.totalUnitCost > 0 && netUnitPrice > 0
           ? ((netUnitPrice - pricingResult.totalUnitCost) / netUnitPrice * 100)
           : null, // Actual margin achieved on net price (margin-on-sale)
-        measure_basis_snapshot: 'area', // Default
+        measure_basis_snapshot: measureBasis, // 'area' for fabric, 'linear' for tube/cassette/etc.
         // ============================================
         // DO NOT WRITE LEGACY FIELDS:
         // - final_unit_price (deprecated)

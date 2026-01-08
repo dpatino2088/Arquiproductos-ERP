@@ -1,23 +1,22 @@
 import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
-import { usePreviousPage } from '../../hooks/usePreviousPage';
-import { useCompanyStore } from '../../stores/company-store';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import {
   Building,
   Users,
   Settings as SettingsIcon,
   ChevronRight,
-  X
+  X,
+  Shield
 } from 'lucide-react';
 import OrganizationUser from './OrganizationUser';
 import OrganizationProfileView from './OrganizationProfileView';
 import OrganizationUserNew from './OrganizationUserNew';
+import OrganizationUserEdit from './OrganizationUserEdit';
 import CostEngineSettings from './CostEngineSettings';
+import CustomerPortalUsers from './CustomerPortalUsers';
 
 export default function CompanySettings() {
-  const { getPreviousPage } = usePreviousPage();
-  const { currentCompany } = useCompanyStore();
   const { isMember, loading: roleLoading } = useCurrentOrgRole();
   const [activeSection, setActiveSection] = useState<string>('organization-user');
   const [activeTab, setActiveTab] = useState<string>('general');
@@ -46,8 +45,10 @@ export default function CompanySettings() {
   }, []);
 
   // Determine if we're in add/edit user mode
-  const isAddEditUserMode = currentRoute.includes('/settings/organization-users/new') || 
-                            currentRoute.match(/\/settings\/organization-users\/edit\/[^/]+/);
+  const isAddUserMode = currentRoute.includes('/settings/organization-users/new');
+  const editUserMatch = currentRoute.match(/\/settings\/organization-users\/edit\/([^/]+)/);
+  const editingUserId = editUserMatch ? editUserMatch[1] : null;
+  const isAddEditUserMode = isAddUserMode || !!editingUserId;
 
   // Proteger Settings: Members no pueden acceder - redirigir inmediatamente sin mostrar error
   useEffect(() => {
@@ -62,32 +63,11 @@ export default function CompanySettings() {
     return null; // No renderizar nada, la redirección ya está en curso
   }
 
-  // Handle ESC key to close settings and return to previous page
-  useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        const previousPage = getPreviousPage();
-        // Si no hay página anterior, ir al dashboard de management
-        const targetPage = previousPage || '/dashboard';
-        console.log('ESC pressed, previous page:', previousPage, 'navigating to:', targetPage);
-        try {
-          router.navigate(targetPage);
-        } catch (error) {
-          console.error('Router navigation failed:', error);
-          // Fallback to direct navigation
-          window.location.href = targetPage;
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [getPreviousPage]);
-
   // Settings menu configuration based on our app modules
   const settingsMenu = [
     { id: 'organization-user', label: 'Organization User', icon: Users },
     { id: 'organization-profile', label: 'Organization Profile', icon: Building },
+    { id: 'customer-portal-users', label: 'Customer Portal Users', icon: Shield },
     { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon }
   ];
 
@@ -107,29 +87,48 @@ export default function CompanySettings() {
     }
   };
 
-  const handleCloseSettings = (): void => {
-    // Si estamos en modo add/edit, volver a organization-user, no al dashboard
+  // Handle navigation when in add/edit mode
+  useEffect(() => {
     if (isAddEditUserMode) {
-      router.navigate('/settings/organization-user');
-      return;
+      // If we're in add/edit mode, ensure we're on the correct route
+      const expectedRoute = isAddUserMode 
+        ? '/settings/organization-users/new'
+        : `/settings/organization-users/edit/${editingUserId}`;
+      
+      const currentPath = window.location.pathname;
+      if (currentPath !== expectedRoute) {
+        router.navigate(expectedRoute, false);
+      }
     }
-    
-    const previousPage = getPreviousPage();
-    // Si no hay página anterior, ir al dashboard de management
-    const targetPage = previousPage || '/dashboard';
-    console.log('Closing settings, previous page:', previousPage, 'navigating to:', targetPage);
-    try {
-      router.navigate(targetPage);
-    } catch (error) {
-      console.error('Router navigation failed:', error);
-      // Fallback to direct navigation
-      window.location.href = targetPage;
-    }
+  }, [isAddEditUserMode, isAddUserMode, editingUserId]);
+
+  // Handle close settings and navigate to dashboard
+  const handleCloseSettings = () => {
+    router.navigate('/dashboard', false);
   };
 
+  // Handle ESC key to close settings
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        handleCloseSettings();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, []);
+
   const renderTabContent = () => {
-    // If we're in add/edit user mode, show OrganizationUserNew embedded
-    if (isAddEditUserMode) {
+    // If we're in edit user mode, show OrganizationUserEdit
+    if (editingUserId) {
+      return <OrganizationUserEdit userId={editingUserId} embedded={true} />;
+    }
+    
+    // If we're in add user mode, show OrganizationUserNew embedded
+    if (isAddUserMode) {
       return <OrganizationUserNew embedded={true} />;
     }
 
@@ -139,6 +138,10 @@ export default function CompanySettings() {
 
     if (activeSection === 'organization-profile') {
       return <OrganizationProfileView />;
+    }
+
+    if (activeSection === 'customer-portal-users') {
+      return <CustomerPortalUsers />;
     }
 
     if (activeSection === 'cost-engine') {
@@ -169,16 +172,14 @@ export default function CompanySettings() {
             <h1 className="text-lg font-semibold text-gray-900">Settings</h1>
           </div>
 
-          <div className="h-6 w-px bg-gray-200 ml-6 mr-6"></div>
-
-          <div className="flex items-center gap-2">
-            <Building className="text-gray-900" style={{ width: '18px', height: '18px' }} />
-            <span className="text-sm font-medium text-gray-900">{currentCompany?.name || 'No Company'}</span>
-          </div>
-
           <div className="ml-auto">
             <button
-              onClick={handleCloseSettings}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCloseSettings();
+              }}
               className="text-gray-500 hover:text-gray-700 p-2 rounded-lg hover:bg-gray-50 transition-colors"
               title="Close Settings (ESC)"
             >
@@ -232,54 +233,13 @@ export default function CompanySettings() {
               })}
             </ul>
           </nav>
-      </div>
+        </div>
 
         {/* Content Area */}
-        <div className="flex-1 flex flex-col">
-          {/* Secondary Navigation */}
-          {currentTabs.length > 0 && (
-            <div className="bg-gray-50 border-b border-gray-200 flex-shrink-0 px-6" style={{ height: '48px' }}>
-              <div className="flex items-center" style={{ height: '48px' }}>
-                <div className="flex items-stretch h-full -mx-2">
-                  {currentTabs.map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={`font-medium transition-colors flex items-center justify-center px-4 rounded-t-lg ${
-                        tab.id === activeTab
-                          ? 'bg-white text-primary border-b-2 border-primary'
-                          : 'hover:text-primary hover:bg-white/50'
-                      }`}
-                      style={{
-                        fontSize: '14px',
-                        height: '46px',
-                        minWidth: '140px'
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
+        <div className="flex-1 flex flex-col overflow-auto">
           {/* Settings Content */}
-          <div className="flex-1 p-8 overflow-auto">
+          <div className="flex-1 p-8">
             <div className="max-w-6xl">
-              {!isAddEditUserMode && (
-                <div className="mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                    {settingsMenu.find(item => item.id === activeSection)?.label}
-                    {currentTabs.length > 0 && activeTab &&
-                      ` - ${currentTabs.find(tab => tab.id === activeTab)?.label}`
-                    }
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Configure and manage your {settingsMenu.find(item => item.id === activeSection)?.label.toLowerCase()} settings and content.
-                  </p>
-                </div>
-              )}
               {renderTabContent()}
             </div>
           </div>

@@ -24,9 +24,23 @@ import {
   isUomValidForMeasureBasis,
   validateAndNormalizeUom 
 } from '../../lib/uom';
+import { getAllowedUoms, getAllowedMeasureBasis, syncCatalogItemProductTypes } from '../../lib/catalog-item-helpers';
+import { useProductTypes } from '../../hooks/useProductTypes';
 
 // Re-export for local use (already normalized in uom.ts)
 const MEASURE_BASIS_OPTIONS_LOCAL = MEASURE_BASIS_OPTIONS;
+
+// ✅ Default UOM by measure basis
+const DEFAULT_UOM_BY_BASIS: Record<string, string> = {
+  unit: 'ea',
+  linear_m: 'm',
+  area: 'm2',
+};
+
+function getDefaultUom(measureBasis: string | null | undefined): string | null {
+  if (!measureBasis) return null;
+  return DEFAULT_UOM_BY_BASIS[measureBasis] ?? null;
+}
 
 // Fabric pricing mode options
 const FABRIC_PRICING_MODE_OPTIONS = [
@@ -50,7 +64,7 @@ const catalogItemSchema = z.object({
   description: z.string().optional(),
   item_category_id: z.string().uuid().optional().nullable(),
   item_type: z.enum(['component', 'fabric', 'linear', 'service', 'accessory']),
-  measure_basis: z.enum(['unit', 'linear_m', 'area', 'fabric']),
+  measure_basis: z.enum(['unit', 'linear_m', 'area']), // ✅ Removed 'fabric' - fabrics use 'linear_m' or 'area'
   uom: z.string().min(1, 'Unit of measure is required'),
   is_fabric: z.boolean(),
   collection_name: z.string().optional().nullable(),
@@ -122,6 +136,11 @@ export default function CatalogItemNew() {
   const { categories: leafCategories } = useLeafItemCategories();
   const { categories: allCategories } = useItemCategories();
   
+  // ✅ ProductTypes state
+  const { productTypes, loading: productTypesLoading } = useProductTypes();
+  const [selectedProductTypeIds, setSelectedProductTypeIds] = useState<string[]>([]);
+  const [primaryProductTypeId, setPrimaryProductTypeId] = useState<string | null>(null);
+  
   // Get current user's role and permissions
   const { canEditCustomers, loading: roleLoading } = useCurrentOrgRole();
   
@@ -176,6 +195,10 @@ export default function CatalogItemNew() {
   const defaultMarginPct = watch('default_margin_pct');
   const itemCategoryId = watch('item_category_id');
   const msrp = watch('msrp');
+  
+  // ✅ Get allowed UOMs based on is_fabric and measure_basis
+  const allowedUoms = getAllowedUoms({ isFabric, measureBasis });
+  const allowedMeasureBasisOptions = getAllowedMeasureBasis(isFabric);
 
   // Get category margin if category is selected
   const { marginPercentage: categoryMarginPct, loading: categoryMarginLoading } = useCategoryMargin(itemCategoryId);
@@ -190,7 +213,7 @@ export default function CatalogItemNew() {
     if (isFabricParam === 'true') {
       setValue('is_fabric', true, { shouldValidate: true });
       setValue('item_type', 'fabric', { shouldValidate: true });
-      setValue('measure_basis', 'fabric', { shouldValidate: true });
+      setValue('measure_basis', 'linear_m', { shouldValidate: true }); // ✅ Fabrics use 'linear_m' or 'area', not 'fabric'
     }
     
     if (collectionNameParam) {
@@ -267,27 +290,69 @@ export default function CatalogItemNew() {
     lastCalculatedMsrp.current = null; // Clear last calculated value when manually edited
   };
 
-  // Auto-update item_type based on is_fabric and measure_basis
+  // ✅ Auto-update item_type and measure_basis based on is_fabric
   useEffect(() => {
     if (isFabric) {
       setValue('item_type', 'fabric', { shouldValidate: true });
+      // If current measure_basis is not valid for fabric, set to linear_m
+      const currentMeasureBasis = watch('measure_basis');
+      if (currentMeasureBasis !== 'linear_m' && currentMeasureBasis !== 'area') {
+        setValue('measure_basis', 'linear_m', { shouldValidate: true });
+      }
     } else if (measureBasis === 'linear_m') {
       setValue('item_type', 'linear', { shouldValidate: true });
     } else if (measureBasis === 'unit' && itemType === 'fabric') {
       // If user unchecks is_fabric, reset to component
       setValue('item_type', 'component', { shouldValidate: true });
     }
-  }, [isFabric, measureBasis, itemType, setValue]);
+  }, [isFabric, measureBasis, itemType, setValue, watch]);
 
-  // Clear UOM if it becomes invalid when measure_basis changes
+  // ✅ Clear UOM if it becomes invalid when is_fabric or measure_basis changes
   useEffect(() => {
     const currentUom = watch('uom');
     const currentMeasureBasis = watch('measure_basis');
+    const currentIsFabric = watch('is_fabric');
     
-    if (currentUom && currentMeasureBasis && !isUomValidForMeasureBasis(currentMeasureBasis, currentUom)) {
-      setValue('uom', '', { shouldValidate: true });
+    if (currentUom && currentMeasureBasis) {
+      const allowed = getAllowedUoms({ isFabric: currentIsFabric, measureBasis: currentMeasureBasis });
+      if (!allowed.includes(currentUom.toLowerCase().trim())) {
+        setValue('uom', '', { shouldValidate: true });
+      }
     }
-  }, [measureBasis, watch, setValue]);
+  }, [isFabric, measureBasis, watch, setValue]);
+  
+  // ✅ Load existing ProductType relationships when editing
+  useEffect(() => {
+    const loadProductTypeRelations = async () => {
+      if (!itemId || !activeOrganizationId) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('CatalogItemProductTypes')
+          .select('product_type_id, is_primary')
+          .eq('catalog_item_id', itemId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false);
+        
+        if (error) {
+          console.error('Error loading product type relations:', error);
+          return;
+        }
+        
+        if (data && data.length > 0) {
+          const ids = data.map(rel => rel.product_type_id);
+          const primary = data.find(rel => rel.is_primary)?.product_type_id || null;
+          
+          setSelectedProductTypeIds(ids);
+          setPrimaryProductTypeId(primary);
+        }
+      } catch (err) {
+        console.error('Error loading product type relations:', err);
+      }
+    };
+    
+    loadProductTypeRelations();
+  }, [itemId, activeOrganizationId]);
 
   // Get item ID from URL if in edit mode
   useEffect(() => {
@@ -401,6 +466,8 @@ export default function CatalogItemNew() {
     setSaveError(null);
 
     try {
+      const normalizedUom = normalizeUom(values.uom) || '';
+      
       const itemData: any = {
         sku: values.sku.trim(),
         item_name: values.name.trim(), // Map name to item_name for database (name field doesn't exist in CatalogItems)
@@ -408,7 +475,8 @@ export default function CatalogItemNew() {
         item_category_id: values.item_category_id || null,
         item_type: values.item_type,
         measure_basis: normalizeMeasureBasis(values.measure_basis) || values.measure_basis,
-        uom: normalizeUom(values.uom) || '',
+        uom: normalizedUom,
+        pricing_uom: normalizedUom, // ✅ Set pricing_uom equal to uom (for now, can be made separate later)
         is_fabric: values.is_fabric,
         collection_name: values.collection_name?.trim() || null,
         variant_name: values.variant_name?.trim() || null,
@@ -661,7 +729,7 @@ export default function CatalogItemNew() {
                       <SelectValue placeholder={watch('measure_basis') ? "Select UOM" : "Select measure basis first"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {getValidUomOptions(watch('measure_basis')).map((uomOption) => (
+                      {allowedUoms.map((uomOption) => (
                         <SelectItem key={uomOption} value={uomOption}>
                           {uomOption}
                         </SelectItem>
@@ -671,9 +739,9 @@ export default function CatalogItemNew() {
                   {errors.uom && !watch('uom') && (
                     <p className="text-xs text-red-600 mt-1">{errors.uom.message}</p>
                   )}
-                  {watch('measure_basis') && !watch('uom') && !errors.uom && (
+                  {watch('measure_basis') && !watch('uom') && !errors.uom && allowedUoms.length > 0 && (
                     <p className="text-xs text-gray-500 mt-1">
-                      Valid options: {getValidUomOptions(watch('measure_basis')).join(', ')}
+                      Valid options: {allowedUoms.join(', ')}
                     </p>
                   )}
                 </div>
@@ -688,18 +756,6 @@ export default function CatalogItemNew() {
                   rows={3}
                   disabled={isReadOnly}
                   placeholder="Type here..."
-                />
-              </div>
-
-              {/* Image Upload */}
-              <div className="col-span-12">
-                <Label className="text-xs">Image</Label>
-                <ImageUpload
-                  currentImageUrl={watch('image_url') || null}
-                  onImageUploaded={(url) => {
-                    setValue('image_url', url || null, { shouldValidate: false });
-                  }}
-                  disabled={isReadOnly}
                 />
               </div>
 
@@ -746,6 +802,100 @@ export default function CatalogItemNew() {
                   })()}
                 </div>
               </div>
+              
+              {/* ✅ Product Types Selection */}
+              <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
+                <div className="col-span-12">
+                  <Label className="text-xs">Product Types</Label>
+                  <div className="mt-2 space-y-2">
+                    {productTypesLoading ? (
+                      <p className="text-xs text-gray-500">Loading product types...</p>
+                    ) : productTypes.length === 0 ? (
+                      <p className="text-xs text-gray-500">No product types available. Create product types in settings.</p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-md p-3">
+                        <div className="space-y-2">
+                          {productTypes.map((pt) => {
+                            const isSelected = selectedProductTypeIds.includes(pt.id);
+                            const isPrimary = primaryProductTypeId === pt.id;
+                            
+                            return (
+                              <div key={pt.id} className="flex items-center gap-3">
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  id={`product_type_${pt.id}`}
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      // Add to selected
+                                      setSelectedProductTypeIds(prev => [...prev, pt.id]);
+                                      // If no primary yet, set this as primary
+                                      if (!primaryProductTypeId) {
+                                        setPrimaryProductTypeId(pt.id);
+                                      }
+                                    } else {
+                                      // Remove from selected
+                                      setSelectedProductTypeIds(prev => prev.filter(id => id !== pt.id));
+                                      // If this was primary, clear primary
+                                      if (primaryProductTypeId === pt.id) {
+                                        setPrimaryProductTypeId(null);
+                                        // Set first remaining as primary if any
+                                        const remaining = selectedProductTypeIds.filter(id => id !== pt.id);
+                                        if (remaining.length > 0) {
+                                          setPrimaryProductTypeId(remaining[0]);
+                                        }
+                                      }
+                                    }
+                                  }}
+                                  disabled={isReadOnly}
+                                  className="h-4 w-4"
+                                />
+                                
+                                {/* Label - fixed width to match longest text (Accessories (ACCESSORIES)) */}
+                                <label
+                                  htmlFor={`product_type_${pt.id}`}
+                                  className="text-xs text-gray-700 cursor-pointer"
+                                  style={{ width: '200px', flexShrink: 0 }}
+                                >
+                                  {pt.name} {pt.code && `(${pt.code})`}
+                                </label>
+                                
+                                {/* Primary radio button - positioned right after the label */}
+                                {isSelected && (
+                                  <label
+                                    htmlFor={`primary_${pt.id}`}
+                                    className="flex items-center gap-2 cursor-pointer"
+                                    style={{ marginLeft: '8px' }} // Small space after text
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="primary_product_type"
+                                      id={`primary_${pt.id}`}
+                                      checked={isPrimary}
+                                      onChange={() => setPrimaryProductTypeId(pt.id)}
+                                      disabled={isReadOnly}
+                                      className="h-4 w-4"
+                                    />
+                                    {isPrimary && (
+                                      <span className="text-xs text-gray-600">Primary</span>
+                                    )}
+                                  </label>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {selectedProductTypeIds.length > 0 && !primaryProductTypeId && (
+                    <p className="text-xs text-yellow-600 mt-1">
+                      ⚠️ Please select a primary product type
+                    </p>
+                  )}
+                </div>
+              </div>
 
               {/* Item Type and Measurement */}
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
@@ -781,9 +931,10 @@ export default function CatalogItemNew() {
                     onValueChange={(value) => {
                       const normalized = normalizeMeasureBasis(value) || value.toLowerCase();
                       setValue('measure_basis', normalized as MeasureBasis, { shouldValidate: true });
-                      // Clear UOM if it's not valid for the new measure basis
+                      // ✅ Clear UOM if it's not valid for the new measure basis (using getAllowedUoms)
                       const currentUom = watch('uom');
-                      if (currentUom && !isUomValidForMeasureBasis(normalized, currentUom)) {
+                      const allowed = getAllowedUoms({ isFabric, measureBasis: normalized });
+                      if (currentUom && !allowed.includes(currentUom.toLowerCase().trim())) {
                         setValue('uom', '', { shouldValidate: true });
                       }
                     }}
@@ -793,13 +944,13 @@ export default function CatalogItemNew() {
                       <SelectValue placeholder="Select measure basis">
                         {(() => {
                           const currentValue = normalizeMeasureBasis(watch('measure_basis'));
-                          const option = MEASURE_BASIS_OPTIONS_LOCAL.find(opt => opt.value === currentValue);
+                          const option = allowedMeasureBasisOptions.find(opt => opt.value === currentValue);
                           return option ? option.label : currentValue || 'Select measure basis';
                         })()}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {MEASURE_BASIS_OPTIONS_LOCAL.map((option) => (
+                      {allowedMeasureBasisOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -819,10 +970,37 @@ export default function CatalogItemNew() {
                       {...register('is_fabric')}
                       checked={isFabric}
                       onChange={(e) => {
-                        setValue('is_fabric', e.target.checked, { shouldValidate: true });
-                        if (!e.target.checked) {
+                        const nextIsFabric = !!e.target.checked;
+                        setValue('is_fabric', nextIsFabric, { shouldValidate: true });
+
+                        if (nextIsFabric) {
+                          // ✅ Fabric: solo linear_m / area
+                          const allowedBasis = getAllowedMeasureBasis(true);
+                          const currentMeasureBasis = normalizeMeasureBasis(watch('measure_basis'));
+                          const nextBasis = allowedBasis.some(opt => opt.value === currentMeasureBasis)
+                            ? currentMeasureBasis
+                            : 'linear_m';
+
+                          setValue('measure_basis', nextBasis as MeasureBasis, { shouldValidate: true });
+
+                          const allowedUoms = getAllowedUoms({ isFabric: true, measureBasis: nextBasis });
+                          const currentUom = normalizeUom(watch('uom'));
+                          if (!allowedUoms.includes(currentUom || '')) {
+                            const defaultUom = getDefaultUom(nextBasis);
+                            if (defaultUom) {
+                              setValue('uom', defaultUom, { shouldValidate: true });
+                            }
+                          }
+                        } else {
+                          // ✅ NO-Fabric: volver a unit sí o sí (UX)
+                          setValue('measure_basis', 'unit', { shouldValidate: true });
+                          setValue('uom', 'ea', { shouldValidate: true });
+
+                          // ✅ Limpiar campos de fabric
                           setValue('fabric_pricing_mode', null);
                           setValue('roll_width_m', null);
+                          setValue('collection_name', null);
+                          setValue('variant_name', null);
                         }
                       }}
                       className="h-4 w-4"
@@ -895,6 +1073,18 @@ export default function CatalogItemNew() {
                     </div>
                   </>
                 )}
+              </div>
+
+              {/* Image Upload */}
+              <div className="col-span-12">
+                <Label className="text-xs">Image</Label>
+                <ImageUpload
+                  currentImageUrl={watch('image_url') || null}
+                  onImageUploaded={(url) => {
+                    setValue('image_url', url || null, { shouldValidate: false });
+                  }}
+                  disabled={isReadOnly}
+                />
               </div>
             </div>
           )}

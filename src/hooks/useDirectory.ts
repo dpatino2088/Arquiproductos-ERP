@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 
@@ -10,6 +9,10 @@ export function useContacts() {
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+
+  const refetch = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   useEffect(() => {
     async function fetchContacts() {
@@ -24,7 +27,7 @@ export function useContacts() {
         setLoading(true);
         setError(null);
 
-        // Step 1: Fetch all contacts
+        // Query simplificada: solo campos básicos
         const { data: contactsData, error: contactsError } = await supabase
           .from('DirectoryContacts')
           .select('*')
@@ -33,20 +36,18 @@ export function useContacts() {
           .order('created_at', { ascending: false });
 
         if (contactsError) {
-          if (import.meta.env.DEV) {
-            console.error('Error fetching Contacts:', contactsError);
-          }
+          console.error('[useContacts] Error fetching Contacts:', contactsError);
           throw contactsError;
         }
 
-        // Step 2: Get all unique customer IDs (filter out nulls)
+        // Get all unique customer IDs (filter out nulls)
         const customerIds = [...new Set(
           (contactsData || [])
             .map((c: any) => c.customer_id)
             .filter((id: any) => id !== null && id !== undefined)
         )];
 
-        // Step 3: Fetch customers in batch if there are any
+        // Fetch customers in batch if there are any
         let customersMap = new Map<string, string>();
         if (customerIds.length > 0) {
           const { data: customersData, error: customersError } = await supabase
@@ -56,21 +57,17 @@ export function useContacts() {
             .eq('deleted', false);
 
           if (customersError) {
-            if (import.meta.env.DEV) {
-              console.error('Error fetching Customers for Contacts:', customersError);
-            }
+            console.warn('[useContacts] Error fetching Customers for Contacts:', customersError);
             // Don't throw, just log - we can still show contacts without customer names
           } else if (customersData) {
-            // Create a map for quick lookup
             customersMap = new Map(
               customersData.map((c: any) => [c.id, c.customer_name || ''])
             );
           }
         }
 
-        // Step 4: Transform data with manual customer mapping
+        // Transform data with manual customer mapping
         const transformedContacts = (contactsData || []).map((contact: any) => {
-          // Get customer name from map
           const customerName = contact.customer_id 
             ? (customersMap.get(contact.customer_id) || '') 
             : '';
@@ -80,7 +77,7 @@ export function useContacts() {
             firstName: contact.contact_name || '',
             lastName: '',
             email: contact.email || '',
-            company: customerName, // Customer name from manual mapping
+            company: customerName,
             customer_id: contact.customer_id || null,
             category: contact.contact_type 
               ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) 
@@ -90,7 +87,6 @@ export function useContacts() {
             dateAdded: contact.created_at || '',
             phone: contact.primary_phone || contact.cell_phone || '',
             contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer',
-            // Additional fields for table display
             primary_phone: contact.primary_phone || '',
             city: contact.city || '',
             country: contact.country || '',
@@ -102,9 +98,7 @@ export function useContacts() {
         setContacts(transformedContacts);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading contacts';
-        if (import.meta.env.DEV) {
-          console.error('Error fetching Contacts:', err);
-        }
+        console.error('[useContacts] Error:', errorMessage);
         setError(errorMessage);
       } finally {
         setLoading(false);
@@ -116,15 +110,12 @@ export function useContacts() {
 
   return {
     data: contacts,
-    contacts, // Alias for backward compatibility
+    contacts,
     error,
     isLoading: loading,
-    loading, // Alias for backward compatibility
+    loading,
     isError: !!error,
-    refetch: () => {
-      // Trigger re-fetch by incrementing refresh trigger
-      setRefreshTrigger(prev => prev + 1);
-    },
+    refetch,
   };
 }
 
@@ -135,6 +126,10 @@ export function useCustomers() {
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+
+  const refetch = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   useEffect(() => {
     async function fetchCustomers() {
@@ -149,11 +144,7 @@ export function useCustomers() {
         setLoading(true);
         setError(null);
 
-        console.log('🔍 useCustomers - Iniciando fetch:', {
-          activeOrganizationId,
-          hasOrgId: !!activeOrganizationId
-        });
-
+        // Query simplificada: solo campos básicos
         const { data, error: queryError } = await supabase
           .from('DirectoryCustomers')
           .select('*')
@@ -161,60 +152,52 @@ export function useCustomers() {
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
-        console.log('📊 useCustomers - Resultado query:', {
-          dataCount: data?.length || 0,
-          error: queryError,
-          rawData: data,
-          firstCustomer: data?.[0] ? {
-            id: data[0].id,
-            customer_name: data[0].customer_name,
-            organization_id: data[0].organization_id
-          } : null
-        });
-
         if (queryError) {
-          console.error('❌ Error fetching Customers:', {
-            error: queryError,
-            code: queryError.code,
-            message: queryError.message,
-            details: queryError.details
-          });
+          console.error('[useCustomers] Error fetching Customers:', queryError);
           throw queryError;
         }
 
-        // Get all primary contact IDs and customer type IDs
-        const primaryContactIds = (data || [])
-          .map((customer: any) => customer.primary_contact_id)
-          .filter(Boolean);
+        if (!data || data.length === 0) {
+          setCustomers([]);
+          return;
+        }
+
+        // Get all primary contact IDs
+        const primaryContactIds = [...new Set(
+          data
+            .map((customer: any) => customer.primary_contact_id)
+            .filter((id: any): id is string => !!id)
+        )];
         
-        // Fetch all primary contacts in one query
+        // Fetch all primary contacts in one query (separate to avoid JOIN issues)
         let contactsMap: Record<string, string> = {};
         if (primaryContactIds.length > 0) {
           try {
-            const { data: contactsData } = await supabase
+            const { data: contactsData, error: contactsError } = await supabase
               .from('DirectoryContacts')
               .select('id, contact_name')
               .in('id', primaryContactIds)
               .eq('organization_id', activeOrganizationId)
               .eq('deleted', false);
 
-            if (contactsData) {
+            if (contactsError) {
+              console.warn('[useCustomers] Error fetching primary contacts:', contactsError);
+            } else if (contactsData) {
               contactsMap = contactsData.reduce((acc: Record<string, string>, contact: any) => {
                 acc[contact.id] = contact.contact_name || '';
                 return acc;
               }, {});
             }
           } catch (err) {
-            // Silently fail if contact fetch fails
+            // Silently fail if contact fetch fails - customers can still be displayed
             if (import.meta.env.DEV) {
-              console.warn('Could not fetch primary contacts:', err);
+              console.warn('[useCustomers] Could not fetch primary contacts:', err);
             }
           }
         }
 
         // Transform data to match frontend interface
-        // Note: We already filter by deleted = false in the query, so all customers here are active
-        const transformedCustomers = (data || []).map((customer: any) => ({
+        const transformedCustomers = data.map((customer: any) => ({
           id: customer.id,
           companyName: customer.customer_name || '',
           contactName: customer.primary_contact_id ? (contactsMap[customer.primary_contact_id] || '') : '',
@@ -225,17 +208,22 @@ export function useCustomers() {
           location: [customer.city, customer.state, customer.country].filter(Boolean).join(', ') || 'N/A',
           dateAdded: customer.created_at ? new Date(customer.created_at).toISOString().split('T')[0] : '',
           totalRevenue: 0, // Not in schema yet
-          // Include deleted flag for filtering (though it should always be false here)
           deleted: customer.deleted || false,
         }));
+
+        if (import.meta.env.DEV) {
+          console.log('[useCustomers] Transformed customers:', {
+            count: transformedCustomers.length,
+            sample: transformedCustomers[0] || null
+          });
+        }
 
         setCustomers(transformedCustomers);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading customers';
-        if (import.meta.env.DEV) {
-          console.error('Error fetching Customers:', err);
-        }
+        console.error('[useCustomers] Error:', errorMessage, err);
         setError(errorMessage);
+        setCustomers([]);
       } finally {
         setLoading(false);
       }
@@ -246,14 +234,12 @@ export function useCustomers() {
 
   return {
     data: customers,
-    customers, // Alias for backward compatibility
+    customers,
     error,
     isLoading: loading,
-    loading, // Alias for backward compatibility
+    loading,
     isError: !!error,
-    refetch: () => {
-      setRefreshTrigger(prev => prev + 1);
-    },
+    refetch,
   };
 }
 
@@ -264,6 +250,10 @@ export function useVendors() {
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+
+  const refetch = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   useEffect(() => {
     async function fetchVendors() {
@@ -286,13 +276,10 @@ export function useVendors() {
           .order('created_at', { ascending: false });
 
         if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('[useDirectory] Error fetching vendors from DirectoryVendors:', queryError);
-          }
+          console.error('[useVendors] Error fetching vendors:', queryError);
           throw queryError;
         }
 
-        // Transform data to match frontend interface
         const transformedVendors = (data || []).map((vendor) => ({
           id: vendor.id,
           vendorName: vendor.vendor_name || '',
@@ -300,7 +287,7 @@ export function useVendors() {
           phone: vendor.work_phone || '',
           email: vendor.email || '',
           country: vendor.country || '',
-          currency: 'USD', // Not in schema yet
+          currency: 'USD',
           status: vendor.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
           dateAdded: vendor.created_at ? new Date(vendor.created_at).toISOString().split('T')[0] : '',
           vendorType: '',
@@ -309,9 +296,7 @@ export function useVendors() {
         setVendors(transformedVendors);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading vendors';
-        if (import.meta.env.DEV) {
-          console.error('[useDirectory] Error fetching vendors from DirectoryVendors:', err);
-        }
+        console.error('[useVendors] Error:', errorMessage);
         setError(errorMessage);
       } finally {
         setLoading(false);
@@ -323,50 +308,68 @@ export function useVendors() {
 
   return {
     data: vendors,
-    vendors, // Alias for backward compatibility
+    vendors,
     error,
     isLoading: loading,
-    loading, // Alias for backward compatibility
+    loading,
     isError: !!error,
-    refetch: () => {
-      setRefreshTrigger(prev => prev + 1);
-    },
+    refetch,
   };
 }
-
 
 // Hook para obtener un vendor por ID
 export function useVendorById(options: { id?: string | null; organizationId?: string | null }) {
   const { id, organizationId } = options;
   const enabled = Boolean(id && organizationId);
 
-  const query = useQuery({
-    queryKey: ['directory-vendor', { organizationId, id }],
-    enabled,
-    queryFn: async () => {
-      if (!id || !organizationId) return null;
+  // Using simple state instead of react-query to avoid dependencies
+  const [vendor, setVendor] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-      const { data, error } = await supabase
-        .from('DirectoryVendors')
-        .select('*')
-        .eq('id', id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-
-      if (error) {
-        if (import.meta.env.DEV) {
-          console.error('[useDirectory] Error fetching vendor by id from DirectoryVendors:', error);
-        }
-        throw error;
+  useEffect(() => {
+    async function fetchVendor() {
+      if (!id || !organizationId) {
+        setLoading(false);
+        setVendor(null);
+        setError(null);
+        return;
       }
 
-      return data;
-    },
-  });
+      try {
+        setLoading(true);
+        setError(null);
+
+        const { data, error: queryError } = await supabase
+          .from('DirectoryVendors')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+
+        if (queryError) {
+          console.error('[useVendorById] Error fetching vendor:', queryError);
+          throw queryError;
+        }
+
+        setVendor(data);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error loading vendor';
+        console.error('[useVendorById] Error:', errorMessage);
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchVendor();
+  }, [id, organizationId]);
 
   return {
-    vendor: query.data,
-    ...query,
+    vendor,
+    isLoading: loading,
+    isError: !!error,
+    error,
   };
 }
 

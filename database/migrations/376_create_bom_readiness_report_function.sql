@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION public.bom_readiness_report(
 RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
-SET search_path = public
+-- ✅ NO SET search_path - STABLE functions cannot use SET
 AS $$
 DECLARE
     v_result jsonb := '[]'::jsonb;
@@ -293,7 +293,7 @@ BEGIN
                 );
             END IF;
             
-            -- Check for auto-select components without required fields
+            -- ✅ FIX: Check for auto-select components without required fields (including uom)
             SELECT COUNT(*) INTO v_invalid_role_count
             FROM "BOMComponents" bc
             INNER JOIN "BOMTemplates" bt ON bt.id = bc.bom_template_id
@@ -306,14 +306,23 @@ BEGIN
             AND bc.component_role IS NOT NULL
             AND (
                 bc.sku_resolution_rule IS NULL 
+                OR TRIM(bc.sku_resolution_rule) = ''
                 OR bc.qty_type IS NULL
+                OR bc.uom IS NULL
+                OR TRIM(bc.uom) = ''
+                -- ✅ FIX: Also check if qty_type is a valid enum value (never output invalid strings like 'WIDTH_M')
+                OR NOT EXISTS (
+                    SELECT 1 
+                    FROM unnest(enum_range(NULL::bom_qty_type)) AS v(enum_val)
+                    WHERE v.enum_val::text = bc.qty_type::text
+                )
             );
             
             IF v_invalid_role_count > 0 THEN
                 v_issues := v_issues || jsonb_build_object(
                     'type', 'INCOMPLETE_AUTO_SELECT',
                     'severity', 'BLOCKER',
-                    'message', format('%s auto-select component(s) are missing required fields (sku_resolution_rule or qty_type)', v_invalid_role_count)
+                    'message', format('%s auto-select component(s) are missing required fields (sku_resolution_rule, qty_type, or uom) or have invalid qty_type enum value', v_invalid_role_count)
                 );
             END IF;
         END IF;
