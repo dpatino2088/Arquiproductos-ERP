@@ -217,7 +217,7 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
                 {manufacturingOrder.SaleOrders.sale_order_no}
               </span>
             </div>
-            {manufacturingOrder.SalesOrders.total && (
+            {manufacturingOrder.SaleOrders.total && (
               <div className="flex justify-between">
                 <span className="text-sm text-gray-700">Total:</span>
                 <span className="text-sm font-medium text-gray-900">
