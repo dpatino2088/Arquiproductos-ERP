@@ -60,8 +60,8 @@ export default function PortalQuotesList() {
         }
 
         if (data) {
-          // Use 'role' column, fallback to 'portal_user_role' for legacy data
-          const rawRole = data.role || data.portal_user_role;
+          // Use 'role' column (matches actual DB schema)
+          const rawRole = data.role;
           setPortalUser({
             id: data.id,
             company_id: data.company_id,

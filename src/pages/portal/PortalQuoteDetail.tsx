@@ -13,6 +13,7 @@ import { useAuthStore } from '../../stores/auth-store';
 import {
   canEditQuote,
   canApproveQuote,
+  canViewQuote,
   normalizeRole,
   type CompanyPortalRole,
   type PortalQuote,
@@ -64,8 +65,8 @@ export default function PortalQuoteDetail() {
         }
 
         if (data) {
-          // Use 'role' column, fallback to 'portal_user_role' for legacy data
-          const rawRole = data.role || data.portal_user_role;
+          // Use 'role' column (matches actual DB schema)
+          const rawRole = data.role;
           setPortalUser({
             id: data.id,
             company_id: data.company_id,
@@ -84,7 +85,7 @@ export default function PortalQuoteDetail() {
   // Load quote
   useEffect(() => {
     const loadQuote = async () => {
-      if (!id || !portalUser) {
+      if (!quoteId || !portalUser) {
         setLoading(false);
         return;
       }
