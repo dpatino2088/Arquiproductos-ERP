@@ -191,8 +191,8 @@ export default function AuthCallback() {
         }
 
         // User has membership and password is set - redirect to destination
-        const queryParams = new URLSearchParams(window.location.search);
-        const nextParam = queryParams.get('next') || '/dashboard';
+        const finalQueryParams = new URLSearchParams(window.location.search);
+        const nextParam = finalQueryParams.get('next') || '/dashboard';
         console.log('✅ Access granted, redirecting to:', nextParam);
         window.history.replaceState(null, '', nextParam);
         router.navigate(nextParam, true);

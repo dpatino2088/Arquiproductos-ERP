@@ -11,6 +11,7 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAccessContext } from '../../hooks/useAccessContext';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
 import { Plus, Edit, Trash2, X, Download } from 'lucide-react';

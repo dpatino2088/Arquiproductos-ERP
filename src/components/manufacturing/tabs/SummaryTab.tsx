@@ -207,21 +207,21 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
       </div>
 
       {/* Sale Order Totals */}
-      {manufacturingOrder.SalesOrders && (
+      {manufacturingOrder.SaleOrders && (
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Sale Order Information</h3>
           <div className="space-y-2">
             <div className="flex justify-between">
               <span className="text-sm text-gray-700">Sale Order:</span>
               <span className="text-sm font-medium text-gray-900">
-                {manufacturingOrder.SalesOrders.sale_order_no}
+                {manufacturingOrder.SaleOrders.sale_order_no}
               </span>
             </div>
             {manufacturingOrder.SalesOrders.total && (
               <div className="flex justify-between">
                 <span className="text-sm text-gray-700">Total:</span>
                 <span className="text-sm font-medium text-gray-900">
-                  {formatCurrency(manufacturingOrder.SalesOrders.total, manufacturingOrder.SalesOrders.currency || 'USD')}
+                  {formatCurrency(manufacturingOrder.SaleOrders.total, manufacturingOrder.SaleOrders.currency || 'USD')}
                 </span>
               </div>
             )}
@@ -270,7 +270,7 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
             <div className="flex justify-between border-t border-gray-200 pt-2">
               <span className="text-sm font-medium text-gray-700">Total EXW Cost:</span>
               <span className="text-sm font-semibold text-gray-900">
-                {formatCurrency(bomTotals.totalCost, manufacturingOrder.SalesOrders?.currency || 'USD')}
+                {formatCurrency(bomTotals.totalCost, manufacturingOrder.SaleOrders?.currency || 'USD')}
               </span>
             </div>
           </div>

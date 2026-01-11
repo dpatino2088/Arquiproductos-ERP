@@ -158,13 +158,13 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
             <div>
               <label className="text-xs font-medium text-gray-700">Sale Order</label>
               <div className="mt-1 text-sm text-gray-900">
-                {manufacturingOrder.SalesOrders?.sale_order_no || 'N/A'}
+                {manufacturingOrder.SaleOrders?.sale_order_no || 'N/A'}
               </div>
             </div>
             <div>
               <label className="text-xs font-medium text-gray-700">Customer</label>
               <div className="mt-1 text-sm text-gray-900">
-                {manufacturingOrder.SalesOrders?.DirectoryCustomers?.customer_name || 'N/A'}
+                {manufacturingOrder.SaleOrders?.DirectoryCustomers?.customer_name || 'N/A'}
               </div>
             </div>
             <div>

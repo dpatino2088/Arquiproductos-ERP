@@ -354,8 +354,6 @@ export interface UseManufacturingMaterialsResult {
   };
 }
 
-import { normalizeUUID } from '../utils/uuid';
-
 export function useManufacturingMaterials(manufacturingOrderId: string): UseManufacturingMaterialsResult {
   const [materials, setMaterials] = useState<ManufacturingMaterial[]>([]);
   const [bomTotals, setBomTotals] = useState<BomInstanceTotals>({
