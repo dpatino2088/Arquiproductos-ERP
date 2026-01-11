@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { useAccessContext } from '../../hooks/useAccessContext';
 import { Building2, ChevronDown, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { router } from '../../lib/router';
 
@@ -14,7 +15,8 @@ export function OrganizationSwitcher() {
     error,
   } = useOrganizationContext();
 
-  const { isSuperAdmin } = useCurrentOrgRole();
+  const { isSuperAdmin, role: currentOrgRole } = useCurrentOrgRole();
+  const { userType, portalRole, internalRole } = useAccessContext();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -40,11 +42,36 @@ export function OrganizationSwitcher() {
     setIsOpen(false);
   };
 
+  // Get the actual role to display based on user type
+  // For portal users: always use portalRole (ignores orgRole which is null)
+  // For internal users: use orgRole from organization context
+  const getDisplayRole = (orgRole: string | null): string | null => {
+    if (userType === "portal") {
+      // Portal users: always use portalRole (member_manager or member)
+      return portalRole || null;
+    }
+    if (userType === "internal") {
+      // Internal users: use orgRole from organization, fallback to internalRole
+      return orgRole || internalRole || null;
+    }
+    // Unknown user type: use orgRole as-is
+    return orgRole;
+  };
+
   const getRoleBadge = (role: string | null) => {
+    // Map roles to display labels
     const roleMap: Record<string, { label: string; color: string; bgColor: string }> = {
+      // Internal roles
+      superadmin: { label: 'SuperAdmin', color: 'text-purple-700', bgColor: 'bg-purple-50' },
       owner: { label: 'Owner', color: 'text-purple-700', bgColor: 'bg-purple-50' },
       admin: { label: 'Admin', color: 'text-blue-700', bgColor: 'bg-blue-50' },
+      operator: { label: 'Operator', color: 'text-green-700', bgColor: 'bg-green-50' },
+      procurement: { label: 'Procurement', color: 'text-indigo-700', bgColor: 'bg-indigo-50' },
+      finance: { label: 'Finance', color: 'text-teal-700', bgColor: 'bg-teal-50' },
       member: { label: 'Member', color: 'text-green-700', bgColor: 'bg-green-50' },
+      // Portal roles
+      member_manager: { label: 'Member Manager', color: 'text-blue-700', bgColor: 'bg-blue-50' },
+      // Legacy/fallback
       viewer: { label: 'Viewer', color: 'text-gray-700', bgColor: 'bg-gray-50' },
     };
 
@@ -124,11 +151,28 @@ export function OrganizationSwitcher() {
         <span className="max-w-[200px] truncate">
           {activeOrganization?.name || 'Select organization'}
         </span>
-        {isSuperAdmin && (
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-            SuperAdmin
-          </span>
-        )}
+        {/* Show role badge in header for current organization */}
+        {activeOrganization && (() => {
+          // For portal users, use portalRole from useAccessContext (not org.role which is 'viewer')
+          // For internal users, use the role from organization context
+          const displayRole = userType === "portal" 
+            ? portalRole 
+            : (userType === "internal" ? (activeOrganization.role || internalRole) : activeOrganization.role);
+          
+          if (!displayRole) return null;
+          
+          // Show SuperAdmin badge for superadmin/internal
+          if (userType === "internal" && (displayRole === "superadmin" || isSuperAdmin)) {
+            return (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                SuperAdmin
+              </span>
+            );
+          }
+          
+          // Show role badge for portal or other internal roles
+          return getRoleBadge(displayRole);
+        })()}
         <ChevronDown
           className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
           style={{ color: 'var(--gray-950)' }}
@@ -179,7 +223,7 @@ export function OrganizationSwitcher() {
                       >
                         {org.name}
                       </div>
-                      <div className="mt-1">{getRoleBadge(org.role || null)}</div>
+                      <div className="mt-1">{getRoleBadge(getDisplayRole(org.role || null))}</div>
                     </div>
                   </div>
                   {isActive && (

@@ -8,7 +8,9 @@ import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
 import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
-import { usePermissions } from '../hooks/usePermissions';
+import { usePermissions, MODULE_PERMS } from '../hooks/usePermissions';
+import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
+import { useOrganizationContext } from '../context/OrganizationContext';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { 
   getSidebarStyles, 
@@ -136,8 +138,27 @@ function Layout({ children }: LayoutProps) {
   const [currentRoute, setCurrentRoute] = useState('/');
   const { tabs: submoduleTabs, breadcrumbs, clearSubmoduleNav } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
-  const { isMember } = useCurrentOrgRole();
+  const { isMember, isSuperAdmin, role: currentRole } = useCurrentOrgRole();
   const { can, loading: permissionsLoading } = usePermissions();
+  const { allowedModules, loading: accessLoading, userType } = useAccessContext();
+  const { role: orgContextRole } = useOrganizationContext();
+  
+  // Determine if user is SuperAdmin (check both sources for reliability)
+  const isSuperAdminUser = isSuperAdmin || orgContextRole === 'superadmin' || currentRole === 'superadmin';
+  
+  // Debug log for SuperAdmin detection
+  if (import.meta.env.DEV) {
+    console.log("[Layout] Role check:", {
+      isSuperAdmin,
+      isSuperAdminUser,
+      currentRole,
+      orgContextRole,
+      userType,
+      allowedModules,
+      permissionsLoading,
+      accessLoading
+    });
+  }
   
   // Use UI store for sidebar and view mode state
   const { 
@@ -235,124 +256,13 @@ function Layout({ children }: LayoutProps) {
     };
   }, []);
 
-  // Load current organization
+  // OBSOLETO: Este código está duplicado y usa el schema antiguo.
+  // OrganizationContext ya maneja esto correctamente.
+  // TODO: Migrar a usar OrganizationContext.organizationName en lugar de currentOrganization state.
+  // Por ahora dejamos currentOrganization como null para evitar duplicación.
   useEffect(() => {
-    const loadCurrentOrganization = async () => {
-      if (!user?.id) {
-        setCurrentOrganization(null);
-        return;
-      }
-
-      try {
-        // Get the first organization the user belongs to
-        // Try with proper foreign key relationship first
-        const { data: orgUser, error } = await supabase
-          .from('OrganizationUsers')
-          .select(`
-            organization_id,
-            organization_id (
-              id,
-              organization_name
-            )
-          `)
-          .eq('user_id', user.id)
-          .eq('deleted', false)
-          .limit(1)
-          .maybeSingle(); // Use maybeSingle to handle no results gracefully
-
-        if (error) {
-          // Log all errors for debugging
-          console.error('Error loading organization in Layout:', {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint
-          });
-          
-          // Handle expected errors silently (user may not have organizations yet)
-          const isExpectedError = 
-            error.code === 'PGRST116' || // No rows returned
-            error.code === '42501' || // Permission denied (RLS)
-            error.code === '42P01' || // Relation does not exist
-            error.message?.includes('relation') ||
-            error.message?.includes('does not exist') ||
-            error.message?.includes('permission denied') ||
-            error.message?.includes('row-level security');
-
-          // Handle column does not exist error (42703) - this is a schema issue
-          if (error.code === '42703' || (error.message?.includes('does not exist') && error.message?.includes('column'))) {
-            console.error('❌ Layout - Error de columna no encontrada. Verifica que las migraciones se hayan aplicado correctamente:', {
-              code: error.code,
-              message: error.message,
-              details: error.details
-            });
-          }
-
-          if (!isExpectedError && import.meta.env.DEV) {
-            console.error('Error loading organization:', error);
-          }
-          setCurrentOrganization(null);
-          return;
-        }
-
-        // Handle response - organization_id becomes an object with the nested data
-        if (orgUser) {
-          // In Supabase nested select, organization_id is replaced with the nested object
-          const org = (orgUser as any).organization_id;
-          
-          if (org && typeof org === 'object' && org.id && org.organization_name) {
-            setCurrentOrganization({
-              id: org.id,
-              name: org.organization_name || 'Organization',
-            });
-            return;
-          }
-          
-          if (import.meta.env.DEV) {
-            console.warn('⚠️ Layout - organization_id no tiene el formato esperado:', {
-              orgUser,
-              organization_id: org,
-              type: typeof org
-            });
-          }
-          
-          // If we have organization_id but no nested data, fetch it separately
-          if (orgUser.organization_id) {
-            const { data: orgData, error: orgError } = await supabase
-              .from('Organizations')
-              .select('id, organization_name')
-              .eq('id', orgUser.organization_id)
-              .maybeSingle();
-
-            if (!orgError && orgData) {
-              setCurrentOrganization({
-                id: orgData.id,
-                name: orgData.organization_name || 'Organization',
-              });
-              return;
-            }
-          }
-        }
-        
-        setCurrentOrganization(null);
-      } catch (err: any) {
-        // Silently handle errors - user may not have organizations yet
-        const isExpectedError = 
-          err?.code === 'PGRST116' ||
-          err?.code === '42501' ||
-          err?.code === '42P01' ||
-          err?.message?.includes('relation') ||
-          err?.message?.includes('does not exist');
-
-        if (!isExpectedError && import.meta.env.DEV) {
-          console.error('Error in loadCurrentOrganization:', err);
-        }
-        setCurrentOrganization(null);
-      }
-    };
-
-    loadCurrentOrganization();
-  }, [user?.id]);
+    setCurrentOrganization(null);
+  }, []);
 
   // Close user menu when clicking outside
   useEffect(() => {
@@ -418,36 +328,118 @@ function Layout({ children }: LayoutProps) {
   }, [currentRoute]);
 
   // Memoized navigation items for management view (filtered by permissions)
+  // Usar MODULE_PERMS para consistencia con el sistema RBAC
   const navigation = useMemo(() => {
     // Create base navigation with new tabs according to design
     const dashboardItem = baseNavigation[0]; // Dashboard
     
-    // Navigation items with permission requirements
-    const allItems = [
-      dashboardItem, // Always visible
-      { name: 'Directory', href: '/directory', icon: BookOpen, permission: 'directory.read' },
-      { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, permission: 'quotes.read' },
-      { name: 'Sales Orders', href: '/sale-orders', icon: FileText, permission: 'sales_orders.read' },
-      { name: 'Catalog', href: '/catalog', icon: Book, permission: 'catalog.read' },
-      { name: 'Inventory', href: '/inventory', icon: Package, permission: 'inventory.read' },
-      { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, permission: 'manufacturing.read' },
-      { name: 'Financials', href: '/financials', icon: DollarSign, permission: 'financials.read' },
-      { name: 'Reports', href: '/reports/company-reports', icon: Printer, permission: 'reports.read' },
+    // Navigation items aligned with MODULE_PERMS and AccessContext
+    type NavItem = { name: string; href: string; icon: any; module?: ModuleKey };
+    const allItems: NavItem[] = [
+      dashboardItem ? { ...dashboardItem, module: undefined } : { name: 'Dashboard', href: '/dashboard', icon: Home },
+      { name: 'Directory', href: '/directory', icon: BookOpen, module: 'directory' },
+      { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, module: 'sales' },
+      { name: 'Sales Orders', href: '/sale-orders', icon: FileText, module: 'sales' }, // Uses 'sales' module for permissions
+      { name: 'Catalog', href: '/catalog', icon: Book, module: 'catalog' },
+      { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, module: 'manufacturing' },
+      { name: 'Financials', href: '/financials', icon: DollarSign, module: 'financials' },
     ];
     
-    // Filter items based on permissions (if permissions are loaded)
+    // ✅ CORRECCIÓN: Lógica separada para portal vs internal
+    // Filter items based on allowedModules (AccessContext) and permissions (RBAC)
+    if (accessLoading) {
+      // Mientras no sabemos userType, mínimo seguro
+      return [allItems[0]]; // solo Dashboard
+    }
+
     if (permissionsLoading) {
-      // Show all items while loading (will be filtered once loaded)
-      return allItems;
+      // Ya sabemos userType
+      if (userType === "portal") {
+        return allItems.filter(i => !i.module || allowedModules.includes(i.module));
+      }
+      // Internal users: mostrar todos mientras carga, pero asegurar que SuperAdmin siempre vea todo
+      if (userType === "internal" && isSuperAdminUser) {
+        return allItems; // SuperAdmin siempre ve todo, incluso durante loading
+      }
+      return allItems; // internal: ok mostrar mientras carga permisos
+    }
+    
+    // ✅ LOG B) Debug output
+    if (import.meta.env.DEV) {
+      console.log("[Sidebar] Filtering navigation:", {
+        allowedModules,
+        userType,
+        isSuperAdmin,
+        isSuperAdminUser,
+        permissionsLoading,
+        allItems: allItems.map(i => ({ name: i.name, module: i.module }))
+      });
     }
     
     return allItems.filter(item => {
-      // Dashboard is always visible
-      if (!item.permission) return true;
-      // Check if user has the required permission
-      return can(item.permission);
+      // Dashboard is always visible (no module)
+      if (!item.module) return true;
+      
+      // ✅ REGLA CORRECTA: Portal users - solo allowedModules (ignorar RBAC)
+      // IMPORTANTE: Portal users NO deben ver Sales Orders, solo Sales
+      if (userType === "portal") {
+        // Portal users: explícitamente excluir Sales Orders
+        if (item.name === "Sales Orders") {
+          return false;
+        }
+        const visible = allowedModules.includes(item.module);
+        if (import.meta.env.DEV && item.name === "Financials") {
+          console.log("[Sidebar] Portal user - Financials:", visible, "allowedModules:", allowedModules);
+        }
+        return visible;
+      }
+      
+      // ✅ REGLA CORRECTA: Internal users - allowedModules AND RBAC permissions
+      if (userType === "internal") {
+        // First check: must be in allowedModules (base list)
+        if (!allowedModules.includes(item.module)) {
+          if (import.meta.env.DEV && item.name === "Financials") {
+            console.log("[Sidebar] Internal user - Financials NOT in allowedModules:", allowedModules);
+          }
+          return false;
+        }
+        
+        // ✅ SUPERADMIN BYPASS: SuperAdmin can see all modules without permission checks
+        if (isSuperAdminUser) {
+          if (import.meta.env.DEV && item.name === "Financials") {
+            console.log("[Sidebar] SuperAdmin - Financials: BYPASSED, showing module");
+          }
+          return true;
+        }
+        
+        // Second check: RBAC permissions (MODULE_PERMS) for non-superadmin users
+        const modulePerms = MODULE_PERMS[item.module as keyof typeof MODULE_PERMS];
+        if (!modulePerms) {
+          if (import.meta.env.DEV && item.name === "Financials") {
+            console.log("[Sidebar] Internal user - Financials: No MODULE_PERMS found");
+          }
+          return false;
+        }
+        
+        // Check if user has any of the view permissions for this module
+        const hasPermission = modulePerms.view.some((perm: string) => can(perm));
+        if (import.meta.env.DEV && item.name === "Financials") {
+          console.log("[Sidebar] Internal user - Financials:", {
+            hasPermission,
+            perms: modulePerms.view,
+            canCheck: modulePerms.view.map(p => ({ perm: p, can: can(p) }))
+          });
+        }
+        return hasPermission;
+      }
+      
+      // Unknown user type - default deny (except dashboard)
+      if (import.meta.env.DEV && item.name === "Financials") {
+        console.log("[Sidebar] Unknown userType - Financials: DENIED", userType);
+      }
+      return false;
     });
-  }, [can, permissionsLoading]);
+  }, [can, permissionsLoading, allowedModules, accessLoading, userType, isSuperAdminUser]);
 
   const dashboardItem = useMemo(() => 
     navigation.find(item => item?.name === 'Dashboard' || item?.name === 'Home'), [navigation]
@@ -473,6 +465,30 @@ function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleNavigation = useCallback((path: string) => {
+    // ✅ BONUS BLINDAJE: Portal - bloquear navegación a módulos prohibidos desde sidebar o links internos
+    if (userType === "portal") {
+      const first = (path.split('/')[1] || '').toLowerCase();
+      const map: Record<string, ModuleKey> = {
+        dashboard: "dashboard",
+        directory: "directory",
+        sales: "sales",
+        catalog: "catalog",
+        manufacturing: "manufacturing",
+        financials: "financials",
+        settings: "settings",
+      };
+      const moduleKey = map[first];
+
+      if (moduleKey && !allowedModules.includes(moduleKey)) {
+        if (import.meta.env.DEV) {
+          console.log("[Layout] Portal user attempted navigation to forbidden module:", moduleKey, "redirecting to /dashboard");
+        }
+        router.navigate("/dashboard", true);
+        setCurrentRoute("/dashboard");
+        return;
+      }
+    }
+
     // Save current page before navigating to settings
     if (path.includes('/settings/company-settings')) {
       saveCurrentPageBeforeSettings();
@@ -487,11 +503,10 @@ function Layout({ children }: LayoutProps) {
       // Always redirect to a list page when navigating to Directory module
       // Ignore last route if it was an edit/new page
       const lastRoute = getLastRouteForModule('/directory');
-      // Only use lastRoute if it's a list page (contacts, customers, or vendors), not edit/new pages
+      // Only use lastRoute if it's a list page (contacts or customers), not edit/new pages
       const isListPage = lastRoute && (
         lastRoute === '/directory/contacts' || 
-        lastRoute === '/directory/customers' || 
-        lastRoute === '/directory/vendors'
+        lastRoute === '/directory/customers'
       );
       const actualPath = (isListPage ? lastRoute : null) || '/directory/contacts';
       router.navigate(actualPath);
@@ -534,7 +549,7 @@ function Layout({ children }: LayoutProps) {
       router.navigate(path);
       setCurrentRoute(path);
     }
-  }, [saveCurrentPageBeforeSettings, getLastRouteForModule]);
+  }, [saveCurrentPageBeforeSettings, getLastRouteForModule, userType, allowedModules]);
 
   // Memoized sidebar width calculations
   const sidebarWidth = useMemo(() => 
@@ -726,11 +741,11 @@ function Layout({ children }: LayoutProps) {
             <div style={{ gap: '1px' }} className="flex flex-col">
 
 
-              {/* Settings Button - Oculto para Members */}
+              {/* Settings Button - Solo para INTERNAL */}
               {(() => {
-                // Show Settings only if user has settings.read permission
+                if (userType !== "internal") return null;  // ✅ portal nunca ve settings
                 if (!can('settings.read')) return null;
-                
+
                 const { settingsUrl, isActive } = getSettingsButtonState(viewMode, isNavItemActive);
                 return (
                   <button

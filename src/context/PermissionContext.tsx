@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
-import { useAuthStore } from '../stores/auth-store';
+import { useAuthSession } from '../hooks/useAuthSession';
 import { useOrganizationContext } from './OrganizationContext';
 
 interface PermissionContextType {
@@ -17,14 +17,29 @@ const PermissionContext = createContext<PermissionContextType | undefined>(undef
 // Export the context for direct access if needed
 export { PermissionContext };
 
+/**
+ * PermissionProvider - Loads and provides RBAC permissions for the active organization
+ * 
+ * Schema used:
+ * - Permissions: code (PK), module, description
+ * - OrganizationUserPermissions: organization_user_id, permission_code
+ * 
+ * Fallback logic:
+ * - role='owner' => all permissions
+ * - role='admin' => all permissions (can be restricted later)
+ * - Other roles => only assigned permissions from OrganizationUserPermissions
+ */
 export function PermissionProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const { user } = useAuthStore();
-  const { activeOrganizationId } = useOrganizationContext();
+  const { userId } = useAuthSession();
+  const { activeOrganizationId, activeMembership, role } = useOrganizationContext();
 
   const loadPermissions = useCallback(async () => {
-    if (!user?.id || !activeOrganizationId) {
+    if (!userId || !activeOrganizationId) {
+      if (import.meta.env.DEV) {
+        console.log('🔍 PermissionContext - No userId or activeOrganizationId, clearing permissions');
+      }
       setPermissions(new Set());
       setLoading(false);
       return;
@@ -33,45 +48,81 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
     try {
       setLoading(true);
 
-      // Get organization user to check role
-      const { data: orgUser, error: orgUserError } = await supabase
-        .from('OrganizationUsers')
-        .select('id, role')
-        .eq('user_id', user.id)
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
-        .maybeSingle();
+      if (import.meta.env.DEV) {
+        console.log('🔍 PermissionContext - Loading permissions for:', {
+          userId,
+          activeOrganizationId,
+          role: activeMembership?.role,
+        });
+      }
 
-      if (orgUserError || !orgUser) {
+      // Fallback: owner, admin, and superadmin have all permissions
+      // We'll load all permissions if role is owner/admin/superadmin
+      if (role === 'owner' || role === 'admin' || role === 'superadmin' || role === 'super_admin') {
+        if (import.meta.env.DEV) {
+          console.log('🔍 PermissionContext - Role is owner/admin/superadmin, loading all permissions', {
+            role,
+            activeMembershipId: activeMembership?.id,
+            activeOrganizationId,
+          });
+        }
+
+        const { data: allPermissions, error: allPermsError } = await supabase
+          .from('Permissions')
+          .select('code');
+
+        if (allPermsError) {
+          if (import.meta.env.DEV) {
+            console.error('❌ PermissionContext - Error loading all permissions:', allPermsError);
+          }
+          setPermissions(new Set());
+          setLoading(false);
+          return;
+        }
+
+        const allPermCodes = new Set((allPermissions || []).map(p => p.code).filter(Boolean));
+        setPermissions(allPermCodes);
+
+        if (import.meta.env.DEV) {
+          console.log('✅ PermissionContext - All permissions loaded for owner/admin/superadmin:', {
+            count: allPermCodes.size,
+            permissions: Array.from(allPermCodes),
+            role: role,
+          });
+        }
+
+        setLoading(false);
+        return;
+      }
+
+      // For other roles, load specific permissions from OrganizationUserPermissions
+      // We need organization_user_id from activeMembership
+      if (!activeMembership?.id) {
+        if (import.meta.env.DEV) {
+          console.warn('⚠️ PermissionContext - No activeMembership.id found for role:', role);
+        }
         setPermissions(new Set());
         setLoading(false);
         return;
       }
 
-      // Superadmin has all permissions (we'll load them all)
-      if (orgUser.role === 'superadmin') {
-        const { data: allPermissions } = await supabase
-          .from('Permissions')
-          .select('code');
-
-        if (allPermissions) {
-          setPermissions(new Set(allPermissions.map(p => p.code)));
-        } else {
-          setPermissions(new Set());
-        }
-        setLoading(false);
-        return;
+      if (import.meta.env.DEV) {
+        console.log('🔍 PermissionContext - Loading specific permissions for organization_user_id:', activeMembership.id);
       }
 
-      // For admin and member, load their specific permissions
+      // Query: OrganizationUserPermissions -> permission_code where organization_user_id = activeMembership.id
       const { data: userPermissions, error: permissionsError } = await supabase
         .from('OrganizationUserPermissions')
         .select('permission_code')
-        .eq('organization_user_id', orgUser.id);
+        .eq('organization_user_id', activeMembership.id);
 
       if (permissionsError) {
         if (import.meta.env.DEV) {
-          console.error('Error loading permissions:', permissionsError);
+          console.error('❌ PermissionContext - Error loading user permissions:', {
+            code: permissionsError.code,
+            message: permissionsError.message,
+            details: permissionsError.details,
+          });
         }
         setPermissions(new Set());
         setLoading(false);
@@ -79,18 +130,30 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
       }
 
       const permissionSet = new Set(
-        (userPermissions || []).map(p => p.permission_code)
+        (userPermissions || []).map(p => p.permission_code).filter(Boolean)
       );
+
       setPermissions(permissionSet);
-    } catch (err) {
+
       if (import.meta.env.DEV) {
-        console.error('Error loading permissions:', err);
+        console.log('✅ PermissionContext - User permissions loaded:', {
+          count: permissionSet.size,
+          permissions: Array.from(permissionSet),
+        });
+      }
+    } catch (err: any) {
+      if (import.meta.env.DEV) {
+        console.error('❌ PermissionContext - Exception loading permissions:', {
+          error: err,
+          message: err?.message,
+          stack: err?.stack,
+        });
       }
       setPermissions(new Set());
     } finally {
       setLoading(false);
     }
-  }, [user?.id, activeOrganizationId]);
+  }, [userId, activeOrganizationId, activeMembership?.id, role]);
 
   useEffect(() => {
     loadPermissions();
@@ -101,10 +164,12 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
   }, [permissions]);
 
   const hasAnyPermission = useCallback((permissionCodes: string[]): boolean => {
+    if (!permissionCodes || permissionCodes.length === 0) return false;
     return permissionCodes.some(code => permissions.has(code));
   }, [permissions]);
 
   const hasAllPermissions = useCallback((permissionCodes: string[]): boolean => {
+    if (!permissionCodes || permissionCodes.length === 0) return true;
     return permissionCodes.every(code => permissions.has(code));
   }, [permissions]);
 
@@ -135,4 +200,3 @@ export function usePermission() {
   }
   return context;
 }
-

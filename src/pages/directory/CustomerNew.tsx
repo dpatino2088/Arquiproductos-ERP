@@ -15,18 +15,19 @@ import Checkbox from '../../components/ui/Checkbox';
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAccessContext } from '../../hooks/useAccessContext';
 
 // Customer type ENUM values (matching PostgreSQL ENUM directory_customer_type_name)
 const CUSTOMER_TYPE_OPTIONS = [
-  { value: 'VIP', label: 'VIP' },
-  { value: 'Partner', label: 'Partner' },
-  { value: 'Reseller', label: 'Reseller' },
-  { value: 'Distributor', label: 'Distributor' },
+  { value: 'contractor', label: 'Contractor' },
+  { value: 'architecture_studio', label: 'Architecture Studio' },
+  { value: 'design_studio', label: 'Design Studio' },
+  { value: 'end_user', label: 'End User' },
 ] as const;
 
 // Schema for Customer
 const customerSchema = z.object({
-  customer_type_name: z.enum(['VIP', 'Partner', 'Reseller', 'Distributor']).refine(
+  customer_type_name: z.enum(['contractor', 'architecture_studio', 'design_studio', 'end_user']).refine(
     (val) => val !== undefined && val !== null,
     { message: 'Customer type is required' }
   ),
@@ -44,7 +45,7 @@ const customerSchema = z.object({
       message: 'Invalid URL format. Use format like: example.com or https://example.com'
     }),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
-  company_phone: z.string().optional(),
+  customer_phone: z.string().optional(), // Usar customer_phone (no company_phone)
   alt_phone: z.string().optional(),
   primary_contact_id: z.string().min(1, 'Primary Contact is required'),
   street_address_line_1: z.string().min(1, 'Street address is required'),
@@ -79,8 +80,8 @@ type CustomerFormValues = z.infer<typeof customerSchema>;
 interface Contact {
   id: string;
   contact_name: string;
-  identification_number?: string;
-  contact_type: 'individual' | 'company';
+  contact_id_number?: string | null;
+  contact_type?: string | null;
 }
 
 export default function CustomerNew() {
@@ -93,11 +94,43 @@ export default function CustomerNew() {
   const { activeOrganizationId } = useOrganizationContext();
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
   
-  // Get current user's role and permissions (uses active organization)
-  const { canEditCustomers, isViewer, loading: roleLoading } = useCurrentOrgRole();
+  // Get permissions: use AccessContext for portal users, CurrentOrgRole for internal users
+  const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
+  const { canEditCustomers, isViewer, loading: roleLoading, isSuperAdmin, isAdmin, isOwner } = useCurrentOrgRole();
+  
+  // Portal users can always edit Directory (both member and member_manager)
+  // Internal users need explicit canEditCustomers permission or be superadmin/admin/owner
+  const canEdit = userType === "portal" 
+    ? canEditDirectory 
+    : (isSuperAdmin || isOwner || isAdmin || canEditCustomers);
   
   // Determine if form should be read-only
-  const isReadOnly = isViewer || !canEditCustomers;
+  // Portal users: always editable (canEditDirectory is true for both roles)
+  // Internal users: editable if superadmin/admin/owner OR has canEditCustomers permission
+  const isReadOnly = accessLoading || roleLoading 
+    ? false // Optimistic: allow while loading
+    : userType === "portal" 
+      ? !canEditDirectory // Portal: read-only only if canEditDirectory is false
+      : (isViewer || !canEdit); // Internal: read-only if viewer or no edit permission
+  
+  // Debug logging
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('🔍 CustomerNew - Permissions:', {
+        userType,
+        canEditDirectory,
+        canEditCustomers,
+        isSuperAdmin,
+        isAdmin,
+        isOwner,
+        isViewer,
+        canEdit,
+        isReadOnly,
+        roleLoading,
+        accessLoading,
+      });
+    }
+  }, [userType, canEditDirectory, canEditCustomers, isSuperAdmin, isAdmin, isOwner, isViewer, canEdit, isReadOnly, roleLoading, accessLoading]);
 
   const {
     register,
@@ -109,7 +142,7 @@ export default function CustomerNew() {
   } = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
-      customer_type_name: 'VIP',
+      customer_type_name: 'contractor',
       billing_same_as_location: true,
       primary_contact_id: '', // Initialize to empty string to avoid undefined
     },
@@ -150,12 +183,12 @@ export default function CustomerNew() {
 
         if (data) {
           // Populate form with customer data
-          setValue('customer_type_name', data.customer_type_name || 'VIP');
+          setValue('customer_type_name', (data.customer_type_name || 'contractor') as 'contractor' | 'architecture_studio' | 'design_studio' | 'end_user');
           setValue('customer_name', data.customer_name || '');
           setValue('identification_number', data.identification_number || '');
           setValue('website', data.website || '');
-          setValue('email', data.email || '');
-          setValue('company_phone', data.company_phone || '');
+          setValue('email', data.customer_email || ''); // Usar customer_email (columna explícita)
+          setValue('customer_phone', data.customer_phone || '');
           setValue('alt_phone', data.alt_phone || '');
           setValue('primary_contact_id', data.primary_contact_id || '');
           setValue('street_address_line_1', data.street_address_line_1 || '');
@@ -216,22 +249,53 @@ export default function CustomerNew() {
 
       try {
         setLoadingContacts(true);
-        const { data, error } = await supabase
-          .from('DirectoryContacts')
-          .select('id, contact_name, identification_number, contact_type')
+        
+        // Primero obtener companies de la organization
+        const { data: orgCompanies } = await supabase
+          .from('Companies')
+          .select('id')
           .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false);
+
+        const companyIds = (orgCompanies || []).map(c => c.id);
+
+        // Usar solo columnas explícitas que existen
+        let query = supabase
+          .from('DirectoryContacts')
+          .select('id, contact_name, contact_id_number, contact_type')
           .eq('deleted', false)
-          .eq('archived', false)
-          .order('contact_type', { ascending: true })
           .order('contact_name', { ascending: true });
 
-        if (error) {
-          console.error('Error loading contacts', error);
-        } else if (data) {
-          setContacts(data);
+        // Filtrar por company_id si existen, sino por organization_id
+        if (companyIds.length > 0) {
+          query = query.in('company_id', companyIds);
+          // También incluir contacts sin company_id pero con organization_id (transición)
+          const { data: companyData } = await query;
+          const { data: orgData } = await supabase
+            .from('DirectoryContacts')
+            .select('id, contact_name, contact_id_number, contact_type')
+            .eq('organization_id', activeOrganizationId)
+            .is('company_id', null)
+            .eq('deleted', false)
+            .order('contact_name', { ascending: true });
+
+          // Combinar sin duplicados
+          const all = [...(companyData || []), ...(orgData || [])];
+          const unique = Array.from(new Map(all.map(item => [item.id, item])).values());
+          setContacts(unique);
+        } else {
+          const { data, error } = await query.eq('organization_id', activeOrganizationId);
+          
+          if (error) {
+            console.error('Error loading contacts', error);
+            setContacts([]);
+          } else if (data) {
+            setContacts(data);
+          }
         }
       } catch (err) {
         console.error('Error loading contacts', err);
+        setContacts([]);
       } finally {
         setLoadingContacts(false);
       }
@@ -332,10 +396,11 @@ export default function CustomerNew() {
         organization_id: activeOrganizationId,
         customer_type_name: values.customer_type_name,
         customer_name: values.customer_name,
+        customer_email: values.email?.trim().toLowerCase() || null, // Usar customer_email (columna explícita) con normalización
+        customer_phone: values.customer_phone?.trim() || null, // Usar customer_phone (NO company_phone)
         website: normalizeWebsite(values.website),
-        email: values.email || null,
-        company_phone: values.company_phone || null,
         alt_phone: values.alt_phone || null,
+        identification_number: values.identification_number?.trim() || null,
         primary_contact_id: values.primary_contact_id, // Required field
         street_address_line_1: values.street_address_line_1,
         street_address_line_2: values.street_address_line_2 || null,
@@ -350,13 +415,7 @@ export default function CustomerNew() {
         billing_zip_code: billingAddress.billing_zip_code || null,
         billing_country: billingAddress.billing_country || null,
         deleted: false,
-        archived: false,
       };
-
-      // Only include identification_number if it has a value (column may not exist in all schemas)
-      if (values.identification_number && values.identification_number.trim()) {
-        customerData.identification_number = values.identification_number.trim();
-      }
 
       let result;
       if (customerId) {
@@ -366,7 +425,15 @@ export default function CustomerNew() {
           .update(customerData)
           .eq('id', customerId)
           .eq('organization_id', activeOrganizationId)
-          .select()
+          .select(`
+            id, organization_id, company_id,
+            customer_name, customer_email, customer_phone,
+            identification_number, customer_type_name, website,
+            alt_phone, primary_contact_id,
+            street_address_line_1, street_address_line_2, city, state, zip_code, country,
+            billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
+            notes, status, deleted, created_at, updated_at
+          `)
           .single();
       } else {
         // Create new customer
@@ -374,7 +441,15 @@ export default function CustomerNew() {
         result = await supabase
         .from('DirectoryCustomers')
         .insert([customerData])
-        .select()
+        .select(`
+          id, organization_id, company_id,
+          customer_name, customer_email, customer_phone,
+          identification_number, customer_type_name, website,
+          alt_phone, primary_contact_id,
+          street_address_line_1, street_address_line_2, city, state, zip_code, country,
+          billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
+          notes, status, deleted, created_at, updated_at
+        `)
         .single();
       }
 
@@ -382,46 +457,6 @@ export default function CustomerNew() {
 
       if (error) {
         console.error('Error saving customer:', error);
-        
-        // If error is about identification_number column not existing, try again without it
-        if (error.message?.includes('identification_number') && customerData.identification_number) {
-          delete customerData.identification_number;
-          
-          let retryResult;
-          if (customerId) {
-            retryResult = await supabase
-              .from('DirectoryCustomers')
-              .update(customerData)
-              .eq('id', customerId)
-              .eq('organization_id', activeOrganizationId)
-              .select()
-              .single();
-          } else {
-            retryResult = await supabase
-              .from('DirectoryCustomers')
-              .insert([customerData])
-              .select()
-              .single();
-          }
-          
-          if (retryResult.error) {
-            throw retryResult.error;
-          }
-          
-          // Success on retry
-          const retryData = retryResult.data;
-          console.log('Customer saved successfully (without identification_number):', retryData);
-          
-          useUIStore.getState().addNotification({
-            type: 'success',
-            title: 'Customer saved successfully',
-            message: `The customer has been ${customerId ? 'updated' : 'saved'} and is now available in your directory.`,
-          });
-          
-          router.navigate('/directory/customers');
-          return;
-        }
-        
         throw error;
       }
 
@@ -688,7 +723,7 @@ export default function CustomerNew() {
                 <SelectShadcn
                   value={watch('customer_type_name') || ''}
                   onValueChange={(value) => {
-                    setValue('customer_type_name', value as 'VIP' | 'Partner' | 'Reseller' | 'Distributor', { shouldValidate: true });
+                    setValue('customer_type_name', value as 'contractor' | 'architecture_studio' | 'design_studio' | 'end_user', { shouldValidate: true });
                   }}
                   disabled={isReadOnly}
                 >
@@ -733,10 +768,10 @@ export default function CustomerNew() {
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="company_phone" className="text-xs">Company Phone</Label>
+                <Label htmlFor="customer_phone" className="text-xs">Customer Phone</Label>
                 <Input 
-                  id="company_phone" 
-                  {...register('company_phone')}
+                  id="customer_phone" 
+                  {...register('customer_phone')}
                   type="tel" 
                       className="py-1 text-xs"
                   disabled={isReadOnly}
@@ -769,8 +804,8 @@ export default function CustomerNew() {
                     {contacts.filter(c => c.id).map((contact) => (
                       <SelectItem key={contact.id} value={contact.id}>
                         {contact.contact_name || 'Unnamed Contact'}
-                        {contact.identification_number && (
-                          <span className="text-xs text-gray-500 ml-2">({contact.identification_number})</span>
+                        {contact.contact_id_number && (
+                          <span className="text-xs text-gray-500 ml-2">({contact.contact_id_number})</span>
                         )}
                       </SelectItem>
                     ))}

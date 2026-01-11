@@ -11,6 +11,8 @@ import { supabase, getUserProfile } from './lib/supabase/client';
 import { useSupabaseStatus } from './lib/services/supabase-status';
 import { SupabaseStatusBanner } from './hooks/useSupabaseHealth';
 import Toast from './components/ui/Toast';
+import { RequireModule } from './components/auth/RequireModule';
+import AuthGate from './auth/AuthGate';
 
 // Code splitting with React.lazy
 const ManagementDashboard = lazy(() => {
@@ -130,36 +132,6 @@ const DirectoryCustomerNew = lazy(() => {
     });
   } catch (error) {
     console.error('Error in DirectoryCustomerNew lazy import:', error);
-    throw error;
-  }
-});
-
-const DirectoryVendors = lazy(() => {
-  try {
-    if (import.meta.env.DEV) {
-      logger.debug('Loading Directory Vendors component');
-    }
-    return import('./pages/directory/Vendors').catch((error) => {
-      console.error('Failed to load DirectoryVendors:', error);
-      throw error;
-    });
-  } catch (error) {
-    console.error('Error in DirectoryVendors lazy import:', error);
-    throw error;
-  }
-});
-
-const DirectoryVendorNew = lazy(() => {
-  try {
-    if (import.meta.env.DEV) {
-      logger.debug('Loading Directory Vendor New component');
-    }
-    return import('./pages/directory/VendorNew').catch((error) => {
-      console.error('Failed to load DirectoryVendorNew:', error);
-      throw error;
-    });
-  } catch (error) {
-    console.error('Error in DirectoryVendorNew lazy import:', error);
     throw error;
   }
 });
@@ -327,9 +299,9 @@ const OrganizationUserNew = lazy(() => {
   return import('./pages/settings/OrganizationUserNew');
 });
 
-const CustomerPortalUsers = lazy(() => {
-  logger.debug('Loading Customer Portal Users component');
-  return import('./pages/settings/CustomerPortalUsers');
+const CompanyPortalUsers = lazy(() => {
+  logger.debug('Loading Company Portal Users component');
+  return import('./pages/settings/CompanyPortalUsers');
 });
 
 // Auth pages
@@ -368,6 +340,16 @@ const NewPassword = lazy(() => {
   return import('./pages/auth/NewPassword');
 });
 
+const SetPassword = lazy(() => {
+  logger.debug('Loading Set Password component');
+  return import('./pages/auth/SetPassword');
+});
+
+const AccessDenied = lazy(() => {
+  logger.debug('Loading Access Denied component');
+  return import('./pages/auth/AccessDenied');
+});
+
 
 
 function ThemeToggle() {
@@ -403,23 +385,60 @@ function App() {
 
   // Check if current page is auth page (memoized - must be before all useEffect)
   const isAuthPage = useMemo(() => [
-    'login', 'signup', 'company-registration', 'reset-password', 'new-password',
-    'auth-callback', 'auth-reset-password'
+    'login', 'signup', 'company-registration', 'reset-password', 'new-password', 'set-password',
+    'auth-callback', 'auth-reset-password', 'access-denied'
   ].includes(currentPage), [currentPage]);
 
-  // Initialize auth on mount
+  // Initialize auth on mount with safety timeout
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let isMounted = true;
+
     const initializeAuth = async () => {
       try {
+        // Set a safety timeout: if initAuth takes more than 10 seconds, force loading=false
+        timeoutId = setTimeout(() => {
+          if (import.meta.env.DEV) {
+            console.warn('[App] initAuth timeout - forcing loading=false after 10s');
+          }
+          if (isMounted) {
+            useAuthStore.getState().setLoading(false);
+          }
+        }, 10000); // 10 seconds max
+
         await initAuth();
+        
+        // Clear timeout if initAuth completes
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
       } catch (error) {
+        if (import.meta.env.DEV) {
+          console.error('[App] Error initializing auth:', error);
+        }
         logger.error('Error initializing auth', error as Error);
         // Don't break the app if auth init fails
-        useAuthStore.getState().setLoading(false);
+        if (isMounted) {
+          useAuthStore.getState().setLoading(false);
+        }
+      } finally {
+        // Always clear timeout
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
       }
     };
     
     initializeAuth();
+
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
   }, [initAuth]);
 
   // Start Supabase monitoring
@@ -474,8 +493,10 @@ function App() {
     router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
     router.addRoute('/auth/reset-password', () => setCurrentPage('auth-reset-password'));
     router.addRoute('/auth/callback', () => setCurrentPage('auth-callback'));
+    router.addRoute('/set-password', () => setCurrentPage('set-password'));
     router.addRoute('/new-password', () => setCurrentPage('new-password'));
     router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
+    router.addRoute('/access-denied', () => setCurrentPage('access-denied'));
     
     // Error routes (always available)
     router.addRoute('/400', () => setCurrentPage('bad-request'));
@@ -577,34 +598,6 @@ function App() {
     router.addRoute('/directory/customers/edit/:id', () => {
       if (isAuthenticated) {
         setCurrentPage('directory-customer-new');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/directory/vendors', () => {
-      if (isAuthenticated) {
-        setCurrentPage('directory-vendors');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/directory/vendors/new', () => {
-      if (isAuthenticated) {
-        setCurrentPage('directory-vendor-new');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/directory/vendors/:id', () => {
-      if (isAuthenticated) {
-        setCurrentPage('directory-vendor-new');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/directory/vendors/edit/:id', () => {
-      if (isAuthenticated) {
-        setCurrentPage('directory-vendor-new');
       } else {
         setCurrentPage('login');
       }
@@ -960,13 +953,6 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/settings/organization-profile', () => {
-      if (isAuthenticated) {
-        setCurrentPage('company-settings');
-      } else {
-        setCurrentPage('login');
-      }
-    });
     router.addRoute('/settings/organization-users/new', () => {
       if (isAuthenticated) {
         setCurrentPage('company-settings');
@@ -981,9 +967,9 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/settings/customer-portal-users', () => {
+    router.addRoute('/settings/company-portal-users', () => {
       if (isAuthenticated) {
-        setCurrentPage('customer-portal-users');
+        setCurrentPage('company-portal-users');
       } else {
         setCurrentPage('login');
       }
@@ -1078,89 +1064,83 @@ function App() {
       case 'branches':
         return <Branches />;
       
-      // Directory module pages
+      // Directory module pages (protected but accessible to portal)
       case 'directory-contacts':
-        return <DirectoryContacts />;
+        return <RequireModule module="directory"><DirectoryContacts /></RequireModule>;
       case 'directory-contact-new':
-        return <DirectoryContactNew />;
+        return <RequireModule module="directory"><DirectoryContactNew /></RequireModule>;
       case 'directory-customers':
-        return <DirectoryCustomers />;
+        return <RequireModule module="directory"><DirectoryCustomers /></RequireModule>;
       case 'directory-customer-new':
-        return <DirectoryCustomerNew />;
-      case 'directory-vendors':
-        return <DirectoryVendors />;
-      case 'directory-vendor-new':
-        return <DirectoryVendorNew />;
+        return <RequireModule module="directory"><DirectoryCustomerNew /></RequireModule>;
       case 'test-directory':
-        return <TestDirectory />;
+        return <RequireModule module="directory"><TestDirectory /></RequireModule>;
       
-      // New module pages
+      // Sales module pages (protected but accessible to portal)
       case 'sales':
-        return <Sales />;
+        return <RequireModule module="sales"><Sales /></RequireModule>;
       case 'orders':
-        return <Orders />;
+        return <RequireModule module="sales"><Orders /></RequireModule>;
       case 'quotes':
-        return <Quotes />;
+        return <RequireModule module="sales"><Quotes /></RequireModule>;
       case 'quote-approved':
-        return <QuoteApproved />;
+        return <RequireModule module="sales"><QuoteApproved /></RequireModule>;
       case 'quote-new':
-        return <QuoteNew />;
+        return <RequireModule module="sales"><QuoteNew /></RequireModule>;
       case 'sale-orders':
-        return <SaleOrders />;
+        return <RequireModule module="sales"><SaleOrders /></RequireModule>;
       case 'sale-order-new':
-        return <SaleOrderNew />;
+        return <RequireModule module="sales"><SaleOrderNew /></RequireModule>;
       case 'catalog':
-        return <Catalog />;
+        return <RequireModule module="catalog"><Catalog /></RequireModule>;
       case 'items':
-        return <Items />;
+        return <RequireModule module="catalog"><Items /></RequireModule>;
       case 'catalog-item-new':
-        return <CatalogItemNew />;
+        return <RequireModule module="catalog"><CatalogItemNew /></RequireModule>;
       case 'manufacturers':
-        return <Manufacturers />;
+        return <RequireModule module="catalog"><Manufacturers /></RequireModule>;
       case 'categories':
-        return <Categories />;
+        return <RequireModule module="catalog"><Categories /></RequireModule>;
       case 'collections':
-        return <Collections />;
+        return <RequireModule module="catalog"><Collections /></RequireModule>;
       case 'bom':
-        return <BOM />;
+        return <RequireModule module="catalog"><BOM /></RequireModule>;
       case 'bom-readiness':
-        return <BOMReadiness />;
+        return <RequireModule module="catalog"><BOMReadiness /></RequireModule>;
       // Variants case removed - use CollectionsCatalog instead
       case 'inventory':
         return <Inventory />;
       case 'warehouse':
         return <Warehouse />;
       case 'manufacturing':
-        return <Manufacturing />;
+        return <RequireModule module="manufacturing"><Manufacturing /></RequireModule>;
       case 'manufacturing-orders':
-        return <ManufacturingOrders />;
+        return <RequireModule module="manufacturing"><ManufacturingOrders /></RequireModule>;
       case 'manufacturing-order-detail': {
         const moId = sessionStorage.getItem('currentManufacturingOrderId');
-        return moId ? <ManufacturingOrderDetail moId={moId} /> : <ManufacturingOrders />;
+        return <RequireModule module="manufacturing">{moId ? <ManufacturingOrderDetail moId={moId} /> : <ManufacturingOrders />}</RequireModule>;
       }
       case 'order-list':
-        return <OrderList />;
+        return <RequireModule module="manufacturing"><OrderList /></RequireModule>;
       case 'material':
-        return <ApprovedBOMList />;
+        return <RequireModule module="manufacturing"><ApprovedBOMList /></RequireModule>;
       case 'bill-of-materials':
-        return <ApprovedBOMList />; // Legacy support - redirect to ApprovedBOMList
+        return <RequireModule module="manufacturing"><ApprovedBOMList /></RequireModule>; // Legacy support - redirect to ApprovedBOMList
       case 'financials':
-        return <Financials />;
+        return <RequireModule module="financials"><Financials /></RequireModule>;
 
       case 'reports':
         return <CompanyReports />;
       case 'company-reports':
         return <CompanyReports />;
       case 'company-settings':
-        return <CompanySettings />;
+        return <RequireModule module="settings"><CompanySettings /></RequireModule>;
       case 'organization-users':
         return <OrganizationUsers organizationId={null} />;
       case 'organization-user':
         return <OrganizationUser />;
-      case 'organization-profile':
-        return <OrganizationUser />; // This route is handled by CompanySettings, but keep for backward compatibility
-      case 'customer-portal-users':
-        return <CustomerPortalUsers />;
+      case 'company-portal-users':
+        return <CompanyPortalUsers />;
       // Note: 'organization-user-new' routes now render CompanySettings which handles the embedded form
       
       // Auth pages
@@ -1176,6 +1156,10 @@ function App() {
         return <NewPassword />;
       case 'auth-callback':
         return <AuthCallback />;
+      case 'set-password':
+        return <SetPassword />;
+      case 'access-denied':
+        return <AccessDenied />;
       case 'auth-reset-password':
         return <ResetPasswordForm />;
       
@@ -1213,30 +1197,34 @@ function App() {
           // Settings pages with their own independent layout
           <ErrorBoundary>
             <Suspense fallback={null}>
-              <CompanySettings />
+              <RequireModule module="settings">
+                <CompanySettings />
+              </RequireModule>
             </Suspense>
           </ErrorBoundary>
         ) : (
-          // Regular pages with layout
-          <SubmoduleNavProvider>
-            <Layout>
-              <ErrorBoundary>
-                <SupabaseStatusBanner />
+          // Regular pages with layout - protected by AuthGate
+          <AuthGate>
+            <SubmoduleNavProvider>
+              <Layout>
                 <ErrorBoundary>
-                  <Suspense fallback={
-                    <div className="flex items-center justify-center min-h-[400px]">
-                      <div className="flex flex-col items-center gap-4">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                        <p className="text-sm text-muted-foreground">Loading...</p>
+                  <SupabaseStatusBanner />
+                  <ErrorBoundary>
+                    <Suspense fallback={
+                      <div className="flex items-center justify-center min-h-[400px]">
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                          <p className="text-sm text-muted-foreground">Loading...</p>
+                        </div>
                       </div>
-                    </div>
-                  }>
-                    {renderPage()}
+                    }>
+                      {renderPage()}
                   </Suspense>
                 </ErrorBoundary>
               </ErrorBoundary>
             </Layout>
           </SubmoduleNavProvider>
+          </AuthGate>
         )}
       </div>
     </ErrorBoundary>

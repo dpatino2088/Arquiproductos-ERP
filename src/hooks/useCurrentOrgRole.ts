@@ -3,13 +3,14 @@ import { supabase } from '../lib/supabase/client';
 import type { OrgRole } from '../types/roles';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { useAuthSession } from './useAuthSession';
+import { mapLegacyRole, isValidOrgRole } from '../rbac/rolePresets';
 
 type UseCurrentOrgRoleOptions = {
   organizationId?: string | null;
 };
 
 type UseCurrentOrgRoleResult = {
-  role: OrgRole;
+  role: OrgRole | null;
   loading: boolean;
   error: string | null;
 
@@ -28,7 +29,6 @@ type UseCurrentOrgRoleResult = {
   canViewQuotes: boolean;
   canEditCustomers: boolean;
   canEditContacts: boolean;
-  canEditVendors: boolean;
   canViewOwnData: boolean;
 };
 
@@ -37,8 +37,8 @@ export function useCurrentOrgRole(
 ): UseCurrentOrgRoleResult {
   const { activeOrganizationId } = useOrganizationContext();
   const effectiveOrgId = options.organizationId ?? activeOrganizationId ?? null;
-  const { user, userId, loading: sessionLoading } = useAuthSession();
-  const [role, setRole] = useState<OrgRole>(null);
+  const { session, userId, loading: sessionLoading } = useAuthSession();
+  const [role, setRole] = useState<OrgRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const lastKeyRef = useRef<string>('');
@@ -56,8 +56,8 @@ export function useCurrentOrgRole(
       return;
     }
 
-    // ✅ FIX: Si no hay userId, retornar sin rol
-    if (!userId || !user) {
+    // ✅ FIX: Si no hay userId o session, retornar sin rol
+    if (!userId || !session?.user) {
       setRole(null);
       setLoading(false);
       return;
@@ -70,8 +70,49 @@ export function useCurrentOrgRole(
         setLoading(true);
         setError(null);
 
-        // ✅ FIX: Usar userId de useAuthSession en lugar de getUser()
-        // Ya no llamamos supabase.auth.getUser() aquí
+        // ✅ CRITICAL FIX: First check if user is a Portal User (CompanyPortalUsers)
+        // Portal users should NOT have Organization roles - they are external customers
+        // IMPORTANT: Use 'role' and 'status' columns (matches actual DB schema)
+        const { data: portalUser, error: portalError } = await supabase
+          .from('CompanyPortalUsers')
+          .select('id, role, status')
+          .eq('user_id', userId)
+          .eq('deleted', false)
+          .in('status', ['active', 'invited'])
+          .maybeSingle();
+
+        if (portalError && import.meta.env.DEV) {
+          console.error('[useCurrentOrgRole] CompanyPortalUsers lookup error', {
+            message: portalError.message,
+            details: portalError.details,
+            hint: portalError.hint,
+            code: portalError.code,
+          });
+        }
+
+        // If user is a portal user, they should NOT have organization roles
+        if (!cancelled && portalUser) {
+          // Use 'role' column (from actual DB schema)
+          const portalRole = portalUser.role;
+          if (import.meta.env.DEV) {
+            console.log('🔒 [useCurrentOrgRole] User is a Portal User, returning null for org role:', {
+              portalUserId: portalUser.id,
+              portalRole: portalRole,
+              userId: userId,
+            });
+          }
+          // Portal users should NOT have organization roles
+          setRole(null);
+          setLoading(false);
+          return;
+        }
+
+        // If there was an error other than "not found", log it but continue
+        if (portalError && portalError.code !== 'PGRST116' && portalError.code !== '42P01') {
+          if (import.meta.env.DEV) {
+            console.debug('[useCurrentOrgRole] Error checking portal user (continuing):', portalError.code);
+          }
+        }
 
         // 2) SUPERADMIN = fila en PlatformAdmins
         // Nota: Si la tabla no existe, esto fallará silenciosamente
@@ -104,7 +145,10 @@ export function useCurrentOrgRole(
           return;
         }
 
-        // 4) Rol en OrganizationUsers
+        // 4) Rol en OrganizationUsers (solo si NO es portal user)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ad52049f-725d-41d8-812c-491bc7b292e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCurrentOrgRole.ts:108',message:'Checking OrganizationUsers role',data:{userId,effectiveOrgId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B'})}).catch(()=>{});
+        // #endregion
         const { data: orgUser, error: orgError } = await supabase
           .from('OrganizationUsers')
           .select('role')
@@ -112,13 +156,25 @@ export function useCurrentOrgRole(
           .eq('user_id', userId)
           .eq('deleted', false)
           .maybeSingle();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ad52049f-725d-41d8-812c-491bc7b292e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCurrentOrgRole.ts:114',message:'OrganizationUsers query result',data:{foundOrgUser:!!orgUser,role:orgUser?.role,orgErrorCode:orgError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B'})}).catch(()=>{});
+        // #endregion
 
         if (orgError && orgError.code !== 'PGRST116') {
           throw orgError;
         }
 
         if (!cancelled) {
-          const dbRole = (orgUser?.role as OrgRole) ?? null;
+          let dbRole: OrgRole | null = null;
+          if (orgUser?.role) {
+            const roleStr = orgUser.role.toString();
+            if (isValidOrgRole(roleStr)) {
+              dbRole = roleStr;
+            } else {
+              // Map legacy role to new role
+              dbRole = mapLegacyRole(roleStr);
+            }
+          }
           setRole(dbRole);
           setLoading(false);
         }
@@ -139,27 +195,25 @@ export function useCurrentOrgRole(
     };
   }, [userId, effectiveOrgId, sessionLoading]);
 
-  // flags de rol (solo 3 roles: superadmin, admin, member)
+  // flags de rol (nuevos roles solamente, legacy ya está mapeado por mapLegacyRole)
   const isSuperAdmin = role === 'superadmin';
-  const isAdmin = role === 'admin' || isSuperAdmin;
-  const isMember = role === 'member';
-  // Mantener isOwner e isViewer para compatibilidad con código existente, pero siempre false
-  const isOwner = false; // Ya no existe el rol 'owner'
-  const isViewer = false; // Ya no existe el rol 'viewer'
+  const isOwner = false; // Legacy 'owner' should be mapped to 'superadmin' by mapLegacyRole
+  const isAdmin = role === 'admin' || isSuperAdmin; // Superadmin tiene permisos de admin
+  const isMember = role === 'operator'; // Legacy 'member' maps to 'operator'
+  const isViewer = false; // Legacy 'viewer' should be mapped by mapLegacyRole
 
   // permisos derivados — según especificación:
   // Superadmin: Puede hacer TODO (incluyendo crear/borrar usuarios)
-  // Admin: Puede ver todas las cotizaciones y hacer todo EXCEPTO crear/borrar usuarios
-  // Member: Solo puede ver/editar/borrar sus propias cotizaciones
+  // Admin: Puede ver todas las cotizaciones y hacer todo EXCEPTO crear/borrar usuarios (depende de permisos)
+  // Operator/Procurement/Finance: Permisos basados en permisos explícitos
   const canManageOrganization = isSuperAdmin; // Solo superadmin puede gestionar organización
-  const canManageUsers = isSuperAdmin; // Solo superadmin puede crear/borrar usuarios
-  const canCreateQuotes = isSuperAdmin || isAdmin || isMember; // Todos pueden crear quotes
-  const canEditQuotes = isSuperAdmin || isAdmin || isMember; // Todos pueden editar quotes (Member solo las suyas)
-  const canViewQuotes = !!role || isSuperAdmin; // Todos pueden ver quotes (pero Member solo las suyas)
-  const canEditCustomers = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar customers
-  const canEditContacts = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar contacts
-  const canEditVendors = isSuperAdmin || isAdmin; // Superadmin y Admin pueden editar vendors
-  const canViewOwnData = !!role || isSuperAdmin; // Todos pueden ver sus propios datos
+  const canManageUsers = isSuperAdmin || isAdmin; // Superadmin y Admin pueden crear/borrar usuarios (si tienen permiso)
+  const canCreateQuotes = !!role; // Todos los roles pueden crear quotes (si tienen permiso)
+  const canEditQuotes = !!role; // Todos los roles pueden editar quotes (si tienen permiso)
+  const canViewQuotes = !!role; // Todos los roles pueden ver quotes (si tienen permiso)
+  const canEditCustomers = isSuperAdmin || isAdmin || role === 'operator' || role === 'procurement' || role === 'finance'; // Depende de permisos
+  const canEditContacts = isSuperAdmin || isAdmin || role === 'operator' || role === 'procurement' || role === 'finance'; // Depende de permisos
+  const canViewOwnData = !!role; // Todos pueden ver sus propios datos
 
   return {
     role,
@@ -177,7 +231,6 @@ export function useCurrentOrgRole(
     canViewQuotes,
     canEditCustomers,
     canEditContacts,
-    canEditVendors,
     canViewOwnData,
   };
 }

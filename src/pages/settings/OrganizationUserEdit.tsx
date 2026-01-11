@@ -15,6 +15,7 @@ import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
 import OrganizationUserPermissions from './OrganizationUserPermissions';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { getRoleLabel, getDefaultPermissionsForRole, type OrgRole, isValidOrgRole, mapLegacyRole } from '../../rbac/rolePresets';
 
 // Debug state (temporary)
 let debugClickCount = 0;
@@ -22,7 +23,8 @@ let debugBanner = '';
 
 const organizationUserEditSchema = z.object({
   email: z.string().email('Debes ingresar un email válido'),
-  role: z.enum(['superadmin', 'admin', 'member']),
+  user_name: z.string().min(1, 'El nombre es requerido').optional().or(z.literal('')),
+  role: z.enum(['superadmin', 'admin', 'operator', 'procurement', 'finance', 'member']), // Keep 'member' for backward compatibility
   customer_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
   contact_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
 });
@@ -49,12 +51,15 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
   const savePermissionsFnRef = useRef<(() => Promise<void>) | null>(null);
   const permissionsSaveRef = useRef<(() => Promise<void>) | null>(null);
   const { showConfirm, dialogState, closeDialog, handleConfirm } = useConfirmDialog();
+  const previousRoleRef = useRef<string | null>(null);
+  const permissionsComponentRef = useRef<{ applyRolePreset: (role: OrgRole, allPermissionCodes?: string[]) => Promise<void> } | null>(null);
 
   const form = useForm<OrganizationUserEditFormData>({
     resolver: zodResolver(organizationUserEditSchema),
     defaultValues: {
       email: '',
-      role: 'member',
+      user_name: '',
+      role: 'operator',
       customer_id: null,
       contact_id: null,
     },
@@ -79,27 +84,43 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     loadingRef.current = true;
     setLoading(true);
     try {
+      // Usar RPC list_organization_users (SECURITY DEFINER, no recursión)
       const { data, error } = await supabase
-        .rpc('get_organization_users', {
+        .rpc('list_organization_users', {
           p_organization_id: activeOrganizationId
         });
 
-      if (error) throw error;
+      if (error) {
+        if (import.meta.env.DEV) {
+          console.error('[OrganizationUserEdit] RPC list error:', error);
+        }
+        throw error;
+      }
 
-      const userData = data?.find(u => u.id === userId);
+      const userData = data?.find((u: any) => u.id === userId);
       if (!userData) {
-        setSaveError('Usuario no encontrado');
+        setSaveError('Usuario no encontrado o no tienes permisos para verlo');
         setLoading(false);
         loadingRef.current = false;
         return;
       }
 
+      // Normalize role: map legacy roles to new roles, but keep 'member' for backward compatibility
+      let normalizedRole: string = userData.role || 'member';
+      if (userData.role && !isValidOrgRole(userData.role) && userData.role !== 'member') {
+        normalizedRole = mapLegacyRole(userData.role);
+      }
+      
+      // Usar user_email (columna real), con fallback temporal a email si existe
       form.reset({
-        email: userData.email || '',
-        role: userData.role as 'superadmin' | 'admin' | 'member',
+        email: (userData.user_email ?? userData.email ?? '').toString().trim(),
+        user_name: userData.user_name || '',
+        role: normalizedRole as any,
         customer_id: userData.customer_id || null,
         contact_id: userData.contact_id || null,
       });
+      
+      previousRoleRef.current = normalizedRole;
 
       hasLoadedRef.current = true;
     } catch (err: any) {
@@ -240,18 +261,27 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
       return;
     }
 
-    // If nothing is dirty, just exit (no-op save)
+    // If nothing is dirty, still allow save (no-op) but show success and navigate if requested
     if (!isDirtyAny) {
-      console.log('SAVE SKIP - No changes', { finish });
+      console.log('SAVE - No changes to save, but allowing save action', { finish });
       setDebugInfo(prev => ({ ...prev, banner: 'No changes to save' }));
       
       // Reset states
       setIsDirtyPermissions(false);
       
+      // Show success notification even if no changes
+      useUIStore.getState().addNotification({
+        type: 'info',
+        title: 'No changes',
+        message: 'No changes detected. Nothing to save.',
+      });
+      
       if (finish || !embedded) {
         setTimeout(() => {
           router.navigate('/settings/organization-user');
         }, 100);
+      } else {
+        setIsSaving(false);
       }
       return;
     }
@@ -271,32 +301,80 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     try {
       const formData = form.getValues();
       
-      // Save details if dirty
+      // Save details if dirty (but always allow save button to work)
       if (isDirtyDetails) {
         const normalizedEmail = formData.email.trim().toLowerCase();
-        const finalCustomerId = (formData.customer_id && formData.customer_id !== '') ? formData.customer_id : null;
-        const finalContactId = (formData.contact_id && formData.contact_id !== '') ? formData.contact_id : null;
-
-        const { error } = await supabase
+        
+        // Obtener el usuario actual usando list_organization_users RPC o direct query con own policy
+        // Primero intentar obtener usando la política no recursiva (solo si es el mismo usuario)
+        // Pero si es admin/owner editando otro usuario, necesitamos usar RPC list_organization_users
+        let currentUserData: any = null;
+        
+        // Si estamos editando nuestro propio usuario, usar query directa (allowed por orgusers_select_own)
+        const { data: ownUser } = await supabase
           .from('OrganizationUsers')
-          .update({
-            email: normalizedEmail,
-            role: formData.role,
-            customer_id: finalCustomerId,
-            contact_id: finalContactId,
-            updated_at: new Date().toISOString(),
-          })
+          .select('*')
           .eq('id', userId)
-          .eq('organization_id', activeOrganizationId);
+          .eq('user_id', user?.id || '')
+          .eq('deleted', false)
+          .maybeSingle();
+        
+        if (ownUser && ownUser.user_id === user?.id) {
+          // Editando propio usuario
+          currentUserData = ownUser;
+        } else {
+          // Editando otro usuario: usar RPC list_organization_users
+          const { data: orgUsers } = await supabase
+            .rpc('list_organization_users', { p_organization_id: activeOrganizationId });
+          
+          currentUserData = orgUsers?.find((u: any) => u.id === userId);
+        }
 
-        if (error) throw error;
+        if (!currentUserData) {
+          throw new Error('Usuario no encontrado o no tienes permisos para editarlo');
+        }
+
+        // Usar RPC upsert para actualizar (el RPC valida permisos y evita recursión)
+        const { data: updatedUser, error: rpcError } = await supabase
+          .rpc('upsert_organization_user', {
+            p_organization_id: activeOrganizationId,
+            p_user_email: normalizedEmail,
+            p_user_name: (formData.user_name || '').trim() || null, // Use user_name from form
+            p_role: formData.role as any,
+            p_status: (currentUserData.status || 'active') as any, // Mantener status actual
+          });
+
+        if (rpcError) {
+          if (import.meta.env.DEV) {
+            console.error('[OrganizationUserEdit] RPC upsert error:', rpcError);
+          }
+          
+          if (rpcError.message?.includes('Only owners and admins')) {
+            throw new Error('No tienes permisos para editar usuarios. Solo los owners y admins pueden editar usuarios.');
+          }
+          
+          if (rpcError.message?.includes('Admins cannot create owners')) {
+            throw new Error('Los admins no pueden cambiar el rol a owner. Solo los owners pueden asignar rol owner.');
+          }
+
+          throw new Error(`Error actualizando usuario: ${rpcError.message || 'Error desconocido'}`);
+        }
+
+        if (!updatedUser) {
+          throw new Error('El RPC no devolvió el usuario actualizado');
+        }
+
+        if (import.meta.env.DEV) {
+          console.log('[OrganizationUserEdit] User updated via RPC:', updatedUser);
+        }
 
         // Reset form dirty state
         form.reset(formData);
       }
 
       // Save permissions if dirty and not superadmin
-      if (isDirtyPermissions && formData.role !== 'superadmin') {
+      const currentRole = formData.role;
+      if (isDirtyPermissions && currentRole !== 'superadmin') {
         await savePermissionsDirect();
       }
 
@@ -462,6 +540,19 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
           <form onSubmit={form.handleSubmit(handleSubmit)}>
             <div className="grid grid-cols-12 gap-4">
               <div className="col-span-12 md:col-span-6">
+                <Label htmlFor="user_name">
+                  Name
+                </Label>
+                <Input
+                  id="user_name"
+                  type="text"
+                  {...form.register('user_name')}
+                  error={form.formState.errors.user_name?.message}
+                  placeholder="User name"
+                />
+              </div>
+
+              <div className="col-span-12 md:col-span-6">
                 <Label htmlFor="email" required>
                   Email
                 </Label>
@@ -480,15 +571,50 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
                 </Label>
                 <select
                   id="role"
-                  {...form.register('role')}
+                  {...form.register('role', {
+                    onChange: async (e) => {
+                      const newRole = e.target.value;
+                      const oldRole = previousRoleRef.current;
+                      
+                      // Only handle role preset logic for new roles (not 'member')
+                      if (oldRole && oldRole !== newRole && isValidOrgRole(newRole)) {
+                        // If permissions are dirty, ask user
+                        if (isDirtyPermissions) {
+                          const confirmed = await showConfirm({
+                            title: 'Apply role defaults?',
+                            message: `You have modified permissions. Do you want to apply the default permissions for "${getRoleLabel(newRole)}" or keep your current permissions?`,
+                            confirmText: 'Apply defaults',
+                            cancelText: 'Keep current',
+                            variant: 'info',
+                          });
+                          
+                          if (confirmed && permissionsComponentRef.current) {
+                            // Apply role preset
+                            await permissionsComponentRef.current.applyRolePreset(newRole);
+                          }
+                          // If not confirmed, just change the role (permissions stay as-is)
+                        } else {
+                          // No dirty permissions, apply preset automatically
+                          if (permissionsComponentRef.current) {
+                            await permissionsComponentRef.current.applyRolePreset(newRole);
+                          }
+                        }
+                      }
+                      
+                      previousRoleRef.current = newRole;
+                    },
+                  })}
                   className={`w-full px-2.5 py-1.5 text-xs border rounded-md bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
                     form.formState.errors.role 
                       ? 'border-red-300 bg-red-50 focus:ring-red-500/20 focus:border-red-500' 
                       : 'border-gray-200 focus:ring-primary/20 focus:border-primary/50'
                   }`}
                 >
-                  <option value="superadmin">Superadmin (Can do everything)</option>
-                  <option value="admin">Admin (Can view all quotes and do everything, except create/delete users)</option>
+                  <option value="superadmin">{getRoleLabel('superadmin')}</option>
+                  <option value="admin">{getRoleLabel('admin')}</option>
+                  <option value="operator">{getRoleLabel('operator')}</option>
+                  <option value="procurement">{getRoleLabel('procurement')}</option>
+                  <option value="finance">{getRoleLabel('finance')}</option>
                   <option value="member">Member (Can only view/edit/delete their own quotes)</option>
                 </select>
                 {form.formState.errors.role && (
@@ -511,6 +637,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
       {activeTab === 'permissions' && (
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <OrganizationUserPermissions
+            ref={permissionsComponentRef}
             organizationUserId={userId}
             userRole={form.watch('role')}
             onSave={handlePermissionsSave}
@@ -533,7 +660,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
         cancelText={dialogState.cancelText}
         variant={dialogState.variant}
         onConfirm={handleConfirm}
-        onCancel={closeDialog}
+        onClose={closeDialog}
         isLoading={dialogState.isLoading}
       />
     </div>

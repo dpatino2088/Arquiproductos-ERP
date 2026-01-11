@@ -16,7 +16,7 @@ import OrganizationUser from './OrganizationUser';
 export default function Settings() {
   const { getPreviousPage } = usePreviousPage();
   const { currentCompany, currentCompanyUser } = useCompanyStore();
-  const [activeTab, setActiveTab] = useState<string>('organization-profile');
+  const [activeTab, setActiveTab] = useState<string>('organization-user');
 
   // Check if user is Owner/Admin
   const isOwnerOrAdmin = currentCompanyUser?.role === 'super_admin' || currentCompanyUser?.role === 'admin';
@@ -55,7 +55,6 @@ export default function Settings() {
 
   // Settings tabs configuration
   const settingsTabs = [
-    { id: 'organization-profile', label: 'Organization Profile', icon: Building },
     ...(isOwnerOrAdmin ? [{ id: 'members', label: 'Members', icon: Users }] : []),
     ...(isOwnerOrAdmin ? [{ id: 'billing', label: 'Billing', icon: CreditCard }] : []),
     ...(isOwnerOrAdmin ? [{ id: 'integrations', label: 'Integrations', icon: Plug }] : []),
@@ -63,8 +62,6 @@ export default function Settings() {
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'organization-profile':
-        return <OrganizationUser />;
       case 'members':
         if (!isOwnerOrAdmin) return null;
         return <Members />;
@@ -161,7 +158,6 @@ export default function Settings() {
                   {settingsTabs.find(tab => tab.id === activeTab)?.label}
                 </h2>
                 <p className="text-sm text-gray-600">
-                  {activeTab === 'organization-profile' && 'Manage your organization profile and information.'}
                   {activeTab === 'members' && 'Manage team members, roles, and permissions.'}
                   {activeTab === 'billing' && 'Manage billing and subscription settings.'}
                   {activeTab === 'integrations' && 'Configure integrations with external services.'}

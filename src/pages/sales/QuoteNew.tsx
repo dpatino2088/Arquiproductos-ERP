@@ -50,10 +50,10 @@ const CURRENCY_OPTIONS = [
   { value: 'CAD', label: 'CAD - Canadian Dollar' },
 ] as const;
 
-// Schema for Quote
+// Schema for Quote - customer_id is now optional
 const quoteSchema = z.object({
   quote_no: z.string().min(1, 'Quote number is required'),
-  customer_id: z.string().uuid('Customer is required'),
+  customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
   status: z.enum(['draft', 'sent', 'approved', 'rejected']),
   currency: z.string().min(1, 'Currency is required'),
   notes: z.string().optional(),
@@ -104,6 +104,7 @@ interface QuoteLineWithRelations {
 
 export default function QuoteNew() {
   const { activeOrganizationId } = useOrganizationContext();
+  const { userType, isPortal } = useAccessContext();
   const { createQuote, isCreating } = useCreateQuote();
   const { updateQuote, isUpdating } = useUpdateQuote();
   const [quoteId, setQuoteId] = useState<string | null>(null);
@@ -116,6 +117,7 @@ export default function QuoteNew() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [initialLineConfig, setInitialLineConfig] = useState<ProductConfig | undefined>(undefined);
+  const [companyInfo, setCompanyInfo] = useState<{ id: string; name: string; number: string | null } | null>(null);
 
   const { lines: quoteLines, loading: loadingLines, refetch: refetchLines } = useQuoteLines(quoteId);
   const { settings: costSettings } = useCostSettings(); // Get cost settings for pricing calculations
@@ -199,6 +201,46 @@ export default function QuoteNew() {
 
     loadQuoteData();
   }, [quoteId, activeOrganizationId, setValue]);
+
+  // Load company info for portal users
+  useEffect(() => {
+    const loadCompanyInfo = async () => {
+      if (!isPortal || !activeOrganizationId) {
+        setCompanyInfo(null);
+        return;
+      }
+
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: portalUser, error: portalError } = await supabase
+          .from('CompanyPortalUsers')
+          .select('company_id, Companies(id, company_name, company_number)')
+          .eq('user_id', user.id)
+          .eq('deleted', false)
+          .in('status', ['active', 'invited'])
+          .maybeSingle();
+
+        if (portalError) {
+          console.error('Error loading portal user company:', portalError);
+          return;
+        }
+
+        if (portalUser && portalUser.Companies) {
+          setCompanyInfo({
+            id: portalUser.company_id,
+            name: portalUser.Companies.company_name || 'Unknown Company',
+            number: portalUser.Companies.company_number || null,
+          });
+        }
+      } catch (err) {
+        console.error('Error loading company info:', err);
+      }
+    };
+
+    loadCompanyInfo();
+  }, [isPortal, activeOrganizationId]);
 
   // Load customers
   useEffect(() => {
@@ -1281,7 +1323,7 @@ export default function QuoteNew() {
     try {
       const quoteData: any = {
         quote_no: data.quote_no,
-        customer_id: data.customer_id,
+        customer_id: data.customer_id || null, // Optional - can be null
         // Note: contact_id is not stored in Quotes table, only customer_id
         status: data.status,
         currency: data.currency,
@@ -1292,6 +1334,8 @@ export default function QuoteNew() {
           total: totals.total,
         },
         organization_id: activeOrganizationId,
+        // company_id will be auto-obtained by useCreateQuote from portal user if not provided
+        company_id: companyInfo?.id || null,
       };
 
       if (quoteId) {
@@ -1452,20 +1496,34 @@ export default function QuoteNew() {
             />
           </div>
 
-          {/* Customer */}
+          {/* Company Info (for portal users) */}
+          {companyInfo && (
+            <div className="col-span-12 md:col-span-6">
+              <Label>Company</Label>
+              <div className="p-2 bg-gray-50 border border-gray-200 rounded text-sm">
+                <div className="font-medium">{companyInfo.name}</div>
+                {companyInfo.number && (
+                  <div className="text-gray-600 text-xs mt-1">Number: {companyInfo.number}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Customer (optional) */}
           <div className="col-span-12 md:col-span-6">
-            <Label htmlFor="customer_id">Customer *</Label>
+            <Label htmlFor="customer_id">Customer</Label>
             <SelectShadcn
               value={watch('customer_id') || ''}
               onValueChange={(value) => {
-                setValue('customer_id', value);
+                setValue('customer_id', value || '');
                 setSelectedContactId(''); // Reset contact when customer changes
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select customer" />
+                <SelectValue placeholder="Select customer (optional)" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="">None</SelectItem>
                 {customers.map((customer) => (
                   <SelectItem key={customer.id} value={customer.id}>
                     {customer.customer_name}

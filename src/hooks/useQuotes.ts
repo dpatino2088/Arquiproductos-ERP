@@ -1,18 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useActiveCompany } from './useActiveCompany';
 import { Quote, QuoteLine } from '../types/catalog';
 
 /**
  * Hook principal para obtener quotes
- * Query simplificada para evitar problemas con funciones de DB
+ * IMPORTANTE: Filtra por organization_id Y company_id (si está disponible)
+ * 
+ * @param companyId - Opcional: si se proporciona, filtra solo por ese company_id específico
  */
-export function useQuotes() {
+export function useQuotes(companyId?: string | null) {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+  const { activeCompanyId } = useActiveCompany();
+  
+  // Usar companyId proporcionado o el activo del hook
+  const effectiveCompanyId = companyId ?? activeCompanyId;
 
   const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
@@ -31,13 +38,24 @@ export function useQuotes() {
         setLoading(true);
         setError(null);
 
-        // Query simplificada: solo campos básicos de Quotes
-        // Los JOINs se hacen después para evitar problemas con funciones de DB
-        const { data: quotesData, error: quotesError } = await supabase
+        // Query: filtrar por organization_id Y company_id (si está disponible)
+        let query = supabase
           .from('Quotes')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
+          .eq('deleted', false);
+
+        // Filtrar por company_id si está disponible
+        if (effectiveCompanyId) {
+          query = query.eq('company_id', effectiveCompanyId);
+        } else {
+          // Warning en DEV si hay quotes sin company_id
+          if (import.meta.env.DEV) {
+            console.warn('[useQuotes] No company_id provided. Quotes without company_id will be included.');
+          }
+        }
+
+        const { data: quotesData, error: quotesError } = await query
           .order('updated_at', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false });
 
@@ -116,7 +134,7 @@ export function useQuotes() {
     }
 
     fetchQuotes();
-  }, [activeOrganizationId, refreshTrigger]);
+  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
 
   return { quotes, loading, error, refetch };
 }
@@ -124,12 +142,20 @@ export function useQuotes() {
 /**
  * Hook para obtener quotes aprobadas con progreso
  */
-export function useApprovedQuotesWithProgress() {
+/**
+ * Hook para obtener quotes aprobadas con progreso
+ * IMPORTANTE: Filtra por organization_id Y company_id (si está disponible)
+ */
+export function useApprovedQuotesWithProgress(companyId?: string | null) {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+  const { activeCompanyId } = useActiveCompany();
+  
+  // Usar companyId proporcionado o el activo del hook
+  const effectiveCompanyId = companyId ?? activeCompanyId;
 
   const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
@@ -148,13 +174,20 @@ export function useApprovedQuotesWithProgress() {
         setLoading(true);
         setError(null);
 
-        // Query simplificada: solo quotes aprobadas
-        const { data: quotesData, error: quotesError } = await supabase
+        // Query: filtrar por organization_id, status='approved' Y company_id (si está disponible)
+        let query = supabase
           .from('Quotes')
           .select('*')
           .eq('organization_id', activeOrganizationId)
           .eq('status', 'approved')
-          .eq('deleted', false)
+          .eq('deleted', false);
+
+        // Filtrar por company_id si está disponible
+        if (effectiveCompanyId) {
+          query = query.eq('company_id', effectiveCompanyId);
+        }
+
+        const { data: quotesData, error: quotesError } = await query
           .order('updated_at', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false });
 
@@ -267,7 +300,7 @@ export function useApprovedQuotesWithProgress() {
     }
 
     fetchApprovedQuotes();
-  }, [activeOrganizationId, refreshTrigger]);
+  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
 
   return { quotes, loading, error, refetch };
 }
@@ -368,18 +401,52 @@ export function useCreateQuote() {
   const [isCreating, setIsCreating] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
 
-  const createQuote = async (quoteData: Omit<Quote, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>) => {
+  const createQuote = async (quoteData: Omit<Quote, 'id' | 'organization_id' | 'company_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'> & { company_id?: string | null }) => {
     if (!activeOrganizationId) {
       throw new Error('No organization selected');
     }
 
     setIsCreating(true);
     try {
+      let finalCompanyId = quoteData.company_id;
+
+      // If company_id is not provided, get it from the current portal user
+      if (!finalCompanyId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error('User not authenticated');
+        }
+
+        // Get portal user's company_id
+        const { data: portalUser, error: portalError } = await supabase
+          .from('CompanyPortalUsers')
+          .select('company_id')
+          .eq('user_id', user.id)
+          .eq('deleted', false)
+          .in('status', ['active', 'invited'])
+          .maybeSingle();
+
+        if (portalError) {
+          console.error('Error getting portal user company:', portalError);
+          throw new Error('Unable to determine company. Please ensure you are logged in as a portal user.');
+        }
+
+        if (!portalUser?.company_id) {
+          throw new Error('company_id is required. Unable to determine your company. Please contact support.');
+        }
+
+        finalCompanyId = portalUser.company_id;
+        if (import.meta.env.DEV) {
+          console.log('[useCreateQuote] Auto-detected company_id from portal user:', finalCompanyId);
+        }
+      }
+
       const { data, error } = await supabase
         .from('Quotes')
         .insert({
           ...quoteData,
           organization_id: activeOrganizationId,
+          company_id: finalCompanyId, // Auto-obtained from portal user if not provided
         })
         .select()
         .single();

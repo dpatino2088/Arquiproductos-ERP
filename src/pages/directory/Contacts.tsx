@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
+import { supabase } from '../../lib/supabase/client';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useContacts, useDeleteContact } from '../../hooks/useDirectory';
-import { useOrganizationContext } from '../../context/OrganizationContext';
-import { supabase } from '../../lib/supabase/client';
+import { useDirectoryContacts } from '../../hooks/useDirectoryContacts';
+import { useDeleteContact } from '../../hooks/useDirectory';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
@@ -109,16 +110,20 @@ const formatContactTypeLabel = (contactType: string) => {
 };
 
 export default function Contacts() {
-  // Debug log to confirm component is rendering
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log('✅ Contacts component is rendering');
-    }
-  }, []);
-
+  // ✅ ALL HOOKS MUST BE CALLED FIRST (before any conditional returns)
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  
+  // ✅ Hook siempre se llama, pero puede estar deshabilitado
+  const { contacts, isLoading: contactsLoading, error: contactsError, refetch } = useDirectoryContacts({
+    organizationId: activeOrganizationId ?? null,
+    enabled: !!activeOrganizationId,
+  });
+  
+  const { deleteContact, isDeleting } = useDeleteContact();
+  
+  // State hooks
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -138,12 +143,21 @@ export default function Contacts() {
   const [statusSearchTerm, setStatusSearchTerm] = useState('');
   const [contactTypeSearchTerm, setContactTypeSearchTerm] = useState('');
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
+  
+  // Mapear DirectoryContact a ContactItem para compatibilidad con UI existente
+  const [contactsData, setContactsData] = useState<ContactItem[]>([]);
+
+  // Effect hooks
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('✅ Contacts component is rendering');
+    }
+  }, []);
 
   useEffect(() => {
     registerSubmodules('Directory', [
       { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
       { id: 'customers', label: 'Customers', href: '/directory/customers' },
-      { id: 'vendors', label: 'Vendors', href: '/directory/vendors' },
     ]);
   }, [registerSubmodules]);
 
@@ -170,33 +184,114 @@ export default function Contacts() {
     };
   }, []);
   
-  // Prevent hook execution without org
-  if (!orgLoading && !activeOrganizationId) {
+  // Mapear contacts a ContactItem
+  useEffect(() => {
+    // Mapear contactos base (ya vienen con columnas explícitas del hook)
+    const mapped = contacts.map(c => ({
+      id: c.id,
+      firstName: c.contact_name || '',
+      lastName: '',
+      email: c.contact_email || '',
+      phone: c.contact_primary_phone || '', // Solo mostrar contact_primary_phone para vista más limpia
+      company: '', // Se llenará después buscando Customers que tengan este Contact como primary_contact_id
+      category: 'Contact',
+      status: c.deleted ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
+      location: c.contact_city ? `${c.contact_city}${c.contact_country ? `, ${c.contact_country}` : ''}` : '',
+      dateAdded: (c.created_at ? new Date(c.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]) as string,
+      contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer', // Map contact_type to UI contactType
+      customer_id: c.customer_id || null,
+      primary_phone: c.contact_primary_phone || '',
+      cell_phone: c.contact_cell_phone || '',
+      contact_type: c.contact_type, // Guardar el tipo real para mostrar correctamente
+      contact_city: c.contact_city || '',
+      contact_country: c.contact_country || '',
+    }));
+    
+    // Buscar Customers que tengan estos Contacts como Primary Contact (primary_contact_id)
+    const contactIds = mapped.map(c => c.id);
+    if (contactIds.length > 0 && activeOrganizationId) {
+      (async () => {
+        try {
+          const { data: customersData, error } = await supabase
+            .from('DirectoryCustomers')
+            .select('id, customer_name, primary_contact_id')
+            .in('primary_contact_id', contactIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+
+          if (error) throw error;
+
+          if (customersData) {
+            // Crear un mapa: contact_id -> customer_name
+            const contactToCustomerMap = new Map<string, string>();
+            customersData.forEach(customer => {
+              if (customer.primary_contact_id && customer.customer_name) {
+                contactToCustomerMap.set(customer.primary_contact_id, customer.customer_name);
+              }
+            });
+            
+            // Actualizar company names en copia
+            const updated = mapped.map(c => {
+              const customerName = contactToCustomerMap.get(c.id);
+              return { ...c, company: customerName || '' };
+            });
+            setContactsData(updated);
+          } else {
+            setContactsData(mapped);
+          }
+        } catch (err: any) {
+          console.error('[Contacts] Error loading customer names (primary contacts):', err);
+          setContactsData(mapped);
+        }
+      })();
+    } else {
+      setContactsData(mapped);
+    }
+  }, [contacts, activeOrganizationId]);
+  
+  // Reset to first page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  // ✅ NOW we can do conditional returns (hooks already called)
+  if (orgLoading) {
     return (
       <div className="py-6 px-6">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
-          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view contacts.</p>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Loading organizations...</p>
+          </div>
         </div>
       </div>
     );
   }
-  
-  // Get contacts from Supabase
-  const { data: contactsData, isLoading: contactsLoading, isError: contactsIsError, error: contactsError, refetch } = useContacts();
-  const { deleteContact, isDeleting } = useDeleteContact();
 
-  // Debug log
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log('🔍 Contacts component - Data:', {
-        contactsCount: contactsData.length,
-        loading: contactsLoading,
-        error: contactsError,
-        contacts: contactsData
-      });
-    }
-  }, [contactsData, contactsLoading, contactsError]);
+  if (!activeOrganizationId) {
+    return (
+      <div className="py-6 px-6">
+        <div style={{ padding: '24px' }}>
+          <div>No organizations available</div>
+          <div>Selecciona una organización o revisa tu membership.</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (contactsError) {
+    return (
+      <div className="py-6 px-6">
+        <div style={{ padding: '24px' }}>
+          <div>Something went wrong</div>
+          <pre>{String(contactsError)}</pre>
+          <button onClick={refetch}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  const contactsIsError = !!contactsError;
 
   const filteredContacts = useMemo(() => {
     const filtered = contactsData.filter(contact => {
@@ -273,11 +368,6 @@ export default function Contacts() {
   const totalPages = Math.ceil(filteredContacts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedContacts = filteredContacts.slice(startIndex, startIndex + itemsPerPage);
-
-  // Reset to first page when search changes
-  useMemo(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
 
   // Handle sorting
   const handleSort = (field: typeof sortBy) => {
@@ -496,8 +586,8 @@ export default function Contacts() {
     }
   };
 
-  // Show loading state
-  if (orgLoading || contactsLoading) {
+  // Show loading state (only for contacts, orgLoading already handled above)
+  if (contactsLoading) {
     return (
       <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
@@ -505,27 +595,6 @@ export default function Contacts() {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-sm text-gray-600">Loading contacts...</p>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (contactsIsError && contactsError) {
-    return (
-      <div className="py-6 px-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error loading contacts</p>
-          <p className="text-sm text-red-700">{contactsError}</p>
-          {import.meta.env.DEV && (
-            <p className="text-xs text-gray-500 mb-4">Please make sure you have selected a company.</p>
-          )}
-          <button 
-            onClick={() => window.location.reload()} 
-            className="px-4 py-2 bg-primary text-white rounded hover:opacity-90"
-          >
-            Retry
-          </button>
         </div>
       </div>
     );
@@ -904,12 +973,12 @@ export default function Contacts() {
                       onClick={() => handleSort('company')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Customer
+                      Customer Name
                       {sortBy === 'company' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Phone</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Email</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Type</th>
@@ -944,29 +1013,29 @@ export default function Contacts() {
                       key={contact.id} 
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
-                      <td className="py-4 px-6 text-gray-900 text-sm">
-                        <div className="font-medium">{contact.firstName}</div>
+                      <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
+                        <span className="font-medium">{contact.firstName}</span>
                       </td>
                       <td className="py-4 px-6 text-gray-700 text-sm">
-                        {contact.company || 'N/A'}
+                        <div className="whitespace-nowrap">{contact.company || 'N/A'}</div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
                         <div className="flex items-center gap-1">
-                          <Phone className="w-3 h-3 text-gray-400" />
-                          {(contact as any).primary_phone || contact.phone || 'N/A'}
+                          <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                          <span>{(contact as any).primary_phone || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
+                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
                         <div className="flex items-center gap-1">
-                          <Mail className="w-3 h-3 text-gray-400" />
-                          {contact.email || 'N/A'}
+                          <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                          <span className="truncate">{contact.email || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {(contact as any).country || contact.location?.split(', ').pop() || 'N/A'}
+                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
+                        {(contact as any).contact_country || 'N/A'}
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {(contact as any).city || contact.location?.split(', ')[0] || 'N/A'}
+                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
+                        {(contact as any).contact_city || 'N/A'}
                       </td>
                       <td className="py-4 px-6">
                         <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${

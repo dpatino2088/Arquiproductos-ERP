@@ -17,7 +17,7 @@ export default function ResetPassword() {
       // Get the frontend URL for password reset redirect
       // Use /auth/callback to handle the recovery token properly
       const siteUrl = window.location.origin;
-      const redirectTo = `${siteUrl}/auth/callback`;
+      const redirectTo = `${siteUrl}/auth/callback?next=/reset-password`;
 
       // Call Supabase reset password
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(emailOrPhone, {

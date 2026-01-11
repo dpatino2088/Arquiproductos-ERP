@@ -1,85 +1,156 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from '../lib/supabase/client';
-import type { Session } from '@supabase/supabase-js';
+import type { Session } from "@supabase/supabase-js";
 
-/**
- * Central hook for auth session management
- * Prevents multiple calls to supabase.auth.getUser() by maintaining a single session source
- */
-export function useAuthSession() {
+type AuthState = {
+  session: Session | null;
+  userId: string | null;
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`[auth] timeout: ${label} (${ms}ms)`));
+    }, ms);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  }) as Promise<T>;
+}
+
+// Global flags to prevent duplicate link_my_org_invites calls
+let globalLinkingInvitesInProgress = false;
+let globalLinkingInvitesTimeout: ReturnType<typeof setTimeout> | null = null;
+
+export function useAuthSession(timeoutMs: number = 8000): AuthState {
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const listenerSetRef = useRef(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const mountedRef = useRef(true);
+  const inflightRef = useRef<Promise<void> | null>(null);
+
+  const loadSession = useCallback(async () => {
+    // Evita múltiples llamadas paralelas que se pisan y causan loops
+    if (inflightRef.current) return inflightRef.current;
+
+    const run = (async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        if (import.meta.env.DEV) console.log("[auth] loadSession:start");
+
+        const { data, error: sessionErr } = await withTimeout(
+          supabase.auth.getSession(),
+          timeoutMs,
+          "supabase.auth.getSession"
+        );
+
+        if (sessionErr) throw sessionErr;
+
+        // data.session puede ser null y eso es válido (signed out)
+        const nextSession = data?.session ?? null;
+
+        if (!mountedRef.current) return;
+        setSession(nextSession);
+
+        if (import.meta.env.DEV) {
+          console.log("[auth] loadSession:done", {
+            hasSession: !!nextSession,
+            userId: nextSession?.user?.id ?? null,
+          });
+        }
+      } catch (e: any) {
+        if (!mountedRef.current) return;
+
+        const msg =
+          typeof e?.message === "string" ? e.message : "Failed to load session";
+        console.warn("[auth] loadSession:error", msg);
+        setSession(null);
+        setError(msg);
+      } finally {
+        if (!mountedRef.current) return;
+        setLoading(false);
+        inflightRef.current = null;
+        if (import.meta.env.DEV) console.log("[auth] loadSession:finally");
+      }
+    })();
+
+    inflightRef.current = run;
+    return run;
+  }, [timeoutMs]);
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
 
-    // Load initial session
-    const loadSession = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+    // 1) Carga inicial
+    void loadSession();
+
+    // 2) Listener: cuando cambia la auth, actualiza rápido sin bloquear
+    const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!mountedRef.current) return;
+      setSession(nextSession);
+      setLoading(false); // IMPORTANT: no dejes loading true por eventos
+      setError(null);
+      if (import.meta.env.DEV) console.log("[auth] onAuthStateChange", event);
+
+      // Link organization invites when user signs in (only once globally)
+      if (event === 'SIGNED_IN' && nextSession?.user?.id && !globalLinkingInvitesInProgress) {
+        globalLinkingInvitesInProgress = true;
         
-        if (!mounted) return;
+        // Clear any existing timeout
+        if (globalLinkingInvitesTimeout) {
+          clearTimeout(globalLinkingInvitesTimeout);
+        }
         
-        if (error) {
-          if (import.meta.env.DEV) {
-            console.warn('[useAuthSession] Error loading session:', error);
+        (async () => {
+          try {
+            const { data: linkData, error: linkError } = await supabase.rpc('link_my_org_invites');
+            if (linkError) {
+              console.error('[useAuthSession] link_my_org_invites error:', linkError);
+            } else if (linkData && linkData[0]?.linked_count > 0) {
+              console.log('[useAuthSession] ✅ Invites linked:', linkData);
+            }
+          } catch (err) {
+            console.error('[useAuthSession] Error linking invites:', err);
+          } finally {
+            // Reset global flag after 3 seconds to allow retry if needed
+            globalLinkingInvitesTimeout = setTimeout(() => {
+              globalLinkingInvitesInProgress = false;
+              globalLinkingInvitesTimeout = null;
+            }, 3000);
           }
-          setSession(null);
-          setLoading(false);
-          return;
-        }
-
-        setSession(session);
-        setLoading(false);
-      } catch (err) {
-        if (!mounted) return;
-        if (import.meta.env.DEV) {
-          console.error('[useAuthSession] Exception loading session:', err);
-        }
-        setSession(null);
-        setLoading(false);
+        })();
       }
-    };
-
-    loadSession();
-
-    // Set up auth state change listener (only once)
-    if (!listenerSetRef.current) {
-      listenerSetRef.current = true;
       
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
-        if (!mounted) return;
-        
-        if (import.meta.env.DEV) {
-          console.log('[useAuthSession] Auth state changed:', event);
+      // Reset global linking flag on sign out
+      if (event === 'SIGNED_OUT') {
+        globalLinkingInvitesInProgress = false;
+        if (globalLinkingInvitesTimeout) {
+          clearTimeout(globalLinkingInvitesTimeout);
+          globalLinkingInvitesTimeout = null;
         }
-        
-        setSession(newSession);
-        
-        // If session is cleared, set loading to false
-        if (!newSession) {
-          setLoading(false);
-        }
-      });
-
-      return () => {
-        mounted = false;
-        subscription.unsubscribe();
-        listenerSetRef.current = false;
-      };
-    }
+      }
+    });
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
+      sub?.subscription?.unsubscribe();
     };
-  }, []);
+  }, [loadSession]);
 
   return {
     session,
-    user: session?.user ?? null,
     userId: session?.user?.id ?? null,
     loading,
+    error,
+    reload: loadSession,
   };
 }
-

@@ -215,6 +215,7 @@ class EnhancedSupabaseClient {
       getSession: () => self.getSession(),
       getUser: () => self.getUser(),
       signInWithPassword: this.client.auth.signInWithPassword.bind(this.client.auth),
+      signInWithOtp: this.client.auth.signInWithOtp.bind(this.client.auth),
       signUp: this.client.auth.signUp.bind(this.client.auth),
       signOut: this.client.auth.signOut.bind(this.client.auth),
       onAuthStateChange: this.client.auth.onAuthStateChange.bind(this.client.auth),

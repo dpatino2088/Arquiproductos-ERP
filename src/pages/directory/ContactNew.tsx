@@ -3,7 +3,6 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { router } from '../../lib/router';
-import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
 import Input from '../../components/ui/Input';
@@ -12,65 +11,93 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { useDirectoryContacts, CONTACT_TYPE_LABELS, type ContactType } from '../../hooks/useDirectoryContacts';
+import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 
-// Contact type options matching Supabase ENUM directory_contact_type
-const CONTACT_TYPE_OPTIONS = [
-  { value: 'architect', label: 'Architect' },
-  { value: 'interior_designer', label: 'Interior Designer' },
-  { value: 'project_manager', label: 'Project Manager' },
-  { value: 'consultant', label: 'Consultant' },
-  { value: 'dealer', label: 'Dealer' },
-  { value: 'reseller', label: 'Reseller' },
-  { value: 'partner', label: 'Partner' },
-  { value: 'vendor', label: 'Vendor' },
-] as const;
+// Contact type options: UI shows EN, DB stores EN
+const CONTACT_TYPE_OPTIONS: { value: ContactType; label: string }[] = [
+  { value: 'architect', label: CONTACT_TYPE_LABELS.architect },
+  { value: 'interior_designer', label: CONTACT_TYPE_LABELS.interior_designer },
+  { value: 'engineer', label: CONTACT_TYPE_LABELS.engineer },
+  { value: 'project_manager', label: CONTACT_TYPE_LABELS.project_manager },
+  { value: 'end_customer', label: CONTACT_TYPE_LABELS.end_customer },
+];
 
-// Unified schema for contacts
+// Unified schema for contacts (campos explícitos)
 const contactSchema = z.object({
   customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
-  contact_type: z.enum(['architect', 'interior_designer', 'project_manager', 'consultant', 'dealer', 'reseller', 'partner', 'vendor']),
-  title_id: z.string().optional(),
+  contact_type: z.enum(['architect', 'interior_designer', 'engineer', 'project_manager', 'end_customer']),
+  contact_title: z.string().optional(),
   contact_name: z.string().min(1, 'Contact name is required'),
-  identification_number: z.string().optional(),
-  primary_phone: z.string().optional(),
-  cell_phone: z.string().optional(),
-  alt_phone: z.string().optional(),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
-  street_address_line_1: z.string().min(1, 'Street address is required'),
-  street_address_line_2: z.string().optional(),
-  city: z.string().min(1, 'City is required'),
-  state: z.string().min(1, 'State is required'),
-  zip_code: z.string().optional(),
-  country: z.string().min(1, 'Country is required'),
+  contact_id_number: z.string().optional(),
+  contact_primary_phone: z.string().optional(),
+  contact_cell_phone: z.string().optional(),
+  contact_alt_phone: z.string().optional(),
+  contact_email: z.string().email('Invalid email').optional().or(z.literal('')),
+  contact_street_address: z.string().min(1, 'Street address is required'),
+  contact_street_address_2: z.string().optional(),
+  contact_city: z.string().min(1, 'City is required'),
+  contact_state: z.string().min(1, 'State is required'),
+  contact_zip_code: z.string().optional(),
+  contact_country: z.string().min(1, 'Country is required'),
 }).refine((data) => {
   // At least one of primary_phone or email must be provided
-  return !!(data.primary_phone?.trim() || data.email?.trim());
+  return !!(data.contact_primary_phone?.trim() || data.contact_email?.trim());
 }, {
   message: 'Either Primary Phone or Email is required',
-  path: ['primary_phone'],
+  path: ['contact_primary_phone'],
 });
 
 type ContactFormData = z.infer<typeof contactSchema>;
-
-interface Customer {
-  id: string;
-  customer_name: string;
-}
 
 export default function ContactNew() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [contactId, setContactId] = useState<string | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loadingCustomers, setLoadingCustomers] = useState(true);
   const { activeOrganizationId } = useOrganizationContext();
+  const { createContact, updateContact, getContactById } = useDirectoryContacts();
+  const { customers, isLoading: loadingCustomers } = useDirectoryCustomers();
   
-  // Get current user's role and permissions (uses active organization)
-  const { canEditCustomers, isViewer, loading: roleLoading } = useCurrentOrgRole();
+  // Get permissions: use AccessContext for portal users, CurrentOrgRole for internal users
+  const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
+  const { canEditContacts, isViewer, loading: roleLoading, isSuperAdmin, isAdmin, isOwner, role } = useCurrentOrgRole();
+  
+  // Portal users can always edit Directory (both member and member_manager)
+  // Internal users need explicit canEditContacts permission or be superadmin/admin/owner
+  const canEdit = userType === "portal" 
+    ? canEditDirectory 
+    : (isSuperAdmin || isOwner || isAdmin || canEditContacts);
   
   // Determine if form should be read-only
-  const isReadOnly = isViewer || !canEditCustomers;
+  // Portal users: always editable (canEditDirectory is true for both roles)
+  // Internal users: editable if superadmin/admin/owner OR has canEditContacts permission
+  const isReadOnly = accessLoading || roleLoading 
+    ? false // Optimistic: allow while loading
+    : userType === "portal" 
+      ? !canEditDirectory // Portal: read-only only if canEditDirectory is false
+      : (isViewer || !canEdit); // Internal: read-only if viewer or no edit permission
+  
+  // Debug logging
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log('🔍 ContactNew - Permissions:', {
+        userType,
+        canEditDirectory,
+        role,
+        isOwner,
+        isAdmin,
+        isSuperAdmin,
+        canEditContacts,
+        isViewer,
+        canEdit,
+        isReadOnly,
+        roleLoading,
+        accessLoading,
+      });
+    }
+  }, [userType, canEditDirectory, role, isOwner, isAdmin, isSuperAdmin, canEditContacts, isViewer, canEdit, isReadOnly, roleLoading, accessLoading]);
 
   // Get contact ID from URL if in edit mode
   useEffect(() => {
@@ -90,39 +117,6 @@ export default function ContactNew() {
     },
   });
 
-  // Load customers for the current organization
-  useEffect(() => {
-    const loadCustomers = async () => {
-      if (!activeOrganizationId) {
-        setLoadingCustomers(false);
-        return;
-      }
-
-      try {
-        setLoadingCustomers(true);
-        const { data, error } = await supabase
-          .from('DirectoryCustomers')
-          .select('id, customer_name')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .eq('archived', false)
-          .order('customer_name', { ascending: true });
-
-        if (error) {
-          console.error('Error loading customers:', error);
-        } else if (data) {
-          setCustomers(data);
-        }
-      } catch (err) {
-        console.error('Error loading customers:', err);
-      } finally {
-        setLoadingCustomers(false);
-      }
-    };
-
-    loadCustomers();
-  }, [activeOrganizationId]);
-
   // Check for customerId in URL params (when coming from customer context)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -136,40 +130,25 @@ export default function ContactNew() {
   const loadContactData = async (id: string) => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('DirectoryContacts')
-        .select('*')
-        .eq('id', id)
-        .single();
+      const contact = await getContactById(id);
 
-      if (error) {
-        console.error('Error loading contact:', error);
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error loading contact',
-          message: 'Could not load contact data. Please try again.',
-        });
-        router.navigate('/directory/contacts');
-        return;
-      }
-
-      if (data) {
+      if (contact) {
         form.reset({
-          customer_id: data.customer_id || '',
-          contact_type: (data.contact_type || 'architect') as any,
-          title_id: data.title_id || undefined,
-          contact_name: data.contact_name || '',
-          identification_number: data.identification_number || '',
-          primary_phone: data.primary_phone || '',
-          cell_phone: data.cell_phone || '',
-          alt_phone: data.alt_phone || '',
-          email: data.email || '',
-          street_address_line_1: data.street_address_line_1 || '',
-          street_address_line_2: data.street_address_line_2 || '',
-          city: data.city || '',
-          state: data.state || '',
-          zip_code: data.zip_code || '',
-          country: data.country || '',
+          customer_id: contact.customer_id || '',
+          contact_type: (contact.contact_type || 'architect') as ContactType,
+          contact_title: contact.contact_title || undefined,
+          contact_name: contact.contact_name || '',
+          contact_id_number: contact.contact_id_number || '',
+          contact_primary_phone: contact.contact_primary_phone || '',
+          contact_cell_phone: contact.contact_cell_phone || '',
+          contact_alt_phone: contact.contact_alt_phone || '',
+          contact_email: contact.contact_email || '',
+          contact_street_address: contact.contact_street_address || '',
+          contact_street_address_2: contact.contact_street_address_2 || '',
+          contact_city: contact.contact_city || '',
+          contact_state: contact.contact_state || '',
+          contact_zip_code: contact.contact_zip_code || '',
+          contact_country: contact.contact_country || '',
         });
       }
     } catch (err: any) {
@@ -203,11 +182,11 @@ export default function ContactNew() {
       const missingFields: string[] = [];
       
       if (errors.contact_name) missingFields.push('Contact Name');
-      if (errors.street_address_line_1) missingFields.push('Street Address');
-      if (errors.city) missingFields.push('City');
-      if (errors.state) missingFields.push('State');
-      if (errors.country) missingFields.push('Country');
-      if (errors.primary_phone) missingFields.push('Primary Phone or Email');
+      if (errors.contact_street_address) missingFields.push('Street Address');
+      if (errors.contact_city) missingFields.push('City');
+      if (errors.contact_state) missingFields.push('State');
+      if (errors.contact_country) missingFields.push('Country');
+      if (errors.contact_primary_phone) missingFields.push('Primary Phone or Email');
       
       useUIStore.getState().addNotification({
         type: 'error',
@@ -225,57 +204,33 @@ export default function ContactNew() {
     try {
       const formData = form.getValues();
 
-      const contactData = {
-        organization_id: activeOrganizationId,
+      // Payload con SOLO columnas explícitas
+      const contactInput = {
         customer_id: formData.customer_id && formData.customer_id.trim() ? formData.customer_id : null,
-        contact_type: formData.contact_type,
-        title_id: formData.title_id && formData.title_id !== 'not_selected' ? formData.title_id : null,
+        contact_type: formData.contact_type, // Ya viene en EN (architect, interior_designer, etc.)
+        contact_title: formData.contact_title && formData.contact_title !== 'not_selected' ? formData.contact_title : null,
         contact_name: formData.contact_name,
-        identification_number: formData.identification_number || null,
-        primary_phone: formData.primary_phone || null,
-        cell_phone: formData.cell_phone || null,
-        alt_phone: formData.alt_phone || null,
-        email: formData.email || null,
-        street_address_line_1: formData.street_address_line_1,
-        street_address_line_2: formData.street_address_line_2 || null,
-        city: formData.city || null,
-        state: formData.state || null,
-        zip_code: formData.zip_code || null,
-        country: formData.country || null,
-        deleted: false,
-        archived: false,
+        contact_id_number: formData.contact_id_number || null,
+        contact_primary_phone: formData.contact_primary_phone || null,
+        contact_cell_phone: formData.contact_cell_phone || null,
+        contact_alt_phone: formData.contact_alt_phone || null,
+        contact_email: formData.contact_email || null,
+        contact_street_address: formData.contact_street_address,
+        contact_street_address_2: formData.contact_street_address_2 || null,
+        contact_city: formData.contact_city || null,
+        contact_state: formData.contact_state || null,
+        contact_zip_code: formData.contact_zip_code || null,
+        contact_country: formData.contact_country || null,
       };
 
-      let result;
       if (contactId) {
         // Update existing contact
-        result = await supabase
-          .from('DirectoryContacts')
-          .update({
-            ...contactData,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', contactId)
-          .select()
-          .single();
+        await updateContact(contactId, contactInput);
       } else {
         // Create new contact
-        result = await supabase
-          .from('DirectoryContacts')
-          .insert([contactData])
-          .select()
-          .single();
+        await createContact(contactInput);
       }
 
-      const { data, error } = result;
-
-      if (error) {
-        console.error('Error saving contact:', error);
-        throw error;
-      }
-
-      console.log('Contact saved successfully:', data);
-      
       // Show success notification
       useUIStore.getState().addNotification({
         type: 'success',
@@ -296,7 +251,7 @@ export default function ContactNew() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error saving contact',
-        message: 'Something went wrong while saving. Please try again.',
+        message: errorMessage,
       });
     } finally {
       setIsSaving(false);
@@ -357,10 +312,10 @@ export default function ContactNew() {
             {/* Row 1: Identity fields */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-2">
-                <Label htmlFor="title" className="text-xs">Title</Label>
+                <Label htmlFor="contact_title" className="text-xs">Title</Label>
                 <Select
-                  id="title"
-                  {...form.register('title_id')}
+                  id="contact_title"
+                  {...form.register('contact_title')}
                   options={[
                     { value: 'not_selected', label: 'Not Selected' },
                     { value: 'mr', label: 'Mr.' },
@@ -383,10 +338,10 @@ export default function ContactNew() {
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="identification_number" className="text-xs">ID Number</Label>
+                <Label htmlFor="contact_id_number" className="text-xs">ID Number</Label>
                 <Input 
-                  id="identification_number" 
-                  {...form.register('identification_number')}
+                  id="contact_id_number" 
+                  {...form.register('contact_id_number')}
                   className="py-1 text-xs"
                   disabled={isReadOnly}
                 />
@@ -395,11 +350,17 @@ export default function ContactNew() {
                 <Label htmlFor="contact_type" className="text-xs" required>Contact Type</Label>
                 <SelectShadcn
                   value={form.watch('contact_type') || 'architect'}
-                  onValueChange={(value) => form.setValue('contact_type', value as any, { shouldValidate: true })}
+                  onValueChange={(value) => form.setValue('contact_type', value as ContactType, { shouldValidate: true })}
                   disabled={isReadOnly}
                 >
                   <SelectTrigger className={`py-1 text-xs ${form.formState.errors.contact_type ? 'border-red-300 bg-red-50' : ''}`}>
-                    <SelectValue placeholder="Select contact type" />
+                    <SelectValue placeholder="Select contact type">
+                      {(() => {
+                        const selectedValue = form.watch('contact_type') || 'architect';
+                        const selectedOption = CONTACT_TYPE_OPTIONS.find(opt => opt.value === selectedValue);
+                        return selectedOption ? selectedOption.label : 'Not Selected';
+                      })()}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {CONTACT_TYPE_OPTIONS.map((option) => (
@@ -418,44 +379,44 @@ export default function ContactNew() {
             {/* Row 2: Phones and Email */}
             <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="col-span-3">
-                <Label htmlFor="primary_phone" className="text-xs">Primary Phone</Label>
+                <Label htmlFor="contact_primary_phone" className="text-xs">Primary Phone</Label>
                 <Input 
-                  id="primary_phone" 
-                  {...form.register('primary_phone')}
+                  id="contact_primary_phone" 
+                  {...form.register('contact_primary_phone')}
                   type="tel" 
                   className="py-1 text-xs"
-                  error={form.formState.errors.primary_phone?.message}
+                  error={form.formState.errors.contact_primary_phone?.message}
                   disabled={isReadOnly}
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="cell_phone" className="text-xs">Cell Phone</Label>
+                <Label htmlFor="contact_cell_phone" className="text-xs">Cell Phone</Label>
                 <Input 
-                  id="cell_phone" 
-                  {...form.register('cell_phone')}
-                  type="tel" 
-                  className="py-1 text-xs"
-                  disabled={isReadOnly}
-                />
-              </div>
-              <div className="col-span-3">
-                <Label htmlFor="alt_phone" className="text-xs">Alt Phone</Label>
-                <Input 
-                  id="alt_phone" 
-                  {...form.register('alt_phone')}
+                  id="contact_cell_phone" 
+                  {...form.register('contact_cell_phone')}
                   type="tel" 
                   className="py-1 text-xs"
                   disabled={isReadOnly}
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="email" className="text-xs">Email</Label>
+                <Label htmlFor="contact_alt_phone" className="text-xs">Alt Phone</Label>
                 <Input 
-                  id="email" 
-                  {...form.register('email')}
+                  id="contact_alt_phone" 
+                  {...form.register('contact_alt_phone')}
+                  type="tel" 
+                  className="py-1 text-xs"
+                  disabled={isReadOnly}
+                />
+              </div>
+              <div className="col-span-3">
+                <Label htmlFor="contact_email" className="text-xs">Email</Label>
+                <Input 
+                  id="contact_email" 
+                  {...form.register('contact_email')}
                   type="email" 
                   className="py-1 text-xs"
-                  error={form.formState.errors.email?.message || (form.formState.errors.primary_phone && !form.watch('primary_phone') ? 'Either Primary Phone or Email is required' : undefined)}
+                  error={form.formState.errors.contact_email?.message || (form.formState.errors.contact_primary_phone && !form.watch('contact_primary_phone') ? 'Either Primary Phone or Email is required' : undefined)}
                   disabled={isReadOnly}
                 />
               </div>
@@ -506,63 +467,63 @@ export default function ContactNew() {
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Location</h3>
               <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                 <div className="col-span-6">
-                  <Label htmlFor="street_address_line_1" className="text-xs" required>Street Address</Label>
+                  <Label htmlFor="contact_street_address" className="text-xs" required>Street Address</Label>
                   <Input 
-                    id="street_address_line_1" 
-                    {...form.register('street_address_line_1')}
+                    id="contact_street_address" 
+                    {...form.register('contact_street_address')}
                     className="py-1 text-xs"
-                    error={form.formState.errors.street_address_line_1?.message}
+                    error={form.formState.errors.contact_street_address?.message}
                     disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-6">
-                  <Label htmlFor="street_address_line_2" className="text-xs">
+                  <Label htmlFor="contact_street_address_2" className="text-xs">
                     <span className="text-gray-500 text-[10px]">Street Address 2 (optional)</span>
                   </Label>
                   <Input 
-                    id="street_address_line_2" 
-                    {...form.register('street_address_line_2')}
+                    id="contact_street_address_2" 
+                    {...form.register('contact_street_address_2')}
                     className="py-1 text-xs"
                     disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
-                  <Label htmlFor="city" className="text-xs" required>City</Label>
+                  <Label htmlFor="contact_city" className="text-xs" required>City</Label>
                   <Input 
-                    id="city" 
-                    {...form.register('city')}
+                    id="contact_city" 
+                    {...form.register('contact_city')}
                     className="py-1 text-xs"
-                    error={form.formState.errors.city?.message}
+                    error={form.formState.errors.contact_city?.message}
                     disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
-                  <Label htmlFor="state" className="text-xs" required>State</Label>
+                  <Label htmlFor="contact_state" className="text-xs" required>State</Label>
                   <Input 
-                    id="state" 
-                    {...form.register('state')}
+                    id="contact_state" 
+                    {...form.register('contact_state')}
                     className="py-1 text-xs"
-                    error={form.formState.errors.state?.message}
+                    error={form.formState.errors.contact_state?.message}
                     disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
-                  <Label htmlFor="zip_code" className="text-xs">Zip Code</Label>
+                  <Label htmlFor="contact_zip_code" className="text-xs">Zip Code</Label>
                   <Input 
-                    id="zip_code" 
-                    {...form.register('zip_code')}
+                    id="contact_zip_code" 
+                    {...form.register('contact_zip_code')}
                     className="py-1 text-xs"
                     disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
-                  <Label htmlFor="country" className="text-xs" required>Country</Label>
+                  <Label htmlFor="contact_country" className="text-xs" required>Country</Label>
                   <SelectShadcn
-                    value={form.watch('country') || ''}
-                    onValueChange={(value) => form.setValue('country', value, { shouldValidate: true })}
+                    value={form.watch('contact_country') || ''}
+                    onValueChange={(value) => form.setValue('contact_country', value, { shouldValidate: true })}
                     disabled={isReadOnly}
                   >
-                    <SelectTrigger className={`py-1 text-xs ${form.formState.errors.country ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectTrigger className={`py-1 text-xs ${form.formState.errors.contact_country ? 'border-red-300 bg-red-50' : ''}`}>
                       <SelectValue placeholder="Select country" />
                     </SelectTrigger>
                     <SelectContent>
@@ -573,8 +534,8 @@ export default function ContactNew() {
                       ))}
                     </SelectContent>
                   </SelectShadcn>
-                  {form.formState.errors.country && (
-                    <p className="mt-1 text-xs text-red-600">{form.formState.errors.country.message}</p>
+                  {form.formState.errors.contact_country && (
+                    <p className="mt-1 text-xs text-red-600">{form.formState.errors.contact_country.message}</p>
                   )}
                 </div>
               </div>

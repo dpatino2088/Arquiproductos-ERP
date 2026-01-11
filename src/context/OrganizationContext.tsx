@@ -1,22 +1,58 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode, useRef, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react';
 import { supabase } from '../lib/supabase/client';
 import type { OrgRole } from '../types/roles';
 import { useAuthSession } from '../hooks/useAuthSession';
 
+/**
+ * Organization Membership - represents a user's membership in an organization
+ */
+export type OrganizationMembership = {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string | null;
+  role: OrgRole;
+  status: 'invited' | 'active' | 'disabled';
+  deleted: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Organization Summary - organization info with user's role
+ */
 export type OrganizationSummary = {
   id: string;
   name: string;
-  role: OrgRole;
+  role: OrgRole | null; // null for portal users (role comes from useAccessContext.portalRole)
+  status: 'invited' | 'active' | 'disabled';
+  created_at: string;
 };
 
 type OrganizationContextValue = {
+  memberships: OrganizationMembership[];
   organizations: OrganizationSummary[];
-  activeOrganization: OrganizationSummary | null;
+
   activeOrganizationId: string | null;
-  setActiveOrganizationId: (id: string | null) => void;
+  activeOrganization: OrganizationSummary | null;
+  activeMembership: OrganizationMembership | null;
+  role: OrgRole | null;
+
   loading: boolean;
   error: string | null;
   hasOrganizations: boolean;
+
+  setActiveOrganizationId: (id: string | null) => void;
   refresh: () => Promise<void>;
 };
 
@@ -24,281 +60,295 @@ const OrganizationContext = createContext<OrganizationContextValue | undefined>(
 
 const STORAGE_KEY = 'activeOrganizationId';
 
+function normalizeEmail(email: string | null | undefined) {
+  return (email || '').toString().trim().toLowerCase();
+}
+
 export function OrganizationProvider({ children }: { children: ReactNode }) {
-  const { session, userId, loading: sessionLoading } = useAuthSession();
+  const { session, userId, loading: authLoading, error: authError } = useAuthSession();
+
+  const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [activeOrganizationId, setActiveOrganizationIdState] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const lastUserIdRef = useRef<string | null>(null);
 
-  const setActiveOrganizationId = (id: string | null) => {
+  const [orgLoading, setOrgLoading] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
+
+  // evita race conditions
+  const requestSeqRef = useRef(0);
+
+  const sessionEmail = useMemo(() => normalizeEmail(session?.user?.email), [session?.user?.email]);
+
+  const setActiveOrganizationId = useCallback((id: string | null) => {
     setActiveOrganizationIdState(id);
-    if (id) {
-      localStorage.setItem(STORAGE_KEY, id);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  };
+    if (id) localStorage.setItem(STORAGE_KEY, id);
+    else localStorage.removeItem(STORAGE_KEY);
+  }, []);
 
-  const loadOrganizations = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  const loadOrganizations = useCallback(
+    async (currentUserId: string, currentEmail: string) => {
+      const reqId = ++requestSeqRef.current;
 
-      // ✅ FIX: Usar userId de useAuthSession en lugar de getUser()
-      // No llamamos supabase.auth.getUser() aquí
-      if (!userId || !session?.user) {
+      if (import.meta.env.DEV) {
+        console.log('[OrganizationContext] load:start', {
+          reqId,
+          currentUserId,
+          currentEmail,
+        });
+      }
+
+      setOrgLoading(true);
+      setOrgError(null);
+
+      try {
+        // ==============================
+        // STEP 1: INTERNAL OrganizationUsers
+        // ==============================
+        const { data: membershipsData, error: membershipsError } = await supabase
+          .from('OrganizationUsers')
+          .select('id, organization_id, user_id, user_email, user_name, role, status, deleted, created_at, updated_at')
+          .eq('user_id', currentUserId)
+          .eq('deleted', false)
+          .in('status', ['active', 'invited']);
+
+        if (reqId !== requestSeqRef.current) return; // stale
+
+        if (membershipsError && import.meta.env.DEV) {
+          console.error('[OrganizationContext] OrganizationUsers error:', membershipsError);
+        }
+
+        const internalMemberships: OrganizationMembership[] = (membershipsData || []).map((m: any) => ({
+          id: m.id,
+          organization_id: m.organization_id,
+          user_id: m.user_id,
+          user_email: (m.user_email || '').toString().trim(),
+          user_name: m.user_name || null,
+          role: (m.role || 'viewer') as OrgRole,
+          status: (m.status || 'active') as 'invited' | 'active' | 'disabled',
+          deleted: !!m.deleted,
+          created_at: m.created_at || new Date().toISOString(),
+          updated_at: m.updated_at || new Date().toISOString(),
+        }));
+
+        const internalOrgIds = internalMemberships.map((m) => m.organization_id).filter(Boolean);
+
         if (import.meta.env.DEV) {
-          console.warn('⚠️ OrganizationContext - No hay usuario autenticado (session)');
-        }
-        setOrganizations([]);
-        setActiveOrganizationIdState(null);
-        setLoading(false);
-        return;
-      }
-
-      const user = session.user;
-
-      // 2) Query OrganizationUsers joined with Organizations
-      console.log('🔍 OrganizationContext - Buscando organizaciones para user_id:', user.id);
-      
-      // Query OrganizationUsers with nested Organizations data
-      const { data: orgUsers, error: orgError } = await supabase
-        .from('OrganizationUsers')
-        .select(`
-          organization_id,
-          role,
-          organization_id (
-            id,
-            organization_name
-          )
-        `)
-        .eq('user_id', user.id)
-        .eq('deleted', false);
-        // NOTA: No filtramos por is_system aquí porque el usuario necesita ver su organización
-        // El filtro is_system solo se usa para ocultar usuarios en las LISTAS, no para ocultar organizaciones
-      
-      // Always log this to debug the issue
-      console.log('📊 OrganizationContext - Resultado query:', {
-        orgUsersCount: orgUsers?.length || 0,
-        error: orgError,
-        firstOrg: orgUsers?.[0],
-        allOrgs: orgUsers,
-        rawData: JSON.stringify(orgUsers, null, 2)
-      });
-
-      if (orgError) {
-        // Log detailed error information
-        console.error('❌ OrganizationContext - Error en query:', {
-          error: orgError,
-          code: orgError.code,
-          message: orgError.message,
-          details: orgError.details,
-          hint: orgError.hint,
-          user_id: user.id
-        });
-        
-        // Handle expected errors gracefully
-        if (orgError.code === 'PGRST116' || orgError.code === '42P01') {
-          // No rows or table doesn't exist - esto es normal si no hay organizaciones
-          if (import.meta.env.DEV) {
-            console.log('ℹ️ OrganizationContext - No hay organizaciones (esto es normal)');
-          }
-          setOrganizations([]);
-          setActiveOrganizationIdState(null);
-          setLoading(false);
-          return;
-        }
-        
-        // Handle column does not exist error (42703)
-        if (orgError.code === '42703' || orgError.message?.includes('does not exist') || orgError.message?.includes('column')) {
-          console.error('❌ OrganizationContext - Error de columna no encontrada:', {
-            code: orgError.code,
-            message: orgError.message,
-            details: orgError.details,
-            hint: orgError.hint
+          console.log('[OrganizationContext] internal', {
+            count: internalMemberships.length,
+            orgIds: internalOrgIds,
           });
-          setError(`Database schema error: ${orgError.message}. Please check if migrations were applied correctly.`);
-          setOrganizations([]);
-          setActiveOrganizationIdState(null);
-          setLoading(false);
-          return;
         }
-        
-        // Para errores de RLS o permisos, no mostrar error al usuario
-        // Solo loguear en desarrollo
-        if (orgError.code === '42501' || orgError.message?.includes('permission') || orgError.message?.includes('policy')) {
-          if (import.meta.env.DEV) {
-            console.warn('⚠️ OrganizationContext - Error de permisos/RLS:', orgError.message);
-          }
-          setOrganizations([]);
-          setActiveOrganizationIdState(null);
-          setLoading(false);
-          return;
-        }
-        
-        // Para otros errores, mostrar información detallada
-        console.error('❌ OrganizationContext - Error desconocido:', {
-          code: orgError.code,
-          message: orgError.message,
-          details: orgError.details,
-          hint: orgError.hint
-        });
-        setError(orgError.message || 'Error loading organizations');
-        setOrganizations([]);
-        setActiveOrganizationIdState(null);
-        setLoading(false);
-        return;
-      }
 
-      // 3) Map result into OrganizationSummary[]
-      // In Supabase nested select, organization_id becomes an object with the nested data
-      const orgs: OrganizationSummary[] = (orgUsers || [])
-        .map((ou: any) => {
-          // organization_id should be an object with id and organization_name
-          const org = ou.organization_id;
-          
-          if (!org || typeof org !== 'object' || !org.id) {
-            if (import.meta.env.DEV) {
-              console.warn('⚠️ OrganizationContext - organization_id no es un objeto válido:', {
-                raw: ou,
-                organization_id: org,
-                type: typeof org
-              });
-            }
-            return null;
+        // ==============================
+        // STEP 2: If none, PORTAL CompanyPortalUsers
+        // ==============================
+        let orgIdsToLoad: string[] = [];
+        let portalMode = false;
+
+        if (internalOrgIds.length > 0) {
+          portalMode = false;
+          orgIdsToLoad = internalOrgIds;
+          setMemberships(internalMemberships);
+        } else {
+          portalMode = true;
+
+          // buscamos por user_id OR email (case-insensitive)
+          // Nota: usamos `or()` con eq/ilike para soportar ambos caminos.
+          const orParts: string[] = [];
+          if (currentUserId) orParts.push(`user_id.eq.${currentUserId}`);
+          if (currentEmail) orParts.push(`portal_user_email.ilike.${currentEmail}`);
+
+          // ✅ CORRECCIÓN: SOLO usar status, NO portal_user_status
+          const { data: portalRows, error: portalErr } = await supabase
+            .from('CompanyPortalUsers')
+            .select('id, organization_id, portal_user_email, status, deleted, user_id')
+            .eq('deleted', false)
+            .in('status', ['active', 'invited'])
+            .or(orParts.join(','));
+
+          if (reqId !== requestSeqRef.current) return; // stale
+
+          if (portalErr && import.meta.env.DEV) {
+            console.error('[OrganizationContext] CompanyPortalUsers error:', portalErr);
           }
-          
-          return {
-            id: org.id,
-            name: org.organization_name || 'Unnamed Organization',
-            role: (ou.role as OrgRole) || null,
-          };
-        })
-        .filter((org): org is OrganizationSummary => org !== null)
-        .sort((a, b) => {
-          // Sort by role priority, then by name
-          const roleOrder: Record<string, number> = {
-            owner: 0,
-            admin: 1,
-            member: 2,
-            viewer: 3,
-          };
-          const aOrder = roleOrder[a.role || ''] ?? 999;
-          const bOrder = roleOrder[b.role || ''] ?? 999;
-          if (aOrder !== bOrder) return aOrder - bOrder;
+
+          // ✅ Ya filtrado por query, usar directamente
+          const activePortal = portalRows || [];
+
+          const portalOrgIds = activePortal.map((pu: any) => pu.organization_id).filter(Boolean);
+
+          if (import.meta.env.DEV) {
+            console.log('[OrganizationContext] portal', {
+              found: (portalRows || []).length,
+              active: activePortal.length,
+              orgIds: portalOrgIds,
+            });
+          }
+
+          orgIdsToLoad = portalOrgIds;
+          setMemberships([]); // portal users no tienen OrganizationUsers role
+        }
+
+        // ==============================
+        // STEP 3: Load Organizations
+        // ==============================
+        if (!orgIdsToLoad.length) {
+          if (import.meta.env.DEV) console.warn('[OrganizationContext] no orgIds -> empty state');
+          setOrganizations([]);
+          setActiveOrganizationId(null);
+          return;
+        }
+
+        const { data: orgsData, error: orgsError } = await supabase
+          .from('Organizations')
+          .select('id, name, created_at')
+          .in('id', orgIdsToLoad)
+          .eq('deleted', false)
+          .order('created_at', { ascending: false });
+
+        if (reqId !== requestSeqRef.current) return; // stale
+
+        if (orgsError) throw new Error(`Failed to load organizations: ${orgsError.message}`);
+
+        // Build summaries
+        const orgsMap = new Map<string, OrganizationSummary>();
+
+        if (!portalMode) {
+          // internal: role desde membership
+          for (const mem of internalMemberships) {
+            const org = (orgsData || []).find((o: any) => o.id === mem.organization_id);
+            if (!org) continue;
+            orgsMap.set(org.id, {
+              id: org.id,
+              name: org.name || 'Unnamed Organization',
+              role: mem.role,
+              status: mem.status,
+              created_at: org.created_at || mem.created_at,
+            });
+          }
+        } else {
+          // portal: no asignar rol aquí (será null), OrganizationSwitcher usará useAccessContext.portalRole
+          for (const org of orgsData || []) {
+            orgsMap.set(org.id, {
+              id: org.id,
+              name: org.name || 'Unnamed Organization',
+              role: null, // Portal users don't have org roles, useAccessContext will provide portalRole
+              status: 'active',
+              created_at: org.created_at || new Date().toISOString(),
+            });
+          }
+        }
+
+        const roleOrder: Record<string, number> = {
+          superadmin: -1,
+          owner: 0,
+          admin: 1,
+          operator: 2,
+          procurement: 3,
+          finance: 4,
+          member: 5,
+          viewer: 6,
+        };
+
+        const safeOrgs = Array.from(orgsMap.values()).sort((a, b) => {
+          // Handle null roles (portal users) - sort them last
+          const aRole = a.role || '';
+          const bRole = b.role || '';
+          const ao = roleOrder[aRole] ?? 999;
+          const bo = roleOrder[bRole] ?? 999;
+          if (ao !== bo) return ao - bo;
           return a.name.localeCompare(b.name);
         });
 
-      console.log('📋 OrganizationContext - Organizaciones mapeadas:', {
-        count: orgs.length,
-        orgs: orgs,
-        rawOrgUsers: orgUsers
-      });
-      
-      setOrganizations(orgs);
+        setOrganizations(safeOrgs);
 
-      // 4) Determine active organization
-      const storedId = localStorage.getItem(STORAGE_KEY);
-      let newActiveId: string | null = null;
+        // Active org selection
+        const stored = localStorage.getItem(STORAGE_KEY);
+        const storedValid = !!stored && safeOrgs.some((o) => o.id === stored);
 
-      if (storedId && orgs.some((org) => org.id === storedId)) {
-        // Use stored ID if it still exists
-        newActiveId = storedId;
-      } else if (orgs.length > 0 && orgs[0]) {
-        // Use first organization
-        newActiveId = orgs[0].id;
-      }
+        const nextActive = storedValid ? stored! : safeOrgs[0]?.id ?? null;
+        setActiveOrganizationId(nextActive);
 
-      setActiveOrganizationIdState(newActiveId);
-      if (newActiveId) {
-        localStorage.setItem(STORAGE_KEY, newActiveId);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-
-      setLoading(false);
-      } catch (err: any) {
-        // Enhanced error logging
-        const errorDetails = {
-          message: err?.message,
-          name: err?.name,
-          code: err?.code,
-          status: err?.status,
-          stack: err?.stack,
-          cause: err?.cause,
-        };
-        
-        console.error('❌ OrganizationContext - Exception in loadOrganizations:', {
-          error: err,
-          details: errorDetails,
-          timestamp: new Date().toISOString(),
-        });
-        
-        // Check for network/fetch errors
-        if (err?.message?.includes('Failed to fetch') || 
-            err?.message?.includes('ERR_INTERNET_DISCONNECTED') ||
-            err?.name === 'AuthRetryableFetchError' ||
-            err?.name === 'TypeError') {
-          const networkError = 'Network error: Unable to connect to Supabase. Please check your internet connection and Supabase configuration.';
-          console.error('❌ OrganizationContext - Network/Fetch Error in catch:', networkError);
-          setError(networkError);
-        } else {
-          setError(err?.message || 'Error loading organizations');
+        if (import.meta.env.DEV) {
+          console.log('[OrganizationContext] load:done', {
+            reqId,
+            portalMode,
+            orgsCount: safeOrgs.length,
+            nextActive,
+          });
         }
-        
+      } catch (err: any) {
+        if (import.meta.env.DEV) console.error('[OrganizationContext] load:error', err);
+        const msg = err?.message || 'Failed to load organizations';
+        setOrgError(msg);
+        setMemberships([]);
         setOrganizations([]);
-        setActiveOrganizationIdState(null);
-        setLoading(false);
+        setActiveOrganizationId(null);
+      } finally {
+        if (reqId === requestSeqRef.current) {
+          setOrgLoading(false);
+        }
+        if (import.meta.env.DEV) console.log('[OrganizationContext] load:finally', { reqId });
       }
-  }, [session, userId]);
+    },
+    [setActiveOrganizationId]
+  );
 
+  // ✅ Load orgs when auth is ready and user changes
   useEffect(() => {
-    // ✅ FIX: Guard para evitar cargar múltiples veces con el mismo userId
-    if (sessionLoading) {
-      return; // Esperar a que la sesión cargue
-    }
-
-    const currentUserId = userId;
-    if (lastUserIdRef.current === currentUserId) {
-      return; // Ya se cargó para este userId
-    }
-    lastUserIdRef.current = currentUserId || null;
-
-    // ✅ FIX: Depender SOLO de session?.user?.id (no hacer polling)
-    if (session?.user?.id) {
-      loadOrganizations();
-    } else {
-      // No hay sesión, establecer estado vacío sin error
-      if (import.meta.env.DEV) {
-        console.log('ℹ️ OrganizationContext - No hay sesión, no se cargarán organizaciones');
-      }
+    // Si hay error de auth, reflejarlo
+    if (authError) {
+      setOrgError(authError);
+      setOrgLoading(false);
+      setMemberships([]);
       setOrganizations([]);
-      setActiveOrganizationIdState(null);
-      setLoading(false);
+      setActiveOrganizationId(null);
+      return;
     }
-  }, [session?.user?.id, sessionLoading, loadOrganizations]);
 
-  const activeOrganization =
-    organizations.find((org) => org.id === activeOrganizationId) || null;
+    // Mientras authLoading, no hacemos nada (NO timeout fake aquí)
+    if (authLoading) return;
 
+    // Si no hay userId -> limpiar
+    if (!userId) {
+      setOrgError(null);
+      setOrgLoading(false);
+      setMemberships([]);
+      setOrganizations([]);
+      setActiveOrganizationId(null);
+      return;
+    }
+
+    // Ejecutar carga
+    void loadOrganizations(userId, sessionEmail);
+  }, [authLoading, authError, userId, sessionEmail, loadOrganizations]);
+
+  const activeOrganization = organizations.find((org) => org.id === activeOrganizationId) || null;
+  const activeMembership = memberships.find((m) => m.organization_id === activeOrganizationId) || null;
+  const role = activeMembership?.role || null;
+
+  const loading = authLoading || orgLoading;
+  const error = authError || orgError;
   const hasOrganizations = organizations.length > 0;
 
-  const refresh = async () => {
-    await loadOrganizations();
-  };
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    await loadOrganizations(userId, sessionEmail);
+  }, [loadOrganizations, userId, sessionEmail]);
 
   return (
     <OrganizationContext.Provider
       value={{
+        memberships,
         organizations,
-        activeOrganization,
         activeOrganizationId,
-        setActiveOrganizationId,
+        activeOrganization,
+        activeMembership,
+        role,
         loading,
         error,
         hasOrganizations,
+        setActiveOrganizationId,
         refresh,
       }}
     >
@@ -310,9 +360,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 export function useOrganizationContext(): OrganizationContextValue {
   const context = useContext(OrganizationContext);
   if (context === undefined) {
-    throw new Error(
-      'useOrganizationContext must be used within an OrganizationProvider'
-    );
+    throw new Error('useOrganizationContext must be used within an OrganizationProvider');
   }
   return context;
 }

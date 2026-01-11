@@ -10,11 +10,11 @@ import {
   Shield
 } from 'lucide-react';
 import OrganizationUser from './OrganizationUser';
-import OrganizationProfileView from './OrganizationProfileView';
 import OrganizationUserNew from './OrganizationUserNew';
 import OrganizationUserEdit from './OrganizationUserEdit';
 import CostEngineSettings from './CostEngineSettings';
-import CustomerPortalUsers from './CustomerPortalUsers';
+import CompanyPortalUsers from './CompanyPortalUsers';
+import CompaniesSettings from './CompaniesSettings';
 
 export default function CompanySettings() {
   const { isMember, loading: roleLoading } = useCurrentOrgRole();
@@ -66,15 +66,14 @@ export default function CompanySettings() {
   // Settings menu configuration based on our app modules
   const settingsMenu = [
     { id: 'organization-user', label: 'Organization User', icon: Users },
-    { id: 'organization-profile', label: 'Organization Profile', icon: Building },
-    { id: 'customer-portal-users', label: 'Customer Portal Users', icon: Shield },
+    { id: 'companies', label: 'Companies', icon: Building },
+    { id: 'company-portal-users', label: 'Company Portal Users', icon: Shield },
     { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon }
   ];
 
   // Tab configurations for each section
   const sectionTabs: Record<string, Array<{ id: string; label: string }>> = {
-    'organization-user': [],
-    'organization-profile': []
+    'organization-user': []
   };
 
   const currentTabs = sectionTabs[activeSection] || [];
@@ -136,12 +135,12 @@ export default function CompanySettings() {
       return <OrganizationUser />;
     }
 
-    if (activeSection === 'organization-profile') {
-      return <OrganizationProfileView />;
+    if (activeSection === 'company-portal-users') {
+      return <CompanyPortalUsers />;
     }
 
-    if (activeSection === 'customer-portal-users') {
-      return <CustomerPortalUsers />;
+    if (activeSection === 'companies') {
+      return <CompaniesSettings />;
     }
 
     if (activeSection === 'cost-engine') {

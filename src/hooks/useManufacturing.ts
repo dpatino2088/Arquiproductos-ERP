@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useActiveCompany } from './useActiveCompany';
 import { normalizeUUID } from '../utils/uuid';
 
 // ============================================================================
@@ -99,12 +100,22 @@ export interface BomInstanceTotals {
 // HOOK: useManufacturingOrders
 // ============================================================================
 
-export function useManufacturingOrders() {
+/**
+ * Hook para obtener ManufacturingOrders
+ * IMPORTANTE: Filtra por organization_id Y company_id (a través de SalesOrders -> Quotes)
+ * 
+ * @param companyId - Opcional: si se proporciona, filtra solo por ese company_id específico
+ */
+export function useManufacturingOrders(companyId?: string | null) {
   const [manufacturingOrders, setManufacturingOrders] = useState<ManufacturingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+  const { activeCompanyId } = useActiveCompany();
+  
+  // Usar companyId proporcionado o el activo del hook
+  const effectiveCompanyId = companyId ?? activeCompanyId;
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -127,12 +138,56 @@ export function useManufacturingOrders() {
           console.log('🔍 useManufacturingOrders: Fetching ManufacturingOrders for organization:', activeOrganizationId);
         }
 
+        // Si hay company_id, primero obtener SalesOrders de ese company
+        let salesOrderIds: string[] | null = null;
+        if (effectiveCompanyId) {
+          // Obtener SalesOrders que pertenecen a Quotes con este company_id
+          const { data: salesOrdersData } = await supabase
+            .from('SalesOrders')
+            .select('id, quote_id')
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+
+          if (salesOrdersData && salesOrdersData.length > 0) {
+            // Obtener Quotes para estos SalesOrders y filtrar por company_id
+            const quoteIds = salesOrdersData.map(so => so.quote_id).filter((id): id is string => !!id);
+            if (quoteIds.length > 0) {
+              const { data: quotesData } = await supabase
+                .from('Quotes')
+                .select('id')
+                .in('id', quoteIds)
+                .eq('company_id', effectiveCompanyId)
+                .eq('deleted', false);
+
+              if (quotesData) {
+                const validQuoteIds = new Set(quotesData.map(q => q.id));
+                salesOrderIds = salesOrdersData
+                  .filter(so => so.quote_id && validQuoteIds.has(so.quote_id))
+                  .map(so => so.id);
+              }
+            }
+          }
+        }
+
         // First, try without JOINs to see if basic query works
-        const { data: basicData, error: basicError } = await supabase
+        let basicQuery = supabase
           .from('ManufacturingOrders')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
+          .eq('deleted', false);
+
+        // Filtrar por sales_order_id si hay company_id
+        if (salesOrderIds !== null) {
+          if (salesOrderIds.length === 0) {
+            // No hay SalesOrders para este company, retornar vacío
+            setManufacturingOrders([]);
+            setLoading(false);
+            return;
+          }
+          basicQuery = basicQuery.in('sales_order_id', salesOrderIds);
+        }
+
+        const { data: basicData, error: basicError } = await basicQuery
           .order('created_at', { ascending: false });
 
         if (basicError) {
@@ -148,7 +203,7 @@ export function useManufacturingOrders() {
         }
 
         // Now try with JOINs
-        const { data, error: queryError } = await supabase
+        let queryWithJoins = supabase
           .from('ManufacturingOrders')
           .select(`
             *,
@@ -165,7 +220,14 @@ export function useManufacturingOrders() {
             )
           `)
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
+          .eq('deleted', false);
+
+        // Filtrar por sales_order_id si hay company_id
+        if (salesOrderIds !== null && salesOrderIds.length > 0) {
+          queryWithJoins = queryWithJoins.in('sales_order_id', salesOrderIds);
+        }
+
+        const { data, error: queryError } = await queryWithJoins
           .order('created_at', { ascending: false });
 
         if (queryError) {
@@ -180,6 +242,11 @@ export function useManufacturingOrders() {
 
         if (import.meta.env.DEV) {
           console.log('✅ useManufacturingOrders: Found', data?.length || 0, 'ManufacturingOrders (with JOINs)');
+          if (effectiveCompanyId && data && data.length > 0) {
+            console.log('   Filtered by company_id:', effectiveCompanyId);
+          } else if (effectiveCompanyId && (!data || data.length === 0)) {
+            console.warn('   No ManufacturingOrders found for company_id:', effectiveCompanyId);
+          }
         }
 
         setManufacturingOrders(data || []);
@@ -192,7 +259,7 @@ export function useManufacturingOrders() {
     }
 
     fetchManufacturingOrders();
-  }, [activeOrganizationId, refreshTrigger]);
+  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
 
   return { manufacturingOrders, loading, error, refetch };
 }

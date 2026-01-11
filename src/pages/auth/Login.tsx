@@ -31,6 +31,8 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [sendingMagicLink, setSendingMagicLink] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,6 +144,46 @@ export default function Login() {
       setError(errorMessage);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSendMagicLink = async () => {
+    if (!emailOrPhone) {
+      setLoginError('Please enter your email address');
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailOrPhone)) {
+      setLoginError('Please enter a valid email address');
+      return;
+    }
+
+    setSendingMagicLink(true);
+    setLoginError(null);
+    setError(null);
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: emailOrPhone,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+
+      if (error) {
+        console.error('Magic link error:', error);
+        setLoginError(error.message || 'Failed to send magic link');
+        return;
+      }
+
+      setMagicLinkSent(true);
+    } catch (error: any) {
+      console.error('Magic link error:', error);
+      setLoginError(error.message || 'Failed to send magic link');
+    } finally {
+      setSendingMagicLink(false);
     }
   };
 
@@ -274,10 +316,10 @@ export default function Login() {
                   />
                   <span className="ml-2 text-sm text-muted-foreground">Remember me</span>
                 </label>
-                {/* Forgot Password - Available for both login types */}
+                {/* Forgot Password */}
                 <button
                   type="button"
-                  onClick={() => window.location.href = '/reset-password'}
+                  onClick={() => router.navigate('/reset-password', true)}
                   className="text-sm text-primary hover:text-primary/80 transition-colors"
                 >
                   Forgot password?
@@ -287,7 +329,7 @@ export default function Login() {
               {/* Login Button */}
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || magicLinkSent}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               >
@@ -301,6 +343,35 @@ export default function Login() {
                 )}
               </button>
             </form>
+
+            {/* Magic Link Section */}
+            {magicLinkSent ? (
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+                <p className="font-medium">Magic link sent!</p>
+                <p className="text-xs mt-1 text-green-700">Check your email inbox and click the link to sign in.</p>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={handleSendMagicLink}
+                  disabled={sendingMagicLink || !emailOrPhone}
+                  className="w-full flex items-center justify-center gap-2 px-4 h-8 border border-gray-300 rounded text-sm text-foreground hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {sendingMagicLink ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      Send magic link
+                      <Mail className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             {/* Divider and Social Login */}
             <div className="my-6">

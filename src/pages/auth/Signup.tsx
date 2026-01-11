@@ -28,72 +28,13 @@ export default function Signup() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [signupError, setSignupError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
-  // Magic Link detection
-  const [isFromMagicLink, setIsFromMagicLink] = useState(false);
-  const [magicLinkUser, setMagicLinkUser] = useState<any>(null);
-  const [isCheckingSession, setIsCheckingSession] = useState(true);
-
-  // Check if user comes from Magic Link
-  useEffect(() => {
-    const checkMagicLinkSession = async () => {
-      try {
-        // Check URL query params
-        const urlParams = new URLSearchParams(window.location.search);
-        const action = urlParams.get('action');
-        
-        if (action === 'set-password') {
-          // Check for active session (created by Magic Link)
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          
-          if (sessionError) {
-            console.error('❌ Error getting session:', sessionError);
-            setSignupError('Invalid or expired magic link. Please request a new one.');
-            setIsCheckingSession(false);
-            return;
-          }
-          
-          if (session?.user) {
-            console.log('✅ Magic Link session found, user needs to set password');
-            setIsFromMagicLink(true);
-            setMagicLinkUser(session.user);
-            setEmail(session.user.email || '');
-            setName(session.user.user_metadata?.name || '');
-            setPhone(session.user.user_metadata?.phone || '');
-          } else {
-            console.log('❌ No session found for Magic Link');
-            setSignupError('No valid session found. Please request a new magic link.');
-          }
-        }
-      } catch (err: any) {
-        console.error('Error checking Magic Link session:', err);
-        setSignupError('Error validating magic link. Please try again.');
-      } finally {
-        setIsCheckingSession(false);
-      }
-    };
-    
-    checkMagicLinkSession();
-  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (password !== confirmPassword) {
-      setSignupError('Passwords do not match');
-      return;
-    }
-    
-    if (password.length < 6) {
-      setSignupError('Password must be at least 6 characters');
-      return;
-    }
     
     setIsLoading(true);
     setSignupError(null);
@@ -112,92 +53,18 @@ export default function Signup() {
         return;
       }
 
-      // If comes from Magic Link, update password instead of creating new user
-      if (isFromMagicLink && magicLinkUser) {
-        console.log('🔐 Updating password for Magic Link user...');
-        
-        // Update password and user metadata
-        const { data: updateData, error: updateError } = await supabase.auth.updateUser({
-          password: password,
-          data: {
-            name: name || magicLinkUser.user_metadata?.name,
-            phone: phone || magicLinkUser.user_metadata?.phone,
-          },
-        });
 
-        if (updateError) {
-          console.error('Error updating password:', updateError);
-          throw updateError;
-        }
-
-        if (updateData.user) {
-          console.log('✅ Password updated successfully for Magic Link user');
-          
-          // Update profile if exists
-          if (name || phone) {
-            const { error: profileError } = await supabase
-              .from('profiles')
-              .upsert({
-                id: updateData.user.id,
-                name: name || updateData.user.user_metadata?.name,
-                phone: phone || updateData.user.user_metadata?.phone,
-                updated_at: new Date().toISOString(),
-              }, {
-                onConflict: 'id'
-              });
-
-            if (profileError && import.meta.env.DEV) {
-              console.warn('Profile update error (may not exist yet):', profileError);
-            }
-          }
-
-          // Get fresh session
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (session) {
-            // Set auth state
-            setAuth(
-              {
-                id: updateData.user.id,
-                email: updateData.user.email || '',
-                name: name || updateData.user.user_metadata?.name || updateData.user.email || '',
-                role: 'user',
-              },
-              session.access_token
-            );
-
-            // Navigate to dashboard
-            router.navigate('/dashboard', true);
-
-            // Background enrich profile (no await)
-            getUserProfile(updateData.user.id)
-              .then((profile) => {
-                if (!profile) return;
-                useAuthStore.getState().updateUser({
-                  name: profile.name || name || updateData.user?.email || '',
-                  role: (profile.role as 'user' | 'admin') || 'user',
-                  department: profile.department,
-                  position: profile.position,
-                });
-              })
-              .catch(() => {});
-          }
-        }
-        return;
-      }
-
-      // Normal signup flow (not from Magic Link)
-      console.log('Attempting to sign up with Supabase...', {
+      // Normal signup flow: Send Magic Link (not from Magic Link)
+      console.log('Sending magic link...', {
         url: supabaseUrl,
         hasKey: !!supabaseAnonKey,
         email: email
       });
       
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signInWithOtp({
         email: email,
-        password: password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             name: name,
             phone: phone,
@@ -205,7 +72,7 @@ export default function Signup() {
         },
       });
 
-      console.log('Supabase sign up response:', { data, error });
+      console.log('Magic link sent response:', { data, error });
 
       if (error) {
         console.error('Supabase auth error:', error);
@@ -220,36 +87,14 @@ export default function Signup() {
         throw error;
       }
 
-      if (data.user && data.session) {
-        // Set basic user immediately for fast navigation
-        setAuth(
-          {
-            id: data.user.id,
-            email: data.user.email || '',
-            name: name || data.user.email || '',
-            role: 'user',
-          },
-          data.session.access_token
-        );
-
-        // Navigate immediately
-        router.navigate('/dashboard', true);
-
-        // Background enrich profile (no await)
-        getUserProfile(data.user.id)
-          .then((profile) => {
-            if (!profile) return;
-            useAuthStore.getState().updateUser({
-              name: profile.name || name || data.user?.email || '',
-              role: (profile.role as 'user' | 'admin') || 'user',
-              department: profile.department,
-              position: profile.position,
-            });
-          })
-          .catch(() => {});
+      if (data) {
+        // Show success message
+        setSignupError(null);
+        setError(null);
+        setSuccessMessage('✅ Magic link sent!');
       }
     } catch (error: any) {
-      let errorMessage = 'Failed to sign up';
+      let errorMessage = 'Failed to send magic link';
       
       console.error('Signup error:', error);
       
@@ -326,149 +171,82 @@ export default function Signup() {
           <div className="bg-white border border-gray-200 rounded-lg py-6 px-6 shadow-card">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-foreground mb-2">
-                {isFromMagicLink ? 'Complete Your Account Setup' : 'Sign Up'}
+                Sign Up
               </h2>
               <p className="text-muted-foreground">
-                {isFromMagicLink 
-                  ? 'Set your password to finish creating your account'
-                  : 'Create your account to access your company portal'
-                }
+                Enter your email and we'll send you a magic link to set your password
               </p>
               {signupError && (
                 <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
                   {signupError}
                 </div>
               )}
-              {isFromMagicLink && (
-                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-                  <p className="font-medium">Complete your account setup</p>
-                  <p className="text-xs mt-1 text-blue-700">Set your password to finish creating your account</p>
+              {successMessage && (
+                <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+                  <p className="font-medium">{successMessage}</p>
+                  <p className="text-xs mt-1 text-green-700">Check your email inbox and click the link to set your password.</p>
                 </div>
               )}
             </div>
 
-            {isCheckingSession ? (
-              <div className="text-center py-8">
-                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-sm text-muted-foreground">Validating magic link...</p>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Name Input - Only show if NOT from Magic Link, or show as optional if from Magic Link */}
-                {!isFromMagicLink && (
-                  <div>
-                    <label htmlFor="name" className="block text-sm font-medium text-foreground mb-2">
-                      Full Name
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input
-                        id="name"
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                        placeholder="Enter your full name"
-                        required
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Email Input - Show as disabled if from Magic Link */}
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-foreground mb-2">
-                    Email
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => !isFromMagicLink && setEmail(e.target.value)}
-                      disabled={isFromMagicLink}
-                      className={`w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50 ${
-                        isFromMagicLink ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''
-                      }`}
-                      placeholder="Enter your email"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Phone Input - Only show if NOT from Magic Link */}
-                {!isFromMagicLink && (
-                  <div>
-                    <label htmlFor="phone" className="block text-sm font-medium text-foreground mb-2">
-                      Phone Number
-                    </label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input
-                        id="phone"
-                        type="tel"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                        placeholder="Enter your phone number"
-                        required
-                      />
-                    </div>
-                  </div>
-                )}
-
-              {/* Password Input */}
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Name Input */}
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-foreground mb-2">
-                  Password
+                <label htmlFor="name" className="block text-sm font-medium text-foreground mb-2">
+                  Full Name
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-10 pr-10 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                    placeholder="Enter your password"
+                    id="name"
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Enter your full name"
                     required
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
                 </div>
               </div>
 
-              {/* Confirm Password Input */}
+              {/* Email Input */}
               <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground mb-2">
-                  Confirm Password
+                <label htmlFor="email" className="block text-sm font-medium text-foreground mb-2">
+                  Email
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    id="confirmPassword"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full pl-10 pr-10 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                    placeholder="Confirm your password"
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Enter your email"
                     required
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
                 </div>
               </div>
+
+              {/* Phone Input */}
+              <div>
+                <label htmlFor="phone" className="block text-sm font-medium text-foreground mb-2">
+                  Phone Number
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    id="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Enter your phone number"
+                    required
+                  />
+                </div>
+              </div>
+
 
                 {/* Signup Button */}
                 <button
@@ -481,13 +259,12 @@ export default function Signup() {
                     <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <>
-                      {isFromMagicLink ? 'Set Password' : 'Sign Up'}
+                      Send magic link
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
                 </button>
               </form>
-            )}
 
             {/* Divider and Social Login */}
             <div className="my-6">

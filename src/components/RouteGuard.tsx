@@ -5,7 +5,7 @@ import { router } from '../lib/router';
 
 type RouteGuardProps = {
   children: ReactNode;
-  requiredPermission?: 'canManageOrganization' | 'canManageUsers' | 'canCreateQuotes' | 'canViewQuotes' | 'canEditCustomers' | 'canEditContacts' | 'canEditVendors';
+  requiredPermission?: 'canManageOrganization' | 'canManageUsers' | 'canCreateQuotes' | 'canViewQuotes' | 'canEditCustomers' | 'canEditContacts';
   requiredRole?: 'superadmin' | 'owner' | 'admin' | 'member' | 'viewer';
   fallback?: ReactNode;
   redirectTo?: string;
@@ -48,7 +48,6 @@ export default function RouteGuard({
     canViewQuotes,
     canEditCustomers,
     canEditContacts,
-    canEditVendors,
   } = useCurrentOrgRole();
 
   // Mostrar loading mientras se cargan los datos
@@ -145,9 +144,6 @@ export default function RouteGuard({
         break;
       case 'canEditContacts':
         hasPermission = canEditContacts;
-        break;
-      case 'canEditVendors':
-        hasPermission = canEditVendors;
         break;
     }
 

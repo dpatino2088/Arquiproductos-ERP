@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { Check } from 'lucide-react';
+import { getDefaultPermissionsForRole, type OrgRole, isValidOrgRole } from '../../rbac/rolePresets';
 
 interface Permission {
   code: string;
@@ -13,13 +14,17 @@ interface Permission {
 
 interface OrganizationUserPermissionsProps {
   organizationUserId: string;
-  userRole: 'superadmin' | 'admin' | 'member';
+  userRole: 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance' | 'member';
   onSave?: (saved: boolean) => void;
   onCancel?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
   externalSave?: (saveFn: () => Promise<void>) => void;
   onRequestSave?: () => Promise<void>;
   showActions?: boolean; // If false, don't render action buttons (parent handles them)
+}
+
+export interface OrganizationUserPermissionsRef {
+  applyRolePreset: (role: OrgRole, allPermissionCodes?: string[]) => Promise<void>;
 }
 
 // Module order for consistent display
@@ -66,7 +71,10 @@ const groupPermissionsByModule = (permissions: Permission[]): Record<string, Per
     if (!acc[perm.module]) {
       acc[perm.module] = [];
     }
-    acc[perm.module].push(perm);
+    const moduleArray = acc[perm.module];
+    if (moduleArray) {
+      moduleArray.push(perm);
+    }
     return acc;
   }, {} as Record<string, Permission[]>);
 };
@@ -181,7 +189,7 @@ function PermissionModuleCard({
   );
 }
 
-// Default permission sets
+// Helper functions (must be defined before the component uses them)
 const getAllPermissionCodes = (permissions: Permission[]): Set<string> => {
   return new Set(permissions.map(p => p.code));
 };
@@ -206,7 +214,7 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
-export default function OrganizationUserPermissions({ 
+const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, OrganizationUserPermissionsProps>(({ 
   organizationUserId,
   userRole,
   onSave,
@@ -214,8 +222,8 @@ export default function OrganizationUserPermissions({
   onDirtyChange,
   externalSave,
   onRequestSave,
-  showActions = false, // Default: no render buttons (parent handles them)
-}: OrganizationUserPermissionsProps) {
+  showActions = true, // Default: render buttons (parent can override)
+}, ref) => {
   const { activeOrganizationId } = useOrganizationContext();
   const { isSuperAdmin, isAdmin } = useCurrentOrgRole();
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -229,13 +237,34 @@ export default function OrganizationUserPermissions({
   // Only admins can edit permissions
   const canEdit = isSuperAdmin || isAdmin;
 
+  // Apply role preset (exposed via ref)
+  const applyRolePreset = useCallback(async (role: OrgRole, allPermissionCodes?: string[]) => {
+    if (role === 'superadmin') {
+      // Superadmin: use all permissions
+      const allCodes = allPermissionCodes || permissions.map(p => p.code);
+      const preset = new Set(allCodes);
+      setDraftPermissions(preset);
+      setOriginalPermissions(preset);
+    } else {
+      // Get preset for role
+      const preset = getDefaultPermissionsForRole(role, allPermissionCodes);
+      setDraftPermissions(preset);
+      setOriginalPermissions(preset);
+    }
+  }, [permissions]);
+
+  // Expose applyRolePreset via ref
+  useImperativeHandle(ref, () => ({
+    applyRolePreset,
+  }), [applyRolePreset]);
+
   // Calculate effective permissions for rendering
   const effectivePermissions = useMemo(() => {
     if (userRole === 'superadmin') {
       // Superadmin has all permissions implicitly
       return getAllPermissionCodes(permissions);
     }
-    // For admin/member, use draftPermissions
+    // For other roles, use draftPermissions
     return draftPermissions;
   }, [userRole, permissions, draftPermissions]);
 
@@ -394,24 +423,10 @@ export default function OrganizationUserPermissions({
       return;
     }
 
-    // If role changed
+    // If role changed (but don't auto-apply presets here - parent handles it via ref)
     if (previousRoleRef.current !== userRole) {
-      if (userRole === 'superadmin') {
-        // Superadmin: don't touch draftPermissions (they're not used for render anyway)
-        // But we can clear them to avoid confusion
-        setDraftPermissions(new Set());
-        setOriginalPermissions(new Set());
-      } else if (userRole === 'admin') {
-        // Admin: apply default admin permissions
-        const defaultAdmin = getDefaultAdminPermissions(permissions);
-        setDraftPermissions(new Set(defaultAdmin));
-        setOriginalPermissions(new Set(defaultAdmin)); // Reset original to match
-      } else if (userRole === 'member') {
-        // Member: use assignedPermissions from DB (or empty if none)
-        setDraftPermissions(new Set(assignedPermissions));
-        setOriginalPermissions(new Set(assignedPermissions)); // Reset original to match
-      }
-      
+      // Just update the ref, don't auto-apply presets
+      // The parent component will call applyRolePreset if needed
       previousRoleRef.current = userRole;
     }
   }, [userRole, permissions, assignedPermissions]);
@@ -446,14 +461,24 @@ export default function OrganizationUserPermissions({
         // Superadmin: don't use DB permissions, they're implicit
         setOriginalPermissions(new Set());
         setDraftPermissions(new Set());
-      } else if (userRole === 'admin') {
-        // Admin: use default admin permissions or DB permissions (whichever is more permissive)
-        const defaultAdmin = getDefaultAdminPermissions(allPermissions || []);
-        const finalPerms = new Set([...defaultAdmin, ...currentPerms]);
-        setOriginalPermissions(new Set(finalPerms));
-        setDraftPermissions(new Set(finalPerms));
+      } else if (isValidOrgRole(userRole)) {
+        // New roles: use role preset if no DB permissions, otherwise use DB permissions
+        const allCodes = (allPermissions || []).map(p => p.code);
+        const rolePreset = getDefaultPermissionsForRole(userRole, allCodes);
+        
+        if (currentPerms.size > 0) {
+          // User has DB permissions, use those
+          setOriginalPermissions(new Set(currentPerms));
+          setDraftPermissions(new Set(currentPerms));
+        } else {
+          // No DB permissions: initialize originalPermissions as EMPTY (so save will insert preset)
+          // and draftPermissions with preset (so UI shows them)
+          // This ensures that when user saves, all preset permissions get inserted
+          setOriginalPermissions(new Set()); // Empty = no permissions in DB yet
+          setDraftPermissions(rolePreset); // Preset = what we want to save
+        }
       } else {
-        // Member: use only DB permissions
+        // Member or other legacy roles: use only DB permissions
         setOriginalPermissions(new Set(currentPerms));
         setDraftPermissions(new Set(currentPerms));
       }
@@ -521,8 +546,10 @@ export default function OrganizationUserPermissions({
         originalPermissions: Array.from(originalPermissions),
       });
       
-      // Reset state and notify parent
-      setIsDirtyPermissions(false);
+      // Notify parent that there are no changes
+      if (onDirtyChange) {
+        onDirtyChange(false);
+      }
       if (onSave) {
         onSave(finish);
       }
@@ -671,7 +698,7 @@ export default function OrganizationUserPermissions({
     
     // Add any remaining modules not in MODULE_ORDER
     Object.keys(grouped).forEach(module => {
-      if (!sorted[module]) {
+      if (!sorted[module] && grouped[module]) {
         sorted[module] = sortPermissions(grouped[module]);
       }
     });
@@ -693,45 +720,51 @@ export default function OrganizationUserPermissions({
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">Permisos del Usuario</h3>
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">User Permissions</h3>
         {userRole === 'superadmin' ? (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <p className="text-sm text-blue-800 font-medium">
-              Superadmin tiene todos los permisos automáticamente
+              Superadmin has all permissions automatically
             </p>
             <p className="text-xs text-blue-700 mt-1">
-              No es necesario asignar permisos individuales. Todos los permisos están habilitados por defecto.
+              No need to assign individual permissions. All permissions are enabled by default.
             </p>
           </div>
         ) : (
           <p className="text-sm text-gray-600">
             {canEdit 
-              ? 'Selecciona los permisos que este usuario puede tener. Los cambios se guardarán al presionar "Save" o "Save & Finish".'
-              : 'Solo los administradores pueden editar permisos.'}
+              ? 'Select the permissions this user can have. Changes will be saved when you press "Save" or "Save & Finish".'
+              : 'Only administrators can edit permissions.'}
           </p>
         )}
         {isDirtyPermissions && canEdit && userRole !== 'superadmin' && (
           <div className="mt-2 text-xs text-amber-600">
-            Tienes cambios sin guardar
+            You have unsaved changes
           </div>
         )}
       </div>
 
       {/* Grid of Module Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-        {Object.entries(permissionsByModule).map(([module, modulePermissions]) => (
-          <PermissionModuleCard
-            key={module}
-            moduleName={module}
-            permissions={modulePermissions}
-            selectedSet={effectivePermissions}
-            onTogglePermission={handleTogglePermission}
-            disabled={!canEdit || saving || userRole === 'superadmin'}
-          />
-        ))}
-      </div>
+      {Object.keys(permissionsByModule).length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+          {Object.entries(permissionsByModule).map(([module, modulePermissions]) => (
+            <PermissionModuleCard
+              key={module}
+              moduleName={module}
+              permissions={modulePermissions}
+              selectedSet={effectivePermissions}
+              onTogglePermission={handleTogglePermission}
+              disabled={!canEdit || saving || userRole === 'superadmin'}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+          <p className="text-sm text-gray-600">No hay permisos disponibles para mostrar.</p>
+        </div>
+      )}
 
       {/* Action Buttons - Only render if showActions is true (parent handles by default) */}
       {showActions && canEdit && (
@@ -747,7 +780,7 @@ export default function OrganizationUserPermissions({
               disabled={saving}
               className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Cancel
+              Cancelar
             </button>
           )}
           {userRole !== 'superadmin' && (
@@ -760,7 +793,7 @@ export default function OrganizationUserPermissions({
                   console.log('CLICK SAVE BUTTON', { isDirtyPermissions, saving });
                   handleSave(false);
                 }}
-                disabled={saving}
+                disabled={saving || !isDirtyPermissions}
                 className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
                 style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               >
@@ -770,7 +803,7 @@ export default function OrganizationUserPermissions({
                     <span>Guardando...</span>
                   </>
                 ) : (
-                  <span>Save</span>
+                  <span>Guardar</span>
                 )}
               </button>
               <button
@@ -781,9 +814,9 @@ export default function OrganizationUserPermissions({
                   console.log('CLICK SAVE & FINISH BUTTON', { isDirtyPermissions, saving });
                   handleSave(true);
                 }}
-                disabled={saving}
+                disabled={saving || !isDirtyPermissions}
                 className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                style={{ backgroundColor: '#10b981' }}
               >
                 {saving ? (
                   <>
@@ -791,7 +824,7 @@ export default function OrganizationUserPermissions({
                     <span>Guardando...</span>
                   </>
                 ) : (
-                  <span>Save & Finish</span>
+                  <span>Guardar y Finalizar</span>
                 )}
               </button>
             </>
@@ -800,4 +833,8 @@ export default function OrganizationUserPermissions({
       )}
     </div>
   );
-}
+});
+
+OrganizationUserPermissions.displayName = 'OrganizationUserPermissions';
+
+export default OrganizationUserPermissions;

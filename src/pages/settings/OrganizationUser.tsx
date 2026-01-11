@@ -35,16 +35,18 @@ import { useUIStore } from '../../stores/ui-store';
 
 interface OrganizationUser {
   id: string;
-  role: 'superadmin' | 'admin' | 'member';
-  created_at: string;
+  organization_id: string;
   user_id: string | null;
-  status?: string;
-  name?: string;
-  email?: string;
-  user_name?: string; // From DirectoryContacts via contact_id
-  contact_id?: string;
-  customer_id?: string;
-  customer_name?: string;
+  user_email: string;
+  user_name: string | null;
+  role: 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance' | 'member' | 'owner' | 'viewer'; // Include all roles
+  status: 'invited' | 'active' | 'disabled';
+  invited_by_user_id: string | null;
+  invited_at: string | null;
+  accepted_at: string | null;
+  deleted: boolean;
+  created_at: string;
+  updated_at: string | null;
 }
 
 export default function OrganizationUser() {
@@ -59,7 +61,7 @@ export default function OrganizationUser() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  const [sortBy, setSortBy] = useState<'email' | 'role' | 'created_at'>('created_at');
+  const [sortBy, setSortBy] = useState<'name' | 'email' | 'role' | 'status' | 'created_at'>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedRole, setSelectedRole] = useState<string[]>([]);
   const [showRoleDropdown, setShowRoleDropdown] = useState(false);
@@ -121,16 +123,16 @@ export default function OrganizationUser() {
     loadingRef.current = true;
     setIsLoading(true);
     try {
-      // ✅ Use RPC function get_organization_users
+      // ✅ Use RPC function list_organization_users (SECURITY DEFINER, no recursion)
       const { data, error } = await supabase
-        .rpc('get_organization_users', {
+        .rpc('list_organization_users', {
           p_organization_id: activeOrganizationId
         });
 
       if (error) {
         // ✅ Improved error handling
         if (import.meta.env.DEV) {
-          console.error('❌ Error calling get_organization_users RPC:', {
+          console.error('❌ Error calling list_organization_users RPC:', {
             errorCode: error.code,
             errorMessage: error.message,
             errorHint: error.hint,
@@ -138,17 +140,27 @@ export default function OrganizationUser() {
           });
         }
         
-        // Check for specific error types
-        if (error.message?.includes('SET is not allowed')) {
-          console.error('❌ Function should be STABLE (not VOLATILE). Please run migration 446_make_organization_users_hybrid.sql');
-        }
-        
         throw error;
       }
 
       if (data) {
-        // ✅ Data is already transformed by the RPC function
-        setUsers(data);
+        // ✅ Map data to component interface
+        const mappedUsers: OrganizationUser[] = (data || []).map((row: any) => ({
+          id: row.id,
+          organization_id: row.organization_id,
+          user_id: row.user_id,
+          user_email: (row.user_email ?? '').toString().trim(),
+          user_name: row.user_name || null,
+          role: row.role,
+          status: row.status || 'invited',
+          invited_by_user_id: row.invited_by_user_id || null,
+          invited_at: row.invited_at || null,
+          accepted_at: row.accepted_at || null,
+          deleted: row.deleted || false,
+          created_at: row.created_at,
+          updated_at: row.updated_at || null,
+        }));
+        setUsers(mappedUsers);
         setIsLoading(false);
         return;
       }
@@ -175,15 +187,18 @@ export default function OrganizationUser() {
       const searchLower = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || (
         (user.user_name || '').toLowerCase().includes(searchLower) ||
-        (user.email || '').toLowerCase().includes(searchLower) ||
+        (user.user_email || '').toLowerCase().includes(searchLower) ||
         (user.user_id || '').toLowerCase().includes(searchLower) ||
         (user.role || '').toLowerCase().includes(searchLower)
       );
 
+      // Don't filter deleted users - they should not be returned by RPC
+      const isActive = !user.deleted;
+
       // Role filter
       const matchesRole = selectedRole.length === 0 || selectedRole.includes(user.role);
 
-      return matchesSearch && matchesRole;
+      return matchesSearch && matchesRole && isActive;
     });
 
     // Apply sorting
@@ -192,21 +207,29 @@ export default function OrganizationUser() {
       let bValue: string | Date;
 
       switch (sortBy) {
+        case 'name':
+          aValue = (a.user_name || a.user_email || '').toLowerCase();
+          bValue = (b.user_name || b.user_email || '').toLowerCase();
+          break;
         case 'email':
-          aValue = (a.email || '').toLowerCase();
-          bValue = (b.email || '').toLowerCase();
+          aValue = (a.user_email || '').toLowerCase();
+          bValue = (b.user_email || '').toLowerCase();
           break;
         case 'role':
           aValue = (a.role || '').toLowerCase();
           bValue = (b.role || '').toLowerCase();
+          break;
+        case 'status':
+          aValue = (a.status || '').toLowerCase();
+          bValue = (b.status || '').toLowerCase();
           break;
         case 'created_at':
           aValue = a.created_at ? new Date(a.created_at) : new Date(0);
           bValue = b.created_at ? new Date(b.created_at) : new Date(0);
           break;
         default:
-          aValue = (a.email || '').toLowerCase();
-          bValue = (b.email || '').toLowerCase();
+          aValue = (a.user_name || a.user_email || '').toLowerCase();
+          bValue = (b.user_name || b.user_email || '').toLowerCase();
       }
 
       if (sortBy === 'created_at') {
@@ -288,16 +311,45 @@ export default function OrganizationUser() {
   // Get role badge color
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'owner':
+      case 'superadmin':
         return 'bg-purple-100 text-purple-800';
       case 'admin':
         return 'bg-blue-100 text-blue-800';
-      case 'member':
+      case 'operator':
         return 'bg-green-100 text-green-800';
-      case 'viewer':
+      case 'procurement':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'finance':
+        return 'bg-indigo-100 text-indigo-800';
+      case 'member':
+      case 'owner':
         return 'bg-gray-100 text-gray-800';
       default:
         return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  // Get status badge - only show active/disabled in UI
+  const getStatusBadge = (status: string) => {
+    // Map invited/pending to disabled for UI display (but keep original in DB)
+    const displayStatus = status === 'active' ? 'active' : 'disabled';
+    
+    switch (displayStatus) {
+      case 'active':
+        return {
+          label: 'Active',
+          className: 'bg-green-50 text-green-700 border border-green-200'
+        };
+      case 'disabled':
+        return {
+          label: 'Disabled',
+          className: 'bg-gray-50 text-gray-700 border border-gray-200'
+        };
+      default:
+        return {
+          label: displayStatus,
+          className: 'bg-gray-50 text-gray-700 border border-gray-200'
+        };
     }
   };
 
@@ -309,7 +361,7 @@ export default function OrganizationUser() {
     try {
       const { error } = await supabase
         .from('OrganizationUsers')
-        .update({ status: 'authorized', updated_at: new Date().toISOString() })
+        .update({ status: 'active', updated_at: new Date().toISOString() })
         .eq('id', userId)
         .eq('organization_id', activeOrganizationId);
 
@@ -335,7 +387,7 @@ export default function OrganizationUser() {
 
   // Handle Send Invite action
   const handleSendInvite = async (user: OrganizationUser) => {
-    if (!activeOrganizationId || !user.email || !user) return;
+    if (!activeOrganizationId || !user.user_email || !user) return;
     
     setInvitingId(user.id);
     try {
@@ -361,7 +413,7 @@ export default function OrganizationUser() {
           organization_id: activeOrganizationId,
           target: 'org',
           record_id: user.id,
-          email: user.email,
+          email: user.user_email,
           redirect_to: `${window.location.origin}/auth/callback?next=/dashboard`,
         }),
       });
@@ -431,20 +483,16 @@ export default function OrganizationUser() {
         throw new Error('No hay organización seleccionada.');
       }
 
+      // Use RPC function to delete user (bypasses RLS)
       const { data, error } = await supabase
-        .from('OrganizationUsers')
-        .update({ 
-          deleted: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId)
-        .eq('organization_id', activeOrganizationId)
-        .select('id')
-        .maybeSingle();
+        .rpc('delete_organization_user', {
+          p_org_user_id: userId,
+          p_organization_id: activeOrganizationId
+        });
 
       if (error) {
         if (import.meta.env.DEV) {
-          console.error('Error deleting user:', {
+          console.error('Error deleting user via RPC:', {
             error,
             userId,
             organizationId: activeOrganizationId,
@@ -455,16 +503,15 @@ export default function OrganizationUser() {
           });
         }
 
-        // Check for specific error types
-        if (error.code === '42501' || error.message?.includes('permission denied') || error.message?.includes('row-level security')) {
-          throw new Error('No tienes permisos para eliminar usuarios. Verifica las políticas de seguridad (RLS).');
-        }
-
         throw new Error(error.message || 'Error al eliminar el usuario. Por favor, intenta de nuevo.');
       }
 
-      if (!data) {
-        throw new Error('No se pudo eliminar el usuario. El usuario no fue encontrado.');
+      // Check RPC response
+      if (!data || (typeof data === 'object' && 'success' in data && !data.success)) {
+        const errorMsg = (data && typeof data === 'object' && 'error' in data) 
+          ? data.error 
+          : 'No se pudo eliminar el usuario. El usuario no fue encontrado o ya está eliminado.';
+        throw new Error(errorMsg);
       }
 
       useUIStore.getState().addNotification({
@@ -686,7 +733,16 @@ export default function OrganizationUser() {
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-100 border-b border-gray-200">
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('name')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Name
+                      {sortBy === 'name' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('email')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -695,7 +751,7 @@ export default function OrganizationUser() {
                       {sortBy === 'email' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('role')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -704,22 +760,31 @@ export default function OrganizationUser() {
                       {sortBy === 'role' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                    <button
+                      onClick={() => handleSort('status')}
+                      className="flex items-center gap-1 hover:text-gray-700"
+                    >
+                      Status
+                      {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('created_at')}
                       className="flex items-center gap-1 hover:text-gray-700"
                     >
-                      Joined
+                      Date Added
                       {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-12 text-center">
+                    <td colSpan={6} className="py-12 text-center">
                       <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No users found</p>
                       <p className="text-sm text-gray-500">
@@ -736,31 +801,41 @@ export default function OrganizationUser() {
                       onClick={() => router.navigate(`/settings/organization-users/edit/${orgUser.id}`)}
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
                     >
-                      <td className="py-4 px-4 text-gray-900 text-sm">
+                      <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
                             <User className="w-4 h-4 text-gray-600" />
                           </div>
-                          <div>
-                            <div className="font-medium">{orgUser.email || orgUser.user_id.substring(0, 8) + '...'}</div>
-                            {orgUser.user_name && orgUser.email && (
-                              <div className="text-xs text-gray-500">{orgUser.user_name}</div>
-                            )}
-                          </div>
+                          <span className="font-medium text-gray-900 truncate">
+                            {orgUser.user_name || 'No name'}
+                          </span>
                         </div>
                       </td>
-                      <td className="py-4 px-4">
+                      <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
+                        {orgUser.user_email || '-'}
+                      </td>
+                      <td className="py-4 px-6 whitespace-nowrap">
                         <span className={`text-xs font-medium px-2 py-1 rounded capitalize ${getRoleBadgeColor(orgUser.role)}`}>
                           {orgUser.role}
                         </span>
                       </td>
-                      <td className="py-4 px-4 text-gray-600 text-sm">
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        {(() => {
+                          const statusBadge = getStatusBadge(orgUser.status);
+                          return (
+                            <span className={`text-xs font-medium px-2 py-1 rounded ${statusBadge.className}`}>
+                              {statusBadge.label}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
                         {new Date(orgUser.created_at).toLocaleDateString()}
                       </td>
-                      <td className="py-4 px-4">
+                      <td className="py-4 px-6">
                         <div className="flex items-center justify-end gap-2">
-                          {/* Authorize button - show if status is not 'authorized' */}
-                          {orgUser.status !== 'authorized' && (
+                          {/* Authorize button - show if status is not 'active' */}
+                          {orgUser.status !== 'active' && orgUser.status !== 'invited' && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -774,8 +849,8 @@ export default function OrganizationUser() {
                             </button>
                           )}
                           
-                          {/* Send Invite button - show if user_id is NULL and status is 'authorized' */}
-                          {!orgUser.user_id && orgUser.status === 'authorized' && orgUser.email && (
+                          {/* Send Invite button - show if user_id is NULL and status is 'active' */}
+                          {!orgUser.user_id && orgUser.status === 'active' && orgUser.user_email && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -803,7 +878,7 @@ export default function OrganizationUser() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteUser(orgUser.id, orgUser.email);
+                                handleDeleteUser(orgUser.id, orgUser.user_email);
                               }}
                               disabled={deletingUserId === orgUser.id}
                               className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -855,15 +930,26 @@ export default function OrganizationUser() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors truncate">
-                        {orgUser.user_name || orgUser.email || orgUser.user_id.substring(0, 8) + '...'}
+                        {orgUser.user_name || orgUser.user_email || orgUser.user_id?.substring(0, 8) + '...' || 'No name'}
                       </h3>
-                      {orgUser.user_name && orgUser.email && (
-                        <p className="text-xs text-gray-500 truncate">{orgUser.email}</p>
+                      {orgUser.user_name && orgUser.user_email && (
+                        <p className="text-xs text-gray-500 truncate">{orgUser.user_email}</p>
                       )}
-                      <div className="mt-1">
+                      {!orgUser.user_name && orgUser.user_email && (
+                        <p className="text-xs text-gray-400 truncate italic">No name</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
                         <span className={`text-xs font-medium px-2 py-1 rounded capitalize ${getRoleBadgeColor(orgUser.role)}`}>
                           {orgUser.role}
                         </span>
+                        {(() => {
+                          const statusBadge = getStatusBadge(orgUser.status);
+                          return (
+                            <span className={`text-xs font-medium px-2 py-1 rounded ${statusBadge.className}`}>
+                              {statusBadge.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -873,8 +959,8 @@ export default function OrganizationUser() {
                           router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
                         }}
                         className="text-gray-400 hover:text-primary transition-colors"
-                        aria-label={`Edit ${orgUser.email}`}
-                        title={`Edit ${orgUser.email}`}
+                        aria-label={`Edit ${orgUser.user_name || orgUser.user_email || 'user'}`}
+                        title={`Edit ${orgUser.user_name || orgUser.user_email || 'user'}`}
                       >
                         <Edit className="w-4 h-4" />
                       </button>
@@ -882,12 +968,12 @@ export default function OrganizationUser() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeleteUser(orgUser.id, orgUser.email);
+                            handleDeleteUser(orgUser.id, orgUser.user_email);
                           }}
                           disabled={deletingUserId === orgUser.id}
                           className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          aria-label={`Delete ${orgUser.email}`}
-                          title={`Delete ${orgUser.email}`}
+                          aria-label={`Delete ${orgUser.user_name || orgUser.user_email || 'user'}`}
+                          title={`Delete ${orgUser.user_name || orgUser.user_email || 'user'}`}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -897,10 +983,10 @@ export default function OrganizationUser() {
 
                   {/* User Info */}
                   <div className="space-y-2">
-                    {orgUser.email && (
+                    {orgUser.user_email && (
                       <div className="flex items-center gap-2 text-xs text-gray-600">
                         <Mail className="w-3 h-3 flex-shrink-0" />
-                        <span className="truncate">{orgUser.email}</span>
+                        <span className="truncate">{orgUser.user_email}</span>
                       </div>
                     )}
                     <div className="flex items-center gap-2 text-xs text-gray-600">

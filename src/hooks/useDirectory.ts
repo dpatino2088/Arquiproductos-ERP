@@ -27,10 +27,10 @@ export function useContacts() {
         setLoading(true);
         setError(null);
 
-        // Query simplificada: solo campos básicos
+        // Query: usar columnas EXPLÍCITAS con fallback a genéricas (transición)
         const { data: contactsData, error: contactsError } = await supabase
           .from('DirectoryContacts')
-          .select('*')
+          .select('id, organization_id, customer_id, contact_name, name, contact_email, email, contact_phone, phone, deleted, created_at, updated_at')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
@@ -48,11 +48,12 @@ export function useContacts() {
         )];
 
         // Fetch customers in batch if there are any
+        // Usar columnas EXPLÍCITAS con fallback a genéricas para transición
         let customersMap = new Map<string, string>();
         if (customerIds.length > 0) {
           const { data: customersData, error: customersError } = await supabase
             .from('DirectoryCustomers')
-            .select('id, customer_name')
+            .select('id, customer_name, name')  // Leer ambas: explícita y genérica
             .in('id', customerIds)
             .eq('deleted', false);
 
@@ -61,36 +62,44 @@ export function useContacts() {
             // Don't throw, just log - we can still show contacts without customer names
           } else if (customersData) {
             customersMap = new Map(
-              customersData.map((c: any) => [c.id, c.customer_name || ''])
+              customersData.map((c: any) => [
+                c.id, 
+                (c.customer_name || c.name || '').toString().trim()  // Preferir explícita, fallback a genérica
+              ])
             );
           }
         }
 
         // Transform data with manual customer mapping
+        // Schema: DirectoryContacts tiene columnas EXPLÍCITAS (contact_name, contact_email, contact_phone)
+        // Con fallback a genéricas (name, email, phone) para transición
         const transformedContacts = (contactsData || []).map((contact: any) => {
           const customerName = contact.customer_id 
             ? (customersMap.get(contact.customer_id) || '') 
             : '';
 
+          // Usar columnas EXPLÍCITAS con fallback a genéricas
+          const contactName = (contact.contact_name || contact.name || '').toString().trim();
+          const contactEmail = (contact.contact_email || contact.email || '').toString().trim();
+          const contactPhone = (contact.contact_phone || contact.phone || '').toString().trim();
+
           return {
             id: contact.id,
-            firstName: contact.contact_name || '',
+            firstName: contactName,
             lastName: '',
-            email: contact.email || '',
+            email: contactEmail,
             company: customerName,
             customer_id: contact.customer_id || null,
-            category: contact.contact_type 
-              ? contact.contact_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) 
-              : 'Architect',
-            status: contact.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
-            location: [contact.city, contact.state, contact.country].filter(Boolean).join(', ') || 'N/A',
+            category: 'Contact', // Default category
+            status: contact.deleted ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
+            location: '', // No location fields in base schema
             dateAdded: contact.created_at || '',
-            phone: contact.primary_phone || contact.cell_phone || '',
+            phone: contactPhone,
             contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer',
-            primary_phone: contact.primary_phone || '',
-            city: contact.city || '',
-            country: contact.country || '',
-            contact_type: contact.contact_type || 'architect',
+            primary_phone: contactPhone,
+            city: '',
+            country: '',
+            contact_type: 'contact',
             created_at: contact.created_at || '',
           };
         });
@@ -173,9 +182,10 @@ export function useCustomers() {
         let contactsMap: Record<string, string> = {};
         if (primaryContactIds.length > 0) {
           try {
+            // Usar columnas EXPLÍCITAS con fallback a genéricas
             const { data: contactsData, error: contactsError } = await supabase
               .from('DirectoryContacts')
-              .select('id, contact_name')
+              .select('id, contact_name, name')  // Leer ambas: explícita y genérica
               .in('id', primaryContactIds)
               .eq('organization_id', activeOrganizationId)
               .eq('deleted', false);
@@ -184,7 +194,8 @@ export function useCustomers() {
               console.warn('[useCustomers] Error fetching primary contacts:', contactsError);
             } else if (contactsData) {
               contactsMap = contactsData.reduce((acc: Record<string, string>, contact: any) => {
-                acc[contact.id] = contact.contact_name || '';
+                // Preferir explícita, fallback a genérica
+                acc[contact.id] = (contact.contact_name || contact.name || '').toString().trim();
                 return acc;
               }, {});
             }
@@ -197,19 +208,28 @@ export function useCustomers() {
         }
 
         // Transform data to match frontend interface
-        const transformedCustomers = data.map((customer: any) => ({
+        // Schema: DirectoryCustomers tiene columnas EXPLÍCITAS (customer_name, customer_email, customer_phone)
+        // Con fallback a genéricas (name) para transición
+        const transformedCustomers = data.map((customer: any) => {
+          // Usar columnas EXPLÍCITAS con fallback a genéricas
+          const customerName = (customer.customer_name || customer.name || '').toString().trim();
+          const customerEmail = (customer.customer_email || '').toString().trim();
+          const customerPhone = (customer.customer_phone || '').toString().trim();
+
+          return {
           id: customer.id,
-          companyName: customer.customer_name || '',
-          contactName: customer.primary_contact_id ? (contactsMap[customer.primary_contact_id] || '') : '',
-          email: customer.email || '',
-          phone: customer.company_phone || '',
-          customerType: customer.customer_type_name || 'N/A',
-          status: customer.archived ? 'Archived' : 'Active' as 'Active' | 'On Hold' | 'Archived',
-          location: [customer.city, customer.state, customer.country].filter(Boolean).join(', ') || 'N/A',
+            companyName: customerName,
+            contactName: '', // No primary_contact_id in base schema - can be added later if needed
+            email: customerEmail, // Ahora disponible desde customer_email
+            phone: customerPhone, // Ahora disponible desde customer_phone
+            customerType: customer.status || 'Active',
+            status: customer.deleted ? 'Archived' : (customer.status || 'Active') as 'Active' | 'On Hold' | 'Archived',
+            location: '', // No location fields in base schema
           dateAdded: customer.created_at ? new Date(customer.created_at).toISOString().split('T')[0] : '',
           totalRevenue: 0, // Not in schema yet
           deleted: customer.deleted || false,
-        }));
+          };
+        });
 
         if (import.meta.env.DEV) {
           console.log('[useCustomers] Transformed customers:', {
@@ -240,136 +260,6 @@ export function useCustomers() {
     loading,
     isError: !!error,
     refetch,
-  };
-}
-
-// Hook para obtener vendors
-export function useVendors() {
-  const [vendors, setVendors] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { activeOrganizationId } = useOrganizationContext();
-
-  const refetch = useCallback(() => {
-    setRefreshTrigger(prev => prev + 1);
-  }, []);
-
-  useEffect(() => {
-    async function fetchVendors() {
-      if (!activeOrganizationId) {
-        setLoading(false);
-        setVendors([]);
-        setError(null);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        const { data, error: queryError } = await supabase
-          .from('DirectoryVendors')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-
-        if (queryError) {
-          console.error('[useVendors] Error fetching vendors:', queryError);
-          throw queryError;
-        }
-
-        const transformedVendors = (data || []).map((vendor) => ({
-          id: vendor.id,
-          vendorName: vendor.vendor_name || '',
-          vendorId: vendor.identification_number || '',
-          phone: vendor.work_phone || '',
-          email: vendor.email || '',
-          country: vendor.country || '',
-          currency: 'USD',
-          status: vendor.archived ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
-          dateAdded: vendor.created_at ? new Date(vendor.created_at).toISOString().split('T')[0] : '',
-          vendorType: '',
-        }));
-
-        setVendors(transformedVendors);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading vendors';
-        console.error('[useVendors] Error:', errorMessage);
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchVendors();
-  }, [activeOrganizationId, refreshTrigger]);
-
-  return {
-    data: vendors,
-    vendors,
-    error,
-    isLoading: loading,
-    loading,
-    isError: !!error,
-    refetch,
-  };
-}
-
-// Hook para obtener un vendor por ID
-export function useVendorById(options: { id?: string | null; organizationId?: string | null }) {
-  const { id, organizationId } = options;
-  const enabled = Boolean(id && organizationId);
-
-  // Using simple state instead of react-query to avoid dependencies
-  const [vendor, setVendor] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchVendor() {
-      if (!id || !organizationId) {
-        setLoading(false);
-        setVendor(null);
-        setError(null);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        const { data, error: queryError } = await supabase
-          .from('DirectoryVendors')
-          .select('*')
-          .eq('id', id)
-          .eq('organization_id', organizationId)
-          .maybeSingle();
-
-        if (queryError) {
-          console.error('[useVendorById] Error fetching vendor:', queryError);
-          throw queryError;
-        }
-
-        setVendor(data);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading vendor';
-        console.error('[useVendorById] Error:', errorMessage);
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchVendor();
-  }, [id, organizationId]);
-
-  return {
-    vendor,
-    isLoading: loading,
-    isError: !!error,
-    error,
   };
 }
 
@@ -474,45 +364,4 @@ export function useDeleteCustomer() {
   };
 }
 
-// Hook para borrar un vendor (soft delete)
-export function useDeleteVendor() {
-  const { activeOrganizationId } = useOrganizationContext();
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const deleteVendor = async (vendorId: string) => {
-    if (!activeOrganizationId) {
-      throw new Error('No organization selected');
-    }
-
-    setIsDeleting(true);
-    setError(null);
-
-    try {
-      const { error: deleteError } = await supabase
-        .from('DirectoryVendors')
-        .update({ deleted: true })
-        .eq('id', vendorId)
-        .eq('organization_id', activeOrganizationId);
-
-      if (deleteError) {
-        throw deleteError;
-      }
-
-      return { success: true };
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Error deleting vendor';
-      setError(errorMessage);
-      throw err;
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  return {
-    deleteVendor,
-    isDeleting,
-    error,
-  };
-}
 
