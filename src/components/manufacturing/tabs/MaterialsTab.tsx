@@ -479,6 +479,8 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
       <div className="space-y-6">
         {sortedCategories.map((category) => {
           const categoryMaterials = groupedMaterials[category];
+          if (!categoryMaterials || categoryMaterials.length === 0) return null;
+          
           const categoryTotal = categoryMaterials.reduce((sum, m) => sum + m.total_cost_exw, 0);
           const categoryTotalMSRP = categoryMaterials.reduce((sum, m) => sum + (m.total_msrp_sale_out || 0), 0);
 

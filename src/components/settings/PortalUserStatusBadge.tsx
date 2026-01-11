@@ -41,6 +41,8 @@ export function PortalUserStatusBadge({
     ? invitationStatusColors[normalizedInvitationStatus] 
     : null;
 
+  if (!colors) return null;
+
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <span 

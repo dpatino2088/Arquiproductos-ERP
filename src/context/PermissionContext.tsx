@@ -56,9 +56,9 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
         });
       }
 
-      // Fallback: owner, admin, and superadmin have all permissions
-      // We'll load all permissions if role is owner/admin/superadmin
-      if (role === 'owner' || role === 'admin' || role === 'superadmin' || role === 'super_admin') {
+      // Fallback: admin and superadmin have all permissions
+      // We'll load all permissions if role is admin/superadmin
+      if (role === 'admin' || role === 'superadmin') {
         if (import.meta.env.DEV) {
           console.log('🔍 PermissionContext - Role is owner/admin/superadmin, loading all permissions', {
             role,

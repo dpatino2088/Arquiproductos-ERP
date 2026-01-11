@@ -136,6 +136,7 @@ export default function CutListTab({ moId, moStatus }: CutListTabProps) {
         <div className="space-y-6">
           {sortedRoles.map((role) => {
             const roleLines = groupedLines[role];
+            if (!roleLines || roleLines.length === 0) return null;
             
             return (
               <div key={role} className="bg-white border border-gray-200 rounded-lg overflow-hidden">

@@ -157,7 +157,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
 
         // Combinar sin duplicados
         const all = [...(companyData || []), ...(orgData || [])];
-        return Array.from(new Map(all.map(item => [item.id, item])).values());
+        return Array.from(new Map(all.filter((item: any): item is { id: string } => item && typeof item === 'object' && 'id' in item).map(item => [item.id, item])).values());
       } else {
         const { data, error: queryError } = await query.eq('organization_id', orgId);
         

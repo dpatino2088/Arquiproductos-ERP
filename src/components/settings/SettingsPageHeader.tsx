@@ -19,7 +19,7 @@ export function SettingsPageHeader({
   actionDisabled = false,
   contextInfo,
 }: SettingsPageHeaderProps) {
-  const { activeOrganizationId, currentOrganization } = useOrganizationContext();
+  const { activeOrganizationId, activeOrganization } = useOrganizationContext();
 
   return (
     <div className="flex items-center justify-between mb-6">

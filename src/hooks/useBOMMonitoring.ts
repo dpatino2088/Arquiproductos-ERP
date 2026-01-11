@@ -188,6 +188,10 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       const totalCostExw = lines.reduce((sum, l) => sum + l.total_cost_exw, 0);
       const totalMsrpSaleOut = lines.reduce((sum, l) => sum + l.total_msrp_sale_out, 0);
 
+      if (!bomInstances || bomInstances.length === 0) {
+        throw new Error('No BOM instances found');
+      }
+
       const bomInstanceData: BOMInstanceData = {
         bom_instance_id: bomInstanceId,
         organization_id: bomInstances[0].organization_id,
