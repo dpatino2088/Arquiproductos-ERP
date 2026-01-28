@@ -4,7 +4,7 @@
  */
 
 import { UnifiedProductConfig } from '../../product-config/config-contract';
-import { BOMTemplateQuestions } from '../../../hooks/useBOMTemplateQuestions';
+import { BOMTemplateQuestions } from '../../../../hooks/useBOMTemplateQuestions';
 
 interface ConfigDebugPanelProps {
   config: Partial<UnifiedProductConfig>;

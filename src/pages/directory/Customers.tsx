@@ -44,6 +44,8 @@ interface CustomerItem {
   status: 'Active' | 'Inactive' | 'On Hold' | 'Archived';
   location: string;
   dateAdded: string;
+  country?: string;
+  city?: string;
   totalRevenue?: number;
   avatar?: string;
 }
@@ -136,21 +138,21 @@ export default function Customers() {
             const contactMap = new Map(contactsData.map(ct => [ct.id, ct.contact_name || '']));
             const updated = mapped.map(c => {
               if ((c as any).primary_contact_id) {
-                return { ...c, contactName: contactMap.get((c as any).primary_contact_id) || 'N/A' };
+                return { ...c, contactName: contactMap.get((c as any).primary_contact_id) || 'N/A', dateAdded: c.dateAdded ?? '' };
               }
-              return { ...c, contactName: 'N/A' };
+              return { ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' };
             });
-            setCustomersData(updated);
+            setCustomersData(updated as CustomerItem[]);
           } else {
-            setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A' })));
+            setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
           }
         })
-        .catch(err => {
+        .catch((err: unknown) => {
           console.error('[Customers] Error loading contact names:', err);
-          setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A' })));
+          setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
         });
     } else {
-      setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A' })));
+      setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
     }
   }, [customers, activeOrganizationId]);
   
@@ -931,7 +933,7 @@ export default function Customers() {
                           return getCustomerTypeBadge(formatCustomerTypeLabel(type));
                         })()}
                       </td>
-                      <td className="py-4 px-6 text-gray-600 text-sm">{new Date(customer.dateAdded).toLocaleDateString()}</td>
+                      <td className="py-4 px-6 text-gray-600 text-sm">{customer.dateAdded ? new Date(customer.dateAdded).toLocaleDateString() : 'N/A'}</td>
                       <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
                           {canEditCustomersFinal && (

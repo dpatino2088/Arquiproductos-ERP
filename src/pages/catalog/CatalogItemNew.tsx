@@ -965,7 +965,7 @@ export default function CatalogItemNew() {
             <Label className="text-xs">Image</Label>
             <ImageUpload
               currentImageUrl={watch('image_url') || null}
-              onImageUploaded={(url) => setValue('image_url', url || null)}
+              onImageUploaded={(url) => setValue('image_url', url ?? null)}
               disabled={isReadOnly}
             />
           </div>

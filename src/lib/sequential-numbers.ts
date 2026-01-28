@@ -34,7 +34,7 @@ export async function generateNextSequentialNumber(
       if (lastNo) {
         // Extract number from format PREFIX-NNNNNN
         const match = String(lastNo).match(new RegExp(`${prefix}-(\\d+)`));
-        if (match && match[1]) {
+        if (match && match[1] != null) {
           nextNumber = parseInt(match[1], 10) + 1;
         }
       }

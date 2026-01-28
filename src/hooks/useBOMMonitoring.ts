@@ -192,10 +192,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         throw new Error('No BOM instances found');
       }
 
-      const firstBomInstance = bomInstances[0];
-      if (!firstBomInstance) {
-        throw new Error('No BOM instance data available');
-      }
+      const firstBomInstance = bomInstances[0]!;
 
       const bomInstanceData: BOMInstanceData = {
         bom_instance_id: bomInstanceId,

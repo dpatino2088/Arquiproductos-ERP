@@ -41,10 +41,16 @@ function StatusBadge({ status, deleted = false }: StatusBadgeProps) {
       text: 'text-gray-700', 
       border: 'border border-gray-200',
       label: 'Disabled'
+    },
+    archived: { 
+      bg: 'bg-gray-100', 
+      text: 'text-gray-600', 
+      border: 'border border-gray-300',
+      label: 'Archived'
     }
   };
 
-  const colors = statusColors[normalizedStatus] || statusColors.disabled;
+  const colors = statusColors[normalizedStatus] ?? statusColors.disabled;
 
   return (
     <span className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
@@ -615,7 +621,7 @@ export default function CompaniesSettings() {
         variant={dialogState.variant}
         confirmText={dialogState.confirmText}
         cancelText={dialogState.cancelText}
-        loading={dialogState.loading}
+        isLoading={dialogState.loading}
       />
     </div>
   );

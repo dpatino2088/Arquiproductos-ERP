@@ -166,8 +166,9 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         }
 
         // Combinar sin duplicados
-        const all = [...(companyData || []), ...(orgData || [])] as unknown as Array<{ id: string }>;
-        return Array.from(new Map(all.filter((item: any) => item && typeof item === 'object' && 'id' in item && typeof item.id === 'string').map((item: { id: string }) => [item.id, item])).values());
+        const all = [...(companyData || []), ...(orgData || [])] as unknown as Array<{ id?: string }>;
+        const withId = all.filter((item: { id?: unknown }) => item && typeof item === 'object' && typeof item.id === 'string') as Array<{ id: string }>;
+        return Array.from(new Map(withId.map((item) => [item.id, item])).values());
       } else {
         // Query simple: solo por organization_id
         const { data, error: queryError } = await supabase
@@ -225,8 +226,9 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
             throw retryOrgError;
           }
 
-          const all = [...(retryCompanyData || []), ...(retryOrgData || [])] as unknown as Array<{ id: string }>;
-          return Array.from(new Map(all.map(item => [item.id, item])).values());
+          const all = [...(retryCompanyData || []), ...(retryOrgData || [])] as unknown as Array<{ id?: string }>;
+          const withId = all.filter((item): item is { id: string } => item != null && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string');
+          return Array.from(new Map(withId.map((item) => [item.id, item])).values());
         } else {
           // Retry Query simple: solo por organization_id
           const { data: retryData, error: retryError } = await supabase

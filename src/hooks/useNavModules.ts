@@ -52,15 +52,15 @@ export function useNavModules(
         const modulePerms = MODULE_PERMS[moduleKey];
 
         // Check view permission
-        const canView = hasAnyPermission([...modulePerms.view]);
+        const canView = hasAnyPermission(Array.from(modulePerms.view));
         return canView;
       })
       .map(module => {
         const moduleKey = module.key as ModuleKey;
         const modulePerms = MODULE_PERMS[moduleKey];
 
-        const canView = hasAnyPermission([...modulePerms.view]);
-        const canEdit = hasAnyPermission([...modulePerms.edit]);
+        const canView = hasAnyPermission(Array.from(modulePerms.view));
+        const canEdit = hasAnyPermission(Array.from(modulePerms.edit));
 
         return {
           key: moduleKey,
