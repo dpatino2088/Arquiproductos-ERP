@@ -660,7 +660,8 @@ function Layout({ children }: LayoutProps) {
           }`}
           style={{ 
             width: sidebarWidth,
-            ...getSidebarStyles(viewMode)
+            ...getSidebarStyles(viewMode),
+            borderColor: 'var(--primary-brand-hex)'
           }}
           role="navigation"
           aria-label="Main navigation"
