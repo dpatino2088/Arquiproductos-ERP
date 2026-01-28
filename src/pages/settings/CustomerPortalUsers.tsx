@@ -1299,7 +1299,7 @@ export default function CompanyPortalUsers() {
                         {((user as any).portal_user_status ?? user.status ?? '') === 'invited' && ((user as any).portal_user_email ?? user.user_email) && (
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => handleResendInvite(user)}
+                              onClick={() => handleResendInvite(user as unknown as PortalUser)}
                               disabled={invitingId === user.id}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
                               title="Resend invitation email"
@@ -1337,7 +1337,7 @@ export default function CompanyPortalUsers() {
 
                         {/* Edit button */}
                         <button
-                          onClick={() => handleEdit(user)}
+                          onClick={() => handleEdit(user as unknown as PortalUser)}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                           title="Edit user"
                         >
@@ -1346,7 +1346,7 @@ export default function CompanyPortalUsers() {
 
                         {/* Archive button */}
                         <button
-                          onClick={() => handleArchive(user)}
+                          onClick={() => handleArchive(user as unknown as PortalUser)}
                           disabled={archivingId === user.id || user.status === 'disabled'}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
                           title="Archive user"
@@ -1356,7 +1356,7 @@ export default function CompanyPortalUsers() {
 
                         {/* Delete button */}
                         <button
-                          onClick={() => handleDelete(user)}
+                          onClick={() => handleDelete(user as unknown as PortalUser)}
                           disabled={deletingId === user.id}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50"
                           title="Delete user"

@@ -120,7 +120,7 @@ export function useProgressiveTemplateFilter(
           return;
         }
 
-        const templateIds = templates.map(t => t.id);
+        const templateIds = templates.map((t: { id: string }) => t.id);
 
         if (import.meta.env.DEV) {
           console.debug('[Progressive] Base templates loaded:', templateIds.length);
@@ -142,7 +142,7 @@ export function useProgressiveTemplateFilter(
 
         // Build component -> templates map
         const componentToTemplates = new Map<string, Set<string>>();
-        (allComponents || []).forEach(c => {
+        (allComponents || []).forEach((c: { component_item_id?: string; bom_template_id: string; component_role?: string }) => {
           if (c.component_item_id) {
             if (!componentToTemplates.has(c.component_item_id)) {
               componentToTemplates.set(c.component_item_id, new Set());
@@ -244,7 +244,7 @@ export function useProgressiveTemplateFilter(
       }
 
       // Filter by role case-insensitive
-      const filteredComponents = (roleComponents || []).filter(c =>
+      const filteredComponents = (roleComponents || []).filter((c: { component_role: string }) =>
         (c.component_role || '').toLowerCase().trim() === normalizedRole
       );
 
@@ -252,7 +252,7 @@ export function useProgressiveTemplateFilter(
       const componentItemIds = new Set<string>();
       const itemToTemplates = new Map<string, string[]>();
 
-      filteredComponents.forEach(c => {
+      filteredComponents.forEach((c: { component_item_id: string; component_role: string; bom_template_id: string }) => {
         if (c.component_item_id) {
           componentItemIds.add(c.component_item_id);
           if (!itemToTemplates.has(c.component_item_id)) {
@@ -429,7 +429,7 @@ export function useBOMTemplateOptionsSimple(
             return;
           }
 
-          templateIds = templates.map(t => t.id);
+          templateIds = templates.map((t: { id: string }) => t.id);
         }
 
         if (templateIds.length === 0) {
@@ -462,7 +462,7 @@ export function useBOMTemplateOptionsSimple(
         }
 
         // Filter by role case-insensitive
-        const components = (allComponents || []).filter(c =>
+        const components = (allComponents || []).filter((c: { component_role: string; component_item_id?: string; bom_template_id: string }) =>
           (c.component_role || '').toLowerCase().trim() === normalizedRole
         );
 
@@ -470,7 +470,7 @@ export function useBOMTemplateOptionsSimple(
         const componentItemIds = new Set<string>();
         const itemToTemplates = new Map<string, Set<string>>();
 
-        components.forEach(c => {
+        components.forEach((c: { component_item_id: string; component_role: string; bom_template_id: string }) => {
           if (c.component_item_id) {
             componentItemIds.add(c.component_item_id);
             if (!itemToTemplates.has(c.component_item_id)) {
@@ -648,7 +648,7 @@ export function useBOMTemplateAllRoleOptions(
             return;
           }
 
-          templateIds = templates.map(t => t.id);
+          templateIds = templates.map((t: { id: string }) => t.id);
         }
 
         if (templateIds.length === 0) {
@@ -675,9 +675,9 @@ export function useBOMTemplateAllRoleOptions(
 
         // Filter and group by role
         const componentIdsByRole = new Map<string, Map<string, Set<string>>>();
-        normalizedRoles.forEach(r => componentIdsByRole.set(r, new Map()));
+        normalizedRoles.forEach((r: string) => componentIdsByRole.set(r, new Map()));
 
-        (allComponents || []).forEach(c => {
+        (allComponents || []).forEach((c: { component_item_id?: string; bom_template_id: string; component_role?: string }) => {
           const compRole = (c.component_role || '').toLowerCase().trim();
           if (normalizedRoles.includes(compRole) && c.component_item_id) {
             const roleMap = componentIdsByRole.get(compRole)!;
@@ -716,7 +716,7 @@ export function useBOMTemplateAllRoleOptions(
 
         // Build item map
         const itemById = new Map<string, any>();
-        (catalogItems || []).forEach(item => {
+        (catalogItems || []).forEach((item: { id: string; sku: string; name: string }) => {
           if (item.sku) {
             itemById.set(item.id, item);
           }

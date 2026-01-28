@@ -387,7 +387,7 @@ export async function createQuoteLineFromRollerConfig(
 
           if (accessories && accessories.length > 0) {
             // Obtener detalles de catalog items y MSRP
-            const accessoryIds = accessories.map(acc => acc.catalog_item_id).filter(Boolean);
+            const accessoryIds = accessories.map((acc: { catalog_item_id: string }) => acc.catalog_item_id).filter(Boolean);
             if (accessoryIds.length > 0) {
               const { data: catalogItems } = await supabase
                 .from('CatalogItems')
@@ -404,15 +404,15 @@ export async function createQuoteLineFromRollerConfig(
 
               // Crear mapa de MSRP
               const msrpMap = new Map<string, number>();
-              msrpData?.forEach(msrp => {
+              msrpData?.forEach((msrp: { catalog_item_id: string; msrp_sale_out: number | null }) => {
                 if (msrp.catalog_item_id && msrp.msrp_sale_out != null) {
                   msrpMap.set(msrp.catalog_item_id, Number(msrp.msrp_sale_out));
                 }
               });
 
               // Insertar líneas de accesorios en BOMInstanceLines
-              const bomLines = accessories.map(accessory => {
-                const catalogItem = catalogItems?.find(ci => ci.id === accessory.catalog_item_id);
+              const bomLines = accessories.map((accessory: { catalog_item_id: string; qty?: number }) => {
+                const catalogItem = catalogItems?.find((ci: { id: string }) => ci.id === accessory.catalog_item_id);
                 if (!catalogItem) return null;
 
                 return {

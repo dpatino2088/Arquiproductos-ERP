@@ -11,7 +11,7 @@ async function waitForSession(maxMs = 4000): Promise<any> {
 
   return await new Promise<any>((resolve) => {
     const started = Date.now();
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event: string, session: { user?: { id: string } } | null) => {
       if (session?.user) {
         sub.subscription.unsubscribe();
         resolve(session);

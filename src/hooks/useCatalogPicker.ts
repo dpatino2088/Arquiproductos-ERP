@@ -129,10 +129,12 @@ export function useCatalogPicker() {
       // Step 6: Combine all data
       // For fabrics: require collection_name and variant_name
       // For non-fabrics: collection_name and variant_name can be NULL
+      type CatalogItemRow = { id: string; sku: string; name?: string; item_name?: string; catalog_name?: string; description?: string; item_type?: string; measure_basis?: string; uom?: string; roll_width_m?: number | null; is_fabric?: boolean; collection_name?: string | null; variant_name?: string | null };
+      type ProductTypeRow = { id: string; code?: string; name?: string };
       const result: CatalogPickerRow[] = cipData
-        .map((row: any) => {
-          const productType = productTypesMap.get(row.product_type_id);
-          const catalogItem = catalogItemsMap.get(row.catalog_item_id);
+        .map((row: { product_type_id: string; catalog_item_id: string }) => {
+          const productType = productTypesMap.get(row.product_type_id) as ProductTypeRow | undefined;
+          const catalogItem = catalogItemsMap.get(row.catalog_item_id) as CatalogItemRow | undefined;
           
           if (!productType || !catalogItem) {
             return null;
@@ -149,10 +151,8 @@ export function useCatalogPicker() {
           // Calculate label based on item type
           let label: string;
           if (isFabric && collectionName && catalogItem.variant_name) {
-            // For fabrics: Collection + Variant
             label = `${collectionName} ${catalogItem.variant_name}`;
           } else {
-            // For non-fabrics: use item_name, fallback to name, description, or sku
             label = catalogItem.item_name || catalogItem.name || catalogItem.description || catalogItem.sku || '';
           }
 
@@ -160,7 +160,7 @@ export function useCatalogPicker() {
             product_type_id: productType.id,
             product_type_code: productType.code || '',
             product_type_name: productType.name || '',
-            collection_id: null as string | null, // No longer used - kept for compatibility
+            collection_id: null as string | null,
             collection_name: collectionName,
             variant_name: catalogItem.variant_name || null,
             catalog_item_id: catalogItem.id,
@@ -176,8 +176,8 @@ export function useCatalogPicker() {
             is_fabric: isFabric,
           };
         })
-        .filter((row): row is CatalogPickerRow => row !== null)
-        .sort((a, b) => {
+        .filter((row: CatalogPickerRow | null): row is CatalogPickerRow => row !== null)
+        .sort((a: CatalogPickerRow, b: CatalogPickerRow) => {
           // Sort by: pt.code, c.name (if fabric), v.variant_name (if fabric), ci.sku
           if (a.product_type_code !== b.product_type_code) {
             return a.product_type_code.localeCompare(b.product_type_code);

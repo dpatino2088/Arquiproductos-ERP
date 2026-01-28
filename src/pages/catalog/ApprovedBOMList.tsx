@@ -476,7 +476,7 @@ export default function ApprovedBOMList() {
             .eq('organization_id', activeOrganizationId);
           
           if (customers) {
-            customersMap = new Map(customers.map(c => [c.id, c.customer_name]));
+            customersMap = new Map(customers.map((c: { id: string; customer_name?: string }) => [c.id, c.customer_name]));
           }
         }
 

@@ -19,19 +19,21 @@ export function computeComputedQty(
   rollWidthM?: number | null,
   fabricPricingMode?: FabricPricingMode | null // Deprecated, not used
 ): number {
-  switch (measureBasis) {
+  // Support legacy values: linear_m (treat as linear), fabric (roll_width_m × height_m)
+  const basis = measureBasis as MeasureBasis | 'linear_m' | 'fabric';
+
+  switch (basis) {
     case 'unit':
       return qty;
 
     case 'linear_m':
-      // For linear items, use width_m if available, otherwise height_m
-      // This covers both cases: tubes (width) and side channels (height)
+    case 'linear':
       if (widthM != null) {
         return qty * widthM;
       } else if (heightM != null) {
         return qty * heightM;
       } else {
-        throw new Error('width_m or height_m is required for linear_m measure basis');
+        throw new Error('width_m or height_m is required for linear measure basis');
       }
 
     case 'area':
@@ -44,13 +46,9 @@ export function computeComputedQty(
       if (widthM == null || heightM == null) {
         throw new Error('width_m and height_m are required for fabric measure basis');
       }
-      
       if (rollWidthM == null || rollWidthM <= 0) {
         throw new Error('roll_width_m is required and must be > 0 for fabric measure basis');
       }
-      
-      // For fabric: cost = roll_width_m × height_m (as per business rules)
-      // Quantity is calculated as: qty × roll_width_m × height_m
       return qty * rollWidthM * heightM;
 
     default:

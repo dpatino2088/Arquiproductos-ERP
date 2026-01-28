@@ -94,7 +94,7 @@ export function useSalesOrders(companyId?: string | null) {
             .eq('deleted', false);
 
           if (quotesData && quotesData.length > 0) {
-            const quoteIds = quotesData.map(q => q.id);
+            const quoteIds = quotesData.map((q: { id: string }) => q.id);
             query = query.in('quote_id', quoteIds);
           } else {
             // No hay Quotes para este company, retornar vacío

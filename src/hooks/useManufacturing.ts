@@ -150,7 +150,7 @@ export function useManufacturingOrders(companyId?: string | null) {
 
           if (salesOrdersData && salesOrdersData.length > 0) {
             // Obtener Quotes para estos SalesOrders y filtrar por company_id
-            const quoteIds = salesOrdersData.map(so => so.quote_id).filter((id): id is string => !!id);
+            const quoteIds = salesOrdersData.map((so: { quote_id?: string }) => so.quote_id).filter((id: string | undefined): id is string => !!id);
             if (quoteIds.length > 0) {
               const { data: quotesData } = await supabase
                 .from('Quotes')
@@ -160,10 +160,10 @@ export function useManufacturingOrders(companyId?: string | null) {
                 .eq('deleted', false);
 
               if (quotesData) {
-                const validQuoteIds = new Set(quotesData.map(q => q.id));
+                const validQuoteIds = new Set(quotesData.map((q: { id: string }) => q.id));
                 salesOrderIds = salesOrdersData
-                  .filter(so => so.quote_id && validQuoteIds.has(so.quote_id))
-                  .map(so => so.id);
+                  .filter((so: { quote_id?: string; id: string }) => so.quote_id && validQuoteIds.has(so.quote_id))
+                  .map((so: { id: string }) => so.id);
               }
             }
           }
@@ -401,7 +401,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
 
         if (solError) throw solError;
 
-        const quoteLineIds = saleOrderLines?.map(sol => sol.quote_line_id).filter(Boolean) || [];
+        const quoteLineIds = saleOrderLines?.map((sol: { quote_line_id: string }) => sol.quote_line_id).filter(Boolean) || [];
 
         if (quoteLineIds.length === 0) {
           setMaterials([]);
@@ -441,7 +441,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           return;
         }
 
-        const bomInstanceIds = bomInstances.map(bi => bi.id);
+        const bomInstanceIds = bomInstances.map((bi: { id: string }) => bi.id);
 
         // Get BOMInstanceLines for these BOMInstances
         // Solo seleccionar columnas que existen en BOMInstanceLines

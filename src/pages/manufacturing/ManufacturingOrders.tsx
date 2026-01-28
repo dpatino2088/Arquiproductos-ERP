@@ -144,8 +144,8 @@ export default function ManufacturingOrders() {
 
     // Sort
     filtered = [...filtered].sort((a, b) => {
-      let aVal: any = sortBy === 'sale_order_no' ? a.saleOrderNo : a[sortBy];
-      let bVal: any = sortBy === 'sale_order_no' ? b.saleOrderNo : b[sortBy];
+      let aVal: any = sortBy === 'sale_order_no' ? a.saleOrderNo : sortBy === 'manufacturing_order_no' ? a.manufacturingOrderNo : (a as unknown as Record<string, unknown>)[sortBy];
+      let bVal: any = sortBy === 'sale_order_no' ? b.saleOrderNo : sortBy === 'manufacturing_order_no' ? b.manufacturingOrderNo : (b as unknown as Record<string, unknown>)[sortBy];
 
       if (sortBy === 'scheduled_start_date') {
         aVal = aVal ? new Date(aVal).getTime() : 0;

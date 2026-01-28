@@ -100,9 +100,9 @@ export default function Quotes() {
       }
 
       // 2. Obtener IDs únicos para enriquecimiento
-      const customerIds = [...new Set(quotesData.map(q => q.customer_id).filter(Boolean))];
-      const contactIds = [...new Set(quotesData.map(q => q.contact_id).filter(Boolean))];
-      const quoteIds = quotesData.map(q => q.id);
+      const customerIds = [...new Set(quotesData.map((q: { customer_id?: string }) => q.customer_id).filter(Boolean))];
+      const contactIds = [...new Set(quotesData.map((q: { contact_id?: string }) => q.contact_id).filter(Boolean))];
+      const quoteIds = quotesData.map((q: { id: string }) => q.id);
 
       // 3. Cargar datos relacionados en paralelo
       const [customersRes, contactsRes, linesRes] = await Promise.all([
@@ -120,24 +120,24 @@ export default function Quotes() {
 
       // 4. Crear mapas para búsqueda rápida
       const customersMap = new Map<string, string>();
-      customersRes.data?.forEach(c => {
+      customersRes.data?.forEach((c: { id: string; customer_name?: string }) => {
         customersMap.set(c.id, c.customer_name || 'Sin nombre');
       });
 
       const contactsMap = new Map<string, string>();
-      contactsRes.data?.forEach(c => {
+      contactsRes.data?.forEach((c: { id: string; first_name?: string; last_name?: string }) => {
         const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre';
         contactsMap.set(c.id, fullName);
       });
 
       const totalsMap = new Map<string, number>();
-      linesRes.data?.forEach(l => {
+      linesRes.data?.forEach((l: { quote_id: string; line_total?: number }) => {
         const current = totalsMap.get(l.quote_id) || 0;
         totalsMap.set(l.quote_id, current + (l.line_total || 0));
       });
 
       // 5. Enriquecer quotes
-      const enrichedQuotes: EnrichedQuote[] = quotesData.map(q => ({
+      const enrichedQuotes: EnrichedQuote[] = quotesData.map((q: { id: string; quote_no?: string; status?: string; customer_id?: string; contact_id?: string; created_at?: string; organization_id?: string; company_id?: string }) => ({
         id: q.id,
         quote_no: q.quote_no || 'N/A',
         status: q.status || 'draft',

@@ -224,7 +224,7 @@ export default function Contacts() {
           if (customersData) {
             // Crear un mapa: contact_id -> customer_name
             const contactToCustomerMap = new Map<string, string>();
-            customersData.forEach(customer => {
+            customersData.forEach((customer: { primary_contact_id?: string; customer_name?: string }) => {
               if (customer.primary_contact_id && customer.customer_name) {
                 contactToCustomerMap.set(customer.primary_contact_id, customer.customer_name);
               }

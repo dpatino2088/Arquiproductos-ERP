@@ -85,7 +85,7 @@ export function useOrderList(companyId?: string | null) {
             .eq('deleted', false);
 
           if (quotesData && quotesData.length > 0) {
-            const quoteIds = quotesData.map(q => q.id);
+            const quoteIds = quotesData.map((q: { id: string }) => q.id);
             // Obtener SalesOrders para estos Quotes
             const { data: salesOrdersData } = await supabase
               .from('SalesOrders')
@@ -95,7 +95,7 @@ export function useOrderList(companyId?: string | null) {
               .eq('deleted', false);
 
             if (salesOrdersData && salesOrdersData.length > 0) {
-              const salesOrderIds = salesOrdersData.map(so => so.id);
+              const salesOrderIds = salesOrdersData.map((so: { id: string }) => so.id);
               query = query.in('sales_order_id', salesOrderIds);
             } else {
               // No hay SalesOrders para este company, retornar vacío

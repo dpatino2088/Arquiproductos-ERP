@@ -264,7 +264,14 @@ export async function createQuoteLineFromConfiguredProduct(
   // ✅ FLUJO: QuoteLine (con bom_template_id) → BOMInstance (con quote_line_id NOT NULL) → Recalcular → Update QuoteLine
   // ✅ GUARDRAIL: Solo crear BOMInstance si tenemos bom_template_id
   let bomInstanceId: string | null = null;
-  let finalPricing: typeof pricing | null = null;
+  let finalPricing: {
+    rollMsrp: number;
+    bomMsrp: number;
+    totalMsrp: number;
+    rollCost: number;
+    bomCost: number;
+    totalCost: number;
+  } | null = null;
   
   if (bom_template_id) {
     // ✅ GUARDRAIL: Mutex para evitar doble creación si operation_type cambia rápido
@@ -387,15 +394,16 @@ export async function createQuoteLineFromConfiguredProduct(
   // ✅ Solo actualizar si tenemos pricing final calculado
   if (finalPricing && quoteLineId) {
     try {
+      const pricing = finalPricing as { rollMsrp: number; bomMsrp: number; totalMsrp: number; rollCost: number; bomCost: number; totalCost: number };
       const { error: updateError } = await supabase
         .from('QuoteLines')
         .update({
-          roll_msrp_snapshot: finalPricing.rollMsrp,
-          bom_msrp_snapshot: finalPricing.bomMsrp,
-          msrp: finalPricing.totalMsrp,
-          roll_cost_snapshot: finalPricing.rollCost,
-          bom_cost_snapshot: finalPricing.bomCost,
-          total_cost: finalPricing.totalCost,
+          roll_msrp_snapshot: pricing.rollMsrp,
+          bom_msrp_snapshot: pricing.bomMsrp,
+          msrp: pricing.totalMsrp,
+          roll_cost_snapshot: pricing.rollCost,
+          bom_cost_snapshot: pricing.bomCost,
+          total_cost: pricing.totalCost,
           pricing_locked: true, // ✅ Bloquear pricing después de actualizar con snapshots finales
           last_priced_at: new Date().toISOString(),
         })

@@ -200,7 +200,7 @@ export default function DealerProfileForm() {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        const companyIds = (orgCompanies || []).map(c => c.id);
+        const companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
 
         let query = supabase
           .from('DirectoryContacts')

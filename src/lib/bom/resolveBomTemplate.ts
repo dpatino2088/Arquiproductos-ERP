@@ -72,7 +72,7 @@ export async function resolveBomTemplate(
       organizationId,
       hardwareColor: normalizedColor,
       templatesFound: allTemplates?.length ?? 0,
-      templateDetails: allTemplates?.map(t => ({ 
+      templateDetails: allTemplates?.map((t: { id: string; code?: string; name?: string }) => ({ 
         id: t.id, 
         code: t.code, 
         name: t.name,
@@ -118,7 +118,7 @@ export async function resolveBomTemplate(
         productTypeId,
         organizationId,
         templatesFound: allTemplates?.length ?? 0,
-        availableTemplateIds: allTemplates?.map(t => t.id) || [],
+        availableTemplateIds: allTemplates?.map((t: { id: string }) => t.id) || [],
       });
     }
     return null;

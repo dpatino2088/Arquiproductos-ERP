@@ -51,13 +51,13 @@ export function useAuthSession(timeoutMs: number = 8000): AuthState {
           supabase.auth.getSession(),
           timeoutMs,
           "supabase.auth.getSession"
-        ) as { data: { session: unknown } | null; error: Error | null };
+        ) as { data: { session: Session | null } | null; error: Error | null };
         const { data, error: sessionErr } = result;
 
         if (sessionErr) throw sessionErr;
 
         // data.session puede ser null y eso es válido (signed out)
-        const nextSession = data?.session ?? null;
+        const nextSession: Session | null = data?.session ?? null;
 
         if (!mountedRef.current) return;
         setSession(nextSession);
@@ -95,7 +95,7 @@ export function useAuthSession(timeoutMs: number = 8000): AuthState {
     void loadSession();
 
     // 2) Listener: cuando cambia la auth, actualiza rápido sin bloquear
-    const { data: sub } = supabase.auth.onAuthStateChange((event: string, nextSession: unknown) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event: string, nextSession: Session | null) => {
       if (!mountedRef.current) return;
       setSession(nextSession);
       setLoading(false); // IMPORTANT: no dejes loading true por eventos

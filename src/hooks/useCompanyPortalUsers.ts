@@ -23,6 +23,13 @@ export interface CompanyPortalUser {
   /** Raw DB columns (when select returns role/status instead of portal_user_*) */
   role?: string | null;
   status?: string | null;
+  /** Optional display fields (from join or PortalUser compatibility) */
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  user_email?: string | null;
+  user_name?: string | null;
+  contact_id?: string | null;
+  contact_name?: string | null;
   legacy?: {
     email?: string;
     status?: string;
@@ -106,9 +113,9 @@ export function useCompanyPortalUsers(companyId?: string | null) {
             .eq('organization_id', orgId)
             .eq('deleted', false);
 
-          let companyIds = (orgCompanies || []).map(c => c.id);
+          let companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
           // Crear un mapa de company_id -> company_name para lookup
-          const companyNameMap = new Map((orgCompanies || []).map(c => [c.id, c.company_name]));
+          const companyNameMap = new Map((orgCompanies || []).map((c: { id: string; company_name?: string }) => [c.id, c.company_name]));
           
           // Si se proporciona filterCompanyId, filtrar solo por ese company
           if (filterCompanyId) {
@@ -239,9 +246,9 @@ export function useCompanyPortalUsers(companyId?: string | null) {
       
       // Warning si hay records sin company_id (solo en DEV)
       if (import.meta.env.DEV && mapped.length > 0) {
-        const withoutCompanyId = mapped.filter(u => !u.company_id);
+        const withoutCompanyId = mapped.filter((u: { company_id?: string }) => !u.company_id);
         if (withoutCompanyId.length > 0) {
-          console.warn('[useCompanyPortalUsers] Found', withoutCompanyId.length, 'portal users without company_id:', withoutCompanyId.map(u => u.id));
+          console.warn('[useCompanyPortalUsers] Found', withoutCompanyId.length, 'portal users without company_id:', withoutCompanyId.map((u: { id: string }) => u.id));
         }
       }
 

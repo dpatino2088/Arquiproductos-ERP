@@ -257,7 +257,7 @@ export default function CustomerNew() {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        const companyIds = (orgCompanies || []).map(c => c.id);
+        const companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
 
         // Usar solo columnas explícitas que existen
         let query = supabase

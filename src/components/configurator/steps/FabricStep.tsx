@@ -29,18 +29,19 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Get product type ID from config
-  const productTypeId = config.product_type_id;
+  const productTypeId = config.product_type_id ?? undefined;
 
-  // Fetch collections and variants
+  // Fetch collections and variants (hooks expect string | undefined, not null)
   const { collections, loading: loadingCollections, error: collectionsError } = useFabricCollections(productTypeId);
   const { variants, loading: loadingVariants, error: variantsError } = useFabricVariants(
     productTypeId,
-    config.collection_name || ''
+    config.collection_name ?? ''
   );
 
-  // Filter collections by search term
-  const filteredCollections = collections.filter((collection) =>
-    collection.collection_name?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false
+  // collections from useFabricCollections is string[]; map to { id, collection_name } for UI
+  const collectionItems = collections.map((name) => ({ id: name, collection_name: name }));
+  const filteredCollections = collectionItems.filter((c) =>
+    c.collection_name?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false
   );
 
   // Handle collection change
@@ -133,7 +134,7 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
                   key={variant.id}
                   onClick={() => handleVariantSelect(variant)}
                   className={`bg-white border rounded-lg overflow-hidden transition-all ${
-                    config.variant_id === variant.id
+                    (config.variant_id ?? undefined) === (variant.id ?? undefined)
                       ? 'border-2 border-primary shadow-lg'
                       : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                   }`}
@@ -142,7 +143,7 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
                     {variant.image_url ? (
                       <img
                         src={variant.image_url}
-                        alt={variant.variant_name}
+                        alt={variant.variant_name ?? ''}
                         className="w-16 h-16 object-cover rounded mb-2"
                       />
                     ) : (

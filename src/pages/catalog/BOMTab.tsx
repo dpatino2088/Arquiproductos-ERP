@@ -431,9 +431,9 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         .select('*')
         .eq('id', editingTemplateId)
         .single()
-        .then(({ data, error }) => {
+        .then(({ data, error }: { data: { product_type_id?: string; name?: string; description?: string } | null; error: unknown }) => {
           if (!error && data) {
-            setProductTypeId(data.product_type_id);
+            setProductTypeId(data.product_type_id ?? '');
             setTemplateName(data.name || '');
             setTemplateDescription(data.description || '');
           }

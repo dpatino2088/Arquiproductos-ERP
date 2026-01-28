@@ -190,8 +190,8 @@ export function useBOMTemplateRoleOptions(
           console.debug('[useBOMTemplateRoleOptions] CatalogItems fetched', {
             role,
             catalogItemsCount: catalogItems?.length || 0,
-            catalogItemsWithSKU: catalogItems?.filter(i => i.sku && i.sku.trim() !== '').length || 0,
-            sampleItems: catalogItems?.slice(0, 3).map(i => ({ id: i.id, sku: i.sku, name: i.name, is_active: true })),
+            catalogItemsWithSKU: catalogItems?.filter((i: { sku?: string }) => i.sku && i.sku.trim() !== '').length || 0,
+            sampleItems: catalogItems?.slice(0, 3).map((i: { id: string; sku: string; name?: string }) => ({ id: i.id, sku: i.sku, name: i.name, is_active: true })),
           });
         }
 

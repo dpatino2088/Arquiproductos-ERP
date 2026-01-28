@@ -284,7 +284,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
 
     // PASO 3: Obtener SKUs de CatalogItems para los componentes
     const catalogItemIds = [...new Set(
-      (allComponents || []).map(c => c.component_item_id).filter(Boolean)
+      (allComponents || []).map((c: { component_item_id?: string }) => c.component_item_id).filter(Boolean)
     )] as string[];
 
     let catalogSkuMap = new Map<string, string>();
@@ -296,7 +296,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         .eq('is_active', true)
         .in('id', catalogItemIds);
 
-      catalogItems?.forEach(item => {
+      catalogItems?.forEach((item: { id: string; sku: string }) => {
         if (item.sku) {
           catalogSkuMap.set(item.id, normalizeSku(item.sku) || '');
         }
@@ -309,7 +309,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       sku: string | null;
     }>>();
 
-    (allComponents || []).forEach(comp => {
+    (allComponents || []).forEach((comp: { bom_template_id: string; component_role?: string; component_item_id?: string }) => {
       const templateId = comp.bom_template_id;
       const role = (comp.component_role || '').toLowerCase().trim();
       const sku = comp.component_item_id ? catalogSkuMap.get(comp.component_item_id) || null : null;
@@ -358,19 +358,21 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       };
 
       // Criterio 1: bottom_bar (obligatorio)
-      if (hasSkuForRole('bottom_bar', normalizedBottomBarSku)) {
+      const bottomBarSku = normalizedBottomBarSku ?? '';
+      if (hasSkuForRole('bottom_bar', bottomBarSku)) {
         score++;
-        matchedCriteria.push(`bottom_bar:${normalizedBottomBarSku}`);
+        matchedCriteria.push(`bottom_bar:${bottomBarSku}`);
       } else {
-        unmatchedCriteria.push(`bottom_bar expected:${normalizedBottomBarSku}`);
+        unmatchedCriteria.push(`bottom_bar expected:${bottomBarSku}`);
       }
 
       // Criterio 2: tube (obligatorio)
-      if (hasSkuForRole('tube', normalizedTubeSku)) {
+      const tubeSku = normalizedTubeSku ?? '';
+      if (hasSkuForRole('tube', tubeSku)) {
         score++;
-        matchedCriteria.push(`tube:${normalizedTubeSku}`);
+        matchedCriteria.push(`tube:${tubeSku}`);
       } else {
-        unmatchedCriteria.push(`tube expected:${normalizedTubeSku}`);
+        unmatchedCriteria.push(`tube expected:${tubeSku}`);
       }
 
       // Criterio 3: operation_type (obligatorio)

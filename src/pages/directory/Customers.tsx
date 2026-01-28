@@ -133,14 +133,14 @@ export default function Customers() {
         .in('id', contactIds)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
-        .then(({ data: contactsData }) => {
+        .then(({ data: contactsData }: { data: Array<{ id: string; contact_name: string | null }> | null }) => {
           if (contactsData) {
-            const contactMap = new Map(contactsData.map(ct => [ct.id, ct.contact_name || '']));
+            const contactMap = new Map(contactsData.map((ct: { id: string; contact_name: string | null }) => [ct.id, ct.contact_name || '']));
             const updated = mapped.map(c => {
-              if ((c as any).primary_contact_id) {
-                return { ...c, contactName: contactMap.get((c as any).primary_contact_id) || 'N/A', dateAdded: c.dateAdded ?? '' };
-              }
-              return { ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' };
+              const contactName: string = (c as any).primary_contact_id
+                ? (contactMap.get((c as any).primary_contact_id) as string | undefined) || 'N/A'
+                : 'N/A';
+              return { ...c, contactName, dateAdded: c.dateAdded ?? '' };
             });
             setCustomersData(updated as CustomerItem[]);
           } else {

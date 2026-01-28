@@ -99,7 +99,7 @@ export function toLegacyFormat(selection: RoleSelection): {
   sku: string | null;
   catalog_item_id: string | null;
 } {
-  if (isSelected(selection)) {
+  if (selection.state === 'selected') {
     return {
       sku: selection.sku || selection.code || '',
       catalog_item_id: selection.catalog_item_id,

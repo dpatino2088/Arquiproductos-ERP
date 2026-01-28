@@ -64,7 +64,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
         if (solError) throw solError;
 
-        const quoteLineIds = saleOrderLines?.map(sol => sol.quote_line_id).filter(Boolean) || [];
+        const quoteLineIds = saleOrderLines?.map((sol: { quote_line_id: string }) => sol.quote_line_id).filter(Boolean) || [];
 
         if (quoteLineIds.length === 0) {
           useUIStore.getState().addNotification({
@@ -93,7 +93,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
           return;
         }
 
-        const bomInstanceIds = bomInstances.map(bi => bi.id);
+        const bomInstanceIds = bomInstances.map((bi: { id: string }) => bi.id);
 
         // Check if BOMInstanceLines exist
         const { data: bomLines, error: bilError } = await supabase
@@ -149,7 +149,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
         if (solError) throw solError;
 
-        const quoteLineIds = saleOrderLines?.map(sol => sol.quote_line_id).filter(Boolean) || [];
+        const quoteLineIds = saleOrderLines?.map((sol: { quote_line_id: string }) => sol.quote_line_id).filter(Boolean) || [];
 
         if (quoteLineIds.length === 0) {
           useUIStore.getState().addNotification({
@@ -178,7 +178,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
           return;
         }
 
-        const bomInstanceIds = bomInstances.map(bi => bi.id);
+        const bomInstanceIds = bomInstances.map((bi: { id: string }) => bi.id);
 
         // Check if BOMInstanceLines exist
         const { data: bomLines, error: bilError } = await supabase

@@ -734,10 +734,9 @@ export default function QuoteNew() {
   // ✅ Usar "quantity" (columna correcta en QuoteLines)
   const totals = useMemo(() => {
     const subtotal = quoteLines.reduce((sum, line) => {
-      // ✅ msrp = precio final de venta al público TOTAL (ya incluye cantidad calculada en el BOM)
-      const msrpPrice = line.msrp || 0;
-      // ✅ quantity = cantidad de unidades de la línea
-      const qty = line.quantity || 1;
+      // ✅ msrp / unit_price_snapshot = precio final; qty = cantidad
+      const msrpPrice = (line as { msrp?: number; unit_price_snapshot?: number }).msrp ?? (line as { unit_price_snapshot?: number }).unit_price_snapshot ?? 0;
+      const qty = (line as { quantity?: number; qty?: number }).quantity ?? line.qty ?? 1;
       // ✅ Total = MSRP total de la línea (ya calculado, incluye cantidad de BOM)
       return sum + (msrpPrice * qty);
     }, 0);
@@ -1411,13 +1410,14 @@ export default function QuoteNew() {
           const skuSelections: any[] = [];
 
           // Fabric (si fue seleccionado)
+          const fabricItemId = rollItemId ?? catalogItem?.id ?? null;
           if (fabricItemId) {
             skuSelections.push({
               organization_id: activeOrganizationId,
               quote_line_id: finalLineId,
               kind: 'selection',
               component_role: 'fabric',
-              catalog_item_id: rollItemId,
+              catalog_item_id: fabricItemId,
               payload: { 
                 sku: catalogItem?.sku || null,
                 collection: collectionName,

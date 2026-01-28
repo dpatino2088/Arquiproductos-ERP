@@ -381,7 +381,7 @@ export default function OrderList() {
         return;
       }
 
-      const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
+      const saleOrderLineIds = saleOrderLines.map((sol: { id: string }) => sol.id);
 
       // Get BomInstances
       const { data: bomInstances, error: biError } = await supabase
@@ -395,7 +395,7 @@ export default function OrderList() {
         console.error('❌ Error checking BOMInstances:', biError);
       }
 
-      const bomInstanceIds = bomInstances?.map(bi => bi.id) || [];
+      const bomInstanceIds = bomInstances?.map((bi: { id: string }) => bi.id) || [];
 
       // Get BOMInstanceLines count
       let bomLinesCount = 0;
@@ -462,7 +462,7 @@ export default function OrderList() {
         return;
       }
 
-      const quoteLineIds = quoteLines.map(ql => ql.id);
+      const quoteLineIds = quoteLines.map((ql: { id: string }) => ql.id);
 
       // Check if QuoteLineComponents exist
       const { count: qlcCount, error: qlcError } = await supabase

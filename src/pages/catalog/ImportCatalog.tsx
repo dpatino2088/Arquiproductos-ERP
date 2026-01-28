@@ -347,18 +347,19 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
       sku: row.sku.toString().trim(),
       name: row.name.toString().trim(),
       description: row.description?.toString().trim() || null,
-      item_type: itemType as any, // Add item_type column
       measure_basis: measureBasis as any,
+      unit_of_measure: row.uom?.toString().trim() || 'unit',
       uom: row.uom?.toString().trim() || 'unit',
       is_fabric: isFabric,
+      is_active: row.active === true || row.active === 'true' || row.active === 'TRUE' || row.active === '1' || row.active === undefined || row.active === '',
+      active: row.active === true || row.active === 'true' || row.active === 'TRUE' || row.active === '1' || row.active === undefined || row.active === '',
       roll_width_m: isFabric && row.roll_width_m ? parseFloat(row.roll_width_m.toString()) : null,
       fabric_pricing_mode: isFabric && row.fabric_pricing_mode ? (row.fabric_pricing_mode.toLowerCase() as any) : null,
       unit_price: parseFloat(row.unit_price.toString()) || 0,
       cost_price: parseFloat(row.cost_price.toString()) || 0,
-      active: row.active === true || row.active === 'true' || row.active === 'TRUE' || row.active === '1' || row.active === undefined || row.active === '',
       discontinued: row.discontinued === true || row.discontinued === 'true' || row.discontinued === 'TRUE' || row.discontinued === '1' || false,
       metadata,
-    };
+    } as Omit<CatalogItem, 'id' | 'created_at' | 'deleted' | 'organization_id' | 'archived' | 'updated_at'>;
   };
 
   const handleReset = () => {

@@ -216,7 +216,7 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
       case 'accessories':
         return <AccessoriesStep config={config} onUpdate={handleUpdate} />;
       case 'review':
-        return <ReviewStep config={config} onUpdate={handleUpdate} />;
+        return <ReviewStep config={config as ProductConfig} onUpdate={handleUpdate} />;
       default:
         return null;
     }
