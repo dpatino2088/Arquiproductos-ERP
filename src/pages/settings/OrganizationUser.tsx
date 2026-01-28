@@ -24,6 +24,7 @@ import {
   Calendar,
   Building,
   Trash2,
+  Archive,
   Send,
   CheckCircle
 } from 'lucide-react';
@@ -70,6 +71,7 @@ export default function OrganizationUser() {
   const [users, setUsers] = useState<OrganizationUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [archivingUserId, setArchivingUserId] = useState<string | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const loadingRef = useRef(false);
@@ -329,12 +331,16 @@ export default function OrganizationUser() {
     }
   };
 
-  // Get status badge - only show active/disabled in UI
+  // Get status badge - show all statuses correctly
   const getStatusBadge = (status: string) => {
-    // Map invited/pending to disabled for UI display (but keep original in DB)
-    const displayStatus = status === 'active' ? 'active' : 'disabled';
+    const normalizedStatus = (status || 'active').toLowerCase().trim();
     
-    switch (displayStatus) {
+    switch (normalizedStatus) {
+      case 'invited':
+        return {
+          label: 'Invited',
+          className: 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+        };
       case 'active':
         return {
           label: 'Active',
@@ -347,7 +353,7 @@ export default function OrganizationUser() {
         };
       default:
         return {
-          label: displayStatus,
+          label: normalizedStatus,
           className: 'bg-gray-50 text-gray-700 border border-gray-200'
         };
     }
@@ -443,12 +449,65 @@ export default function OrganizationUser() {
   };
 
   // Handle delete user
+  // Handle Archive action
+  const handleArchiveUser = async (userId: string, userEmail?: string) => {
+    if (!activeOrganizationId) return;
+
+    const confirmed = await showConfirm({
+      title: 'Archive User',
+      message: `Are you sure you want to archive "${userEmail || 'this user'}"? The user will be disabled and can be restored later.`,
+      variant: 'warning',
+      confirmText: 'Archive',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed) return;
+
+    setArchivingUserId(userId);
+    setLoading(true);
+
+    try {
+      const { error } = await supabase
+        .from('OrganizationUsers')
+        .update({ status: 'disabled', updated_at: new Date().toISOString() })
+        .eq('id', userId)
+        .eq('organization_id', activeOrganizationId);
+
+      if (error) throw error;
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'User Archived',
+        message: 'User has been archived successfully.',
+      });
+
+      // Reset loading ref to allow reload
+      hasLoadedRef.current = false;
+      // Reload users
+      await loadUsers();
+    } catch (err: any) {
+      const errorMessage = err.message || 'Error archiving user. Please try again.';
+      if (import.meta.env.DEV) {
+        console.error('Error in handleArchiveUser:', err);
+      }
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Archive Error',
+        message: errorMessage,
+      });
+    } finally {
+      setArchivingUserId(null);
+      setIsLoading(false);
+      setLoading(false);
+    }
+  };
+
   const handleDeleteUser = async (userId: string, userEmail?: string) => {
     if (!isSuperAdmin) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Sin permisos',
-        message: 'Solo los Superadmins pueden eliminar usuarios.',
+        title: 'No permissions',
+        message: 'Only Superadmins can delete users.',
       });
       return;
     }
@@ -463,10 +522,10 @@ export default function OrganizationUser() {
     }
 
     const confirmed = await showConfirm({
-      title: 'Eliminar Usuario',
-      message: `¿Estás seguro de que deseas eliminar al usuario ${userEmail || userId}? Esta acción no se puede deshacer.`,
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
+      title: 'Delete User',
+      message: `Are you sure you want to delete user "${userEmail || userId}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
       variant: 'danger',
     });
 
@@ -480,7 +539,7 @@ export default function OrganizationUser() {
     
     try {
       if (!activeOrganizationId) {
-        throw new Error('No hay organización seleccionada.');
+        throw new Error('No organization selected.');
       }
 
       // Use RPC function to delete user (bypasses RLS)
@@ -503,21 +562,21 @@ export default function OrganizationUser() {
           });
         }
 
-        throw new Error(error.message || 'Error al eliminar el usuario. Por favor, intenta de nuevo.');
+        throw new Error(error.message || 'Error deleting user. Please try again.');
       }
 
       // Check RPC response
       if (!data || (typeof data === 'object' && 'success' in data && !data.success)) {
         const errorMsg = (data && typeof data === 'object' && 'error' in data) 
           ? data.error 
-          : 'No se pudo eliminar el usuario. El usuario no fue encontrado o ya está eliminado.';
+          : 'Could not delete user. User not found or already deleted.';
         throw new Error(errorMsg);
       }
 
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Usuario Eliminado',
-        message: 'El usuario ha sido eliminado exitosamente.',
+        title: 'User Deleted',
+        message: 'User has been deleted successfully.',
       });
 
       // Reset loading ref to allow reload
@@ -525,13 +584,13 @@ export default function OrganizationUser() {
       // Reload users
       await loadUsers();
     } catch (err: any) {
-      const errorMessage = err.message || 'Error al eliminar el usuario. Por favor, intenta de nuevo.';
+      const errorMessage = err.message || 'Error deleting user. Please try again.';
       if (import.meta.env.DEV) {
         console.error('Error in handleDeleteUser:', err);
       }
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error al Eliminar',
+        title: 'Delete Error',
         message: errorMessage,
       });
     } finally {
@@ -869,10 +928,21 @@ export default function OrganizationUser() {
                               e.stopPropagation();
                               router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
                             }}
-                            className="text-gray-400 hover:text-primary transition-colors"
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                             title="Edit user"
                           >
                             <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleArchiveUser(orgUser.id, orgUser.user_email);
+                            }}
+                            disabled={archivingUserId === orgUser.id || orgUser.status === 'disabled'}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                            title="Archive user"
+                          >
+                            <Archive className="w-4 h-4" />
                           </button>
                           {isSuperAdmin && (
                             <button
@@ -881,7 +951,7 @@ export default function OrganizationUser() {
                                 handleDeleteUser(orgUser.id, orgUser.user_email);
                               }}
                               disabled={deletingUserId === orgUser.id}
-                              className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Delete user"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -958,11 +1028,23 @@ export default function OrganizationUser() {
                           e.stopPropagation();
                           router.navigate(`/settings/organization-users/edit/${orgUser.id}`);
                         }}
-                        className="text-gray-400 hover:text-primary transition-colors"
+                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                         aria-label={`Edit ${orgUser.user_name || orgUser.user_email || 'user'}`}
                         title={`Edit ${orgUser.user_name || orgUser.user_email || 'user'}`}
                       >
                         <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleArchiveUser(orgUser.id, orgUser.user_email);
+                        }}
+                        disabled={archivingUserId === orgUser.id || orgUser.status === 'disabled'}
+                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                        aria-label={`Archive ${orgUser.user_name || orgUser.user_email || 'user'}`}
+                        title={`Archive ${orgUser.user_name || orgUser.user_email || 'user'}`}
+                      >
+                        <Archive className="w-4 h-4" />
                       </button>
                       {isSuperAdmin && (
                         <button
@@ -971,7 +1053,7 @@ export default function OrganizationUser() {
                             handleDeleteUser(orgUser.id, orgUser.user_email);
                           }}
                           disabled={deletingUserId === orgUser.id}
-                          className="text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
                           aria-label={`Delete ${orgUser.user_name || orgUser.user_email || 'user'}`}
                           title={`Delete ${orgUser.user_name || orgUser.user_email || 'user'}`}
                         >

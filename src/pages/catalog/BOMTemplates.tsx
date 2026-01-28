@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Plus, Edit, Trash2, Search, Wrench, Info, Settings, Package, CheckCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Wrench, Info, Settings, Package, Copy, GripVertical } from 'lucide-react';
 import Label from '../../components/ui/Label';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '../../components/ui/SelectShadcn';
@@ -15,9 +15,10 @@ import { useBOMCRUD, useBOMComponents } from '../../hooks/useBOM';
 import { useBOMTemplates, useBOMTemplateCRUD } from '../../hooks/useBOMTemplates';
 import { Folder, X } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../../components/ui/Tooltip';
-import { CANONICAL_COMPONENT_ROLES, normalizeRole, normalizeSubRole, isValidRole, isValidSubRole, getRoleLabel, getSubRoleLabel, getSubRolesForRole, hasSubRoles } from '../../lib/bom/roles';
+import { CANONICAL_COMPONENT_ROLES, VALID_CHILD_ROLES, normalizeRole, isValidRole, getRoleLabel, getSubRoleLabel } from '../../lib/bom/roles';
 import { getValidUomOptions, normalizeMeasureBasis, normalizeUom } from '../../lib/uom';
 import { calculateFabricLinearM, getFabricCalculationPreview } from '../../lib/bom/fabric-calculations';
+import { useOnVisibilityChange } from '../../lib/app-persistence';
 
 // Helper functions for conditional UI rendering based on role
 const shouldShowHardwareColor = (role: string | null | undefined): boolean => {
@@ -137,7 +138,7 @@ const getUomForTubeFromMeasureBasis = (measureBasis: string | null | undefined):
 // Check if UOM should be readonly for a component
 // For Auto-Select: UOM is ALWAYS readonly (determined from CatalogItems.uom at BOM generation time)
 // For Fixed: UOM is readonly (comes from CatalogItems.uom of selected component)
-const isUomReadonlyForComponent = (role: string | null | undefined, selectionMode: 'fixed' | 'auto_select' | undefined): boolean => {
+const isUomReadonlyForComponent = (role: string | null | undefined, selectionMode: 'fixed' | 'user_select' | 'none_allowed' | undefined): boolean => {
   // Always readonly - UOM comes from CatalogItems.uom at BOM generation time
   return true;
 };
@@ -148,7 +149,6 @@ interface BOMTemplate {
   name?: string;
   template_name?: string;
   description?: string;
-  active: boolean;
   created_at: string;
   updated_at: string;
   ProductType?: {
@@ -159,7 +159,7 @@ interface BOMTemplate {
 }
 
 // ✅ FIX: Shared constants for bom_qty_type enum (must match DB enum exactly)
-export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_area'] as const;
+export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area'] as const;
 export type BOMQtyType = typeof BOM_QTY_TYPES[number];
 
 type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | 'CATEGORY_FIRST_MATCH' | string;
@@ -171,7 +171,6 @@ interface BOMComponent {
   component_role?: string;
   component_sub_role?: string; // Optional sub-role for granularity (e.g., hardware: fastener, end_cap, adapter)
   component_item_id?: string;
-  qty_per_unit: number;
   uom: string;
   block_type?: string;
   block_condition?: any;
@@ -184,9 +183,9 @@ interface BOMComponent {
   qty_formula_code?: string | null; // Formula code (e.g., 'CHAIN_HEIGHT_FACTOR')
   qty_formula_params?: Record<string, any> | null; // Formula parameters (JSON)
   auto_select?: boolean; // DB field (boolean)
-  selection_mode?: 'fixed' | 'auto_select'; // UI field (derived from auto_select)
+  selection_mode?: 'fixed' | 'user_select' | 'none_allowed';
   sequence_order: number;
-  affects_role?: string;
+  depends_on_role?: string;
   cut_axis?: string;
   cut_delta_mm?: number;
   cut_delta_scope?: string;
@@ -214,8 +213,44 @@ export default function BOMTemplates() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
+  const [dragOverTemplateId, setDragOverTemplateId] = useState<string | null>(null);
+  
+  // ✅ Persist edit state across tab changes
+  const PERSISTENCE_KEY = 'bomTemplates:editState';
+  
+  // Restore persisted state on mount
+  const [showTemplateModal, setShowTemplateModal] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(PERSISTENCE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return parsed.showTemplateModal === true;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+    return false;
+  });
+  
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(PERSISTENCE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return parsed.editingTemplateId || null;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+    return null;
+  });
+  
+  const [productTypeId, setProductTypeId] = useState<string>('');
 
   // Register Catalog submodules when BOMTemplates component mounts
   useEffect(() => {
@@ -224,28 +259,71 @@ export default function BOMTemplates() {
       registerSubmodules('Catalog', [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
         { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
-        { id: 'bom-readiness', label: 'BOM Readiness', href: '/catalog/bom-readiness', icon: CheckCircle },
       ]);
     }
   }, [registerSubmodules]);
+
+  // ✅ Restore persisted edit state on mount (verify template exists)
+  const hasRestoredState = useRef(false);
+  useEffect(() => {
+    if (hasRestoredState.current || !activeOrganizationId) return;
+    
+    const persistedId = editingTemplateId;
+    const persistedModal = showTemplateModal;
+    
+    if (persistedId && persistedModal) {
+      hasRestoredState.current = true;
+      // Verify template still exists before restoring
+      supabase
+        .from('BOMTemplates')
+        .select('id')
+        .eq('id', persistedId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('is_active', true)
+        .eq('archived', false)
+        .single()
+        .then(({ data, error }: { data: any; error: any }) => {
+          if (error || !data) {
+            // Template no longer exists, clear persisted state
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.removeItem(PERSISTENCE_KEY);
+              } catch (e) {
+                // Ignore storage errors
+              }
+            }
+            setShowTemplateModal(false);
+            setEditingTemplateId(null);
+          }
+          // If template exists, modal will stay open (already set in state)
+        });
+    } else {
+      hasRestoredState.current = true;
+    }
+  }, [activeOrganizationId, editingTemplateId, showTemplateModal]);
 
   // Load product types
   useEffect(() => {
     const loadProductTypes = async () => {
       if (!activeOrganizationId) return;
       try {
+        // ✅ FIX: Soportar registros globales (organization_id NULL)
         const { data, error } = await supabase
           .from('ProductTypes')
           .select('id, name, code')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .is('archived', null)
+          .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
           .order('name');
         
         if (error) throw error;
         setProductTypes(data || []);
       } catch (err) {
-        console.error('Error loading product types:', err);
+        // ✅ FIX: Formatear error para evitar "[circular]"
+        const errorDetails = err instanceof Error 
+          ? { message: err.message, name: err.name }
+          : typeof err === 'object' && err !== null
+          ? { message: (err as any).message || String(err), code: (err as any).code }
+          : String(err);
+        console.error('Error loading product types:', errorDetails);
       }
     };
     loadProductTypes();
@@ -273,7 +351,8 @@ export default function BOMTemplates() {
         setLoading(true);
         setError(null);
 
-        const { data, error } = await supabase
+        // ✅ FIX: Intentar ordenar por sort_order, pero si la columna no existe, usar created_at
+        let query = supabase
           .from('BOMTemplates')
           .select(`
             *,
@@ -284,8 +363,38 @@ export default function BOMTemplates() {
             )
           `)
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
+          .eq('is_active', true)
+          .eq('archived', false)
+          .order('sort_order', { ascending: true })
           .order('created_at', { ascending: false });
+        
+        let { data, error } = await query;
+
+        // ✅ FIX: Si el error es porque sort_order no existe, reintentar sin ese ordenamiento
+        if (error && (error.code === '42703' || error.message?.includes('sort_order') || error.message?.includes('column') && error.message?.includes('does not exist'))) {
+          if (import.meta.env.DEV) {
+            console.warn('[BOMTemplates] sort_order column not found, retrying with created_at only');
+          }
+          // Reintentar sin sort_order
+          query = supabase
+            .from('BOMTemplates')
+            .select(`
+              *,
+              ProductType:product_type_id (
+                id,
+                name,
+                code
+              )
+            `)
+            .eq('organization_id', activeOrganizationId)
+            .eq('is_active', true)
+            .eq('archived', false)
+            .order('created_at', { ascending: false });
+          
+          const retryResult = await query;
+          data = retryResult.data;
+          error = retryResult.error;
+        }
 
         // ✅ FIX: Don't retry on 404/400 errors
         if (error) {
@@ -306,14 +415,18 @@ export default function BOMTemplates() {
 
         // Load components for each template
         if (data && data.length > 0) {
-          const templateIds = data.map(t => t.id);
+          const templateIds = data.map((t: any) => t.id);
           // ✅ FIX: No usar join relacional (PGRST200) - traer plano y resolver en memoria
           const { data: componentsData, error: componentsError } = await supabase
             .from('BOMComponents')
             .select('*') // ✅ Solo campos de BOMComponents, sin join
             .in('bom_template_id', templateIds)
+            .eq('organization_id', activeOrganizationId)
             .eq('deleted', false)
-            .order('sequence_order', { ascending: true });
+            .eq('archived', false)
+            .order('parent_component_id', { ascending: true })
+            .order('sort_order', { ascending: true })
+            .order('created_at', { ascending: true });
 
           // ✅ FIX: Handle 404/400 errors gracefully
           if (componentsError) {
@@ -324,7 +437,13 @@ export default function BOMTemplates() {
               }
               setComponents(new Map()); // Set empty map on expected errors
             } else {
-              console.error('[BOMTemplates] Unexpected error fetching components:', componentsError);
+              // ✅ FIX: Formatear error para evitar "[circular]"
+              const errorDetails = { 
+                message: componentsError.message, 
+                code: componentsError.code,
+                details: componentsError.details 
+              };
+              console.error('[BOMTemplates] Unexpected error fetching components:', errorDetails);
             }
           } else if (componentsData) {
             const componentsMap = new Map<string, BOMComponent[]>();
@@ -352,12 +471,26 @@ export default function BOMTemplates() {
   const filteredTemplates = useMemo(() => {
     if (!searchTerm) return templates;
     const searchLower = searchTerm.toLowerCase();
-    return templates.filter(t => 
+    return templates.filter((t: any) => 
       t.template_name?.toLowerCase().includes(searchLower) ||
       t.description?.toLowerCase().includes(searchLower) ||
       t.ProductType?.name.toLowerCase().includes(searchLower)
     );
   }, [templates, searchTerm]);
+
+  // ✅ Persist state to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(PERSISTENCE_KEY, JSON.stringify({
+          editingTemplateId,
+          showTemplateModal,
+        }));
+      } catch (e) {
+        // Ignore storage errors (quota exceeded, etc.)
+      }
+    }
+  }, [editingTemplateId, showTemplateModal]);
 
   const handleNewTemplate = () => {
     setEditingTemplateId(null);
@@ -367,6 +500,433 @@ export default function BOMTemplates() {
   const handleEditTemplate = (templateId: string) => {
     setEditingTemplateId(templateId);
     setShowTemplateModal(true);
+  };
+
+  const buildUniqueName = (baseName: string) => {
+    const existingNames = new Set(
+      templates.map((t) => String((t as any).name || (t as any).template_name || '').trim().toLowerCase())
+    );
+    let candidate = baseName.trim();
+    if (!candidate) candidate = 'BOM Template Copy';
+    if (!existingNames.has(candidate.toLowerCase())) return candidate;
+    let index = 2;
+    while (existingNames.has(`${candidate} ${index}`.toLowerCase())) {
+      index += 1;
+    }
+    return `${candidate} ${index}`;
+  };
+
+  const buildUniqueCode = (baseCode: string) => {
+    const existingCodes = new Set(
+      templates.map((t) => String((t as any).code || (t as any).template_code || '').trim().toUpperCase())
+    );
+    const normalizedBase = (baseCode || 'BOM').trim().toUpperCase();
+    let candidate = `${normalizedBase}_COPY`;
+    if (!existingCodes.has(candidate)) return candidate;
+    let index = 2;
+    while (existingCodes.has(`${candidate}_${index}`)) {
+      index += 1;
+    }
+    return `${candidate}_${index}`;
+  };
+
+  const buildNextCopyCode = (baseCode: string, attempt: number) => {
+    const normalizedBase = (baseCode || 'BOM').trim().toUpperCase();
+    if (attempt <= 1) return `${normalizedBase}_COPY`;
+    return `${normalizedBase}_COPY_${attempt}`;
+  };
+
+  const handleDuplicateTemplate = async (template: BOMTemplate) => {
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Organization Required',
+        message: 'Please select an organization before duplicating.',
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const baseName = String(template.name || (template as any).template_name || (template as any).code || 'BOM Template');
+      const baseCode = String((template as any).code || (template as any).template_code || 'BOM_TEMPLATE');
+      const duplicatedName = buildUniqueName(`${baseName} Copy`);
+      let newTemplate: any = null;
+      let duplicatedCode = buildNextCopyCode(baseCode, 1);
+      let attempt = 1;
+      const maxAttempts = 20;
+
+      while (!newTemplate && attempt <= maxAttempts) {
+        const { data: created, error: templateError } = await supabase
+          .from('BOMTemplates')
+          .insert({
+            organization_id: activeOrganizationId,
+            product_type_id: (template as any).product_type_id,
+            code: duplicatedCode,
+            name: duplicatedName,
+            description: template.description || null,
+            hardware_color: (template as any).hardware_color || null,
+            metadata: (template as any).metadata || {},
+            is_active: true,
+            archived: false,
+          })
+          .select('id, product_type_id, code, name, description, hardware_color')
+          .single();
+
+        if (!templateError && created) {
+          newTemplate = created;
+          break;
+        }
+
+        const errorMessage = templateError?.message || '';
+        const isSchemaCacheClone =
+          errorMessage.toLowerCase().includes('clone_bomcomponents') ||
+          errorMessage.toLowerCase().includes('schema cache');
+
+        if (isSchemaCacheClone) {
+          const { data: recovered, error: recoverError } = await supabase
+            .from('BOMTemplates')
+            .select('id, product_type_id, code, name, description, hardware_color')
+            .eq('organization_id', activeOrganizationId)
+            .eq('code', duplicatedCode)
+            .eq('is_active', true)
+            .eq('archived', false)
+            .single();
+
+          if (!recoverError && recovered) {
+            newTemplate = recovered;
+            break;
+          }
+        }
+        const isDuplicate =
+          templateError?.code === '23505' ||
+          errorMessage.toLowerCase().includes('duplicate key') ||
+          errorMessage.includes('BOMTemplates_code_key');
+
+        if (!isDuplicate) {
+          throw new Error(templateError?.message || 'Failed to create duplicated template');
+        }
+
+        attempt += 1;
+        duplicatedCode = buildNextCopyCode(baseCode, attempt);
+      }
+
+      if (!newTemplate) {
+        throw new Error('Failed to create duplicated template (code conflict)');
+      }
+
+      const { data: componentsData, error: componentsError } = await supabase
+        .from('BOMComponents')
+        .select('id, organization_id, bom_template_id, parent_component_id, component_item_id, component_role, auto_select, uom, is_required, sort_order, deleted, archived, qty_type, qty_value, qty_delta_mm, waste_pct, cut_axis, cut_delta_mm, depends_on_role, component_scope, slot_id, sku_resolution_rule, component_mode, type_per_unit, qty_spacing_mm, qty_min')
+        .eq('organization_id', activeOrganizationId)
+        .eq('bom_template_id', template.id)
+        .eq('deleted', false)
+        .eq('archived', false)
+        .order('parent_component_id', { ascending: true })
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+
+      if (componentsError) {
+        throw new Error(componentsError.message || 'Failed to load components to duplicate');
+      }
+
+      const parents = (componentsData || []).filter((c: any) => !c.parent_component_id);
+      const children = (componentsData || []).filter((c: any) => !!c.parent_component_id);
+      const idMap = new Map<string, string>();
+      const duplicatedComponents: any[] = [];
+
+      const buildComponentPayload = (comp: any, parentId: string | null) => {
+        // Solo usar columnas que existen según el DUMP SQL
+        return {
+          organization_id: activeOrganizationId,
+          bom_template_id: newTemplate.id,
+          parent_component_id: parentId,
+          component_item_id: comp.component_item_id || null,
+          component_role: comp.component_role || null,
+          auto_select: comp.auto_select ?? true,
+          uom: comp.uom || 'ea',
+          is_required: comp.is_required !== false,
+          sort_order: comp.sort_order || 0,
+          deleted: false,
+          archived: false,
+          qty_type: comp.qty_type || 'fixed',
+          qty_value: comp.qty_value || 1,
+          qty_delta_mm: comp.qty_delta_mm || 0,
+          waste_pct: comp.waste_pct || 0,
+          cut_axis: comp.cut_axis || null,
+          cut_delta_mm: comp.cut_delta_mm || 0,
+          depends_on_role: comp.depends_on_role || null,
+          component_scope: comp.component_scope || 'bom',
+          slot_id: comp.slot_id || null,
+          sku_resolution_rule: comp.sku_resolution_rule || 'ROLE_AND_COLOR',
+          component_mode: comp.component_mode || 'auto',
+          type_per_unit: comp.type_per_unit || null,
+          qty_spacing_mm: comp.qty_spacing_mm || null,
+          qty_min: comp.qty_min || null,
+        };
+      };
+
+      for (const parent of parents) {
+        const { data: newParent, error: parentError } = await supabase
+          .from('BOMComponents')
+          .insert(buildComponentPayload(parent, null))
+          .select('id')
+          .single();
+        if (parentError || !newParent) {
+          throw new Error(parentError?.message || 'Failed to duplicate parent component');
+        }
+        idMap.set(parent.id, newParent.id);
+        duplicatedComponents.push({
+          ...parent,
+          id: newParent.id,
+          bom_template_id: newTemplate.id,
+          parent_component_id: null,
+          deleted: false,
+          archived: false,
+        });
+      }
+
+      for (const child of children) {
+        const mappedParentId = idMap.get(child.parent_component_id) || null;
+        const { data: newChild, error: childError } = await supabase
+          .from('BOMComponents')
+          .insert(buildComponentPayload(child, mappedParentId))
+          .select('id')
+          .single();
+        if (childError || !newChild) {
+          throw new Error(childError?.message || 'Failed to duplicate child component');
+        }
+        duplicatedComponents.push({
+          ...child,
+          id: newChild.id,
+          bom_template_id: newTemplate.id,
+          parent_component_id: mappedParentId,
+          deleted: false,
+          archived: false,
+        });
+      }
+
+      const mappedDraftComponents = duplicatedComponents.map((comp: any) => ({
+        id: comp.id,
+        parent_component_id: comp.parent_component_id || null,
+        component_item_id: comp.component_item_id || null,
+        component_role: comp.component_role || null,
+        qty_type: comp.qty_type || 'fixed',
+        qty_value: comp.qty_value || 1,
+        qty_delta_mm: comp.qty_delta_mm || 0,
+        waste_pct: comp.waste_pct || 0,
+        depends_on_role: comp.depends_on_role || null,
+        cut_axis: comp.cut_axis || null,
+        cut_delta_mm: comp.cut_delta_mm || 0,
+        uom: comp.uom || 'ea',
+        sort_order: comp.sort_order || 0,
+        sequence_order: comp.sort_order || 0,
+        is_required: comp.is_required !== false,
+        auto_select: comp.auto_select ?? false,
+      }));
+
+      setTemplates((prev) => [newTemplate, ...prev]);
+      setComponents((prev) => {
+        const next = new Map(prev);
+        next.set(newTemplate.id, duplicatedComponents);
+        return next;
+      });
+
+      try {
+        const draftKey = `bomTemplateDraft:${newTemplate.id}`;
+        sessionStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            productTypeId: newTemplate.product_type_id,
+            templateCode: newTemplate.code || duplicatedCode,
+            templateName: newTemplate.name || duplicatedName,
+            templateDescription: newTemplate.description || '',
+            templateHardwareColor: newTemplate.hardware_color || '',
+            components: mappedDraftComponents,
+            showAddComponentForm: false,
+          })
+        );
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[BOMTemplates] Failed to write duplication draft:', err);
+        }
+      }
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Duplicated',
+        message: 'BOM template duplicated successfully.',
+      });
+
+      setEditingTemplateId(newTemplate.id);
+      setShowTemplateModal(true);
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.error('[BOMTemplates] Duplicate failed:', err);
+      }
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Duplicate Failed',
+        message:
+          err instanceof Error
+            ? err.message
+            : (err as any)?.message || (err as any)?.details || 'Failed to duplicate BOM template',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // ✅ Clear persisted state when modal closes
+  const handleCloseModal = () => {
+    setShowTemplateModal(false);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(PERSISTENCE_KEY);
+      } catch (e) {
+        // Ignore storage errors
+      }
+    }
+  };
+
+  const handleDragStart = (templateId: string) => {
+    setDraggedTemplateId(templateId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, templateId: string) => {
+    e.preventDefault();
+    if (draggedTemplateId && draggedTemplateId !== templateId) {
+      setDragOverTemplateId(templateId);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverTemplateId(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetTemplateId: string) => {
+    e.preventDefault();
+    setDragOverTemplateId(null);
+
+    if (!draggedTemplateId || draggedTemplateId === targetTemplateId || !activeOrganizationId) {
+      setDraggedTemplateId(null);
+      return;
+    }
+
+    try {
+      const draggedIndex = filteredTemplates.findIndex(t => t.id === draggedTemplateId);
+      const targetIndex = filteredTemplates.findIndex(t => t.id === targetTemplateId);
+
+      if (draggedIndex === -1 || targetIndex === -1) {
+        setDraggedTemplateId(null);
+        return;
+      }
+
+      // Reordenar templates localmente
+      const reorderedTemplates = [...filteredTemplates];
+      const spliced = reorderedTemplates.splice(draggedIndex, 1);
+      const draggedTemplate = spliced[0];
+      if (!draggedTemplate) {
+        setDraggedTemplateId(null);
+        return;
+      }
+      reorderedTemplates.splice(targetIndex, 0, draggedTemplate);
+
+      // Preparar updates para batch update - asegurar que solo contenga datos primitivos
+      const updates = reorderedTemplates.map((template, index) => ({
+        id: String(template.id), // Asegurar que sea string
+        sort_order: Number(index), // Asegurar que sea número
+      }));
+
+      // ✅ OPTIMIZACIÓN: Usar función RPC para batch update (mucho más rápido)
+      const { data, error } = await supabase.rpc('update_bom_template_sort_orders', {
+        p_organization_id: activeOrganizationId,
+        p_updates: updates,
+      });
+
+      if (error) {
+        // ✅ FIX: Extraer información del error sin referencias circulares
+        const errorMessage = error.message || 'Unknown error';
+        const errorCode = error.code || 'UNKNOWN';
+        const errorDetails = error.details || '';
+        const errorHint = error.hint || '';
+        
+        if (import.meta.env.DEV) {
+          console.error('[BOMTemplates] RPC error:', {
+            message: errorMessage,
+            code: errorCode,
+            details: errorDetails,
+            hint: errorHint,
+          });
+        }
+        
+        // Si la función RPC no existe, usar método alternativo (updates individuales)
+        if (errorCode === '42883' || errorMessage.includes('does not exist') || errorMessage.includes('function')) {
+          if (import.meta.env.DEV) {
+            console.warn('[BOMTemplates] RPC function not found, falling back to individual updates');
+          }
+          
+          // Fallback: actualizar individualmente
+          const updatePromises = updates.map(update =>
+            supabase
+              .from('BOMTemplates')
+              .update({ sort_order: update.sort_order })
+              .eq('id', update.id)
+              .eq('organization_id', activeOrganizationId)
+          );
+          
+          const results = await Promise.all(updatePromises);
+          const hasErrors = results.some(r => r.error);
+          
+          if (hasErrors) {
+            const firstError = results.find(r => r.error)?.error;
+            throw new Error(firstError?.message || 'Failed to update some templates');
+          }
+        } else {
+          throw new Error(errorMessage);
+        }
+      }
+
+      // Verificar resultado
+      if (data && typeof data === 'object' && 'updated_count' in data) {
+        const updatedCount = Number(data.updated_count) || 0;
+        if (updatedCount !== updates.length) {
+          console.warn('[BOMTemplates] Some templates were not updated:', {
+            expected: updates.length,
+            updated: updatedCount,
+          });
+        }
+      }
+
+      // Actualizar estado local
+      setTemplates(reorderedTemplates);
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Reordered',
+        message: 'Template order updated successfully.',
+      });
+    } catch (err) {
+      // ✅ FIX: Extraer mensaje de error sin referencias circulares
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : typeof err === 'string' 
+          ? err 
+          : 'Failed to reorder templates';
+      
+      if (import.meta.env.DEV) {
+        console.error('[BOMTemplates] Error reordering templates:', errorMessage);
+      }
+      
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Reorder Failed',
+        message: errorMessage,
+      });
+    } finally {
+      setDraggedTemplateId(null);
+    }
   };
 
   const handleDeleteTemplate = async (id: string) => {
@@ -384,7 +944,7 @@ export default function BOMTemplates() {
       setLoading(true);
       const { error } = await supabase
         .from('BOMTemplates')
-        .update({ deleted: true })
+        .update({ is_active: false })
         .eq('id', id)
         .eq('organization_id', activeOrganizationId);
 
@@ -458,26 +1018,43 @@ export default function BOMTemplates() {
         <div className="space-y-4">
           {filteredTemplates.map((template) => {
             const templateComponents = components.get(template.id) || [];
+            const isDragging = draggedTemplateId === template.id;
+            const isDragOver = dragOverTemplateId === template.id;
             return (
-              <div key={template.id} className="bg-white border border-gray-200 rounded-lg p-6">
+              <div
+                key={template.id}
+                draggable
+                onDragStart={() => handleDragStart(template.id)}
+                onDragOver={(e) => handleDragOver(e, template.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, template.id)}
+                className={`bg-white border rounded-lg p-6 transition-all ${
+                  isDragging ? 'opacity-50 cursor-grabbing' : 'cursor-grab'
+                } ${
+                  isDragOver ? 'border-primary border-2 shadow-md' : 'border-gray-200'
+                }`}
+              >
                 <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {(template.name || template.template_name) || template.ProductType?.name || 'BOM Template'}
-                      </h3>
-                      <span className={`px-2 py-1 text-xs rounded ${
-                        template.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {template.active ? 'Active' : 'Inactive'}
-                      </span>
+                  <div className="flex items-start gap-2 flex-1">
+                    <div
+                      className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 mt-1"
+                      title="Drag to reorder"
+                    >
+                      <GripVertical className="w-5 h-5" />
                     </div>
-                    <p className="text-sm text-gray-600 mb-2">
-                      Product Type: {template.ProductType?.name || 'N/A'}
-                    </p>
-                    {template.description && (
-                      <p className="text-sm text-gray-500">{template.description}</p>
-                    )}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-lg font-semibold text-gray-900">
+                          {(template.name || template.template_name) || template.ProductType?.name || 'BOM Template'}
+                        </h3>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-2">
+                        Product Type: {template.ProductType?.name || 'N/A'}
+                      </p>
+                      {template.description && (
+                        <p className="text-sm text-gray-500">{template.description}</p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -486,6 +1063,13 @@ export default function BOMTemplates() {
                       title="Edit Template and Components"
                     >
                       <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDuplicateTemplate(template)}
+                      className="p-2 hover:bg-gray-100 rounded text-gray-600"
+                      title="Duplicate Template"
+                    >
+                      <Copy className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDeleteTemplate(template.id)}
@@ -505,7 +1089,7 @@ export default function BOMTemplates() {
                       {templateComponents.slice(0, 5).map((comp) => (
                         <span key={comp.id} className="text-xs bg-gray-100 px-2 py-1 rounded">
                           {comp.CatalogItems?.item_name || comp.CatalogItems?.sku || comp.component_role || 'Unknown'}
-                          {comp.qty_per_unit > 1 && ` (x${comp.qty_per_unit})`}
+                          {(comp.qty_value || 0) > 1 && ` (x${comp.qty_value})`}
                         </span>
                       ))}
                       {templateComponents.length > 5 && (
@@ -525,16 +1109,25 @@ export default function BOMTemplates() {
         <BOMModal
           isOpen={showTemplateModal}
           onClose={() => {
-            setShowTemplateModal(false);
+            handleCloseModal();
             setEditingTemplateId(null);
           }}
           onSave={() => {
+            // ✅ Clear persisted state on successful save
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.removeItem(PERSISTENCE_KEY);
+              } catch (e) {
+                // Ignore storage errors
+              }
+            }
             setShowTemplateModal(false);
             setEditingTemplateId(null);
             // Reload templates
             window.location.reload();
           }}
           editingTemplateId={editingTemplateId}
+          setEditingTemplateId={setEditingTemplateId}
         />
       )}
 
@@ -557,25 +1150,45 @@ export default function BOMTemplates() {
 }
 
 // BOM Modal Component - Full configuration modal with components management
-function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
+function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTemplateId }: {
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
   editingTemplateId: string | null;
+  setEditingTemplateId: (id: string | null) => void;
 }) {
   const { activeOrganizationId } = useOrganizationContext();
   const { productTypes } = useProductTypes();
-  const { items: catalogItems } = useCatalogItems();
+  
+  // ✅ FIX: Declarar productTypeId ANTES de usarlo en useCatalogItems
+  const [productTypeId, setProductTypeId] = useState<string>('');
+  
+  // ✅ FIX: Cargar TODOS los CatalogItems (sin filtro por ProductType temporalmente para debugging)
+  // TODO: Restaurar filtro por ProductType una vez que la búsqueda funcione correctamente
+  const { items: catalogItems, loading: catalogItemsLoading } = useCatalogItems();
+  
+  // Debug: Log cuando cambian los catalogItems
+  useEffect(() => {
+    if (import.meta.env.DEV && catalogItems.length > 0) {
+      console.log(`[BOMTemplates] CatalogItems loaded: ${catalogItems.length} items`);
+      const rca04Items = catalogItems.filter((item: any) => 
+        (item.sku || '').toUpperCase().includes('RCA-04')
+      );
+      if (rca04Items.length > 0) {
+        console.log(`[BOMTemplates] RCA-04 items found:`, rca04Items.map((item: any) => item.sku).join(', '));
+      }
+    }
+  }, [catalogItems.length]);
   const { categories } = useItemCategories();
   const { categories: leafCategories = [] } = useLeafItemCategories();
   const { createTemplate, updateTemplate, isCreating, isUpdating } = useBOMTemplateCRUD();
   const { createComponent, updateComponent } = useBOMCRUD();
   const { components: existingComponents } = useBOMComponents(editingTemplateId || null);
 
-  const [productTypeId, setProductTypeId] = useState<string>('');
   const [templateCode, setTemplateCode] = useState<string>(''); // ✅ Template code (unique)
   const [templateName, setTemplateName] = useState<string>('');
   const [templateDescription, setTemplateDescription] = useState<string>('');
+  const [templateHardwareColor, setTemplateHardwareColor] = useState<string>(''); // ✅ Hardware color (White, Black, etc.) or empty for all colors
   const [components, setComponents] = useState<any[]>([]);
   const [componentsToDelete, setComponentsToDelete] = useState<string[]>([]); // ✅ IDs de componentes a borrar en save
   const initialComponentsRef = useRef<any[]>([]); // ✅ Snapshot inicial para comparar
@@ -590,11 +1203,123 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   const [showEngineeringModal, setShowEngineeringModal] = useState(false);
   const [editingEngineeringComponentId, setEditingEngineeringComponentId] = useState<string | null>(null);
   const [engineeringData, setEngineeringData] = useState({
-    affects_role: '',
+    depends_on_role: '',
     cut_axis: 'none' as 'length' | 'width' | 'height' | 'none',
     cut_delta_mm: null as number | null,
     cut_delta_scope: 'none' as 'per_side' | 'per_item' | 'none',
   });
+  
+  // ✅ NUEVO: Estado para gestión de HIJOS
+  const [showChildrenModal, setShowChildrenModal] = useState(false);
+  const [editingParentComponentId, setEditingParentComponentId] = useState<string | null>(null);
+  const [childComponents, setChildComponents] = useState<any[]>([]);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+  const [showAddChildForm, setShowAddChildForm] = useState(false);
+  const [editingChildId, setEditingChildId] = useState<string | null>(null);
+  const [childFormData, setChildFormData] = useState({
+    child_item_id: '',
+    child_role: '',
+    qty: 1,
+    uom: 'ea',
+    required: true,
+    notes: '',
+  });
+  const [childSearchTerm, setChildSearchTerm] = useState('');
+  const [showChildDropdown, setShowChildDropdown] = useState(false);
+  // ✅ FIX: Cargar roles canónicos desde CatalogItemRoles y filtrar solo los válidos como child roles
+  const [catalogItemRoles, setCatalogItemRoles] = useState<any[]>([]);
+  const childRoleOptions = useMemo(() => {
+    // Primero intentar cargar desde CatalogItemRoles (si está disponible)
+    if (catalogItemRoles.length > 0) {
+      // Filtrar solo roles canónicos que pueden ser child roles
+      const validRoles = catalogItemRoles
+        .filter((role: any) => 
+          role.active !== false && 
+          VALID_CHILD_ROLES.includes(role.role_code as any)
+        )
+        .map((role: any) => role.role_code)
+        .filter((code: string) => VALID_CHILD_ROLES.includes(code as any));
+      
+      if (validRoles.length > 0) {
+        if (import.meta.env.DEV) {
+          console.log('[BOMTemplates] Child roles from CatalogItemRoles (canonical):', validRoles);
+        }
+        return validRoles as readonly string[];
+      }
+    }
+    
+    // Fallback: usar VALID_CHILD_ROLES directamente
+    const roles = VALID_CHILD_ROLES as readonly string[];
+    if (import.meta.env.DEV) {
+      console.log('[BOMTemplates] Using VALID_CHILD_ROLES (canonical):', roles);
+    }
+    return roles;
+  }, [catalogItemRoles]);
+
+  // Cargar CatalogItemRoles al montar el componente
+  useEffect(() => {
+    const loadCatalogItemRoles = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('CatalogItemRoles')
+          .select('role_code, label, description, active, sort_order')
+          .eq('active', true)
+          .order('sort_order', { ascending: true });
+        
+        if (error) {
+          if (import.meta.env.DEV) {
+            console.warn('[BOMTemplates] Error loading CatalogItemRoles (non-critical):', error);
+          }
+          return; // Fallback a VALID_CHILD_ROLES
+        }
+        
+        if (data && data.length > 0) {
+          if (import.meta.env.DEV) {
+            console.log('[BOMTemplates] Loaded CatalogItemRoles:', data.length, 'roles');
+          }
+          setCatalogItemRoles(data);
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[BOMTemplates] Exception loading CatalogItemRoles (non-critical):', err);
+        }
+        // Fallback a VALID_CHILD_ROLES
+      }
+    };
+    
+    loadCatalogItemRoles();
+  }, []);
+
+  // ✅ FIX: Mapear item_role a child_role canónico válido
+  // Solo retorna roles que están en childRoleOptions (roles canónicos válidos como child)
+  const mapChildRoleFromItemRole = useCallback(
+    (itemRole: string | null | undefined): string => {
+      const normalized = normalizeRole(itemRole);
+      if (!normalized) return '';
+      
+      // Si ya es un child role canónico válido, retornarlo
+      if (childRoleOptions.includes(normalized)) return normalized;
+      
+      // Mapear variaciones a roles canónicos válidos
+      if (normalized.includes('end_cap') || normalized === 'end_cap') return 'end_cap';
+      if (normalized.includes('adapter') || normalized === 'adapter') return 'adapter';
+      if (normalized.includes('fastener') || normalized === 'fastener') return 'fastener';
+      if (normalized.includes('idler') || normalized === 'idler') return 'idler';
+      if (normalized.includes('chain_stop') || normalized === 'chain_stop') return 'chain_stop';
+      if (normalized.includes('chain_tensioner') || normalized === 'chain_tensioner') return 'chain_tensioner';
+      if (normalized.includes('filler') || normalized === 'filler') return 'filler';
+      
+      // Si no se puede mapear a un role canónico válido, retornar vacío
+      // (el usuario deberá seleccionar manualmente)
+      return '';
+    },
+    [childRoleOptions]
+  );
+  
+  // ✅ PERSISTENCIA: Draft key para sessionStorage
+  const draftKey = `bomTemplateDraft:${editingTemplateId || 'new'}`;
+  const isInitialMount = useRef(true);
+
   // ✅ MVP: Simplified form state - only MVP fields
   const [formData, setFormData] = useState<{
     component_item_id: string;
@@ -614,6 +1339,117 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     is_required: true,
   });
 
+  // ✅ Cerrar dropdown de child component al hacer clic fuera
+  useEffect(() => {
+    if (!showChildDropdown) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      const dropdown = document.querySelector('[data-child-dropdown]');
+      const input = document.querySelector('[data-child-input]');
+      
+      if (dropdown && input && !dropdown.contains(target) && !input.contains(target)) {
+        setShowChildDropdown(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowChildDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showChildDropdown]);
+
+  // ✅ PERSISTENCIA: Restaurar estado desde sessionStorage al montar
+  useEffect(() => {
+    if (isInitialMount.current) {
+      try {
+        const rawDraft = sessionStorage.getItem(draftKey);
+        if (rawDraft) {
+          const parsed = JSON.parse(rawDraft);
+          if (parsed.productTypeId) setProductTypeId(parsed.productTypeId);
+          if (parsed.templateCode) setTemplateCode(parsed.templateCode);
+          if (parsed.templateName) setTemplateName(parsed.templateName);
+          if (parsed.templateDescription) setTemplateDescription(parsed.templateDescription);
+          if (parsed.templateHardwareColor !== undefined) setTemplateHardwareColor(parsed.templateHardwareColor || '');
+          if (parsed.components) {
+            const shouldRestoreComponents =
+              !editingTemplateId ||
+              (Array.isArray(parsed.components) && parsed.components.length > 0);
+            if (shouldRestoreComponents) {
+              setComponents(parsed.components);
+            }
+          }
+          if (parsed.showAddComponentForm !== undefined) setShowAddComponentForm(parsed.showAddComponentForm);
+          console.log('[BOMModal] Restored draft from sessionStorage:', parsed);
+        }
+      } catch (err) {
+        console.warn('[BOMModal] Failed to restore draft from sessionStorage', err);
+      } finally {
+        isInitialMount.current = false;
+      }
+    }
+  }, [draftKey, editingTemplateId]);
+
+  // ✅ PERSISTENCIA: Guardar estado en sessionStorage cuando cambia
+  useEffect(() => {
+    if (isInitialMount.current) return; // No guardar en el primer mount
+
+    const payload = {
+      productTypeId,
+      templateCode,
+      templateName,
+      templateDescription,
+      templateHardwareColor,
+      components,
+      showAddComponentForm,
+    };
+    sessionStorage.setItem(draftKey, JSON.stringify(payload));
+  }, [draftKey, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, components, showAddComponentForm]);
+
+  // ✅ PERSISTENCIA: Restaurar al volver al tab
+  useOnVisibilityChange(useCallback(() => {
+    if (document.visibilityState === 'visible') {
+      try {
+        const rawDraft = sessionStorage.getItem(draftKey);
+        if (rawDraft) {
+          const parsed = JSON.parse(rawDraft);
+          if (parsed.productTypeId) setProductTypeId(parsed.productTypeId);
+          if (parsed.templateCode) setTemplateCode(parsed.templateCode);
+          if (parsed.templateName) setTemplateName(parsed.templateName);
+          if (parsed.templateDescription) setTemplateDescription(parsed.templateDescription);
+          if (parsed.templateHardwareColor !== undefined) setTemplateHardwareColor(parsed.templateHardwareColor || '');
+          if (parsed.components) {
+            const shouldRestoreComponents =
+              !editingTemplateId ||
+              (Array.isArray(parsed.components) && parsed.components.length > 0);
+            if (shouldRestoreComponents) {
+              setComponents(parsed.components);
+            }
+          }
+          if (parsed.showAddComponentForm !== undefined) setShowAddComponentForm(parsed.showAddComponentForm);
+          console.log('[BOMModal] Restored draft on visibility change:', parsed);
+        }
+      } catch (err) {
+        console.warn('[BOMModal] Failed to restore draft on visibility change', err);
+      }
+    }
+  }, [draftKey]));
+
+  // ✅ PERSISTENCIA: Limpiar draft al cerrar modal
+  const clearDraft = useCallback(() => {
+    sessionStorage.removeItem(draftKey);
+    console.log('[BOMModal] Cleared draft from sessionStorage');
+  }, [draftKey]);
+
   // Load template data if editing
   useEffect(() => {
     if (editingTemplateId && activeOrganizationId) {
@@ -622,12 +1458,13 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         .select('*')
         .eq('id', editingTemplateId)
         .single()
-        .then(({ data, error }) => {
+        .then(({ data, error }: { data: any; error: any }) => {
           if (!error && data) {
             setProductTypeId(data.product_type_id);
             setTemplateCode(data.code || ''); // ✅ Load code
             setTemplateName(data.name || data.template_name || '');
             setTemplateDescription(data.description || '');
+            setTemplateHardwareColor(data.hardware_color || ''); // ✅ Load hardware_color
             // ✅ Backend still saves metadata (as {}), but UI doesn't use it
           }
         });
@@ -637,6 +1474,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       setTemplateCode('');
       setTemplateName('');
       setTemplateDescription('');
+      setTemplateHardwareColor('');
       setComponents([]);
       setComponentsToDelete([]);
       initialComponentsRef.current = [];
@@ -701,15 +1539,23 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       // ✅ MVP: Mapear solo campos MVP necesarios
       const mappedComponents = existingComponents.map((comp: any) => ({
         id: comp.id,
-        component_item_id: comp.component_item_id,
+        parent_component_id: comp.parent_component_id || null,
+        component_item_id: comp.component_item_id || null,
         component_role: comp.component_role || null,
         qty_type: comp.qty_type || 'fixed',
-        qty_value: comp.qty_value || (comp.qty_type === 'fixed' ? comp.qty_per_unit : null),
-        qty_per_unit: comp.qty_per_unit || (comp.qty_type === 'fixed' ? comp.qty_value || 1 : 1),
+        qty_value: comp.qty_value || 1,
+        qty_delta_mm: comp.qty_delta_mm || 0,
+        waste_pct: comp.waste_pct || 0,
+        depends_on_role: comp.depends_on_role || null,
+        cut_axis: comp.cut_axis || null,
+        cut_delta_mm: comp.cut_delta_mm || 0,
         uom: comp.uom || 'ea',
-        sequence_order: comp.sequence_order || 0,
+        sort_order: comp.sort_order || 0,
+        sequence_order: comp.sort_order || 0,
+        component_mode: comp.component_mode || 'auto',
         is_required: comp.is_required !== false,
         auto_select: false, // ✅ MVP: siempre false
+        catalog_item: comp.component_item || null,
       }));
 
       // ✅ FIX: Deduplicación defensiva por ID (O(n))
@@ -762,10 +1608,36 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     }
   }, [editingTemplateId, existingComponents]);
 
+  const childrenByParent = useMemo(() => {
+    const grouped: Record<string, any[]> = {};
+    (components || [])
+      .filter((c: any) => c.parent_component_id)
+      .forEach((child: any) => {
+        const parentId = child.parent_component_id;
+        if (!grouped[parentId]) grouped[parentId] = [];
+        grouped[parentId].push(child);
+      });
+    Object.keys(grouped).forEach((parentId) => {
+      const list = grouped[parentId];
+      if (!list) return;
+      list.sort((a, b) => {
+        const aOrder = a.sort_order ?? a.sequence_order ?? 0;
+        const bOrder = b.sort_order ?? b.sequence_order ?? 0;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+      });
+    });
+    return grouped;
+  }, [components]);
+
+  const displayComponents = useMemo(() => {
+    return (components || []).filter((c: any) => !c.parent_component_id);
+  }, [components]);
+
   // Group components by block_type (new BOM structure) or category (fallback)
   const componentsByCategory = useMemo(() => {
-    console.log('🔍 Grouping components. Total components:', components?.length || 0);
-    if (!components || components.length === 0) {
+    console.log('🔍 Grouping components. Total components:', displayComponents?.length || 0);
+    if (!displayComponents || displayComponents.length === 0) {
       console.log('⚠️ No components to group');
       return [];
     }
@@ -781,8 +1653,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       'side_channel': 'SIDE_CHANNEL',
     };
     
-    components.forEach((component: any) => {
-      const componentItem = catalogItems.find(item => item.id === component.component_item_id);
+    displayComponents.forEach((component: any) => {
+      const componentItem = catalogItems.find(item => item.id === component.component_item_id) || component.catalog_item;
       
       const blockType = component.block_type;
       const categoryId = componentItem?.item_category_id || component.component_category_id || null;
@@ -835,7 +1707,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     });
 
     return sortedGroups;
-  }, [components, catalogItems, categories]);
+  }, [displayComponents, catalogItems, categories]);
 
   // Get flat list of filtered items for autocomplete
   // Note: This must be defined after filteredAndGroupedComponents, so we'll calculate it directly
@@ -870,25 +1742,62 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
 
       // Category filter
       if (selectedCategoryFilter) {
-        if (item.item_category_id !== selectedCategoryFilter) {
+        // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+        const itemCategoryId = item.category_id || item.item_category_id;
+        if (itemCategoryId !== selectedCategoryFilter) {
           return false;
         }
       }
 
-      // Search filter
+      // ✅ FIX: Search filter - Mejorado para ser tan flexible como Items.tsx
       if (normalizedSearch) {
-        const itemSku = (item.sku || '').toLowerCase().replace(/[-_\s]/g, '');
-        const itemName = (item.name || item.item_name || '').toLowerCase().replace(/[-_\s]/g, '');
-        const itemDesc = (item.description || '').toLowerCase().replace(/[-_\s]/g, '');
-        const category = categories.find(c => c.id === item.item_category_id);
-        const categoryName = (category?.name || '').toLowerCase().replace(/[-_\s]/g, '');
-        const categoryCode = (category?.code || '').toLowerCase().replace(/[-_\s]/g, '');
+        const searchLower = searchTerm.toLowerCase().trim();
+        const searchNormalized = searchLower.replace(/[-\s]/g, ''); // Remove hyphens and spaces
         
-        if (!itemSku.includes(normalizedSearch) && 
-            !itemName.includes(normalizedSearch) && 
-            !itemDesc.includes(normalizedSearch) &&
-            !categoryName.includes(normalizedSearch) &&
-            !categoryCode.includes(normalizedSearch)) {
+        // Normalize SKU for flexible matching (RCA-04-W = RCA04W = "RCA 04 W")
+        const skuNormalized = (item.sku || '').toLowerCase().replace(/[-\s]/g, '');
+        const skuExact = (item.sku || '').toLowerCase();
+        
+        // Get additional fields from item
+        const itemName = (item.name || item.item_name || '').toLowerCase();
+        const itemDesc = (item.description || '').toLowerCase();
+        const collectionName = (item.collection_name || '').toLowerCase();
+        const variantName = (item.variant_name || '').toLowerCase();
+        const color = (item.color || '').toLowerCase();
+        const measureBasis = (item.measure_basis || '').toLowerCase();
+        const uom = (item.unit_of_measure || item.uom || '').toLowerCase();
+        const manufacturer = ((item as any).manufacturer || '').toLowerCase();
+        
+        // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+        const itemCategoryId = item.category_id || item.item_category_id;
+        const category = categories.find(c => c.id === itemCategoryId);
+        const categoryName = (category?.name || '').toLowerCase();
+        const categoryCode = (category?.code || '').toLowerCase();
+        
+        // Check if matches any field (flexible matching)
+        const matches = (
+          // SKU: exact + normalized matching (RCA-04-W matches "rca-04", "rca04", "rca-04-w", etc.)
+          skuExact.includes(searchLower) ||
+          skuNormalized.includes(searchNormalized) ||
+          // Name
+          itemName.includes(searchLower) ||
+          // Description
+          itemDesc.includes(searchLower) ||
+          // Collection, Variant, Color
+          collectionName.includes(searchLower) ||
+          variantName.includes(searchLower) ||
+          color.includes(searchLower) ||
+          // Measure basis, UOM
+          measureBasis.includes(searchLower) ||
+          uom.includes(searchLower) ||
+          // Manufacturer
+          manufacturer.includes(searchLower) ||
+          // Category
+          categoryName.includes(searchLower) ||
+          categoryCode.includes(searchLower)
+        );
+        
+        if (!matches) {
           return false;
         }
       }
@@ -900,7 +1809,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     const categoryMap = new Map<string | null, { category: any; items: any[] }>();
     
     filtered.forEach((item) => {
-      const categoryId = item.item_category_id || null;
+      // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+      const categoryId = item.category_id || item.item_category_id || null;
       const category = categories.find(c => c.id === categoryId) || {
         id: null,
         name: 'Uncategorized',
@@ -965,17 +1875,40 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   const handleSelectComponent = (itemId: string) => {
     const selectedItem = catalogItems.find(item => item.id === itemId);
     
+    if (!selectedItem) {
+      console.warn('⚠️ Selected item not found:', itemId);
+      return;
+    }
+    
+    // ✅ FIX: Auto-llenar component_role desde item_role del CatalogItem
+    // Intentar obtener item_role de múltiples formas para compatibilidad
+    const itemRole = selectedItem?.item_role || (selectedItem as any)?.item_role || '';
+    const autoRole = itemRole ? normalizeRole(itemRole) : '';
+    
+    if (import.meta.env.DEV) {
+      console.log('🔍 handleSelectComponent:', {
+        itemId,
+        sku: selectedItem.sku,
+        name: selectedItem.name,
+        item_role: itemRole,
+        normalizedRole: autoRole,
+        selectedItemKeys: Object.keys(selectedItem),
+      });
+    }
+    
     // ✅ FIX: For fabrics, force UOM to 'm' (linear meters)
     const isFabric = selectedItem?.is_fabric || false;
-    const isFabricRole = formData.component_role === 'fabric';
+    const isFabricRole = autoRole === 'fabric';
     const shouldUseMeters = isFabric || isFabricRole;
-    const catalogUom = shouldUseMeters ? 'm' : (selectedItem?.uom || 'ea');
+    const catalogUom = shouldUseMeters ? 'm' : (selectedItem?.unit_of_measure || selectedItem?.uom || 'ea');
     
     setFormData({ 
       ...formData, 
       component_item_id: itemId,
+      component_role: autoRole || formData.component_role || '', // ✅ Auto-fill desde item_role, mantener el actual si no hay item_role
       uom: catalogUom // ✅ Force 'm' for fabrics
     });
+    
     // ✅ FIX: Set search term to show selected item
     if (selectedItem) {
       setComponentSearchTerm(`${selectedItem.sku} - ${selectedItem.name || selectedItem.item_name || ''}`);
@@ -1008,7 +1941,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     }
   }, [showComponentDropdown]);
 
-  // ✅ MVP: Simplified handleAddComponent - only MVP fields
+  // ✅ Add parent component
   const handleAddComponent = () => {
     if (import.meta.env.DEV) {
       console.log('[handleAddComponent] Called with formData:', formData);
@@ -1083,26 +2016,35 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       : formData.qty_type;
     
     const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
-    
-    // ✅ MVP: Build component with only MVP fields
-    const newComponent = {
+
+    const newParent = {
       id: `temp-${crypto.randomUUID()}`,
+      organization_id: activeOrganizationId || '',
+      bom_template_id: editingTemplateId || null,
+      parent_component_id: null,
       component_item_id: formData.component_item_id,
       component_role: normalizedRole,
       qty_type: finalQtyType,
-      qty_value: finalQtyType === 'fixed' ? formData.qty_value : null,
-      qty_formula_code: isFabricRole ? 'FABRIC_LINEAR_M' : null, // ✅ Set formula for fabric
-      qty_formula_params: isFabricRole ? { 
-        roll_width_m: selectedItem?.roll_width_m || null,
-        allowance_m: 0.1, // Default allowance
-      } : null,
-      uom: finalUom, // ✅ Normalized UOM (forced 'm' for fabric)
+      qty_value: finalQtyType === 'fixed' ? (formData.qty_value || 1) : 1,
+      qty_delta_mm: 0,
+      waste_pct: 0,
+      uom: finalUom,
+      sort_order: formData.sequence_order ?? 0,
       sequence_order: formData.sequence_order ?? 0,
       is_required: formData.is_required ?? true,
-      auto_select: false, // ✅ MVP: Always false
+      deleted: false,
+      archived: false,
+      catalog_item: selectedItem
+        ? {
+            id: selectedItem.id,
+            sku: selectedItem.sku,
+            name: selectedItem.name || selectedItem.item_name,
+          }
+        : null,
     };
-    
-    setComponents([...components, newComponent]);
+
+    setComponents([...components, newParent]);
+
     resetForm();
     
     useUIStore.getState().addNotification({
@@ -1112,7 +2054,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     });
   };
 
-  // ✅ MVP: Simplified handleUpdateComponent - only MVP fields
+  // ✅ Update Parent Component (BOMComponents)
   const handleUpdateComponent = async () => {
     if (!editingComponentId) {
       useUIStore.getState().addNotification({
@@ -1133,25 +2075,39 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       return;
     }
 
-    if (!formData.component_role) {
+    // ✅ FIX: Si no hay component_role pero hay component_item_id, intentar obtenerlo del item
+    let finalComponentRole = formData.component_role;
+    if (!finalComponentRole && formData.component_item_id) {
+      const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
+      if (selectedItem) {
+        const itemRole = selectedItem?.item_role || (selectedItem as any)?.item_role || '';
+        finalComponentRole = itemRole ? (normalizeRole(itemRole) || '') : '';
+        if (finalComponentRole) {
+          // Actualizar formData con el role encontrado
+          setFormData({ ...formData, component_role: finalComponentRole });
+        }
+      }
+    }
+
+    if (!finalComponentRole) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Validation Error',
-        message: 'Component role is required.',
+        message: 'Component role is required. Please select a component with a valid item_role.',
       });
       return;
     }
 
-    if (!isValidRole(formData.component_role)) {
+    if (!isValidRole(finalComponentRole)) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Invalid Role',
-        message: `Invalid component_role: "${formData.component_role}". Please select a valid role from the dropdown.`,
+        message: `Invalid component_role: "${finalComponentRole}". The role must be a valid canonical role.`,
       });
       return;
     }
     
-    const normalizedRole = normalizeRole(formData.component_role);
+    const normalizedRole = normalizeRole(finalComponentRole);
     // ✅ MVP: Dropdown already provides canonical snake_case values, so normalization check is redundant
     
     if (!formData.qty_type) {
@@ -1181,27 +2137,6 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       return;
     }
 
-    // ✅ FIX: UPDATE by id - never insert when editing
-    if (!editingTemplateId || !activeOrganizationId) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'Template ID or Organization ID missing. Cannot update component.',
-      });
-      return;
-    }
-
-    // ✅ Verify component exists
-    const componentExists = components.some(c => c.id === editingComponentId);
-    if (!componentExists) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'Component not found. Please try again.',
-      });
-      return;
-    }
-
     try {
       // ✅ FIX: For fabric role, ensure UOM is 'm' and set qty_type/formula
       const isFabricRole = normalizedRole === 'fabric';
@@ -1209,82 +2144,132 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       const finalQtyType = isFabricRole && formData.qty_type === 'fixed' 
         ? 'per_area' // ✅ Fabric should use formula, not fixed
         : formData.qty_type;
-      
-      const selectedItem = catalogItems.find(item => item.id === formData.component_item_id);
-      
+
       const updateData = {
         component_item_id: formData.component_item_id,
         component_role: normalizedRole,
         qty_type: finalQtyType,
-        qty_value: finalQtyType === 'fixed' ? formData.qty_value : null,
-        qty_per_unit: finalQtyType === 'fixed' ? (formData.qty_value || 1) : 1,
-        qty_formula_code: isFabricRole ? 'FABRIC_LINEAR_M' : null, // ✅ Set formula for fabric
-        qty_formula_params: isFabricRole ? { 
-          roll_width_m: selectedItem?.roll_width_m || null,
-          allowance_m: 0.1, // Default allowance
-        } : null,
-        uom: normalizedUom, // ✅ Normalized UOM (forced 'm' for fabric)
-        sequence_order: formData.sequence_order ?? 0,
+        qty_value: formData.qty_value || 1,
+        qty_delta_mm: 0,
+        waste_pct: 0,
+        uom: normalizedUom,
+        sort_order: formData.sequence_order ?? 0,
         is_required: formData.is_required ?? true,
-        auto_select: false,
       };
 
-      if (import.meta.env.DEV) {
-        console.log('[handleUpdateComponent] Updating component:', {
-          componentId: editingComponentId,
-          originalUom: formData.uom,
-          normalizedUom,
-          updateData,
-        });
-      }
+      if (editingComponentId) {
+        // ✅ Local-only update when template isn't saved yet (or temp component)
+        const isLocalComponent =
+          !editingTemplateId || String(editingComponentId).startsWith('temp-');
 
-      // ✅ FIX: UPDATE by BOMComponent.id (not catalog_item_id) - NEVER INSERT
-      await updateComponent(editingComponentId, updateData);
-
-      // ✅ FIX: Recargar desde DB para asegurar estado sincronizado (igual que en handleSave)
-      if (editingTemplateId) {
-        const { data: refreshedComponents, error: refreshError } = await supabase
-          .from('BOMComponents')
-          .select('*')
-          .eq('bom_template_id', editingTemplateId)
-          .eq('deleted', false)
-          .order('sequence_order', { ascending: true });
-        
-        if (!refreshError && refreshedComponents) {
-          const mappedComponents = refreshedComponents.map((comp: any) => ({
-            id: comp.id,
-            component_item_id: comp.component_item_id,
-            component_role: comp.component_role || null,
-            qty_type: comp.qty_type || 'fixed',
-            qty_value: comp.qty_value || (comp.qty_type === 'fixed' ? comp.qty_per_unit : null),
-            qty_per_unit: comp.qty_per_unit || (comp.qty_type === 'fixed' ? comp.qty_value || 1 : 1),
-            uom: normalizeUom(comp.uom) || 'ea', // ✅ Normalize UOM from DB
-            sequence_order: comp.sequence_order || 0,
-            is_required: comp.is_required !== false,
-            auto_select: false,
-          }));
-          
-          // ✅ Deduplicación defensiva por ID
-          const uniqueById = Array.from(
-            mappedComponents.reduce((acc, comp) => {
-              acc.set(comp.id, comp);
-              return acc;
-            }, new Map<string, any>()).values()
+        if (isLocalComponent) {
+          const updatedComponents = components.map((c) =>
+            c.id === editingComponentId ? { ...c, ...updateData } : c
           );
-          
-          setComponents(uniqueById);
-          initialComponentsRef.current = uniqueById.map(c => ({ ...c }));
-          
+          setComponents(updatedComponents);
           if (import.meta.env.DEV) {
-            console.log('[handleUpdateComponent] Components reloaded from DB:', {
+            console.log('[handleUpdateComponent] Local update (no templateId):', {
               componentId: editingComponentId,
-              updatedUom: uniqueById.find(c => c.id === editingComponentId)?.uom,
-              totalComponents: uniqueById.length,
             });
           }
-        } else if (refreshError) {
-          console.warn('[handleUpdateComponent] Error reloading components (non-critical):', refreshError);
-          // Fallback: update local state with updateData
+          resetForm();
+          return;
+        }
+
+        // ✅ Verify component exists
+        const componentExists = components.some(c => c.id === editingComponentId);
+        if (!componentExists) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error',
+            message: 'Component not found. Please try again.',
+          });
+          return;
+        }
+
+        if (import.meta.env.DEV) {
+          console.log('[handleUpdateComponent] Updating component:', {
+            componentId: editingComponentId,
+            originalUom: formData.uom,
+            normalizedUom,
+            updateData,
+          });
+        }
+
+        await updateComponent(editingComponentId, updateData);
+
+        // ✅ FIX: Recargar desde DB para asegurar estado sincronizado (igual que en handleSave)
+        if (editingTemplateId) {
+          const { data: refreshedComponents, error: refreshError } = await supabase
+            .from('BOMComponents')
+            .select('*')
+            .eq('bom_template_id', editingTemplateId)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .eq('archived', false)
+            .order('parent_component_id', { ascending: true })
+            .order('sort_order', { ascending: true })
+            .order('created_at', { ascending: true });
+          
+          if (!refreshError && refreshedComponents) {
+            const mappedComponents = (refreshedComponents as any[]).map((comp: any) => ({
+              id: comp.id,
+              parent_component_id: comp.parent_component_id || null,
+              component_item_id: comp.component_item_id || null,
+              component_role: comp.component_role || null,
+              qty_type: comp.qty_type || 'fixed',
+              qty_value: comp.qty_value || 1,
+              qty_delta_mm: comp.qty_delta_mm || 0,
+              waste_pct: comp.waste_pct || 0,
+              depends_on_role: comp.depends_on_role || null,
+              cut_axis: comp.cut_axis || null,
+              cut_delta_mm: comp.cut_delta_mm || 0,
+              uom: normalizeUom(comp.uom) || 'ea', // ✅ Normalize UOM from DB
+              sort_order: comp.sort_order || 0,
+              sequence_order: comp.sort_order || 0,
+              auto_select: false,
+            }));
+            
+            // ✅ Deduplicación defensiva por ID
+            const uniqueById = Array.from(
+              mappedComponents.reduce((acc: Map<string, any>, comp: any) => {
+                acc.set(comp.id, comp);
+                return acc;
+              }, new Map<string, any>()).values()
+            ) as any[];
+            
+            setComponents(uniqueById);
+            initialComponentsRef.current = uniqueById.map((c: any) => ({ ...c }));
+            
+            if (import.meta.env.DEV) {
+              console.log('[handleUpdateComponent] Components reloaded from DB:', {
+                componentId: editingComponentId,
+                updatedUom: uniqueById.find((c: any) => c.id === editingComponentId)?.uom,
+                totalComponents: uniqueById.length,
+              });
+            }
+          } else if (refreshError) {
+            // ✅ FIX: Formatear error para evitar "[circular]"
+            const errorDetails = { 
+              message: refreshError.message, 
+              code: refreshError.code,
+              details: refreshError.details 
+            };
+            console.warn('[handleUpdateComponent] Error reloading components (non-critical):', errorDetails);
+            // Fallback: update local state with updateData
+            const updatedComponents = components.map(c => {
+              if (c.id === editingComponentId) {
+                return {
+                  ...c,
+                  ...updateData,
+                };
+              }
+              return c;
+            });
+            setComponents(updatedComponents);
+          }
+        } else {
+          // Fallback: update local state if no templateId
           const updatedComponents = components.map(c => {
             if (c.id === editingComponentId) {
               return {
@@ -1296,18 +2281,6 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
           });
           setComponents(updatedComponents);
         }
-      } else {
-        // Fallback: update local state if no templateId
-        const updatedComponents = components.map(c => {
-          if (c.id === editingComponentId) {
-            return {
-              ...c,
-              ...updateData,
-            };
-          }
-          return c;
-        });
-        setComponents(updatedComponents);
       }
       
       resetForm();
@@ -1318,7 +2291,13 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         message: 'Component updated successfully.',
       });
     } catch (error) {
-      console.error('[handleUpdateComponent] Error updating component:', error);
+      // ✅ FIX: Formatear error para evitar "[circular]"
+      const errorDetails = error instanceof Error 
+        ? { message: error.message, name: error.name }
+        : typeof error === 'object' && error !== null
+        ? { message: (error as any).message || String(error), code: (error as any).code }
+        : String(error);
+      console.error('[handleUpdateComponent] Error updating component:', errorDetails);
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
@@ -1346,43 +2325,69 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     setHighlightedIndex(-1);
   };
 
-  // ✅ FIX: Borrado solo local - se confirma en save
-  const handleDeleteComponent = (componentId: string) => {
+  // ✅ Local delete; persisted on save (soft delete)
+  const handleDeleteComponent = (component: any) => {
+    const componentId = component?.id as string;
+
+    const childIds = components
+      .filter(c => String(c.parent_component_id) === String(componentId))
+      .map(c => c.id);
+
     if (componentId.startsWith('temp-')) {
-      // ✅ Componente temporal: solo remover de lista
-      setComponents(components.filter(c => c.id !== componentId));
+      setComponents(components.filter(c => c.id !== componentId && !childIds.includes(c.id)));
     } else {
-      // ✅ Componente real: remover de lista y marcar para borrado
-      setComponents(components.filter(c => c.id !== componentId));
-      setComponentsToDelete(prev => [...prev, componentId]);
+      setComponents(components.filter(c => c.id !== componentId && !childIds.includes(c.id)));
+      setComponentsToDelete(prev => {
+        const next = new Set(prev);
+        next.add(componentId);
+        childIds.filter(id => !String(id).startsWith('temp-')).forEach(id => next.add(id));
+        return Array.from(next);
+      });
     }
-    
+
     if (import.meta.env.DEV) {
       console.log('[BOMTemplates] Component deleted locally:', {
         componentId,
-        isTemp: componentId.startsWith('temp-'),
-        componentsToDeleteCount: componentId.startsWith('temp-') ? componentsToDelete.length : componentsToDelete.length + 1,
+        isTemp: componentId?.startsWith('temp-'),
+        componentsToDeleteCount: componentId?.startsWith('temp-') ? componentsToDelete.length : componentsToDelete.length + 1,
       });
     }
   };
 
   // ✅ MVP: Simplified handleEditComponent - only MVP fields
   const handleEditComponent = (component: any) => {
+    // ✅ FIX: Cerrar modal de children si está abierto antes de editar
+    if (showChildrenModal) {
+      handleCloseChildrenModal();
+    }
+
     const componentItemId = component.component_item_id || '';
     const componentItem = catalogItems.find(item => item.id === componentItemId);
-    const displayText = componentItem ? `${componentItem.sku} - ${componentItem.name || componentItem.item_name || 'Unnamed'}` : '';
+    // ✅ FIX: Usar solo 'name' (no 'item_name' que no existe) y mostrar SKU incluso si no hay name
+    // ✅ FIX: Si no hay componente, dejar el campo en blanco (no mostrar "No component selected")
+    const displayText = componentItem 
+      ? `${componentItem.sku || 'N/A'} - ${componentItem.name || 'Unnamed'}` 
+      : (component.catalog_item 
+          ? `${component.catalog_item.sku || 'N/A'} - ${component.catalog_item.name || 'Unnamed'}` 
+          : ''); // ✅ Cambiado: '' en lugar de 'No component selected'
     
     // ✅ FIX: Ensure UOM is properly initialized from component (prioritize component.uom)
     // Normalize UOM from component (lowercase, trim)
     // For fabric role, force UOM to 'm'
     const isFabricRole = component.component_role === 'fabric';
     const componentUomNormalized = isFabricRole ? 'm' : normalizeUom(component.uom);
-    const fallbackUom = isFabricRole ? 'm' : (normalizeUom(componentItem?.uom) || 'ea');
+    const fallbackUom = isFabricRole
+      ? 'm'
+      : (normalizeUom(componentItem?.unit_of_measure || componentItem?.uom) || 'ea');
     const finalUom = componentUomNormalized || fallbackUom;
     
     if (import.meta.env.DEV) {
       console.log('[handleEditComponent] Initializing form:', {
         componentId: component.id,
+        componentItemId,
+        componentItem: componentItem ? { id: componentItem.id, sku: componentItem.sku, name: componentItem.name } : null,
+        catalogItem: component.catalog_item ? { id: component.catalog_item.id, sku: component.catalog_item.sku, name: component.catalog_item.name } : null,
+        displayText,
         componentUom: component.uom,
         componentUomNormalized,
         componentItemUom: componentItem?.uom,
@@ -1392,17 +2397,19 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     }
     
     setEditingComponentId(component.id);
+    // ✅ FIX: Establecer el texto de búsqueda para mostrar el componente seleccionado ANTES de mostrar el formulario
+    // ✅ Si no hay componente, dejar en blanco (no mostrar "No component selected")
+    setComponentSearchTerm(displayText);
     setFormData({
       component_item_id: componentItemId,
       component_role: component.component_role || '',
       qty_type: component.qty_type || 'fixed',
-      qty_value: component.qty_type === 'fixed' ? (component.qty_value || component.qty_per_unit || 1) : null,
+      qty_value: component.qty_type === 'fixed' ? (component.qty_value || 1) : null,
       uom: finalUom, // ✅ FIX: Use normalized UOM
-      sequence_order: component.sequence_order || 0,
+      sequence_order: component.sort_order || component.sequence_order || 0,
       is_required: component.is_required ?? true,
     });
     setShowAddComponentForm(true);
-    setComponentSearchTerm(displayText);
     setSelectedCategoryFilter('');
     setShowComponentDropdown(false);
     setHighlightedIndex(-1);
@@ -1414,7 +2421,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       setEditingEngineeringComponentId(componentId);
       const cutAxis = component.cut_axis || 'none';
       setEngineeringData({
-        affects_role: (cutAxis === 'none' || !cutAxis) ? '' : (component.affects_role || ''),
+        depends_on_role: (cutAxis === 'none' || !cutAxis) ? '' : (component.depends_on_role || ''),
         cut_axis: cutAxis,
         cut_delta_mm: component.cut_delta_mm || null,
         cut_delta_scope: component.cut_delta_scope || 'none',
@@ -1426,15 +2433,15 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   const handleSaveEngineeringRules = () => {
     if (!editingEngineeringComponentId) return;
     
-    const finalAffectsRole = (engineeringData.cut_axis === 'none' || !engineeringData.cut_axis) 
+    const finalDependsOnRole = (engineeringData.cut_axis === 'none' || !engineeringData.cut_axis) 
       ? null 
-      : normalizeRole(engineeringData.affects_role);
+      : normalizeRole(engineeringData.depends_on_role);
     
     setComponents(components.map(c => {
       if (c.id === editingEngineeringComponentId) {
         return {
           ...c,
-          affects_role: finalAffectsRole,
+          depends_on_role: finalDependsOnRole,
           cut_axis: engineeringData.cut_axis === 'none' ? null : engineeringData.cut_axis || null,
           cut_delta_mm: engineeringData.cut_delta_mm || null,
           cut_delta_scope: engineeringData.cut_delta_scope === 'none' ? null : engineeringData.cut_delta_scope || null,
@@ -1446,11 +2453,230 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     setShowEngineeringModal(false);
     setEditingEngineeringComponentId(null);
     setEngineeringData({
-      affects_role: '',
+      depends_on_role: '',
       cut_axis: 'none',
       cut_delta_mm: null,
       cut_delta_scope: 'none',
     });
+  };
+
+  // ✅ Open modal with children from BOMComponents tree
+  const handleOpenChildrenModal = (parentComponentId: string) => {
+    if (!parentComponentId) return;
+    setEditingParentComponentId(parentComponentId);
+    setShowChildrenModal(true);
+    setLoadingChildren(false);
+    setChildComponents(childrenByParent[parentComponentId] || []);
+  };
+
+  // ✅ NUEVO: Cerrar modal de HIJOS
+  const handleCloseChildrenModal = () => {
+    if (import.meta.env.DEV) {
+      console.log('[handleCloseChildrenModal] Closing modal and resetting state');
+    }
+    setShowChildrenModal(false);
+    setEditingParentComponentId(null);
+    setChildComponents([]);
+    setShowAddChildForm(false);
+    setEditingChildId(null);
+    setChildFormData({
+      child_item_id: '',
+      child_role: '',
+      qty: 1,
+      uom: 'ea',
+      required: true,
+      notes: '',
+    });
+    setChildSearchTerm('');
+    setShowChildDropdown(false);
+  };
+
+  // ✅ Add or update child component in BOMComponents tree
+  const handleAddChild = async () => {
+    if (!editingParentComponentId || !activeOrganizationId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Missing parent component or organization',
+      });
+      return;
+    }
+
+    const canPersistChild =
+      Boolean(editingTemplateId) && !String(editingParentComponentId).startsWith('temp-');
+
+    if (!childFormData.child_item_id) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Select a child item.',
+      });
+      return;
+    }
+
+    if (!childFormData.child_role) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Child role is required.',
+      });
+      return;
+    }
+
+    if (!isValidRole(childFormData.child_role)) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Invalid Role',
+        message: `Invalid child_role: "${childFormData.child_role}". Please select a valid role.`,
+      });
+      return;
+    }
+
+    if (!childFormData.uom) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'UOM is required.',
+      });
+      return;
+    }
+
+    if (!childFormData.qty || childFormData.qty <= 0) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Quantity must be greater than 0.',
+      });
+      return;
+    }
+
+    const normalizedChildRole = normalizeRole(childFormData.child_role) || childFormData.child_role;
+    if (!normalizedChildRole) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Validation Error',
+        message: 'Child role is invalid.',
+      });
+      return;
+    }
+
+    const duplicate = childComponents.find(
+      (c) =>
+        c.component_item_id === childFormData.child_item_id &&
+        c.parent_component_id === editingParentComponentId &&
+        c.id !== editingChildId
+    );
+    if (duplicate) {
+      useUIStore.getState().addNotification({
+        type: 'warning',
+        title: 'Duplicate Child',
+        message: 'This child SKU already exists under this parent.',
+      });
+      return;
+    }
+
+    try {
+      const selectedItem = catalogItems.find(item => item.id === childFormData.child_item_id);
+      const normalizedUom = normalizeUom(childFormData.uom) || 'ea';
+      const wasEditing = Boolean(editingChildId);
+      const sortOrder = childComponents.find(c => c.id === editingChildId)?.sort_order ?? childComponents.length;
+
+      const basePayload = {
+        organization_id: activeOrganizationId,
+        bom_template_id: editingTemplateId || null,
+        parent_component_id: editingParentComponentId,
+        component_item_id: childFormData.child_item_id,
+        component_role: normalizedChildRole,
+        qty_type: 'fixed',
+        qty_value: childFormData.qty || 1,
+        uom: normalizedUom,
+        sort_order: sortOrder,
+        is_required: childFormData.required !== false,
+        deleted: false,
+        archived: false,
+      };
+
+      let savedChild: any = null;
+
+      if (canPersistChild && editingChildId && !String(editingChildId).startsWith('temp-')) {
+        const { data, error } = await supabase
+          .from('BOMComponents')
+          .update({ ...basePayload, updated_at: new Date().toISOString() })
+          .eq('id', editingChildId)
+          .eq('organization_id', activeOrganizationId)
+          .select('*')
+          .single();
+        if (error) throw error;
+        // ✅ Clean catalog_item to avoid circular references
+        const cleanCatalogItem1 = selectedItem ? {
+          id: selectedItem.id,
+          sku: selectedItem.sku,
+          name: selectedItem.name || selectedItem.item_name,
+        } : null;
+        savedChild = { ...data, catalog_item: cleanCatalogItem1 };
+      } else if (canPersistChild && !editingChildId) {
+        const { data, error } = await supabase
+          .from('BOMComponents')
+          .insert(basePayload)
+          .select('*')
+          .single();
+        if (error) throw error;
+        // ✅ Clean catalog_item to avoid circular references
+        const cleanCatalogItem2 = selectedItem ? {
+          id: selectedItem.id,
+          sku: selectedItem.sku,
+          name: selectedItem.name || selectedItem.item_name,
+        } : null;
+        savedChild = { ...data, catalog_item: cleanCatalogItem2 };
+      } else {
+        const tempId = editingChildId || `temp-${crypto.randomUUID()}`;
+        // ✅ Clean catalog_item to avoid circular references
+        const cleanCatalogItem = selectedItem ? {
+          id: selectedItem.id,
+          sku: selectedItem.sku,
+          name: selectedItem.name || selectedItem.item_name,
+        } : null;
+        savedChild = { id: tempId, ...basePayload, catalog_item: cleanCatalogItem };
+      }
+
+      setComponents((prev) => {
+        if (editingChildId) {
+          return prev.map(c => (String(c.id) === String(editingChildId) ? savedChild : c));
+        }
+        return [...prev, savedChild];
+      });
+
+      setChildComponents((prev) => {
+        if (editingChildId) {
+          return prev.map(c => (String(c.id) === String(editingChildId) ? savedChild : c));
+        }
+        return [...prev, savedChild];
+      });
+
+      setShowAddChildForm(false);
+      setEditingChildId(null);
+      setChildFormData({
+        child_item_id: '',
+        child_role: '',
+        qty: 1,
+        uom: 'ea',
+        required: true,
+        notes: '',
+      });
+      setChildSearchTerm('');
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Success',
+        message: wasEditing ? 'Child component updated successfully' : 'Child component added successfully',
+      });
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error Adding Child Component',
+        message: err?.message || 'Failed to add child component',
+      });
+    }
   };
 
   const handleSave = async () => {
@@ -1495,13 +2721,13 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         }
       }
       
-      // Validate affects_role
-      if (component.affects_role && component.affects_role.trim() !== '') {
-        if (!isValidRole(component.affects_role)) {
+      // Validate depends_on_role
+      if (component.depends_on_role && component.depends_on_role.trim() !== '') {
+        if (!isValidRole(component.depends_on_role)) {
           if (isLegacyFromDB) {
-            legacyComponents.push(`Component ${componentIndex}: legacy affects_role "${component.affects_role}" (migrate to canonical)`);
+            legacyComponents.push(`Component ${componentIndex}: legacy depends_on_role "${component.depends_on_role}" (migrate to canonical)`);
           } else {
-            invalidComponents.push(`Component ${componentIndex}: invalid affects_role "${component.affects_role}"`);
+            invalidComponents.push(`Component ${componentIndex}: invalid depends_on_role "${component.depends_on_role}"`);
           }
         }
       }
@@ -1539,29 +2765,59 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         });
         return;
       }
+
+      // ✅ Validar hardware_color requerido
+      if (!templateHardwareColor || templateHardwareColor.trim() === '') {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Validation Error',
+          message: 'Hardware Color is required to filter templates in the product configurator',
+        });
+        return;
+      }
       
+      const normalizedTemplateCode = templateCode.trim();
+      const normalizedTemplateName = (templateName || '').trim() || normalizedTemplateCode;
+      // Normalize hardware_color (capitalize first letter) - REQUIRED
+      const normalizedHardwareColor = templateHardwareColor.trim().charAt(0).toUpperCase() + templateHardwareColor.trim().slice(1).toLowerCase();
+
       // ✅ FIX: Save template first, then components
       if (editingTemplateId) {
         await updateTemplate(editingTemplateId, {
-          code: templateCode.trim(),
-          name: templateName || null,
+          code: normalizedTemplateCode,
+          name: normalizedTemplateName,
           description: templateDescription || null,
+          hardware_color: normalizedHardwareColor,
           metadata: {},
         } as any);
         templateId = editingTemplateId;
       } else {
         const newTemplate = await createTemplate({
           product_type_id: productTypeId,
-          code: templateCode.trim(),
-          name: templateName || null,
+          code: normalizedTemplateCode,
+          name: normalizedTemplateName,
           description: templateDescription || null,
+          hardware_color: normalizedHardwareColor,
           metadata: {},
         } as any);
         templateId = newTemplate.id;
+        // ✅ FIX: Establecer editingTemplateId después de crear el template
+        setEditingTemplateId(templateId);
+      }
+
+      // ✅ Save BOMComponents only
+      if (!templateId) {
+        throw new Error('Template ID missing after save');
       }
 
       // ✅ FIX: Save flow determinístico - deletions, updates, inserts en orden
       const componentsToDeleteSet = new Set(componentsToDelete);
+      const tempIdToRealIdMap = new Map<string, string>(); // Map temp IDs to real DB IDs
+      
+      // Separate parents (no parent_component_id) from children (has parent_component_id)
+      const allComponents = components.filter(c => !componentsToDeleteSet.has(c.id));
+      const parentComponents = allComponents.filter(c => !c.parent_component_id);
+      const childComponents = allComponents.filter(c => !!c.parent_component_id);
       
       // 1) DELETIONS: Borrar componentes marcados para borrado
       if (componentsToDelete.length > 0) {
@@ -1573,44 +2829,48 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
           .from('BOMComponents')
           .update({ deleted: true })
           .in('id', componentsToDelete)
+          .eq('organization_id', activeOrganizationId)
           .eq('bom_template_id', templateId);
         
         if (deleteError) {
-          console.error('[handleSave] Error deleting components:', deleteError);
+          const errorDetails = { 
+            message: deleteError.message, 
+            code: deleteError.code,
+            details: deleteError.details 
+          };
+          console.error('[handleSave] Error deleting components:', errorDetails);
           throw new Error(`Error deleting components: ${deleteError.message}`);
         }
       }
       
       // 2) UPDATES: Actualizar componentes existentes (id real y NO en componentsToDelete)
-      const componentsToUpdate = components.filter(
-        c => !c.id.startsWith('temp-') && !componentsToDeleteSet.has(c.id)
-      );
+      const parentsToUpdate = parentComponents.filter(c => !c.id.startsWith('temp-'));
+      const childrenToUpdate = childComponents.filter(c => !c.id.startsWith('temp-'));
       
-      if (componentsToUpdate.length > 0) {
+      if (parentsToUpdate.length > 0) {
         if (import.meta.env.DEV) {
-          console.log('[handleSave] Updating components:', componentsToUpdate.length);
+          console.log('[handleSave] Updating parent components:', parentsToUpdate.length);
         }
         
-        for (const component of componentsToUpdate) {
+        for (const component of parentsToUpdate) {
           const normalizedComponentRole = normalizeRole(component.component_role || '');
-          
-          // ✅ FIX: Include formula fields for fabric components
+          const finalComponentRole = normalizedComponentRole || component.component_role || null;
+          const normalizedDependsOnRole = normalizeRole(component.depends_on_role || '');
+          const finalDependsOnRole = normalizedDependsOnRole || component.depends_on_role || null;
           const isFabricRole = normalizedComponentRole === 'fabric';
-          const selectedItem = catalogItems.find(item => item.id === component.component_item_id);
-          
           const updateData = {
+            parent_component_id: null, // Parents always have null
             component_item_id: component.component_item_id || null,
-            component_role: normalizedComponentRole || null,
+            component_role: finalComponentRole,
             qty_type: component.qty_type || 'fixed',
-            qty_value: component.qty_type === 'fixed' ? (component.qty_value || component.qty_per_unit || 1) : null,
-            qty_per_unit: component.qty_per_unit || (component.qty_type === 'fixed' ? (component.qty_value || 1) : 1),
-            qty_formula_code: isFabricRole ? (component.qty_formula_code || 'FABRIC_LINEAR_M') : (component.qty_formula_code || null),
-            qty_formula_params: isFabricRole ? (component.qty_formula_params || { 
-              roll_width_m: selectedItem?.roll_width_m || null,
-              allowance_m: 0.1,
-            }) : (component.qty_formula_params || null),
-            uom: isFabricRole ? 'm' : (component.uom || 'ea'), // ✅ Force 'm' for fabric
-            sequence_order: component.sequence_order || 0,
+            qty_value: component.qty_value || 1,
+            qty_delta_mm: component.qty_delta_mm || 0,
+            waste_pct: component.waste_pct || 0,
+            depends_on_role: finalDependsOnRole,
+            cut_axis: component.cut_axis || null,
+            cut_delta_mm: component.cut_delta_mm || 0,
+            uom: isFabricRole ? 'm' : (component.uom || 'ea'),
+            sort_order: component.sort_order || component.sequence_order || 0,
             is_required: component.is_required !== false,
             auto_select: false,
           };
@@ -1619,52 +2879,188 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
             .from('BOMComponents')
             .update(updateData)
             .eq('id', component.id)
+            .eq('organization_id', activeOrganizationId)
             .eq('bom_template_id', templateId);
           
           if (updateError) {
-            console.error('[handleSave] Error updating component:', component.id, updateError);
+            const errorDetails = { 
+              message: updateError.message, 
+              code: updateError.code,
+              details: updateError.details 
+            };
+            console.error('[handleSave] Error updating parent component:', component.id, errorDetails);
             throw new Error(`Error updating component ${component.id}: ${updateError.message}`);
           }
         }
       }
       
-      // 3) INSERTS: Crear componentes nuevos (id temp-)
-      const componentsToInsert = components.filter(c => c.id.startsWith('temp-'));
-      
-      if (componentsToInsert.length > 0) {
+      if (childrenToUpdate.length > 0) {
         if (import.meta.env.DEV) {
-          console.log('[handleSave] Creating components:', componentsToInsert.length);
+          console.log('[handleSave] Updating child components:', childrenToUpdate.length);
         }
         
-        for (const component of componentsToInsert) {
+        for (const component of childrenToUpdate) {
           const normalizedComponentRole = normalizeRole(component.component_role || '');
-          
-          // ✅ FIX: Include formula fields for fabric components
+          const finalComponentRole = normalizedComponentRole || component.component_role || null;
+          const normalizedDependsOnRole = normalizeRole(component.depends_on_role || '');
+          const finalDependsOnRole = normalizedDependsOnRole || component.depends_on_role || null;
           const isFabricRole = normalizedComponentRole === 'fabric';
-          const selectedItem = catalogItems.find(item => item.id === component.component_item_id);
+          
+          // Resolve parent_component_id: if it's a temp ID, look it up in the map
+          let resolvedParentId = component.parent_component_id;
+          if (resolvedParentId && String(resolvedParentId).startsWith('temp-')) {
+            resolvedParentId = tempIdToRealIdMap.get(String(resolvedParentId)) || null;
+            if (!resolvedParentId) {
+              console.warn('[handleSave] Child component has temp parent ID that was not mapped:', component.id, component.parent_component_id);
+              continue; // Skip this child if parent wasn't saved
+            }
+          }
+          
+          const updateData = {
+            parent_component_id: resolvedParentId,
+            component_item_id: component.component_item_id || null,
+            component_role: finalComponentRole,
+            qty_type: component.qty_type || 'fixed',
+            qty_value: component.qty_value || 1,
+            qty_delta_mm: component.qty_delta_mm || 0,
+            waste_pct: component.waste_pct || 0,
+            depends_on_role: finalDependsOnRole,
+            cut_axis: component.cut_axis || null,
+            cut_delta_mm: component.cut_delta_mm || 0,
+            uom: isFabricRole ? 'm' : (component.uom || 'ea'),
+            sort_order: component.sort_order || component.sequence_order || 0,
+            is_required: component.is_required !== false,
+            auto_select: false,
+          };
+          
+          const { error: updateError } = await supabase
+            .from('BOMComponents')
+            .update(updateData)
+            .eq('id', component.id)
+            .eq('organization_id', activeOrganizationId)
+            .eq('bom_template_id', templateId);
+          
+          if (updateError) {
+            const errorDetails = { 
+              message: updateError.message, 
+              code: updateError.code,
+              details: updateError.details 
+            };
+            console.error('[handleSave] Error updating child component:', component.id, errorDetails);
+            throw new Error(`Error updating child component ${component.id}: ${updateError.message}`);
+          }
+        }
+      }
+      
+      // 3) INSERTS: Crear componentes nuevos (id temp-)
+      // First insert parents, then children (children need parent IDs)
+      const parentsToInsert = parentComponents.filter(c => c.id.startsWith('temp-'));
+      const childrenToInsert = childComponents.filter(c => c.id.startsWith('temp-'));
+      
+      if (parentsToInsert.length > 0) {
+        if (import.meta.env.DEV) {
+          console.log('[handleSave] Creating parent components:', parentsToInsert.length);
+        }
+        
+        for (const component of parentsToInsert) {
+          const normalizedComponentRole = normalizeRole(component.component_role || '');
+          const finalComponentRole = normalizedComponentRole || component.component_role || null;
+          const normalizedDependsOnRole = normalizeRole(component.depends_on_role || '');
+          const finalDependsOnRole = normalizedDependsOnRole || component.depends_on_role || null;
+          const isFabricRole = normalizedComponentRole === 'fabric';
+          const tempId = component.id;
           
           const componentData = {
             bom_template_id: templateId,
+            parent_component_id: null, // Parents always have null
             component_item_id: component.component_item_id || null,
-            component_role: normalizedComponentRole || null,
+            component_role: finalComponentRole,
             qty_type: component.qty_type || 'fixed',
-            qty_value: component.qty_type === 'fixed' ? (component.qty_value || component.qty_per_unit || 1) : null,
-            qty_per_unit: component.qty_per_unit || (component.qty_type === 'fixed' ? (component.qty_value || 1) : 1),
-            qty_formula_code: isFabricRole ? (component.qty_formula_code || 'FABRIC_LINEAR_M') : (component.qty_formula_code || null),
-            qty_formula_params: isFabricRole ? (component.qty_formula_params || { 
-              roll_width_m: selectedItem?.roll_width_m || null,
-              allowance_m: 0.1,
-            }) : (component.qty_formula_params || null),
-            uom: isFabricRole ? 'm' : (component.uom || 'ea'), // ✅ Force 'm' for fabric
-            sequence_order: component.sequence_order || 0,
+            qty_value: component.qty_value || 1,
+            qty_delta_mm: component.qty_delta_mm || 0,
+            waste_pct: component.waste_pct || 0,
+            depends_on_role: finalDependsOnRole,
+            cut_axis: component.cut_axis || null,
+            cut_delta_mm: component.cut_delta_mm || 0,
+            uom: isFabricRole ? 'm' : (component.uom || 'ea'),
             is_required: component.is_required !== false,
+            sort_order: component.sort_order || component.sequence_order || 0,
+            auto_select: false,
+          };
+          
+          const result = await createComponent(componentData);
+          
+          if (!result || !result.id) {
+            throw new Error('Component creation returned no data or ID');
+          }
+          
+          // Map temp ID to real ID for children resolution
+          tempIdToRealIdMap.set(tempId, result.id);
+        }
+      }
+      
+      if (childrenToInsert.length > 0) {
+        if (import.meta.env.DEV) {
+          console.log('[handleSave] Creating child components:', childrenToInsert.length);
+        }
+        
+        for (const component of childrenToInsert) {
+          const normalizedComponentRole = normalizeRole(component.component_role || '');
+          const finalComponentRole = normalizedComponentRole || component.component_role || null;
+          const normalizedDependsOnRole = normalizeRole(component.depends_on_role || '');
+          const finalDependsOnRole = normalizedDependsOnRole || component.depends_on_role || null;
+          const isFabricRole = normalizedComponentRole === 'fabric';
+          
+          // Resolve parent_component_id: if it's a temp ID, look it up in the map
+          let resolvedParentId = component.parent_component_id;
+          if (resolvedParentId && String(resolvedParentId).startsWith('temp-')) {
+            resolvedParentId = tempIdToRealIdMap.get(String(resolvedParentId)) || null;
+            if (!resolvedParentId) {
+              console.warn('[handleSave] Child component has temp parent ID that was not mapped, skipping:', component.id, component.parent_component_id);
+              continue; // Skip this child if parent wasn't saved
+            }
+          }
+          
+          // Verify parent exists (either in our list or already in DB)
+          if (resolvedParentId && !String(resolvedParentId).startsWith('temp-')) {
+            // Check if parent is in our current list (to be updated or inserted)
+            const parentInList = parentComponents.find(p => {
+              const pId = String(p.id);
+              const realId = pId.startsWith('temp-') ? tempIdToRealIdMap.get(pId) : pId;
+              return String(realId) === String(resolvedParentId);
+            });
+            
+            if (!parentInList) {
+              // Parent should already exist in DB - verify it's a valid parent component
+              // (We'll let the DB foreign key constraint handle validation)
+              if (import.meta.env.DEV) {
+                console.log('[handleSave] Child component parent ID from DB:', component.id, resolvedParentId);
+              }
+            }
+          }
+          
+          const componentData = {
+            bom_template_id: templateId,
+            parent_component_id: resolvedParentId,
+            component_item_id: component.component_item_id || null,
+            component_role: finalComponentRole,
+            qty_type: component.qty_type || 'fixed',
+            qty_value: component.qty_value || 1,
+            qty_delta_mm: component.qty_delta_mm || 0,
+            waste_pct: component.waste_pct || 0,
+            depends_on_role: finalDependsOnRole,
+            cut_axis: component.cut_axis || null,
+            cut_delta_mm: component.cut_delta_mm || 0,
+            uom: isFabricRole ? 'm' : (component.uom || 'ea'),
+            is_required: component.is_required !== false,
+            sort_order: component.sort_order || component.sequence_order || 0,
             auto_select: false,
           };
           
           const result = await createComponent(componentData);
           
           if (!result) {
-            throw new Error('Component creation returned no data');
+            throw new Error('Child component creation returned no data');
           }
         }
       }
@@ -1675,45 +3071,75 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       // ✅ Recargar desde DB para tener estado sincronizado (tanto para edit como create)
       const { data: refreshedComponents, error: refreshError } = await supabase
         .from('BOMComponents')
-        .select('*')
+        .select(`
+          *,
+          component_item:component_item_id (
+            id,
+            sku,
+            name
+          )
+        `)
         .eq('bom_template_id', templateId)
+        .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
-        .order('sequence_order', { ascending: true });
+        .eq('archived', false)
+        .order('parent_component_id', { ascending: true })
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
       
       if (!refreshError && refreshedComponents) {
-        const mappedComponents = refreshedComponents.map((comp: any) => ({
-          id: comp.id,
-          component_item_id: comp.component_item_id,
-          component_role: comp.component_role || null,
-          qty_type: comp.qty_type || 'fixed',
-          qty_value: comp.qty_value || (comp.qty_type === 'fixed' ? comp.qty_per_unit : null),
-          qty_per_unit: comp.qty_per_unit || (comp.qty_type === 'fixed' ? comp.qty_value || 1 : 1),
-          qty_formula_code: comp.qty_formula_code || null, // ✅ Include formula code
-          qty_formula_params: comp.qty_formula_params || null, // ✅ Include formula params
-          uom: normalizeUom(comp.uom) || 'ea', // ✅ Normalize UOM
-          sequence_order: comp.sequence_order || 0,
-          is_required: comp.is_required !== false,
-          auto_select: false,
-        }));
+        const mappedComponents = (refreshedComponents as any[]).map((comp: any) => {
+          // ✅ Clean catalog_item to avoid circular references
+          const catalogItem = comp.component_item ? {
+            id: comp.component_item.id,
+            sku: comp.component_item.sku,
+            name: comp.component_item.name,
+          } : null;
+          
+          return {
+            id: comp.id,
+            parent_component_id: comp.parent_component_id || null,
+            component_item_id: comp.component_item_id || null,
+            component_role: comp.component_role || null,
+            qty_type: comp.qty_type || 'fixed',
+            qty_value: comp.qty_value || 1,
+            qty_delta_mm: comp.qty_delta_mm || 0,
+            waste_pct: comp.waste_pct || 0,
+            depends_on_role: comp.depends_on_role || null,
+            cut_axis: comp.cut_axis || null,
+            cut_delta_mm: comp.cut_delta_mm || 0,
+            uom: normalizeUom(comp.uom) || 'ea', // ✅ Normalize UOM
+            sort_order: comp.sort_order || 0,
+            sequence_order: comp.sort_order || 0,
+            auto_select: false,
+            catalog_item: catalogItem,
+          };
+        });
         
         // ✅ FIX: Deduplicación defensiva por ID (O(n))
         const uniqueById = Array.from(
-          mappedComponents.reduce((acc, comp) => {
+          mappedComponents.reduce((acc: Map<string, any>, comp: any) => {
             acc.set(comp.id, comp);
             return acc;
           }, new Map<string, any>()).values()
-        );
+        ) as any[];
         
         // ✅ SIEMPRE REEMPLAZAR estado, NUNCA merge
         setComponents(uniqueById);
-        initialComponentsRef.current = uniqueById.map(c => ({ ...c }));
+        initialComponentsRef.current = uniqueById.map((c: any) => ({ ...c }));
         
         if (import.meta.env.DEV) {
           console.log('[handleSave] Components reloaded from DB:', mappedComponents.length);
         }
       } else if (refreshError) {
         if (import.meta.env.DEV) {
-          console.warn('[handleSave] Error reloading components (non-critical):', refreshError);
+          // ✅ FIX: Formatear error para evitar "[circular]"
+          const errorDetails = { 
+            message: refreshError.message, 
+            code: refreshError.code,
+            details: refreshError.details 
+          };
+          console.warn('[handleSave] Error reloading components (non-critical):', errorDetails);
         }
       }
 
@@ -1723,9 +3149,16 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         message: 'BOM Template saved successfully.',
       });
 
+      clearDraft(); // ✅ Limpiar draft al guardar exitosamente
       onSave();
     } catch (error) {
-      console.error('Error saving BOM:', error);
+      // ✅ FIX: Formatear error para evitar "[circular]"
+      const errorDetails = error instanceof Error 
+        ? { message: error.message, name: error.name, stack: error.stack }
+        : typeof error === 'object' && error !== null
+        ? { message: (error as any).message || String(error), code: (error as any).code, details: (error as any).details }
+        : String(error);
+      console.error('Error saving BOM:', errorDetails);
       
       // Extract detailed error message from Supabase or other errors
       let errorMessage = 'Error saving BOM template';
@@ -1740,7 +3173,12 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
           } else if ('hint' in error) {
             errorMessage = `${(error as any).message || 'Database error'}: ${(error as any).hint || ''}`;
           } else {
-            errorMessage = JSON.stringify(error, null, 2);
+            // ✅ FIX: Evitar JSON.stringify de objetos circulares
+            try {
+              errorMessage = JSON.stringify(error, null, 2);
+            } catch {
+              errorMessage = `Error: ${(error as any).message || 'Unknown error'}`;
+            }
           }
         } else if (error) {
         errorMessage = String(error);
@@ -1799,7 +3237,9 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       if (isAlreadyAdded) return false;
       
       if (selectedCategoryFilter && selectedCategoryFilter !== '__all__') {
-        if (item.item_category_id !== selectedCategoryFilter) {
+        // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+        const itemCategoryId = item.category_id || item.item_category_id;
+        if (itemCategoryId !== selectedCategoryFilter) {
           return false;
         }
       }
@@ -1808,7 +3248,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         const sku = normalizeSearchTerm(item.sku || '');
         const name = normalizeSearchTerm(item.name || item.item_name || '');
         const description = normalizeSearchTerm(item.description || '');
-        const categoryId = item.item_category_id;
+        // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+        const categoryId = item.category_id || item.item_category_id;
         const category = categories.find(cat => cat.id === categoryId);
         const categoryName = normalizeSearchTerm(category?.name || '');
         const categoryCode = normalizeSearchTerm(category?.code || '');
@@ -1838,7 +3279,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     const groups = new Map<string | null, { category: any; items: any[] }>();
     
     filtered.forEach((item) => {
-      const categoryId = item.item_category_id || null;
+      // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+      const categoryId = item.category_id || item.item_category_id || null;
       const category = categories.find(cat => cat.id === categoryId);
       
       const categoryData = category || { 
@@ -1884,8 +3326,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg w-full h-full max-w-6xl m-4 overflow-hidden flex flex-col">
+    <div className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center ${showChildrenModal ? 'pointer-events-none z-0' : ''}`}>
+      <div className={`bg-white rounded-lg w-full h-full max-w-6xl m-4 overflow-hidden flex flex-col ${showChildrenModal ? 'pointer-events-auto' : ''}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
@@ -1914,7 +3356,6 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
             <SelectShadcn
               value={productTypeId}
               onValueChange={setProductTypeId}
-              disabled={!!editingTemplateId}
             >
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="Select product type" />
@@ -1967,6 +3408,34 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                 placeholder="Brief description"
               />
             </div>
+          </div>
+
+          {/* Hardware Color - REQUIRED */}
+          <div className="mb-6">
+            <Label htmlFor="template_hardware_color" className="text-sm" required>
+              Hardware Color
+            </Label>
+            <SelectShadcn
+              value={templateHardwareColor || ''}
+              onValueChange={(value) => {
+                setTemplateHardwareColor(value);
+              }}
+              required
+            >
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="Select hardware color (required)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="White">White</SelectItem>
+                <SelectItem value="Black">Black</SelectItem>
+                <SelectItem value="Silver">Silver</SelectItem>
+                <SelectItem value="Bronze">Bronze</SelectItem>
+                <SelectItem value="Grey">Grey</SelectItem>
+              </SelectContent>
+            </SelectShadcn>
+            <p className="text-xs text-gray-500 mt-1">
+              Select the hardware color (White, Black, etc.) to filter templates in the product configurator. Required field.
+            </p>
           </div>
 
           {/* Components Section */}
@@ -2090,7 +3559,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
 
                       {/* Autocomplete Dropdown */}
                       {showComponentDropdown && (flatFilteredItems.length > 0 || componentSearchTerm.trim()) && (
-                        <div className="absolute left-0 top-full mt-1 z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-[300px] overflow-y-auto">
+                        <div className="absolute left-0 top-full mt-1 z-[100] w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-[300px] overflow-y-auto">
                           {flatFilteredItems.length > 0 ? (
                             <>
                               {/* Group by category */}
@@ -2101,7 +3570,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                 // Get items from flatFilteredItems that belong to this group
                                 const groupItems = flatFilteredItems.filter(item => {
                                   const catalogItem = catalogItems.find(ci => ci.id === item.id);
-                                  const itemCategoryId = catalogItem?.item_category_id || null;
+                                  // ✅ FIX: Use category_id (new schema) with fallback to item_category_id (legacy)
+                                  const itemCategoryId = catalogItem?.category_id || catalogItem?.item_category_id || null;
                                   return itemCategoryId === group.category.id || 
                                          (!group.category.id && !itemCategoryId);
                                 });
@@ -2148,9 +3618,6 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                                 {item.sku && ' - '}
                                                 <span className="text-gray-700">{item.name}</span>
                                               </div>
-                                              <div className="text-gray-500 text-xs mt-0.5">
-                                                UOM: {item.uom}
-                                              </div>
                                             </div>
                                             {isSelected && (
                                               <div className="ml-2 text-primary flex-shrink-0">
@@ -2177,35 +3644,26 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                     </div>
                   </div>
 
-                  {/* ✅ MVP: Component Role - Always Required */}
+                  {/* ✅ Component Role - Auto-filled from CatalogItems.item_role, visible but read-only */}
                   <div className="col-span-3">
                     <Label htmlFor="component_role" required className="mb-1.5">
                       Component Role
+                      {formData.component_item_id && formData.component_role && (
+                        <span className="text-xs text-gray-500 ml-2 font-normal">(auto from item)</span>
+                      )}
                     </Label>
-                    <SelectShadcn
+                    <Input
+                      id="component_role"
                       value={formData.component_role || ''}
-                      onValueChange={(value) => {
-                        const newRole = value === 'none' ? '' : value;
-                        // ✅ FIX: When role='fabric', force UOM to 'm'
-                        const newUom = newRole === 'fabric' ? 'm' : formData.uom;
-                        setFormData({ 
-                          ...formData, 
-                          component_role: newRole,
-                          uom: newUom
-                        });
-                      }}
-                    >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Selecciona el role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CANONICAL_COMPONENT_ROLES.map((role) => (
-                        <SelectItem key={role} value={role}>
-                          {getRoleLabel(role)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                    </SelectShadcn>
+                      readOnly
+                      className="h-9 bg-gray-50 cursor-not-allowed"
+                      placeholder="Will auto-fill when component is selected"
+                    />
+                    {formData.component_item_id && !formData.component_role && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        ⚠️ No item_role found for selected item. Please select a different component.
+                      </p>
+                    )}
                   </div>
                   
                   {/* ✅ MVP: Qty Type */}
@@ -2227,6 +3685,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                       <SelectContent>
                         <SelectItem value="fixed">Fixed</SelectItem>
                         <SelectItem value="per_width">Per Width</SelectItem>
+                        <SelectItem value="per_height">Per Height</SelectItem>
                         <SelectItem value="per_area">Per Area</SelectItem>
                       </SelectContent>
                     </SelectShadcn>
@@ -2411,6 +3870,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                               </div>
                             </th>
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Role</th>
+                            <th className="text-left py-2 px-4 text-xs font-semibold text-gray-900">Children</th>
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Condition</th>
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Color</th>
                             <th className="text-center py-2 px-4 text-xs font-semibold text-gray-900">Order</th>
@@ -2420,15 +3880,17 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {categoryGroup.components.map((component) => {
-                            const componentItem = catalogItems.find(item => item.id === component.component_item_id);
+                            const componentItem = catalogItems.find(item => item.id === component.component_item_id) || component.catalog_item;
                             // ✅ Resolve qty display: show qty_type + qty_value format
-                            const qtyDisplay = component.qty_type === 'fixed' 
-                              ? (component.qty_value || component.qty_per_unit || 1)
+            const qtyDisplay = component.qty_type === 'fixed' 
+              ? (component.qty_value || 1)
                               : component.qty_type === 'per_width'
                                 ? 'per_width'
-                                : component.qty_type === 'per_area'
-                                  ? 'per_area'
-                                  : '-';
+                                : component.qty_type === 'per_height'
+                                  ? 'per_height'
+                                  : component.qty_type === 'per_area'
+                                    ? 'per_area'
+                                    : '-';
                             
                             return (
                               <tr key={component.id} className="hover:bg-gray-50">
@@ -2456,7 +3918,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                   <span className="text-gray-700">
                                     {(component.uom !== null && component.uom !== undefined && component.uom !== '') 
                                       ? component.uom 
-                                      : (componentItem?.uom || 'ea')}
+                                      : (componentItem?.unit_of_measure || componentItem?.uom || 'ea')}
                                   </span>
                                 </td>
                                 {/* 4. Role */}
@@ -2469,7 +3931,31 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                     <span className="text-gray-400">—</span>
                                   )}
                                 </td>
-                                {/* 5. Condition */}
+                                {/* 5. Children */}
+                                <td className="py-2 px-4 text-xs text-gray-700">
+                                  {(() => {
+                                    const parentId = component.id;
+                                    const children = parentId ? (childrenByParent[parentId] || []) : [];
+                                    if (!children.length) return <span className="text-gray-400">—</span>;
+
+                                    const preview = children.slice(0, 3).map((child: any) => {
+                                      const item = child.catalog_item || catalogItems.find(ci => ci.id === child.component_item_id);
+                                      const sku = item?.sku || child.component_item_id || 'N/A';
+                                      const qty = child.qty_value || 1;
+                                      const uom = child.uom || 'ea';
+                                      return `${sku} (${qty} ${uom})`;
+                                    });
+                                    const remaining = children.length - preview.length;
+
+                                    return (
+                                      <span>
+                                        {preview.join(', ')}
+                                        {remaining > 0 ? ` +${remaining}` : ''}
+                                      </span>
+                                    );
+                                  })()}
+                                </td>
+                                {/* 6. Condition */}
                                 <td className="py-2 px-4 text-xs text-center">
                                   {component.block_condition ? (
                                     <span className="text-gray-700">{String(component.block_condition)}</span>
@@ -2477,7 +3963,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                     <span className="text-gray-400">—</span>
                                   )}
                                 </td>
-                                {/* 6. Color (resolve from hardware_color or color_id if exists) */}
+                                {/* 7. Color (resolve from hardware_color or color_id if exists) */}
                                 <td className="py-2 px-4 text-xs text-center">
                                   {component.hardware_color ? (
                                     <span className="text-gray-700">{String(component.hardware_color)}</span>
@@ -2485,11 +3971,11 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                     <span className="text-gray-400">—</span>
                                   )}
                                 </td>
-                                {/* 7. Order/Priority */}
+                                {/* 8. Order/Priority */}
                                 <td className="py-2 px-4 text-xs text-gray-700 text-center">
-                                  {component.sequence_order || 0}
+                                  {component.sort_order || component.sequence_order || 0}
                                 </td>
-                                {/* 8. Required (checkmark here) */}
+                                {/* 9. Required (checkmark here) */}
                                 <td className="py-2 px-4 text-xs text-center">
                                   {component.is_required !== false ? (
                                     <span className="text-green-600 font-bold">✓</span>
@@ -2520,7 +4006,18 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                       <Settings className="w-4 h-4" />
                                     </button>
                                     <button
-                                      onClick={() => handleDeleteComponent(component.id)}
+                                      onClick={() => handleOpenChildrenModal(component.id)}
+                                      className="p-1.5 hover:bg-green-100 rounded transition-colors text-green-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                      title="Manage child components (adapters, end caps, screws, etc)"
+                                      type="button"
+                                      disabled={!component.component_item_id}
+                                    >
+                                      <Package className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        handleDeleteComponent(component);
+                                      }}
                                       className="p-1.5 hover:bg-red-100 rounded transition-colors text-red-600"
                                       title="Delete component"
                                       type="button"
@@ -2545,7 +4042,10 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
           <button
-            onClick={onClose}
+            onClick={() => {
+              clearDraft(); // ✅ Limpiar draft al cancelar
+              onClose();
+            }}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Cancel
@@ -2573,7 +4073,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                   setShowEngineeringModal(false);
                   setEditingEngineeringComponentId(null);
                   setEngineeringData({
-                    affects_role: '',
+                    depends_on_role: '',
                     cut_axis: 'none',
                     cut_delta_mm: null,
                     cut_delta_scope: 'none',
@@ -2595,7 +4095,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                     setEngineeringData({ 
                       ...engineeringData, 
                       cut_axis: newCutAxis,
-                      affects_role: newCutAxis === 'none' ? '' : engineeringData.affects_role
+                      depends_on_role: newCutAxis === 'none' ? '' : engineeringData.depends_on_role
                     });
                   }}
                 >
@@ -2612,19 +4112,19 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
               </div>
               
               <div>
-                <Label htmlFor="affects_role" className="text-xs">Affects Role</Label>
+                <Label htmlFor="depends_on_role" className="text-xs">Depends on Role</Label>
                 <SelectShadcn
-                  value={engineeringData.affects_role || 'none'}
+                  value={engineeringData.depends_on_role || 'none'}
                   onValueChange={(value) => {
                     if (value !== 'none' && !isValidRole(value)) {
                       useUIStore.getState().addNotification({
                         type: 'error',
                         title: 'Invalid Role',
-                        message: `Invalid affects_role: "${value}". Please select a valid role from the dropdown.`,
+                        message: `Invalid depends_on_role: "${value}". Please select a valid role from the dropdown.`,
                       });
                       return;
                     }
-                    setEngineeringData({ ...engineeringData, affects_role: value === 'none' ? '' : value });
+                    setEngineeringData({ ...engineeringData, depends_on_role: value === 'none' ? '' : value });
                   }}
                   disabled={engineeringData.cut_axis === 'none' || !engineeringData.cut_axis}
                 >
@@ -2643,7 +4143,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                 <p className="text-xs text-gray-500 mt-1">
                   {engineeringData.cut_axis === 'none' || !engineeringData.cut_axis 
                     ? 'Select a cut axis first to enable this field' 
-                    : 'Target role this component affects'}
+                    : 'Role that this component depends on'}
                 </p>
               </div>
               
@@ -2685,7 +4185,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                   setShowEngineeringModal(false);
                   setEditingEngineeringComponentId(null);
                   setEngineeringData({
-                    affects_role: '',
+                    depends_on_role: '',
                     cut_axis: 'none',
                     cut_delta_mm: null,
                     cut_delta_scope: 'none',
@@ -2706,6 +4206,539 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
           </div>
         </div>
       )}
+
+      {/* ✅ REHECHO: Modal para gestionar HIJOS (Child Components) - Versión limpia */}
+      {showChildrenModal && editingParentComponentId && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4"
+          style={{ pointerEvents: 'auto' }}
+          onClick={(e) => {
+            // Cerrar modal si se hace click en el overlay (no en el contenido)
+            if (e.target === e.currentTarget) {
+              handleCloseChildrenModal();
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+            style={{ pointerEvents: 'auto' }}
+            onClick={(e) => {
+              // Prevenir que clicks dentro del modal se propaguen al overlay
+              e.stopPropagation();
+            }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h3 className="text-lg font-semibold">Manage Child Components</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Add adapters, end caps, screws, and other parts that come with this SKU
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseChildrenModal}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4" style={{ pointerEvents: 'auto' }}>
+              {loadingChildren ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                  <p className="text-sm text-gray-600">Loading children...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Botón para agregar nuevo hijo */}
+                  {!showAddChildForm ? (
+                    <div style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1 }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          
+                          if (import.meta.env.DEV) {
+                            console.log('[BOMTemplates] Add Child Button clicked');
+                          }
+                          
+                          // Resetear todo primero
+                          setEditingChildId(null);
+                          setChildFormData({
+                            child_item_id: '',
+                            child_role: '',
+                            qty: 1,
+                            uom: 'ea',
+                            required: true,
+                            notes: '',
+                          });
+                          setChildSearchTerm('');
+                          setShowChildDropdown(false);
+                          
+                          // Luego mostrar formulario
+                          setShowAddChildForm(true);
+                        }}
+                        className="w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-primary hover:bg-primary/5 transition-colors text-sm text-gray-600 hover:text-primary flex items-center justify-center gap-2 cursor-pointer"
+                        style={{ pointerEvents: 'auto', position: 'relative', zIndex: 10 }}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Child Component
+                      </button>
+                      <div className="text-xs text-gray-400 mt-1 text-center" style={{ pointerEvents: 'none' }}>
+                        Click to add a new child component
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Formulario para agregar/editar HIJO */}
+                  {showAddChildForm ? (
+                    <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-semibold">
+                          {editingChildId ? 'Edit Child Component' : 'Add Child Component'}
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddChildForm(false);
+                            setEditingChildId(null);
+                            setChildFormData({
+                              child_item_id: '',
+                              child_role: '',
+                              qty: 1,
+                              uom: 'ea',
+                              required: true,
+                              notes: '',
+                            });
+                            setChildSearchTerm('');
+                            setShowChildDropdown(false);
+                          }}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Child Component Selector */}
+                        <div>
+                          <Label className="text-xs mb-1">Child Component *</Label>
+                          <div className="relative">
+                            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none z-10" />
+                            <Input
+                              data-child-input
+                              type="text"
+                              placeholder="Search SKU or name..."
+                              value={childSearchTerm}
+                              onChange={(e) => {
+                                setChildSearchTerm(e.target.value);
+                                setShowChildDropdown(true);
+                                if (e.target.value && childFormData.child_item_id) {
+                                  setChildFormData({ ...childFormData, child_item_id: '', child_role: '' });
+                                }
+                              }}
+                              onFocus={() => setShowChildDropdown(true)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  setShowChildDropdown(false);
+                                }
+                              }}
+                              className="pl-8 h-8 text-xs"
+                            />
+                            {showChildDropdown && catalogItems.length > 0 && (
+                              <div data-child-dropdown className="absolute left-0 top-full mt-1 z-[110] w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-200 bg-gray-50 sticky top-0">
+                                  <span className="text-xs font-medium text-gray-700">Select component</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowChildDropdown(false)}
+                                    className="p-0.5 hover:bg-gray-200 rounded transition-colors text-gray-500 hover:text-gray-700"
+                                    title="Close dropdown"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                {catalogItems
+                                  .filter(item => {
+                                    if (!item || item.deleted) return false;
+                                    if (!childSearchTerm) return true;
+                                    const searchLower = childSearchTerm.toLowerCase();
+                                    return (
+                                      item.sku?.toLowerCase().includes(searchLower) ||
+                                      item.name?.toLowerCase().includes(searchLower) ||
+                                      (item as any).item_name?.toLowerCase().includes(searchLower)
+                                    );
+                                  })
+                                  .slice(0, 50)
+                                  .map((item) => {
+                                    const mappedChildRole = mapChildRoleFromItemRole((item as any).item_role);
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setChildFormData({ 
+                                            ...childFormData, 
+                                            child_item_id: item.id,
+                                            child_role: mappedChildRole || childFormData.child_role || '',
+                                            uom: item.unit_of_measure || item.uom || 'ea'
+                                          });
+                                          setChildSearchTerm(`${item.sku || 'N/A'} - ${item.name || (item as any).item_name || 'Unknown'}`);
+                                          setShowChildDropdown(false);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+                                      >
+                                        <div className="font-medium">{item.sku || 'N/A'}</div>
+                                        <div className="text-gray-500 text-xs">{item.name || (item as any).item_name || 'Unknown'}</div>
+                                        {mappedChildRole && (
+                                          <div className="text-gray-400 text-xs mt-0.5">Role: {mappedChildRole}</div>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                {catalogItems.filter(item => {
+                                  if (!item || item.deleted) return false;
+                                  if (!childSearchTerm) return true;
+                                  const searchLower = childSearchTerm.toLowerCase();
+                                  return (
+                                    item.sku?.toLowerCase().includes(searchLower) ||
+                                    item.name?.toLowerCase().includes(searchLower) ||
+                                    (item as any).item_name?.toLowerCase().includes(searchLower)
+                                  );
+                                }).length === 0 && (
+                                  <div className="px-3 py-2 text-xs text-gray-500 text-center">
+                                    No items found
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Child Role */}
+                        <div>
+                          <Label className="text-xs mb-1">Child Role *</Label>
+                          <SelectShadcn
+                            value={childFormData.child_role}
+                            onValueChange={(value) => setChildFormData({ ...childFormData, child_role: value })}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {/* ✅ FIX: Solo roles canónicos válidos como child roles (desde VALID_CHILD_ROLES) */}
+                              {VALID_CHILD_ROLES.map((role) => {
+                                const label = getSubRoleLabel(role) || getRoleLabel(role);
+                                return (
+                                  <SelectItem key={role} value={role}>
+                                    {label}
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </SelectShadcn>
+                        </div>
+
+
+                        {/* Qty */}
+                        <div>
+                          <Label className="text-xs mb-1">Quantity *</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={childFormData.qty}
+                            onChange={(e) => setChildFormData({ ...childFormData, qty: parseFloat(e.target.value) || 1 })}
+                            className="h-8 text-xs"
+                          />
+                        </div>
+
+                        {/* UOM */}
+                        <div>
+                          <Label className="text-xs mb-1">UOM *</Label>
+                          <SelectShadcn
+                            value={childFormData.uom}
+                            onValueChange={(value) => setChildFormData({ ...childFormData, uom: value })}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ea">ea (Each)</SelectItem>
+                              <SelectItem value="pcs">pcs (Pieces)</SelectItem>
+                              <SelectItem value="set">set</SelectItem>
+                              <SelectItem value="m">m (Meters)</SelectItem>
+                            </SelectContent>
+                          </SelectShadcn>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 mt-4">
+                        <button
+                          onClick={() => {
+                            setShowAddChildForm(false);
+                            setEditingChildId(null);
+                            setChildFormData({
+                              child_item_id: '',
+                              child_role: '',
+                              qty: 1,
+                              uom: 'ea',
+                              required: true,
+                              notes: '',
+                            });
+                            setChildSearchTerm('');
+                          }}
+                          className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            
+                            if (import.meta.env.DEV) {
+                              console.log('[Add Child Button] Form submit clicked:', {
+                                child_item_id: childFormData.child_item_id,
+                                child_role: childFormData.child_role,
+                                editingParentComponentId,
+                                hasOrganization: !!activeOrganizationId,
+                              });
+                            }
+                            
+                            if (!childFormData.child_item_id) {
+                              useUIStore.getState().addNotification({
+                                type: 'error',
+                                title: 'Validation Error',
+                                message: 'Please select a child component (SKU)',
+                              });
+                              return;
+                            }
+                            
+                            if (!childFormData.child_role) {
+                              useUIStore.getState().addNotification({
+                                type: 'error',
+                                title: 'Validation Error',
+                                message: 'Please select a child role',
+                              });
+                              return;
+                            }
+                            
+                            try {
+                              await handleAddChild();
+                            } catch (err) {
+                              if (import.meta.env.DEV) {
+                                console.error('[Add Child Button] Error in handleAddChild:', err);
+                              }
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs bg-primary text-white rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={!childFormData.child_item_id || !childFormData.child_role}
+                        >
+                          {editingChildId ? 'Update Child' : 'Add Child'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Lista de HIJOS - Versión limpia */}
+                  {childComponents.length > 0 && (
+                    <div className="space-y-2 mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold text-gray-700">
+                          Children ({childComponents.length})
+                        </h4>
+                      </div>
+                      {childComponents.map((child) => {
+                        // Validar que child.id existe
+                        if (!child?.id) {
+                          if (import.meta.env.DEV) {
+                            console.warn('[BOMTemplates] Child without ID, skipping:', {
+                              component_item_id: child?.component_item_id,
+                              component_role: child?.component_role,
+                            });
+                          }
+                          return null;
+                        }
+                        
+                        const childId = String(child.id);
+                        const childItem = (child.catalog_item || child.child_item || catalogItems.find(item => item.id === child.component_item_id)) as any;
+                        const childItemId = child.component_item_id;
+                        const childName = childItem?.name || childItem?.item_name || 'Unknown';
+                        const childSku = childItem?.sku || childItemId || 'N/A';
+                        const childRole = child.component_role || 'N/A';
+                        const childQty = child.qty_value || child.qty || 1;
+                        const childUom = child.uom || 'ea';
+                        
+                        return (
+                          <div 
+                            key={childId} 
+                            className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm text-gray-900 truncate">
+                                {childName}
+                              </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              SKU: {childSku} • Role: {childRole} • Qty: {childQty} {childUom}
+                            </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                              {/* Botón Editar */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  
+                                  if (!childId) {
+                                    useUIStore.getState().addNotification({
+                                      type: 'error',
+                                      title: 'Error',
+                                      message: 'Child component ID is missing',
+                                    });
+                                    return;
+                                  }
+                                  
+                                  setEditingChildId(childId);
+                                  setShowAddChildForm(true);
+                                  setChildFormData({
+                                    child_item_id: childItemId || '',
+                                    child_role: childRole !== 'N/A' ? childRole : '',
+                                    qty: childQty,
+                                    uom: childUom,
+                                    required: child.is_required !== false,
+                                    notes: child.notes || '',
+                                  });
+                                  setChildSearchTerm(
+                                    childItem
+                                      ? `${childSku} - ${childName}`
+                                      : ''
+                                  );
+                                  setShowChildDropdown(false);
+                                }}
+                                className="p-1.5 hover:bg-blue-100 rounded transition-colors text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Edit child component"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              
+                              {/* Botón Eliminar */}
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  
+                                  if (!childId) {
+                                    useUIStore.getState().addNotification({
+                                      type: 'error',
+                                      title: 'Error',
+                                      message: 'Child component ID is missing',
+                                    });
+                                    return;
+                                  }
+                                  
+                                  if (!window.confirm(`Delete "${childName}" (${childSku})?`)) {
+                                    return;
+                                  }
+                                  
+                                  if (!activeOrganizationId) {
+                                    useUIStore.getState().addNotification({
+                                      type: 'error',
+                                      title: 'Error',
+                                      message: 'No organization selected',
+                                    });
+                                    return;
+                                  }
+                                  
+                                  try {
+                                    if (!childId.startsWith('temp-')) {
+                                      const { error: deleteError } = await supabase
+                                        .from('BOMComponents')
+                                        .update({
+                                          deleted: true,
+                                          updated_at: new Date().toISOString(),
+                                        })
+                                        .eq('id', childId)
+                                        .eq('organization_id', activeOrganizationId);
+
+                                      if (deleteError) {
+                                        throw deleteError;
+                                      }
+                                    }
+
+                                    setComponents(prev => prev.filter(c => String(c.id) !== childId));
+                                    setChildComponents(prev => prev.filter(c => String(c.id) !== childId));
+
+                                    if (editingChildId === childId) {
+                                      setEditingChildId(null);
+                                      setShowAddChildForm(false);
+                                      setChildFormData({
+                                        child_item_id: '',
+                                        child_role: '',
+                                        qty: 1,
+                                        uom: 'ea',
+                                        required: true,
+                                        notes: '',
+                                      });
+                                      setChildSearchTerm('');
+                                    }
+
+                                    useUIStore.getState().addNotification({
+                                      type: 'success',
+                                      title: 'Success',
+                                      message: 'Child component deleted successfully',
+                                    });
+                                  } catch (err: any) {
+                                    useUIStore.getState().addNotification({
+                                      type: 'error',
+                                      title: 'Error',
+                                      message: err?.message || 'Failed to delete child component',
+                                    });
+                                  }
+                                }}
+                                className="p-1.5 hover:bg-red-100 rounded transition-colors text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Delete child component"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  
+                  {/* Mensaje cuando no hay hijos */}
+                  {!showAddChildForm && childComponents.length === 0 && (
+                    <div className="text-center py-8 text-gray-500 text-sm">
+                      No child components yet. Click "Add Child Component" to add one.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+              <button
+                type="button"
+                onClick={handleCloseChildrenModal}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

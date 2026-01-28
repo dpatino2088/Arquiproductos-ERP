@@ -94,3 +94,27 @@ export function isRLSError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Safe error serializer to avoid [circular] errors when logging
+ * Extracts only safe, serializable properties from error objects
+ * 
+ * @param e - Error object (Supabase error, Error, or any)
+ * @returns Safe object with only serializable properties
+ */
+export function safeError(e: any): {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+  name?: string;
+} {
+  if (!e) return {};
+  
+  return {
+    message: e?.message,
+    details: e?.details,
+    hint: e?.hint,
+    code: e?.code,
+    name: e?.name,
+  };
+}

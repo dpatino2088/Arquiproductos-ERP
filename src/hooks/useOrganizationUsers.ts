@@ -115,7 +115,7 @@ export function useOrganizationUsers(organizationId?: string) {
           organization_id: effectiveOrgId,
           user_email: input.user_email.trim().toLowerCase(),
           role: input.role,
-          redirect_to: input.redirect_to || `${window.location.origin}/auth/callback`,
+          // ✅ NO redirect_to - deja que el Edge Function use APP_ORIGIN
         },
       });
 

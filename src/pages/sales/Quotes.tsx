@@ -1,401 +1,198 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useQuotes, approveQuote, normalizeStatus, waitForSalesOrder } from '../../hooks/useQuotes';
+import { approveQuote, waitForSalesOrder } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useActiveCompany } from '../../hooks/useActiveCompany';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import { getSupabaseErrorMessage, isRLSError } from '../../lib/supabase-error-utils';
+import { getSupabaseErrorMessage, isRLSError, safeError } from '../../lib/supabase-error-utils';
 import { 
-  Search, 
-  Filter,
-  Plus,
-  Upload,
-  List,
-  Grid3X3,
-  SortAsc,
-  SortDesc,
-  Edit,
-  Copy,
-  Eye,
-  Trash2,
-  Archive,
-  ShoppingCart,
-  FileText,
-  CheckCircle
+  Search, Plus, Upload, List, Grid3X3, Edit, Trash2, Archive, 
+  ShoppingCart, FileText, CheckCircle, RefreshCw, Filter,
+  SortAsc, SortDesc
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
 
-interface QuoteItem {
+interface EnrichedQuote {
   id: string;
-  quoteNo: string;
+  quote_no: string;
   status: QuoteStatus;
-  customerName: string;
-  subtotal: number;
-  tax: number;
+  customer_id: string | null;
+  customer_name: string;
+  contact_id: string | null;
+  contact_name: string;
   total: number;
-  currency: string;
-  createdAt: string;
+  created_at: string;
+  organization_id: string;
+  company_id: string | null;
 }
 
-// Function to get status badge color
 const getStatusBadgeColor = (status: QuoteStatus) => {
   switch (status) {
-    case 'draft':
-      return 'bg-gray-50 text-gray-700';
-    case 'sent':
-      return 'bg-blue-50 text-blue-700';
-    case 'approved':
-      return 'bg-green-50 text-green-700';
-    case 'rejected':
-      return 'bg-red-50 text-red-700';
-    case 'cancelled':
-      return 'bg-orange-50 text-orange-700';
-    default:
-      return 'bg-gray-50 text-gray-700';
+    case 'draft': return 'bg-gray-100 text-gray-700';
+    case 'sent': return 'bg-blue-100 text-blue-700';
+    case 'approved': return 'bg-green-100 text-green-700';
+    case 'rejected': return 'bg-red-100 text-red-700';
+    case 'cancelled': return 'bg-orange-100 text-orange-700';
+    default: return 'bg-gray-100 text-gray-700';
   }
 };
 
-// Format currency
-const formatCurrency = (amount: number, currency: string = 'USD') => {
+const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
+    currency: 'USD',
+  }).format(amount || 0);
 };
 
 export default function Quotes() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
-  const { quotes, loading, error, refetch } = useQuotes();
   const { activeOrganizationId } = useOrganizationContext();
-  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  const { activeCompanyId } = useActiveCompany();
+  const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
+  
+  const [quotes, setQuotes] = useState<EnrichedQuote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  const [sortBy, setSortBy] = useState<'quoteNo' | 'status' | 'customerName' | 'total' | 'createdAt'>('quoteNo');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [sortBy, setSortBy] = useState<'quote_no' | 'status' | 'customer_name' | 'total' | 'created_at'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedStatus, setSelectedStatus] = useState<QuoteStatus[]>([]);
 
-  useEffect(() => {
-    // Register Quotes submodules when Quotes component is mounted
-    const currentPath = window.location.pathname;
-    if (currentPath.startsWith('/sales/quotes')) {
-      registerSubmodules('Quotes', [
-        { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
-        { id: 'quote-approved', label: 'Quote Approved', href: '/sales/quotes/approved', icon: CheckCircle },
-      ]);
-    }
-    
-    // Cleanup: clear submodules when component unmounts or path changes
-    return () => {
-      const path = window.location.pathname;
-      if (!path.startsWith('/sales/quotes')) {
-        clearSubmoduleNav();
-      }
-    };
-  }, [registerSubmodules, clearSubmoduleNav]);
-
-  // Transform quotes to display format
-  const quotesData: QuoteItem[] = useMemo(() => {
-    if (!quotes) return [];
-    return quotes.map(quote => {
-      // Calculate total from QuoteLines (sum of all line_total)
-      const quoteLines = (quote as any).QuoteLines || [];
-      
-      const linesTotal = quoteLines
-        .filter((line: any) => !line.deleted)
-        .reduce((sum: number, line: any) => sum + (line.line_total || 0), 0);
-      
-      // Use calculated total from lines (sum of all line_total), or fallback to quote.totals
-      const calculatedTotal = linesTotal > 0 ? linesTotal : (quote.totals?.total || 0);
-      
-      return {
-        id: quote.id,
-        quoteNo: (quote as any).quote_no || 'N/A',
-        status: quote.status,
-        customerName: (quote as any).DirectoryCustomers?.customer_name || 'N/A',
-        subtotal: calculatedTotal, // Subtotal is the same as total (sum of line_total)
-        tax: 0, // Tax is included in line_total if applicable
-        total: calculatedTotal, // Total is the sum of all line_total
-        currency: quote.currency || 'USD',
-        createdAt: quote.created_at,
-      };
-    });
-  }, [quotes]);
-
-  // Filter and sort quotes
-  const filteredQuotes = useMemo(() => {
-    const filtered = quotesData.filter(quote => {
-      // Search filter
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || (
-        quote.quoteNo.toLowerCase().includes(searchLower) ||
-        quote.customerName.toLowerCase().includes(searchLower) ||
-        quote.status.toLowerCase().includes(searchLower)
-      );
-
-      // Status filter
-      const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(quote.status);
-
-      return matchesSearch && matchesStatus;
-    });
-
-    // Sort
-    return filtered.sort((a, b) => {
-      let aValue: any = a[sortBy];
-      let bValue: any = b[sortBy];
-
-      if (sortBy === 'createdAt') {
-        aValue = new Date(a.createdAt);
-        bValue = new Date(b.createdAt);
-        return sortOrder === 'asc' ? aValue.getTime() - bValue.getTime() : bValue.getTime() - aValue.getTime();
-      } else if (sortBy === 'total') {
-        return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
-      } else {
-        const strA = String(aValue).toLowerCase();
-        const strB = String(bValue).toLowerCase();
-        if (strA < strB) return sortOrder === 'asc' ? -1 : 1;
-        if (strA > strB) return sortOrder === 'asc' ? 1 : -1;
-        return 0;
-      }
-    });
-  }, [searchTerm, quotesData, sortBy, sortOrder, selectedStatus]);
-
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredQuotes.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedQuotes = filteredQuotes.slice(startIndex, startIndex + itemsPerPage);
-
-  // Reset to first page when search changes
-  useMemo(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  // Handle sorting
-  const handleSort = (field: typeof sortBy) => {
-    if (sortBy === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(field);
-      setSortOrder('asc');
-    }
-  };
-
-  // Handle status toggle
-  const handleStatusToggle = (status: QuoteStatus) => {
-    setSelectedStatus(prev => 
-      prev.includes(status) 
-        ? prev.filter(s => s !== status)
-        : [...prev, status]
-    );
-  };
-
-  // Clear all filters
-  const clearAllFilters = () => {
-    setSelectedStatus([]);
-    setSearchTerm('');
-  };
-
-  // Handlers for actions
-  const handleEditQuote = (quote: QuoteItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    router.navigate(`/sales/quotes/edit/${quote.id}`);
-  };
-
-  const handleArchiveQuote = async (quote: QuoteItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    
-    const confirmed = await showConfirm({
-      title: 'Archivar Cotización',
-      message: `¿Estás seguro de que deseas archivar la cotización "${quote.quoteNo}"?`,
-      variant: 'warning',
-      confirmText: 'Archivar',
-      cancelText: 'Cancelar',
-    });
-
-    if (!confirmed) return;
-
-    try {
-      if (!activeOrganizationId) return;
-      
-      setLoading(true);
-      const { error } = await supabase
-        .from('Quotes')
-        .update({ archived: true })
-        .eq('id', quote.id)
-        .eq('organization_id', activeOrganizationId);
-
-      if (error) throw error;
-
-      useUIStore.getState().addNotification({
-        type: 'success',
-        title: 'Cotización archivada',
-        message: 'La cotización ha sido archivada correctamente.',
-      });
-      
-      refetch();
-    } catch (error) {
-      const errorMessage = getSupabaseErrorMessage(error);
-      const isRLS = isRLSError(error);
-      
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: isRLS ? 'Error de permisos' : 'Error al archivar',
-        message: errorMessage,
-      });
-      
-      if (import.meta.env.DEV) {
-        console.error('❌ Error archiving quote:', {
-          quoteId: quote.id,
-          quoteNo: quote.quoteNo,
-          errorCode: (error as any)?.code,
-          errorMessage: (error as any)?.message,
-          isRLS,
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateSaleOrder = async (quote: QuoteItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    
+  // === FETCH QUOTES CON ENRIQUECIMIENTO ===
+  const fetchQuotes = useCallback(async () => {
     if (!activeOrganizationId) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'No organization selected',
-      });
+      setLoading(false);
+      setQuotes([]);
+      setError('No hay organización activa');
       return;
     }
 
-    const confirmed = await showConfirm({
-      title: 'Create Sales Order',
-      message: `Create a Sales Order from Quote "${quote.quoteNo}"?`,
-      variant: 'info',
-      confirmText: 'Create',
-      cancelText: 'Cancel',
-    });
-
-    if (!confirmed) return;
+    setLoading(true);
+    setError(null);
 
     try {
-      setLoading(true);
-      
-      // Step 1: Check if SalesOrder already exists
-      const { data: existingSaleOrder } = await supabase
-        .from('SalesOrders')
-        .select('id, sale_order_no')
-        .eq('quote_id', quote.id)
+      // 1. Query base de Quotes
+      const { data: quotesData, error: quotesError } = await supabase
+        .from('Quotes')
+        .select('id, quote_no, status, organization_id, company_id, customer_id, contact_id, created_at')
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
-        .maybeSingle();
+        .order('created_at', { ascending: false })
+        .limit(500);
 
-      if (existingSaleOrder) {
-        // SalesOrder already exists, navigate to it
-        console.log('✅ handleCreateSaleOrder: SalesOrder already exists', {
-          salesOrderId: existingSaleOrder.id,
-          saleOrderNo: existingSaleOrder.sale_order_no,
-        });
-        
-        useUIStore.getState().addNotification({
-          type: 'info',
-          title: 'Sales Order Exists',
-          message: `Sales Order ${existingSaleOrder.sale_order_no} already exists for this quote.`,
-        });
-        router.navigate(`/sale-orders/edit/${existingSaleOrder.id}`);
+      if (quotesError) {
+        console.error('[Quotes] Query error:', safeError(quotesError));
+        setError(getSupabaseErrorMessage(quotesError));
+        setQuotes([]);
         return;
       }
 
-      // Step 2: Ensure quote is approved (use approveQuote function if needed)
-      // approveQuote() already includes polling, so we don't need to wait separately
-      const currentStatus = normalizeStatus(quote.status);
-      if (currentStatus !== 'approved') {
-        console.log('🔔 handleCreateSaleOrder: Quote not approved, approving first...', {
-          quoteId: quote.id,
-          currentStatus: quote.status,
-        });
-        
-        try {
-          await approveQuote(quote.id, activeOrganizationId);
-          console.log('✅ handleCreateSaleOrder: Quote approved successfully');
-        } catch (approveError) {
-          console.error('❌ handleCreateSaleOrder: Error approving quote:', approveError);
-          throw new Error(`Failed to approve quote: ${approveError instanceof Error ? approveError.message : 'Unknown error'}`);
-        }
-      } else {
-        console.log('✅ handleCreateSaleOrder: Quote already approved, waiting for SalesOrder...');
-        // Quote is already approved, but SalesOrder doesn't exist yet
-        // Wait for trigger to create it (polling)
-        const salesOrder = await waitForSalesOrder(quote.id, activeOrganizationId);
-        
-        if (salesOrder) {
-          console.log('✅ handleCreateSaleOrder: SalesOrder found after polling', {
-            salesOrderId: salesOrder.id,
-            saleOrderNo: salesOrder.sale_order_no,
-          });
-          
-          useUIStore.getState().addNotification({
-            type: 'success',
-            title: 'Success',
-            message: `Sales Order ${salesOrder.sale_order_no} created successfully from Quote ${quote.quoteNo}`,
-          });
-          router.navigate(`/sale-orders/edit/${salesOrder.id}`);
-          return;
-        }
+      if (!quotesData || quotesData.length === 0) {
+        setQuotes([]);
+        return;
       }
 
-      // Step 3: If SalesOrder still doesn't exist after approval/polling, show error
-      // (approveQuote already did polling, so if we reach here, it's likely a trigger issue)
-      console.error('❌ handleCreateSaleOrder: SalesOrder not found after approval and polling');
-      
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Sales Order Not Found',
-        message: 'Sales Order was not created automatically. Please try again or contact support.',
+      // 2. Obtener IDs únicos para enriquecimiento
+      const customerIds = [...new Set(quotesData.map(q => q.customer_id).filter(Boolean))];
+      const contactIds = [...new Set(quotesData.map(q => q.contact_id).filter(Boolean))];
+      const quoteIds = quotesData.map(q => q.id);
+
+      // 3. Cargar datos relacionados en paralelo
+      const [customersRes, contactsRes, linesRes] = await Promise.all([
+        // Customers
+        customerIds.length > 0 
+          ? supabase.from('DirectoryCustomers').select('id, customer_name').in('id', customerIds)
+          : Promise.resolve({ data: [] }),
+        // Contacts
+        contactIds.length > 0 
+          ? supabase.from('DirectoryContacts').select('id, first_name, last_name').in('id', contactIds)
+          : Promise.resolve({ data: [] }),
+        // Quote Lines (para calcular totales)
+        supabase.from('QuoteLines').select('quote_id, line_total').in('quote_id', quoteIds)
+      ]);
+
+      // 4. Crear mapas para búsqueda rápida
+      const customersMap = new Map<string, string>();
+      customersRes.data?.forEach(c => {
+        customersMap.set(c.id, c.customer_name || 'Sin nombre');
       });
-      
-      // Optionally: Could add a "Force Create (Recovery)" button here for admin users
-      // For now, we just show the error and let the user retry
-    } catch (err) {
-      console.error('❌ handleCreateSaleOrder: Error:', err);
-      const errorMessage = err instanceof Error 
-        ? err.message 
-        : 'Failed to create sales order. Please check the console for details.';
-      
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: errorMessage,
+
+      const contactsMap = new Map<string, string>();
+      contactsRes.data?.forEach(c => {
+        const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre';
+        contactsMap.set(c.id, fullName);
       });
+
+      const totalsMap = new Map<string, number>();
+      linesRes.data?.forEach(l => {
+        const current = totalsMap.get(l.quote_id) || 0;
+        totalsMap.set(l.quote_id, current + (l.line_total || 0));
+      });
+
+      // 5. Enriquecer quotes
+      const enrichedQuotes: EnrichedQuote[] = quotesData.map(q => ({
+        id: q.id,
+        quote_no: q.quote_no || 'N/A',
+        status: q.status || 'draft',
+        customer_id: q.customer_id,
+        customer_name: q.customer_id ? (customersMap.get(q.customer_id) || 'Cliente no encontrado') : 'Consumidor Final',
+        contact_id: q.contact_id,
+        contact_name: q.contact_id ? (contactsMap.get(q.contact_id) || 'Contacto no encontrado') : '-',
+        total: totalsMap.get(q.id) || 0,
+        created_at: q.created_at,
+        organization_id: q.organization_id,
+        company_id: q.company_id,
+      }));
+
+      console.log('[Quotes] Loaded', enrichedQuotes.length, 'quotes with enrichment');
+      setQuotes(enrichedQuotes);
+
+    } catch (err: any) {
+      console.error('[Quotes] Error:', safeError(err));
+      setError(err?.message || 'Error desconocido');
+      setQuotes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeOrganizationId]);
 
-  const handleDeleteQuote = async (quote: QuoteItem, e: React.MouseEvent) => {
+  // Load on mount
+  useEffect(() => {
+    fetchQuotes();
+  }, [fetchQuotes]);
+
+  // Register submodules
+  useEffect(() => {
+    registerSubmodules('Quotes', [
+      { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
+      { id: 'quote-approved', label: 'Quote Approved', href: '/sales/quotes/approved', icon: CheckCircle },
+    ]);
+    return () => clearSubmoduleNav();
+  }, [registerSubmodules, clearSubmoduleNav]);
+
+  // === DELETE HANDLER ===
+  const handleDelete = async (quote: EnrichedQuote, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // ✅ Bloquear borrado si el Quote está approved
     if (quote.status === 'approved') {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'No se puede eliminar',
-        message: 'No se puede eliminar una cotización que está aprobada. Primero debe ser rechazada o cancelada.',
+        title: 'No permitido',
+        message: 'No se puede eliminar una cotización aprobada.',
       });
       return;
     }
-    
+
     const confirmed = await showConfirm({
       title: 'Eliminar Cotización',
-      message: `¿Estás seguro de que deseas eliminar la cotización "${quote.quoteNo}"? Esta acción no se puede deshacer.`,
+      message: `¿Eliminar la cotización ${quote.quote_no}?`,
       variant: 'danger',
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
@@ -404,127 +201,204 @@ export default function Quotes() {
     if (!confirmed) return;
 
     try {
-      if (!activeOrganizationId) return;
+      setDialogLoading(true);
       
-      setLoading(true);
-      
-      // ✅ Soft delete: update({ deleted: true })
+      // Optimistic update
+      setQuotes(prev => prev.filter(q => q.id !== quote.id));
+
       const { error } = await supabase
         .from('Quotes')
         .update({ deleted: true })
-        .eq('id', quote.id)
-        .eq('organization_id', activeOrganizationId);
+        .eq('id', quote.id);
 
       if (error) {
-        // ✅ Mejorar manejo de errores: detectar RLS y otros errores
-        const errorMessage = getSupabaseErrorMessage(error);
-        const isRLS = isRLSError(error);
-        
-        if (isRLS) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Error de permisos',
-            message: 'No tienes permisos para eliminar esta cotización. Por favor, contacta al administrador.',
-          });
-        } else {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Error al eliminar',
-            message: errorMessage,
-          });
-        }
-        
-        // Log detallado en DEV
-        if (import.meta.env.DEV) {
-          console.error('❌ Error deleting quote:', {
-            quoteId: quote.id,
-            quoteNo: quote.quoteNo,
-            status: quote.status,
-            errorCode: (error as any)?.code,
-            errorMessage: (error as any)?.message,
-            errorHint: (error as any)?.hint,
-            isRLS,
-          });
-        }
-        
+        console.error('[Quotes] Delete error:', safeError(error));
+        await fetchQuotes(); // Rollback
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: getSupabaseErrorMessage(error),
+        });
         return;
       }
 
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Cotización eliminada',
-        message: 'La cotización ha sido eliminada correctamente.',
+        title: 'Eliminado',
+        message: 'Cotización eliminada correctamente',
       });
       
-      refetch();
-    } catch (error) {
-      // ✅ Catch para errores inesperados
-      const errorMessage = getSupabaseErrorMessage(error);
-      const isRLS = isRLSError(error);
-      
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: isRLS ? 'Error de permisos' : 'Error al eliminar',
-        message: errorMessage,
-      });
-      
-      if (import.meta.env.DEV) {
-        console.error('❌ Unexpected error deleting quote:', error);
-      }
+      // Refetch to sync
+      await fetchQuotes();
+
+    } catch (err) {
+      console.error('[Quotes] Delete catch:', safeError(err));
+      await fetchQuotes();
     } finally {
-      setLoading(false);
+      setDialogLoading(false);
     }
   };
 
+  // === EDIT HANDLER ===
+  const handleEdit = (quote: EnrichedQuote, e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.navigate(`/sales/quotes/${quote.id}/edit`);
+  };
+
+  // === CREATE SALE ORDER HANDLER ===
+  const handleCreateSaleOrder = async (quote: EnrichedQuote, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      if (quote.status !== 'approved') {
+        const error = await approveQuote(quote.id, activeOrganizationId!);
+        if (error) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error',
+            message: 'No se pudo aprobar la cotización.',
+          });
+          return;
+        }
+      }
+
+      const salesOrder = await waitForSalesOrder(quote.id, activeOrganizationId!);
+      if (salesOrder) {
+        router.navigate(`/sales/orders/${salesOrder.id}`);
+      } else {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'No se pudo crear la orden de venta.',
+        });
+      }
+    } catch (err) {
+      console.error('[Quotes] Create sale order error:', safeError(err));
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Ocurrió un error al crear la orden de venta.',
+      });
+    }
+  };
+
+  // === SORTING ===
+  const handleSort = (field: typeof sortBy) => {
+    if (sortBy === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortOrder('asc');
+    }
+  };
+
+  // === STATUS TOGGLE ===
+  const handleStatusToggle = (status: QuoteStatus) => {
+    setSelectedStatus(prev => 
+      prev.includes(status) 
+        ? prev.filter(s => s !== status)
+        : [...prev, status]
+    );
+  };
+
+  // === FILTERED & SORTED QUOTES ===
+  const filteredQuotes = useMemo(() => {
+    let result = quotes;
+
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(q => 
+        q.quote_no?.toLowerCase().includes(term) ||
+        q.customer_name?.toLowerCase().includes(term) ||
+        q.contact_name?.toLowerCase().includes(term) ||
+        q.status?.toLowerCase().includes(term)
+      );
+    }
+
+    // Status filter
+    if (selectedStatus.length > 0) {
+      result = result.filter(q => selectedStatus.includes(q.status));
+    }
+
+    // Sort
+    result = [...result].sort((a, b) => {
+      const factor = sortOrder === 'asc' ? 1 : -1;
+      
+      if (sortBy === 'created_at') {
+        return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * factor;
+      }
+      if (sortBy === 'total') {
+        return (a.total - b.total) * factor;
+      }
+      
+      const aVal = String(a[sortBy] || '').toLowerCase();
+      const bVal = String(b[sortBy] || '').toLowerCase();
+      return aVal.localeCompare(bVal) * factor;
+    });
+
+    return result;
+  }, [quotes, searchTerm, selectedStatus, sortBy, sortOrder]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredQuotes.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedQuotes = filteredQuotes.slice(startIndex, startIndex + itemsPerPage);
+
   const statusOptions: QuoteStatus[] = ['draft', 'sent', 'approved', 'rejected', 'cancelled'];
 
-  // Show loading state
+  // === RENDER ===
+  
   if (loading) {
     return (
       <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading quotes...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Cargando cotizaciones...</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // Show error state
   if (error) {
     return (
       <div className="py-6 px-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error loading quotes</p>
-          <p className="text-sm text-red-700">{error}</p>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <h3 className="text-red-800 font-medium mb-2">Error al cargar cotizaciones</h3>
+          <p className="text-red-700 text-sm mb-4">{error}</p>
+          <button
+            onClick={() => fetchQuotes()}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Reintentar
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="py-6">
+    <div className="py-6 px-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Quotes</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {`Manage your ${filteredQuotes.length} quotes${filteredQuotes.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
+          <h1 className="text-xl font-semibold text-gray-900">Quotes</h1>
+          <p className="text-sm text-gray-500">
+            {filteredQuotes.length} cotizaciones
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
-            <Upload style={{ width: '14px', height: '14px' }} />
+          <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-sm">
+            <Upload className="w-4 h-4" />
             Import
           </button>
           <button
             onClick={() => router.navigate('/sales/quotes/new')}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm bg-blue-600 hover:bg-blue-700"
           >
-            <Plus style={{ width: '14px', height: '14px' }} />
+            <Plus className="w-4 h-4" />
             Add Quote
           </button>
         </div>
@@ -532,249 +406,197 @@ export default function Quotes() {
 
       {/* Search and Filters */}
       <div className="mb-4">
-        <div className={`bg-white border border-gray-200 py-6 px-6 ${
-          showFilters ? 'rounded-t-lg' : 'rounded-lg'
-        }`}>
-          <div className="flex items-center justify-between gap-3">
-            {/* Search Bar */}
+        <div className={`bg-white border border-gray-200 py-4 px-4 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
+          <div className="flex items-center gap-3">
+            {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search quotes by quote number, customer name, or status..."
+                placeholder="Buscar por número, cliente o contacto..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            {/* Filter button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
                 showFilters || selectedStatus.length > 0
-                  ? 'bg-primary text-white border-primary'
+                  ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
               }`}
             >
               <Filter className="w-4 h-4" />
               Filters
               {selectedStatus.length > 0 && (
-                <span className="bg-white text-primary rounded-full px-2 py-0.5 text-xs font-semibold">
+                <span className="bg-white text-blue-600 rounded-full px-2 py-0.5 text-xs font-semibold">
                   {selectedStatus.length}
                 </span>
               )}
             </button>
-            <div className="flex items-center gap-1 border border-gray-200 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode('table')}
-                className={`p-2 transition-colors ${
-                  viewMode === 'table'
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </button>
-            </div>
+            {/* Refresh button */}
+            <button
+              onClick={() => fetchQuotes()}
+              className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50"
+              title="Actualizar"
+            >
+              <RefreshCw className="w-4 h-4 text-gray-600" />
+            </button>
           </div>
 
-          {/* Filters Dropdown */}
+          {/* Filters Panel */}
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-700">Status</span>
-                  {selectedStatus.length > 0 && (
-                    <button
-                      onClick={() => setSelectedStatus([])}
-                      className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
-                    >
-                      Clear ({selectedStatus.length})
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {statusOptions.map((status) => (
-                    <button
-                      key={status}
-                      onClick={() => handleStatusToggle(status)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                        selectedStatus.includes(status)
-                          ? getStatusBadgeColor(status)
-                          : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                      }`}
-                    >
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700">Status</span>
+                {selectedStatus.length > 0 && (
+                  <button
+                    onClick={() => setSelectedStatus([])}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Limpiar
+                  </button>
+                )}
               </div>
-              <div className="flex justify-between items-center">
-                <button 
-                  onClick={clearAllFilters}
-                  className="text-xs text-gray-500 hover:text-gray-700"
-                >
-                  Clear all filters
-                </button>
+              <div className="flex flex-wrap gap-2">
+                {statusOptions.map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => handleStatusToggle(status)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      selectedStatus.includes(status)
+                        ? getStatusBadgeColor(status)
+                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </button>
+                ))}
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Table View */}
-      {viewMode === 'table' && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+      {/* Table */}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">
+                  <button onClick={() => handleSort('quote_no')} className="flex items-center gap-1 hover:text-gray-900">
+                    Quote No
+                    {sortBy === 'quote_no' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">
+                  <button onClick={() => handleSort('status')} className="flex items-center gap-1 hover:text-gray-900">
+                    Status
+                    {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">
+                  <button onClick={() => handleSort('customer_name')} className="flex items-center gap-1 hover:text-gray-900">
+                    Customer
+                    {sortBy === 'customer_name' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">
+                  Contact
+                </th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">
+                  <button onClick={() => handleSort('total')} className="flex items-center gap-1 hover:text-gray-900">
+                    Total
+                    {sortBy === 'total' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">
+                  <button onClick={() => handleSort('created_at')} className="flex items-center gap-1 hover:text-gray-900">
+                    Date
+                    {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {paginatedQuotes.length === 0 ? (
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('quoteNo')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Quote No
-                      {sortBy === 'quoteNo' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('status')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Status
-                      {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('customerName')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Customer Name
-                      {sortBy === 'customerName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('total')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Total
-                      {sortBy === 'total' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('createdAt')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Date
-                      {sortBy === 'createdAt' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                  <td colSpan={7} className="py-12 px-6 text-center">
+                    <div className="flex flex-col items-center">
+                      <Search className="w-12 h-12 text-gray-300 mb-4" />
+                      <p className="text-gray-600 mb-2">No se encontraron cotizaciones</p>
+                      <p className="text-sm text-gray-400">
+                        {quotes.length === 0 
+                          ? 'Crea tu primera cotización' 
+                          : 'Intenta con otros términos de búsqueda'}
+                      </p>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredQuotes.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 px-6 text-center">
-                      <div className="flex flex-col items-center">
-                        <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                          <Search className="w-6 h-6 text-gray-400" />
-                        </div>
-                        <p className="text-gray-600 mb-2">No quotes found</p>
-                        <p className="text-sm text-gray-500">
-                          {quotesData.length === 0 
-                            ? 'Start by adding a quote'
-                            : 'Try adjusting your search criteria'}
-                        </p>
+              ) : (
+                paginatedQuotes.map((quote) => (
+                  <tr key={quote.id} className="hover:bg-gray-50">
+                    <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                      {quote.quote_no}
+                    </td>
+                    <td className="py-4 px-6">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeColor(quote.status)}`}>
+                        {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
+                      </span>
+                    </td>
+                    <td className="py-4 px-6 text-gray-700 text-sm">
+                      {quote.customer_name}
+                    </td>
+                    <td className="py-4 px-6 text-gray-600 text-sm">
+                      {quote.contact_name}
+                    </td>
+                    <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                      {formatCurrency(quote.total)}
+                    </td>
+                    <td className="py-4 px-6 text-gray-600 text-sm">
+                      {new Date(quote.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-1 justify-end">
+                        {quote.status === 'approved' && (
+                          <button 
+                            onClick={(e) => handleCreateSaleOrder(quote, e)}
+                            className="p-2 hover:bg-blue-50 rounded text-blue-600"
+                            title="Crear Orden de Venta"
+                          >
+                            <ShoppingCart className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button 
+                          onClick={(e) => handleEdit(quote, e)}
+                          className="p-2 hover:bg-gray-100 rounded text-gray-600"
+                          title="Editar"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={(e) => handleDelete(quote, e)}
+                          className="p-2 hover:bg-red-50 rounded text-red-600"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
-                ) : (
-                  paginatedQuotes.map((quote) => (
-                    <tr 
-                      key={quote.id} 
-                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="py-4 px-6 text-gray-900 text-sm font-medium">
-                        {quote.quoteNo}
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeColor(quote.status)}`}>
-                          {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {quote.customerName}
-                      </td>
-                      <td className="py-4 px-6 text-gray-900 text-sm font-medium">
-                        {formatCurrency(quote.total, quote.currency)}
-                      </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {new Date(quote.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 justify-end">
-                          {quote.status === 'approved' && (
-                            <button 
-                              onClick={(e) => handleCreateSaleOrder(quote, e)}
-                              className="p-1.5 hover:bg-blue-100 rounded transition-colors text-blue-600"
-                              aria-label={`Create Sales Order from ${quote.quoteNo}`}
-                              title={`Create Sales Order from ${quote.quoteNo}`}
-                            >
-                              <ShoppingCart className="w-4 h-4" />
-                            </button>
-                          )}
-                          <button 
-                            onClick={(e) => handleEditQuote(quote, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Editar ${quote.quoteNo}`}
-                            title={`Editar ${quote.quoteNo}`}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={(e) => handleArchiveQuote(quote, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Archivar ${quote.quoteNo}`}
-                            title={`Archivar ${quote.quoteNo}`}
-                          >
-                            <Archive className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={(e) => handleDeleteQuote(quote, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Eliminar ${quote.quoteNo}`}
-                            title={`Eliminar ${quote.quoteNo}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
       {/* Pagination */}
-      <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
+      <div className="bg-white border border-gray-200 rounded-lg py-4 px-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">Show:</span>
@@ -784,7 +606,7 @@ export default function Quotes() {
                 setItemsPerPage(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="px-3 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>
@@ -792,14 +614,14 @@ export default function Quotes() {
               <option value={100}>100</option>
             </select>
             <span className="text-sm text-gray-700">
-              Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredQuotes.length)} of {filteredQuotes.length}
+              Showing {filteredQuotes.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredQuotes.length)} of {filteredQuotes.length}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1 border border-gray-200 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
             >
               Previous
             </button>
@@ -809,7 +631,7 @@ export default function Quotes() {
             <button
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage >= totalPages}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1 border border-gray-200 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
             >
               Next
             </button>
@@ -824,12 +646,11 @@ export default function Quotes() {
         onConfirm={handleConfirm}
         title={dialogState.title}
         message={dialogState.message}
+        variant={dialogState.variant}
         confirmText={dialogState.confirmText}
         cancelText={dialogState.cancelText}
-        variant={dialogState.variant}
         isLoading={dialogState.isLoading}
       />
     </div>
   );
 }
-

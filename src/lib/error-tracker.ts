@@ -145,7 +145,7 @@ class ErrorTracker {
     // - Bugsnag
     // - Custom error tracking API
     
-    console.log('Would send to error service:', error);
+    logger.info('Would send to error service', { errorId: error.id, message: error.message });
     
     // Example implementation:
     // fetch('/api/errors', {

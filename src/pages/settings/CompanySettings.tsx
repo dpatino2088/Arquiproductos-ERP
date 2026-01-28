@@ -13,12 +13,11 @@ import OrganizationUser from './OrganizationUser';
 import OrganizationUserNew from './OrganizationUserNew';
 import OrganizationUserEdit from './OrganizationUserEdit';
 import CostEngineSettings from './CostEngineSettings';
-import CompanyPortalUsers from './CompanyPortalUsers';
-import CompaniesSettings from './CompaniesSettings';
+import DealerProfile from './DealerProfile';
 
 export default function CompanySettings() {
   const { isMember, loading: roleLoading } = useCurrentOrgRole();
-  const [activeSection, setActiveSection] = useState<string>('organization-user');
+  const [activeSection, setActiveSection] = useState<string>('organization');
   const [activeTab, setActiveTab] = useState<string>('general');
   const [currentRoute, setCurrentRoute] = useState<string>(router.getCurrentRoute() || window.location.pathname);
 
@@ -49,6 +48,25 @@ export default function CompanySettings() {
   const editUserMatch = currentRoute.match(/\/settings\/organization-users\/edit\/([^/]+)/);
   const editingUserId = editUserMatch ? editUserMatch[1] : null;
   const isAddEditUserMode = isAddUserMode || !!editingUserId;
+  
+  // Determine if we're in dealer profile edit mode
+  const isDealerEditMode = currentRoute.match(/\/settings\/dealer-profile\/edit\/([^/]+)/);
+  const isDealerNewMode = currentRoute.includes('/settings/dealer-profile/new');
+  const isDealerUserMode = currentRoute.includes('/settings/dealer-profile/user');
+  
+  // Ensure activeSection matches route for dealer-profile (including user tab)
+  useEffect(() => {
+    if ((currentRoute.includes('/settings/dealer-profile') || isDealerUserMode) && activeSection !== 'dealer-profile') {
+      setActiveSection('dealer-profile');
+    }
+  }, [currentRoute, isDealerUserMode, activeSection]);
+
+  // Ensure activeSection matches route for cost-engine
+  useEffect(() => {
+    if (currentRoute.includes('/settings/cost-engine') && activeSection !== 'cost-engine') {
+      setActiveSection('cost-engine');
+    }
+  }, [currentRoute, activeSection]);
 
   // Proteger Settings: Members no pueden acceder - redirigir inmediatamente sin mostrar error
   useEffect(() => {
@@ -65,9 +83,8 @@ export default function CompanySettings() {
 
   // Settings menu configuration based on our app modules
   const settingsMenu = [
-    { id: 'organization-user', label: 'Organization User', icon: Users },
-    { id: 'companies', label: 'Companies', icon: Building },
-    { id: 'company-portal-users', label: 'Company Portal Users', icon: Shield },
+    { id: 'organization', label: 'Organization', icon: Users },
+    { id: 'dealer-profile', label: 'Dealer Profile', icon: Building },
     { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon }
   ];
 
@@ -84,6 +101,15 @@ export default function CompanySettings() {
     if (newTabs && newTabs.length > 0) {
       setActiveTab(newTabs[0]?.id || 'general');
     }
+    
+    // Navigate to the corresponding route
+    if (sectionId === 'organization') {
+      router.navigate('/settings/organization');
+    } else if (sectionId === 'dealer-profile') {
+      router.navigate('/settings/dealer-profile');
+    } else if (sectionId === 'cost-engine') {
+      router.navigate('/settings/cost-engine');
+    }
   };
 
   // Handle navigation when in add/edit mode
@@ -99,7 +125,14 @@ export default function CompanySettings() {
         router.navigate(expectedRoute, false);
       }
     }
-  }, [isAddEditUserMode, isAddUserMode, editingUserId]);
+    
+    // Ensure activeSection matches route for organization
+    if (currentRoute.includes('/settings/organization') || currentRoute.includes('/settings/organization-users')) {
+      if (activeSection !== 'organization') {
+        setActiveSection('organization');
+      }
+    }
+  }, [isAddEditUserMode, isAddUserMode, editingUserId, currentRoute, activeSection]);
 
   // Handle close settings and navigate to dashboard
   const handleCloseSettings = () => {
@@ -131,16 +164,12 @@ export default function CompanySettings() {
       return <OrganizationUserNew embedded={true} />;
     }
 
-    if (activeSection === 'organization-user') {
+    if (activeSection === 'organization') {
       return <OrganizationUser />;
     }
 
-    if (activeSection === 'company-portal-users') {
-      return <CompanyPortalUsers />;
-    }
-
-    if (activeSection === 'companies') {
-      return <CompaniesSettings />;
+    if (activeSection === 'dealer-profile') {
+      return <DealerProfile />;
     }
 
     if (activeSection === 'cost-engine') {
@@ -199,16 +228,18 @@ export default function CompanySettings() {
           <nav className="px-4 pt-6 pb-4">
             <ul className="space-y-1">
               {settingsMenu.map((item) => {
-                // Highlight organization-user if we're in add/edit mode
+                // Highlight organization if we're in add/edit mode
                 const isActive = isAddEditUserMode 
-                  ? item.id === 'organization-user'
+                  ? item.id === 'organization'
                   : activeSection === item.id;
                 return (
                   <li key={item.id}>
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         if (isAddEditUserMode) {
-                          router.navigate('/settings/organization-user');
+                          router.navigate('/settings/organization');
                         } else {
                           handleSectionChange(item.id);
                         }
@@ -237,10 +268,8 @@ export default function CompanySettings() {
         {/* Content Area */}
         <div className="flex-1 flex flex-col overflow-auto">
           {/* Settings Content */}
-          <div className="flex-1 p-8">
-            <div className="max-w-6xl">
-              {renderTabContent()}
-            </div>
+          <div className="flex-1 py-6 px-6">
+            {renderTabContent()}
           </div>
         </div>
       </div>

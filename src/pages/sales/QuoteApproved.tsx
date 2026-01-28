@@ -229,12 +229,12 @@ export default function QuoteApproved() {
   // Handlers for actions
   const handleViewQuote = (quote: QuoteApprovedItem, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    router.navigate(`/sales/quotes/edit/${quote.id}`);
+    router.navigate(`/sales/quotes/${quote.id}/edit`);
   };
 
   const handleQuoteNoClick = (quote: QuoteApprovedItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    router.navigate(`/sales/quotes/edit/${quote.id}`);
+    router.navigate(`/sales/quotes/${quote.id}/edit`);
   };
 
   // Show loading state

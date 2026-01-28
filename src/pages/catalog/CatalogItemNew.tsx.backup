@@ -1,0 +1,1375 @@
+import { useState, useEffect, useRef } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { router } from '../../lib/router';
+import { useUIStore } from '../../stores/ui-store';
+import Input from '../../components/ui/Input';
+import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
+import Label from '../../components/ui/Label';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useCatalogItems, useCreateCatalogItem, useUpdateCatalogItem, useLeafItemCategories, useItemCategories, useCatalogCategories } from '../../hooks/useCatalog';
+import { useCategoryMargin } from '../../hooks/useCategoryMargins';
+import { MeasureBasis, FabricPricingMode } from '../../types/catalog';
+import { supabase } from '../../lib/supabase/client';
+import { Plus, Trash2, Edit, X } from 'lucide-react';
+import ImageUpload from '../../components/ui/ImageUpload';
+import FileUpload from '../../components/ui/FileUpload';
+import { 
+  MEASURE_BASIS_OPTIONS, 
+  getValidUomOptions, 
+  normalizeUom, 
+  normalizeMeasureBasis,
+  isUomValidForMeasureBasis,
+  validateAndNormalizeUom 
+} from '../../lib/uom';
+import { getAllowedUoms, getAllowedMeasureBasis, syncCatalogItemProductTypes } from '../../lib/catalog-item-helpers';
+import { useProductTypes } from '../../hooks/useProductTypes';
+
+// Re-export for local use (already normalized in uom.ts)
+const MEASURE_BASIS_OPTIONS_LOCAL = MEASURE_BASIS_OPTIONS;
+
+// ✅ Default UOM by measure basis
+const DEFAULT_UOM_BY_BASIS: Record<'unit' | 'linear' | 'area', string> = {
+  unit: 'ea',
+  linear: 'm',
+  area: 'm2',
+};
+
+function getDefaultUom(measureBasis: 'unit' | 'linear' | 'area' | null | undefined): string | null {
+  if (!measureBasis) return null;
+  return DEFAULT_UOM_BY_BASIS[measureBasis] ?? null;
+}
+
+// Fabric pricing mode options
+const FABRIC_PRICING_MODE_OPTIONS = [
+  { value: 'per_linear_m', label: 'Per Linear Meter' },
+  { value: 'per_sqm', label: 'Per Square Meter' },
+] as const;
+
+// Roll type options (only when is_roll=true)
+const ROLL_TYPE_OPTIONS = [
+  { value: 'fabric', label: 'Fabric' },
+  // DB enum is public.roll_type and uses 'window_film' (NOT 'film')
+  { value: 'window_film', label: 'Window Film' },
+  { value: 'vinyl', label: 'Vinyl' },
+  { value: 'mesh', label: 'Mesh' },
+  { value: 'paper', label: 'Paper' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+// Schema for CatalogItem
+const catalogItemSchema = z.object({
+  sku: z.string().min(1, 'SKU is required'),
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  category_id: z.string().uuid().optional().nullable(), // FK to CatalogCategories
+  measure_basis: z.enum(['unit', 'linear', 'area']), // Required: 'unit' | 'linear' | 'area'
+  uom: z.string().min(1, 'Unit of measure is required'),
+  is_fabric: z.boolean(), // Required: determines if variant_name or color is used
+  // Fields shown when is_fabric=true (rolls)
+  roll_type: z.enum(['fabric', 'window_film', 'vinyl', 'mesh', 'paper', 'other']).optional().nullable(), // DB enum: public.roll_type
+  collection_name: z.string().optional().nullable(),
+  variant_name: z.string().optional().nullable(), // Used ONLY when is_fabric=true (stores color/variant label)
+  roll_width: z.number().optional().nullable(), // 'roll_width' numeric
+  fabric_pricing_mode: z.enum(['per_linear_m', 'per_sqm']).optional().nullable(),
+  // Fields shown when is_fabric=false (components)
+  color: z.string().optional().nullable(), // Used ONLY when is_fabric=false
+  image_url: z.string().url().optional().nullable().or(z.literal('')),
+  // Pricing fields
+  cost_exw: z.number().min(0, 'Cost EXW must be >= 0').optional().nullable(), // Base cost (EXW = Ex Works)
+  default_margin_pct: z.number().min(0).max(100, 'Margin must be between 0 and 100').optional().nullable(), // Default margin percentage
+  msrp: z.number().min(0, 'MSRP must be >= 0').optional().nullable(), // Manufacturer's Suggested Retail Price
+  // Labor costs
+  labor_cost_per_unit: z.number().min(0).optional().nullable(),
+  labor_cost_per_hour: z.number().min(0).optional().nullable(),
+  labor_hours_per_unit: z.number().min(0).optional().nullable(),
+  // Shipping costs
+  shipping_cost_base: z.number().min(0).optional().nullable(),
+  shipping_cost_per_kg: z.number().min(0).optional().nullable(),
+  shipping_cost_per_unit: z.number().min(0).optional().nullable(),
+  shipping_cost_percentage: z.number().min(0).max(100).optional().nullable(),
+  // Additional costs
+  import_tax_pct: z.number().min(0).max(100).optional().nullable(),
+  freight_cost: z.number().min(0).optional().nullable(),
+  handling_cost: z.number().min(0).optional().nullable(),
+  // Legacy fields (kept for compatibility)
+  unit_price: z.number().min(0, 'Unit price must be >= 0'),
+  cost_price: z.number().min(0, 'Cost price must be >= 0'),
+  active: z.boolean(),
+  discontinued: z.boolean(),
+}).refine((data) => {
+  // If is_fabric=true (roll item), collection_name is required
+  if (data.is_fabric && !data.collection_name) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Collection name is required for roll items',
+  path: ['collection_name'],
+}).refine((data) => {
+  // If is_fabric=true (roll item), variant_name is required
+  if (data.is_fabric && !data.variant_name) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Variant name is required for roll items',
+  path: ['variant_name'],
+}).refine((data) => {
+  // If is_fabric=true and pricing is per_linear_m, roll_width is required
+  if (data.is_fabric && data.fabric_pricing_mode === 'per_linear_m' && (!data.roll_width || data.roll_width <= 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Roll width is required for fabric items with per linear meter pricing',
+  path: ['roll_width'],
+}).refine((data) => {
+  // If is_fabric=true, fabric_pricing_mode is required
+  if (data.is_fabric && !data.fabric_pricing_mode) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Fabric pricing mode is required for roll items',
+  path: ['fabric_pricing_mode'],
+});
+
+type CatalogItemFormValues = z.infer<typeof catalogItemSchema>;
+
+interface FileItem {
+  id: string;
+  name: string;
+  url: string;
+  size: number;
+  type: string;
+}
+
+export default function CatalogItemNew() {
+  const [activeTab, setActiveTab] = useState<'profile' | 'settings' | 'rates' | 'attachments'>('profile');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [itemId, setItemId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<FileItem[]>([]);
+  const { activeOrganizationId } = useOrganizationContext();
+  const { createItem, isCreating } = useCreateCatalogItem();
+  const { updateItem, isUpdating } = useUpdateCatalogItem();
+  const { categories: leafCategories } = useLeafItemCategories(); // Legacy: kept for backward compatibility
+  const { categories: allCategories } = useItemCategories(); // Legacy: kept for backward compatibility
+  const { leafCategories: catalogCategories, loading: catalogCategoriesLoading } = useCatalogCategories(); // NEW: CatalogCategories (only leaf categories selectable)
+  
+  // ✅ ProductTypes state
+  const { productTypes, loading: productTypesLoading } = useProductTypes();
+  const [selectedProductTypeIds, setSelectedProductTypeIds] = useState<string[]>([]);
+  const [primaryProductTypeId, setPrimaryProductTypeId] = useState<string | null>(null);
+  
+  // Get current user's role and permissions
+  const { canEditCustomers, loading: roleLoading } = useCurrentOrgRole();
+  
+  // Determine if form should be read-only (using canEditCustomers as proxy for now)
+  const isReadOnly = !canEditCustomers;
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    clearErrors,
+    formState: { errors },
+  } = useForm<CatalogItemFormValues>({
+    mode: 'onBlur', // Only validate on blur, not on change
+    resolver: zodResolver(catalogItemSchema),
+    defaultValues: {
+      measure_basis: 'unit', // Required: 'unit' | 'linear' | 'area'
+      uom: 'ea', // Default UOM
+      is_fabric: false, // Determines variant_name vs color usage
+      image_url: null,
+      cost_exw: null,
+      default_margin_pct: 35, // Default 35% margin
+      msrp: null,
+      category_id: null,
+      collection_name: null,
+      variant_name: null, // Used when is_fabric=true
+      color: null, // Used when is_fabric=false
+      roll_width: null,
+      fabric_pricing_mode: null,
+      // Labor costs
+      labor_cost_per_unit: null,
+      labor_cost_per_hour: null,
+      labor_hours_per_unit: null,
+      // Shipping costs
+      shipping_cost_base: null,
+      shipping_cost_per_kg: null,
+      shipping_cost_per_unit: null,
+      shipping_cost_percentage: null,
+      // Additional costs
+      import_tax_pct: null,
+      freight_cost: null,
+      handling_cost: null,
+      unit_price: 0,
+      cost_price: 0,
+      active: true,
+      discontinued: false,
+    },
+  });
+
+  const measureBasis = watch('measure_basis');
+  const isFabric = watch('is_fabric');
+  const fabricPricingMode = watch('fabric_pricing_mode');
+  const costExw = watch('cost_exw');
+  const defaultMarginPct = watch('default_margin_pct');
+  const categoryId = watch('category_id');
+  const variantName = watch('variant_name');
+  const color = watch('color');
+  const msrp = watch('msrp');
+  
+  // ✅ Get allowed UOMs based on measure_basis and is_fabric
+  const allowedUoms = getAllowedUoms({ isFabric, measureBasis });
+  const allowedMeasureBasisOptions = getAllowedMeasureBasis(isFabric);
+
+  // Get category margin if category is selected
+  const { marginPercentage: categoryMarginPct, loading: categoryMarginLoading } = useCategoryMargin(categoryId);
+
+  // Read URL parameters to pre-fill form (e.g., from Collections page)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const isFabricParam = urlParams.get('is_fabric');
+    const collectionNameParam = urlParams.get('collection_name');
+    const variantNameParam = urlParams.get('variant_name');
+    const colorParam = urlParams.get('color');
+    
+    if (isFabricParam === 'true') {
+      setValue('is_fabric', true, { shouldValidate: true });
+      setValue('measure_basis', 'linear', { shouldValidate: true });
+    }
+    
+    if (collectionNameParam) {
+      setValue('collection_name', collectionNameParam, { shouldValidate: false });
+    }
+    
+    if (variantNameParam) {
+      setValue('variant_name', variantNameParam, { shouldValidate: false });
+    }
+    
+    if (colorParam) {
+      setValue('color', colorParam, { shouldValidate: false });
+    }
+  }, [setValue]);
+
+  // Track if MSRP was manually edited to avoid overwriting user input
+  const [msrpManuallyEdited, setMsrpManuallyEdited] = useState(false);
+  const previousCostExw = useRef<number | null>(null);
+  const previousMarginPct = useRef<number | null>(null);
+  const lastCalculatedMsrp = useRef<number | null>(null);
+
+  // Auto-calculate MSRP when item-level pricing changes
+  // Note: Only uses cost_exw (item cost), not operational costs
+  // Priority: Category Margin > Item Default Margin > 35% fallback
+  useEffect(() => {
+    // Wait for category margin to load
+    if (categoryMarginLoading) return;
+
+    // Only calculate if we have cost_exw
+    if (costExw !== null && costExw !== undefined && costExw > 0) {
+      // Priority: Category Margin > Item Default Margin > 35% fallback
+      const marginToUse = categoryMarginPct !== null 
+        ? categoryMarginPct 
+        : (defaultMarginPct !== null && defaultMarginPct !== undefined ? defaultMarginPct : 35);
+      
+      // Calculate MSRP: cost_exw * (1 + margin/100)
+      // Only use item-level cost, operational costs are handled separately
+      const calculatedMsrp = costExw * (1 + marginToUse / 100);
+      
+      // Check if cost_exw or margin changed (user is actively editing)
+      const costChanged = previousCostExw.current !== costExw;
+      const marginChanged = previousMarginPct.current !== marginToUse;
+      
+      // If cost or margin changed, reset the manual edit flag to allow recalculation
+      if (costChanged || marginChanged) {
+        setMsrpManuallyEdited(false);
+      }
+      
+      // Auto-update MSRP if:
+      // 1. MSRP was not manually edited, AND
+      // 2. (MSRP is null/empty/zero, OR cost/margin changed, OR MSRP matches last calculation)
+      const shouldUpdate = !msrpManuallyEdited && (
+        msrp === null || 
+        msrp === undefined || 
+        msrp === 0 || 
+        costChanged ||
+        marginChanged ||
+        (lastCalculatedMsrp.current !== null && Math.abs(msrp - lastCalculatedMsrp.current) < 0.01)
+      );
+      
+      if (shouldUpdate) {
+        const roundedMsrp = Number(calculatedMsrp.toFixed(2));
+        setValue('msrp', roundedMsrp, { shouldValidate: false });
+        lastCalculatedMsrp.current = roundedMsrp;
+      }
+      
+      // Update refs to track changes
+      previousCostExw.current = costExw;
+      previousMarginPct.current = marginToUse;
+    }
+  }, [costExw, defaultMarginPct, categoryMarginPct, categoryMarginLoading, msrp, msrpManuallyEdited, setValue]);
+
+  // Track manual MSRP edits
+  const handleMsrpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = parseFloat(e.target.value) || null;
+    setMsrpManuallyEdited(true);
+    setValue('msrp', newValue, { shouldValidate: true });
+    lastCalculatedMsrp.current = null; // Clear last calculated value when manually edited
+  };
+
+  // ✅ Auto-update UOM based on measure_basis
+  useEffect(() => {
+    if (measureBasis === 'unit') {
+      // Default UOM for unit measure_basis
+      const currentUom = watch('uom');
+      if (!currentUom || !['ea', 'pcs', 'set', 'pair'].includes(currentUom.toLowerCase())) {
+        setValue('uom', 'ea', { shouldValidate: true });
+      }
+    } else if (measureBasis === 'linear') {
+      // Default UOM for linear measure_basis
+      const currentUom = watch('uom');
+      if (!currentUom || !['m', 'ft', 'yd'].includes(currentUom.toLowerCase())) {
+        setValue('uom', 'm', { shouldValidate: true });
+      }
+    } else if (measureBasis === 'area') {
+      // Default UOM for area measure_basis
+      const currentUom = watch('uom');
+      if (!currentUom || currentUom.toLowerCase() !== 'm2') {
+        setValue('uom', 'm2', { shouldValidate: true });
+      }
+    }
+  }, [measureBasis, setValue, watch]);
+
+  // ✅ Clear UOM if it becomes invalid when measure_basis or is_fabric changes
+  useEffect(() => {
+    const currentUom = watch('uom');
+    const currentMeasureBasis = watch('measure_basis');
+    const currentIsFabric = watch('is_fabric');
+    
+    if (currentUom && currentMeasureBasis) {
+      const allowed = getAllowedUoms({ isFabric: currentIsFabric, measureBasis: currentMeasureBasis });
+      if (!allowed.includes(currentUom.toLowerCase().trim())) {
+        setValue('uom', '', { shouldValidate: true });
+      }
+    }
+  }, [measureBasis, isFabric, watch, setValue]);
+  
+  // ✅ Load existing ProductType relationships when editing (OPTIONAL - non-blocking)
+  useEffect(() => {
+    const loadProductTypeRelations = async () => {
+      if (!itemId || !activeOrganizationId) return;
+      
+      try {
+        // NOTE: CatalogItemProductTypes has simple structure: id, organization_id, catalog_item_id, product_type_id, created_at
+        // NO is_primary, NO deleted columns
+        const { data, error } = await supabase
+          .from('CatalogItemProductTypes')
+          .select('product_type_id')
+          .eq('catalog_item_id', itemId)
+          .eq('organization_id', activeOrganizationId)
+          .limit(50); // Limit results
+        
+        // If table doesn't exist or RLS blocks, silently skip
+        if (error) {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ ProductTypes relations not available (non-blocking):', error.message);
+          }
+          return;
+        }
+        
+        if (data && data.length > 0) {
+          const ids = data.map((rel: any) => rel.product_type_id);
+          setSelectedProductTypeIds(ids);
+          // Set first as primary (simplified logic since DB doesn't track primary)
+          if (ids.length > 0) {
+            setPrimaryProductTypeId(ids[0]);
+          }
+        }
+      } catch (err) {
+        // Table doesn't exist - this is OK, ProductTypes are optional
+        if (import.meta.env.DEV) {
+          console.warn('⚠️ ProductTypes relations skipped (table may not exist)');
+        }
+      }
+    };
+    
+    loadProductTypeRelations();
+  }, [itemId, activeOrganizationId]);
+
+  // Get item ID from URL if in edit mode
+  useEffect(() => {
+    const path = window.location.pathname;
+    const match = path.match(/\/catalog\/items\/edit\/([^/]+)/);
+    if (match && match[1]) {
+      setItemId(match[1]);
+    }
+  }, []);
+
+  // Load item data when in edit mode
+  useEffect(() => {
+    const loadItemData = async () => {
+      if (!itemId || !activeOrganizationId) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('CatalogItems')
+          .select('*')
+          .eq('id', itemId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading item:', error);
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error loading item',
+            message: 'Could not load item data. Please try again.',
+          });
+          return;
+        }
+
+        if (data) {
+          setValue('sku', data.sku || '');
+          setValue('name', data.name || data.item_name || '');
+          setValue('description', data.description || '');
+          setValue('measure_basis', normalizeMeasureBasis(data.measure_basis) || data.measure_basis || 'unit');
+          setValue('uom', normalizeUom(data.uom || data.unit_of_measure) || 'ea');
+          // DB has is_roll (canonical) + is_fabric (legacy). Prefer is_roll.
+          setValue('is_fabric', (data as any).is_roll ?? data.is_fabric ?? false);
+          
+          // Load category_id
+          setValue('category_id', (data as any).category_id || null);
+          
+          // Load fabric fields (when is_fabric=true)
+          setValue('roll_type', (data as any).roll_type || null);
+          setValue('collection_name', data.collection_name || null);
+          setValue('variant_name', data.variant_name || null); // Used when is_fabric=true
+          setValue('roll_width', data.roll_width || data.roll_width_m || null);
+          setValue('fabric_pricing_mode', data.fabric_pricing_mode);
+          
+          // Load color (when is_fabric=false)
+          setValue('color', data.color || null);
+          setValue('image_url', data.image_url || (data.metadata && typeof data.metadata === 'object' && data.metadata.image) || null);
+          
+          // Load attachments from metadata
+          if (data.metadata && typeof data.metadata === 'object' && Array.isArray(data.metadata.attachments)) {
+            setAttachments(data.metadata.attachments);
+          } else {
+            setAttachments([]);
+          }
+          
+          // New pricing fields
+          setValue('cost_exw', data.cost_exw ?? null);
+          setValue('default_margin_pct', data.default_margin_pct ?? 35);
+          setValue('msrp', data.msrp ?? null);
+          // Labor costs
+          setValue('labor_cost_per_unit', data.labor_cost_per_unit ?? null);
+          setValue('labor_cost_per_hour', data.labor_cost_per_hour ?? null);
+          setValue('labor_hours_per_unit', data.labor_hours_per_unit ?? null);
+          // Shipping costs
+          setValue('shipping_cost_base', data.shipping_cost_base ?? null);
+          setValue('shipping_cost_per_kg', data.shipping_cost_per_kg ?? null);
+          setValue('shipping_cost_per_unit', data.shipping_cost_per_unit ?? null);
+          setValue('shipping_cost_percentage', data.shipping_cost_percentage ?? null);
+          // Additional costs (hidden from UI, kept for database compatibility)
+          setValue('import_tax_pct', data.import_tax_pct ?? null);
+          setValue('freight_cost', data.freight_cost ?? null);
+          setValue('handling_cost', data.handling_cost ?? null);
+          // Legacy pricing fields (hidden from UI, kept for database compatibility only)
+          setValue('unit_price', data.unit_price || 0);
+          setValue('cost_price', data.cost_price || data.cost_exw || 0);
+          setValue('active', data.active ?? true);
+          setValue('discontinued', data.discontinued || false);
+        }
+      } catch (err) {
+        console.error('Error loading item data:', err);
+      }
+    };
+
+    loadItemData();
+  }, [itemId, activeOrganizationId, setValue]);
+
+  // Show message if no organization is selected
+  if (!activeOrganizationId) {
+    return (
+      <div className="py-6 px-6">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-800">
+            Select an organization to continue.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const onSubmit = async (values: CatalogItemFormValues) => {
+    console.log('🔥 onSubmit CALLED');
+    console.log('   Form values:', values);
+    
+    if (!activeOrganizationId) {
+      console.log('❌ No organization selected');
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'No organization selected. Please select an organization.',
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      console.log('✅ Starting save process...');
+      const normalizedUom = normalizeUom(values.uom) || '';
+      
+      // NEW SCHEMA: Prepare save payload with correct column names
+      const normalizedMeasureBasis = values.measure_basis;
+      
+      // Save payload - do NOT send item_type (column removed from DB)
+      const itemData: any = {
+        sku: values.sku.trim(),
+        name: values.name.trim(),
+        description: values.description?.trim() || null,
+        category_id: values.category_id || null, // FK to CatalogCategories.id
+        measure_basis: normalizedMeasureBasis, // Required: 'unit' | 'linear' | 'area'
+        unit_of_measure: normalizedUom, // Required: 'unit_of_measure'
+        // IMPORTANT: DB has is_roll boolean with constraint:
+        // roll_type requires is_roll=true.
+        // UI toggle is currently is_fabric (legacy naming) -> map it to is_roll too.
+        is_fabric: values.is_fabric, // Legacy column (exists in DB dump)
+        is_roll: values.is_fabric,   // Canonical column used by constraints + other modules
+        // Fields when is_fabric=true
+        roll_type: values.is_fabric ? values.roll_type : null, // Only when is_fabric=true
+        collection_name: values.is_fabric ? (values.collection_name?.trim() || null) : null,
+        variant_name: values.is_fabric ? (values.variant_name?.trim() || null) : null, // Used ONLY when is_fabric=true
+        roll_width: values.is_fabric && values.roll_width ? Number(values.roll_width) : null,
+        fabric_pricing_mode: values.is_fabric && values.roll_type === 'fabric' ? values.fabric_pricing_mode : null,
+        // Fields when is_fabric=false
+        color: !values.is_fabric ? (values.color?.trim() || null) : null, // Used ONLY when is_fabric=false
+        // Common fields
+        image_url: values.image_url?.trim() || null,
+        // Pricing fields (ONLY cost_exw exists in CatalogItems)
+        cost_exw: values.cost_exw != null ? Number(values.cost_exw) : null, // Base cost (EXW) - numeric
+        // Status
+        is_active: values.active,
+      };
+      
+      // ✅ IMPORTANT: Do NOT include item_type in payload (column removed from DB)
+
+      // Remove legacy fields from payload (they might cause issues if columns don't exist)
+      // Keep only new schema fields
+      // Additional pricing fields (keep for backward compatibility if needed)
+      // Only include if they exist in DB schema
+
+      console.log('📦 Payload to save:', itemData);
+      
+      // IMPORTANT: ProductTypes relations (CatalogItemProductTypes) are OPTIONAL.
+      // If that table/policies don't exist, we must still be able to save the item.
+      const syncProductTypesNonBlocking = async (catalogItemId: string) => {
+        try {
+          await syncCatalogItemProductTypes(
+            catalogItemId,
+            selectedProductTypeIds,
+            primaryProductTypeId,
+            activeOrganizationId
+          );
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ ProductTypes sync skipped (non-blocking):', e);
+          }
+        }
+      };
+
+      if (itemId) {
+        // Update existing item
+        console.log('🔄 Updating item:', itemId);
+        await updateItem(itemId, itemData);
+        await syncProductTypesNonBlocking(itemId);
+        console.log('✅ Item updated successfully');
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Item updated',
+          message: 'Catalog item has been updated successfully.',
+        });
+      } else {
+        // Create new item
+        console.log('➕ Creating new item...');
+        const newItem = await createItem(itemData);
+        console.log('✅ Item created:', newItem);
+        if (newItem && newItem.id) {
+          await syncProductTypesNonBlocking(newItem.id);
+          if (import.meta.env.DEV) {
+            console.log('✅ Item created, setting itemId:', newItem.id);
+          }
+          setItemId(newItem.id);
+          // Update URL to edit mode so user can continue editing (without full page reload)
+          // Use replaceState to avoid triggering a navigation
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, '', `/catalog/items/edit/${newItem.id}`);
+          }
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Item created',
+            message: 'Catalog item has been created successfully.',
+          });
+          // Item created successfully
+          return;
+        } else {
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Item created',
+            message: 'Catalog item has been created successfully.',
+          });
+        }
+      }
+
+      router.navigate('/catalog/items');
+    } catch (err: any) {
+      // Format error for display
+      const errorMessage = err?.message || 'Failed to save item. Please try again.';
+      const errorCode = err?.code || 'UNKNOWN';
+      const errorDetails = err?.details || '';
+      const errorHint = err?.hint || '';
+      
+      console.error('❌ ERROR SAVING ITEM:');
+      console.error('   Message:', errorMessage);
+      console.error('   Code:', errorCode);
+      console.error('   Details:', errorDetails);
+      console.error('   Hint:', errorHint);
+      console.error('   Full error object:', err);
+      
+      // Build detailed error message for user
+      let userMessage = errorMessage;
+      if (errorDetails) {
+        userMessage += ` (${errorDetails})`;
+      }
+      if (errorHint) {
+        userMessage += ` Hint: ${errorHint}`;
+      }
+      
+      setSaveError(userMessage);
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error saving item',
+        message: userMessage,
+      });
+    } finally {
+      console.log('🏁 Save process finished');
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="py-6 px-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground mb-1">
+            {itemId ? 'Edit Item' : 'New Item'}
+          </h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+            {itemId ? 'Edit catalog item information' : 'Create a new catalog item'}
+          </p>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.navigate('/catalog/items')}
+            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
+            title="Close"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            onClick={handleSubmit(onSubmit)}
+            disabled={isSaving || isReadOnly}
+            title={isReadOnly ? 'You only have read permissions' : undefined}
+          >
+            {isSaving ? 'Saving...' : isReadOnly ? 'Read Only' : 'Save'}
+          </button>
+          {!isReadOnly && (
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              onClick={handleSubmit(onSubmit)}
+              disabled={isSaving}
+            >
+              {isSaving ? 'Saving...' : 'Save and Finish'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {saveError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          {saveError}
+        </div>
+      )}
+
+      {/* Main Content Card */}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+        {/* Tab Toggle Header */}
+        <div 
+          className="border-b"
+          style={{
+            height: '2.625rem',
+            backgroundColor: 'var(--gray-100)',
+            borderColor: 'var(--gray-250)'
+          }}
+        >
+          <div className="flex items-stretch h-full" role="tablist">
+            {(['profile', 'settings', 'rates', 'attachments'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`transition-colors flex items-center justify-start ${
+                  tab !== 'profile' ? 'border-r' : ''
+                } ${
+                  activeTab === tab
+                    ? 'bg-white font-semibold'
+                    : 'hover:bg-white/50 font-normal'
+                }`}
+                style={{
+                  fontSize: '12px',
+                  padding: '0 48px',
+                  height: '100%',
+                  minWidth: '140px',
+                  width: 'auto',
+                  color: activeTab === tab ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
+                  borderColor: 'var(--gray-250)',
+                  borderBottom: activeTab === tab ? '2px solid var(--primary-brand-hex)' : 'none'
+                }}
+                role="tab"
+                aria-selected={activeTab === tab}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Form Body */}
+        <div className="py-6 px-6">
+          {activeTab === 'profile' && (
+            <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+              {/* General Information */}
+              <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
+                <div className="col-span-6">
+                  <Label htmlFor="name" className="text-xs" required>Name</Label>
+                  <Input 
+                    id="name" 
+                    {...register('name')}
+                    className="py-1 text-xs"
+                    error={errors.name?.message}
+                    disabled={isReadOnly}
+                    placeholder="Enter item name"
+                  />
+                </div>
+                <div className="col-span-3">
+                  <Label htmlFor="sku" className="text-xs" required>SKU</Label>
+                  <Input 
+                    id="sku" 
+                    {...register('sku')}
+                    className="py-1 text-xs"
+                    error={errors.sku?.message}
+                    disabled={isReadOnly}
+                    placeholder="Enter SKU"
+                  />
+                </div>
+                <div className="col-span-3">
+                  <Label htmlFor="uom" className="text-xs" required>Unit of Measure</Label>
+                  <SelectShadcn
+                    value={watch('uom') || ''}
+                    onValueChange={(value) => {
+                      const normalized = normalizeUom(value);
+                      if (normalized) {
+                        clearErrors('uom');
+                      }
+                      setValue('uom', normalized || '', { shouldValidate: true });
+                    }}
+                    disabled={isReadOnly || !watch('measure_basis')}
+                  >
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.uom && !watch('uom') ? 'bg-red-50' : ''}`}>
+                      <SelectValue placeholder={watch('measure_basis') ? "Select UOM" : "Select measure basis first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allowedUoms.map((uomOption) => (
+                        <SelectItem key={uomOption} value={uomOption}>
+                          {uomOption}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.uom && !watch('uom') && (
+                    <p className="text-xs text-red-600 mt-1">{errors.uom.message}</p>
+                  )}
+                  {watch('measure_basis') && !watch('uom') && !errors.uom && allowedUoms.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valid options: {allowedUoms.join(', ')}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="col-span-12">
+                <Label htmlFor="description" className="text-xs">Description</Label>
+                <textarea
+                  id="description"
+                  {...register('description')}
+                  className="w-full px-2.5 py-1.5 text-xs border border-gray-200 bg-gray-50 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:opacity-50"
+                  rows={3}
+                  disabled={isReadOnly}
+                  placeholder="Type here..."
+                />
+              </div>
+
+              {/* Category Selection */}
+              <div className="col-span-12 grid grid-cols-12 gap-x-4">
+                <div className="col-span-4">
+                  <Label htmlFor="category_id" className="text-xs">Category</Label>
+                  <SelectShadcn
+                    value={watch('category_id') || '__none__'}
+                    onValueChange={(value) => {
+                      setValue('category_id', value === '__none__' ? null : value, { shouldValidate: true });
+                    }}
+                    disabled={isReadOnly || catalogCategoriesLoading}
+                  >
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.category_id ? 'border-red-300 bg-red-50' : ''}`}>
+                      <SelectValue placeholder={catalogCategoriesLoading ? "Loading categories..." : "Select category"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {catalogCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.path}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.category_id && (
+                    <p className="text-xs text-red-600 mt-1">{errors.category_id.message}</p>
+                  )}
+                </div>
+              </div>
+              
+              {/* ✅ Product Types Selection */}
+              <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
+                <div className="col-span-12">
+                  <Label className="text-xs">Product Types</Label>
+                  <div className="mt-2 space-y-2">
+                    {productTypesLoading ? (
+                      <p className="text-xs text-gray-500">Loading product types...</p>
+                    ) : productTypes.length === 0 ? (
+                      <p className="text-xs text-gray-500">No product types available. Create product types in settings.</p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-md p-3">
+                        <div className="space-y-2">
+                          {productTypes.map((pt) => {
+                            const isSelected = selectedProductTypeIds.includes(pt.id);
+                            const isPrimary = primaryProductTypeId === pt.id;
+                            
+                            return (
+                              <div key={pt.id} className="flex items-center gap-3">
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  id={`product_type_${pt.id}`}
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      // Add to selected
+                                      setSelectedProductTypeIds(prev => [...prev, pt.id]);
+                                      // If no primary yet, set this as primary
+                                      if (!primaryProductTypeId) {
+                                        setPrimaryProductTypeId(pt.id);
+                                      }
+                                    } else {
+                                      // Remove from selected
+                                      setSelectedProductTypeIds(prev => prev.filter(id => id !== pt.id));
+                                      // If this was primary, clear primary
+                                      if (primaryProductTypeId === pt.id) {
+                                        setPrimaryProductTypeId(null);
+                                        // Set first remaining as primary if any
+                                        const remaining = selectedProductTypeIds.filter(id => id !== pt.id);
+                                        if (remaining.length > 0) {
+                                        setPrimaryProductTypeId(remaining[0] ?? null);
+                                        }
+                                      }
+                                    }
+                                  }}
+                                  disabled={isReadOnly}
+                                  className="h-4 w-4"
+                                />
+                                
+                                {/* Label - fixed width to match longest text (Accessories (ACCESSORIES)) */}
+                                <label
+                                  htmlFor={`product_type_${pt.id}`}
+                                  className="text-xs text-gray-700 cursor-pointer"
+                                  style={{ width: '200px', flexShrink: 0 }}
+                                >
+                                  {pt.name} {pt.code && `(${pt.code})`}
+                                </label>
+                                
+                                {/* Primary radio button - positioned right after the label */}
+                                {isSelected && (
+                                  <label
+                                    htmlFor={`primary_${pt.id}`}
+                                    className="flex items-center gap-2 cursor-pointer"
+                                    style={{ marginLeft: '8px' }} // Small space after text
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="primary_product_type"
+                                      id={`primary_${pt.id}`}
+                                      checked={isPrimary}
+                                      onChange={() => setPrimaryProductTypeId(pt.id)}
+                                      disabled={isReadOnly}
+                                      className="h-4 w-4"
+                                    />
+                                    {isPrimary && (
+                                      <span className="text-xs text-gray-600">Primary</span>
+                                    )}
+                                  </label>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {selectedProductTypeIds.length > 0 && !primaryProductTypeId && (
+                    <p className="text-xs text-yellow-600 mt-1">
+                      ⚠️ Please select a primary product type
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Measure Basis, Supply Form, and UOM */}
+              <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
+                <div className="col-span-4">
+                  <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
+                  <SelectShadcn
+                    value={watch('measure_basis') || 'unit'}
+                    onValueChange={(value) => {
+                      setValue('measure_basis', value as 'unit' | 'linear' | 'area', { shouldValidate: true });
+                      
+                      // Clear UOM if it's not valid for the new measure basis
+                      const currentUom = watch('uom');
+                      const allowed = getAllowedUoms({ isFabric, measureBasis: value });
+                      if (currentUom && !allowed.includes(currentUom.toLowerCase().trim())) {
+                        setValue('uom', '', { shouldValidate: true });
+                      }
+                    }}
+                    disabled={isReadOnly}
+                  >
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.measure_basis ? 'border-red-300 bg-red-50' : ''}`}>
+                      <SelectValue placeholder="Select measure basis" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allowedMeasureBasisOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.measure_basis && (
+                    <p className="text-xs text-red-600 mt-1">{errors.measure_basis.message}</p>
+                  )}
+                </div>
+
+                <div className="col-span-4">
+                  <div className="flex items-center gap-2 mt-6">
+                    <input
+                      type="checkbox"
+                      id="is_fabric"
+                      {...register('is_fabric')}
+                      checked={isFabric}
+                      onChange={(e) => {
+                        const isRollItem = !!e.target.checked;
+                        
+                        // Toggle logic: ROLL vs NON-ROLL
+                        if (isRollItem) {
+                          // Turning ON roll: move color -> variant_name if variant_name empty, then clear color
+                          const currentColor = watch('color');
+                          const currentVariantName = watch('variant_name');
+                          if (currentColor && !currentVariantName) {
+                            setValue('variant_name', currentColor, { shouldValidate: false });
+                          }
+                          setValue('color', null, { shouldValidate: false });
+                          
+                          // Roll items: default to linear measure_basis
+                          setValue('measure_basis', 'linear', { shouldValidate: true });
+                          setValue('uom', 'm', { shouldValidate: true });
+                          
+                        } else {
+                          // Turning OFF roll (HARD RESET): clear all roll-specific fields
+                          // Move variant_name -> color if color empty
+                          const currentVariantName = watch('variant_name');
+                          const currentColor = watch('color');
+                          if (currentVariantName && !currentColor) {
+                            setValue('color', currentVariantName, { shouldValidate: false });
+                          }
+                          
+                          // Clear all roll-specific fields
+                          setValue('variant_name', null, { shouldValidate: false });
+                          setValue('collection_name', null, { shouldValidate: false });
+                          setValue('fabric_pricing_mode', null, { shouldValidate: false });
+                          setValue('roll_width', null, { shouldValidate: false });
+                          
+                          // Reset to non-roll defaults
+                          setValue('measure_basis', 'unit', { shouldValidate: true });
+                          setValue('uom', 'ea', { shouldValidate: true });
+                        }
+                        
+                        setValue('is_fabric', isRollItem, { shouldValidate: true });
+                      }}
+                      className="h-4 w-4"
+                      disabled={isReadOnly}
+                    />
+                    <Label htmlFor="is_fabric" className="text-xs mb-0">
+                      Roll Item <span className="text-gray-500">(fabric, film, vinyl, etc.)</span>
+                    </Label>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Roll items use collection + variant. Non-roll items use color.
+                  </p>
+                </div>
+
+                <div className="col-span-4">
+                  <Label htmlFor="uom" className="text-xs" required>Unit of Measure</Label>
+                  <SelectShadcn
+                    value={watch('uom') || ''}
+                    onValueChange={(value) => {
+                      const normalized = normalizeUom(value);
+                      if (normalized) {
+                        clearErrors('uom');
+                      }
+                      setValue('uom', normalized || '', { shouldValidate: true });
+                    }}
+                    disabled={isReadOnly || !watch('measure_basis')}
+                  >
+                    <SelectTrigger className={`h-auto py-1 text-xs ${errors.uom && !watch('uom') ? 'bg-red-50' : ''}`}>
+                      <SelectValue placeholder={watch('measure_basis') ? "Select UOM" : "Select measure basis first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allowedUoms.map((uomOption) => (
+                        <SelectItem key={uomOption} value={uomOption}>
+                          {uomOption}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {errors.uom && !watch('uom') && (
+                    <p className="text-xs text-red-600 mt-1">{errors.uom.message}</p>
+                  )}
+                  {watch('measure_basis') && !watch('uom') && !errors.uom && allowedUoms.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Valid options: {allowedUoms.join(', ')}
+                    </p>
+                  )}
+                </div>
+
+                {/* Roll fields (only when is_fabric=true) */}
+                {isFabric && (
+                  <>
+                    <div className="col-span-4">
+                      <Label htmlFor="roll_type" className="text-xs" required>Roll Type</Label>
+                      <SelectShadcn
+                        value={watch('roll_type') || ''}
+                        onValueChange={(value) => {
+                          setValue('roll_type', value as 'fabric' | 'window_film' | 'vinyl' | 'mesh' | 'paper' | 'other', { shouldValidate: true });
+                          
+                          // Clear fabric_pricing_mode if not fabric
+                          if (value !== 'fabric') {
+                            setValue('fabric_pricing_mode', null, { shouldValidate: false });
+                          }
+                        }}
+                        disabled={isReadOnly}
+                      >
+                        <SelectTrigger className={`h-auto py-1 text-xs ${errors.roll_type ? 'border-red-300 bg-red-50' : ''}`}>
+                          <SelectValue placeholder="Select roll type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[
+                            { value: 'fabric', label: 'Fabric' },
+                            { value: 'window_film', label: 'Window Film' },
+                            { value: 'vinyl', label: 'Vinyl' },
+                            { value: 'mesh', label: 'Mesh' },
+                            { value: 'paper', label: 'Paper' },
+                            { value: 'other', label: 'Other' },
+                          ].map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                      {errors.roll_type && (
+                        <p className="text-xs text-red-600 mt-1">{errors.roll_type.message}</p>
+                      )}
+                    </div>
+                    
+                    <div className="col-span-4">
+                      <Label htmlFor="collection_name" className="text-xs" required>Collection Name</Label>
+                      <Input 
+                        id="collection_name" 
+                        {...register('collection_name')}
+                        className="py-1 text-xs"
+                        error={errors.collection_name?.message}
+                        disabled={isReadOnly}
+                        placeholder="Enter collection name"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Required for roll items</p>
+                    </div>
+                    
+                    <div className="col-span-4">
+                      <Label htmlFor="variant_name" className="text-xs" required>Variant Name (Color)</Label>
+                      <Input 
+                        id="variant_name" 
+                        {...register('variant_name')}
+                        className="py-1 text-xs"
+                        error={errors.variant_name?.message}
+                        disabled={isReadOnly}
+                        placeholder="Enter color/variant"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Required for roll items (stored in variant_name)</p>
+                    </div>
+                    
+                    <div className="col-span-4">
+                      <Label htmlFor="roll_width" className="text-xs" required={watch('roll_type') === 'fabric' && fabricPricingMode === 'per_linear_m'}>Roll Width</Label>
+                      <Input 
+                        id="roll_width" 
+                        type="number"
+                        step="0.001"
+                        {...register('roll_width', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.roll_width?.message}
+                        disabled={isReadOnly}
+                        placeholder="0.000"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Width in meters (no conversion)</p>
+                    </div>
+                    
+                    {watch('roll_type') === 'fabric' && (
+                      <div className="col-span-4">
+                        <Label htmlFor="fabric_pricing_mode" className="text-xs" required>Fabric Pricing Mode</Label>
+                        <SelectShadcn
+                          value={watch('fabric_pricing_mode') || ''}
+                          onValueChange={(value) => {
+                            setValue('fabric_pricing_mode', value as FabricPricingMode, { shouldValidate: true });
+                          }}
+                          disabled={isReadOnly}
+                        >
+                          <SelectTrigger className={`h-auto py-1 text-xs ${errors.fabric_pricing_mode ? 'border-red-300 bg-red-50' : ''}`}>
+                            <SelectValue placeholder="Select pricing mode" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {FABRIC_PRICING_MODE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </SelectShadcn>
+                        {errors.fabric_pricing_mode && (
+                          <p className="text-xs text-red-600 mt-1">{errors.fabric_pricing_mode.message}</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Color field for non-fabric items (is_fabric=false) */}
+                {!isFabric && (
+                  <div className="col-span-4">
+                    <Label htmlFor="color" className="text-xs">Color</Label>
+                    <Input 
+                      id="color" 
+                      {...register('color')}
+                      className="py-1 text-xs"
+                      error={errors.color?.message}
+                      disabled={isReadOnly}
+                      placeholder="Enter color"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">For non-roll items (components, accessories)</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Image Upload */}
+              <div className="col-span-12">
+                <Label className="text-xs">Image</Label>
+                <ImageUpload
+                  currentImageUrl={watch('image_url') || null}
+                  onImageUploaded={(url) => {
+                    setValue('image_url', url || null, { shouldValidate: false });
+                  }}
+                  disabled={isReadOnly}
+                />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+              <div className="col-span-12">
+                <p className="text-xs text-gray-500">Settings tab - To be implemented</p>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'rates' && (
+            <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+              {/* Pricing Section (Item Level) */}
+              <div className="col-span-12">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  <span className="text-lg">$</span>
+                  Pricing (Item Level)
+                </h3>
+                <p className="text-xs text-gray-500 mb-4">
+                  Product definition pricing. Operational and project costs are managed separately.
+                </p>
+              </div>
+              
+              <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
+                <div className="col-span-4">
+                  <Label htmlFor="cost_exw" className="text-xs" required>Item Cost EXW</Label>
+                  <Input 
+                    id="cost_exw" 
+                    type="number"
+                    step="0.01"
+                    {...register('cost_exw', { valueAsNumber: true })}
+                    className="py-1 text-xs"
+                    error={errors.cost_exw?.message}
+                    disabled={isReadOnly}
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Base cost (Ex Works)</p>
+                </div>
+                <div className="col-span-4">
+                  <Label htmlFor="msrp" className="text-xs">Item Sale Price (MSRP)</Label>
+                  <Input 
+                    id="msrp" 
+                    type="number"
+                    step="0.01"
+                    {...register('msrp', { valueAsNumber: true })}
+                    onChange={(e) => {
+                      register('msrp').onChange(e);
+                      handleMsrpChange(e);
+                    }}
+                    className="py-1 text-xs"
+                    error={errors.msrp?.message}
+                    disabled={isReadOnly}
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Manufacturer's Suggested Retail Price (auto-calculated from cost + margin)
+                    {categoryMarginPct !== null && (
+                      <span className="block text-blue-600 font-medium mt-1">
+                        Using category margin: {categoryMarginPct.toFixed(2)}%
+                      </span>
+                    )}
+                    {categoryMarginPct === null && defaultMarginPct !== null && defaultMarginPct !== undefined && (
+                      <span className="block text-gray-600 mt-1">
+                        Using item margin: {defaultMarginPct.toFixed(2)}%
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="col-span-4">
+                  <Label htmlFor="default_margin_pct" className="text-xs">
+                    Default Margin % 
+                    {categoryMarginPct !== null && (
+                      <span className="text-blue-600 text-xs ml-2">(Category margin overrides this)</span>
+                    )}
+                  </Label>
+                  <Input 
+                    id="default_margin_pct" 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    {...register('default_margin_pct', { valueAsNumber: true })}
+                    className="py-1 text-xs"
+                    error={errors.default_margin_pct?.message}
+                    disabled={isReadOnly}
+                    placeholder="35.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {categoryMarginPct !== null 
+                      ? 'Category margin is being used instead' 
+                      : 'Suggestion only (optional, used if no category margin)'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status fields */}
+              <div className="col-span-12 mt-6 pt-4 border-t border-gray-200">
+                <div className="grid grid-cols-12 gap-x-4 gap-y-3">
+                  <div className="col-span-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="active"
+                        {...register('active')}
+                        className="h-4 w-4"
+                        disabled={isReadOnly}
+                      />
+                      <Label htmlFor="active" className="text-xs mb-0">Active</Label>
+                    </div>
+                  </div>
+                  <div className="col-span-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="discontinued"
+                        {...register('discontinued')}
+                        className="h-4 w-4"
+                        disabled={isReadOnly}
+                      />
+                      <Label htmlFor="discontinued" className="text-xs mb-0">Discontinued</Label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'attachments' && (
+            <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+              <div className="col-span-12">
+                <FileUpload
+                  currentFiles={attachments}
+                  onFilesChanged={(files) => setAttachments(files)}
+                  disabled={isReadOnly || isSaving}
+                  acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/*']}
+                  maxFileSize={10 * 1024 * 1024} // 10MB
+                  maxFiles={10}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+

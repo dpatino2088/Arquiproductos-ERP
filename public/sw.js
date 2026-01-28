@@ -69,6 +69,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
+  // CRITICAL: Skip Vite HMR and dynamic module imports
+  // Vite uses these patterns for dynamic imports and HMR:
+  // - /@vite/... (Vite client and HMR)
+  // - /@fs/... (file system access)
+  // - /node_modules/... (node modules)
+  // - URLs with ?import or ?t= query params (dynamic imports with timestamps)
+  if (
+    url.pathname.includes('/@vite/') ||
+    url.pathname.includes('/@fs/') ||
+    url.pathname.includes('/node_modules/') ||
+    url.searchParams.has('import') ||
+    url.searchParams.has('t') ||
+    url.pathname.endsWith('.js') && (url.search.includes('import') || url.search.includes('t='))
+  ) {
+    // Let Vite handle these requests directly - don't intercept
+    return;
+  }
+  
   // Implement different strategies based on request type
   if (isStaticAsset(request.url)) {
     // Cache First strategy for static assets

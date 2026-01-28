@@ -62,18 +62,18 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   const handleSubmit = async (data: OrganizationUserFormData) => {
     // Validaciones básicas
     if (!activeOrganizationId) {
-      setSaveError('No hay organización seleccionada. Por favor, selecciona una organización.');
+      setSaveError('No organization selected. Please select an organization.');
       return;
     }
 
     if (!user?.id) {
-      setSaveError('No estás autenticado. Por favor, inicia sesión nuevamente.');
+      setSaveError('You are not authenticated. Please log in again.');
       return;
     }
 
     // Solo Superadmin puede crear usuarios
     if (!isSuperAdmin) {
-      setSaveError('Solo los Superadmins pueden crear usuarios.');
+      setSaveError('Only Superadmins can create users.');
       return;
     }
 
@@ -84,47 +84,75 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       const normalizedEmail = data.email.trim().toLowerCase();
       const userName: string | null = data.user_name?.trim() || null;
 
-      // Use Edge Function send-invite to create auth user and send invitation email
-      const { data: inviteData, error: inviteError } = await supabase.functions.invoke('send-invite', {
+      // ✅ Use create-temp-user (temporary password flow)
+      const { data: createData, error: createError } = await supabase.functions.invoke('create-temp-user', {
         body: {
           kind: 'org',
           organization_id: activeOrganizationId,
           email: normalizedEmail,
-          role: data.role,
           name: userName,
-          redirect_to: `${window.location.origin}/auth/callback`,
+          role: data.role,
         },
       });
 
-      if (inviteError) {
-        throw inviteError;
+      if (createError) {
+        console.error('[OrganizationUserNew] Edge Function error:', createError);
+        throw new Error(createError.message || 'Failed to create user');
       }
 
-      if (!inviteData?.ok) {
-        throw new Error(inviteData?.error || 'Invite failed');
+      if (!createData?.ok) {
+        console.error('[OrganizationUserNew] Response not ok:', createData);
+        throw new Error(createData?.error || 'Edge Function failed');
       }
 
-      if (import.meta.env.DEV) {
-        console.log('[OrganizationUserNew] Invite OK:', inviteData);
-      }
+      console.log('[OrganizationUserNew] User created:', createData);
+      console.log('[OrganizationUserNew] Email sent?', createData?.email_sent);
+      console.log('[OrganizationUserNew] Email error?', createData?.email_error);
+      console.log('[OrganizationUserNew] Temp password?', createData?.temp_password ? 'YES' : 'NO');
 
-      // Store the created user ID for permissions tab if available
-      const userId = inviteData?.membership_id || inviteData?.invited_user_id || null;
-      
-      if (userId) {
-        setCreatedUserId(userId);
+      // ✅ Get the OrganizationUsers record ID that was just created
+      const { data: orgUser, error: fetchError } = await supabase
+        .from('OrganizationUsers')
+        .select('id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_email', normalizedEmail)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (fetchError) {
+        console.warn('[OrganizationUserNew] Could not fetch created user ID:', fetchError);
+      } else if (orgUser?.id) {
+        console.log('[OrganizationUserNew] Found created user ID:', orgUser.id);
+        setCreatedUserId(orgUser.id);
         // Switch to permissions tab automatically after creating user
         setActiveTab('permissions');
       }
 
+      // ✅ Success message - mostrar password temporal si está disponible
+      const emailSent = createData?.email_sent === true;
+      let message = emailSent 
+        ? `Usuario creado. Se envió email con credenciales temporales a ${normalizedEmail}.`
+        : `Usuario creado. Email no pudo enviarse (configura RESEND_API_KEY y FROM_EMAIL en Supabase).`;
+      
+      if (createData?.temp_password) {
+        message += `\n\n🔑 Contraseña temporal: ${createData.temp_password}\n\nCopia esta contraseña y compártela con el usuario.`;
+        console.log('[OrganizationUserNew] Temp password:', createData.temp_password);
+      }
+
+      if (createData?.email_error) {
+        console.warn('[OrganizationUserNew] Email error:', createData.email_error);
+        message += `\n\n⚠️ Error de email: ${createData.email_error}`;
+      }
+
       useUIStore.getState().addNotification({
-        type: 'success',
-        title: 'Usuario Invitado',
-        message: 'El correo de invitación ha sido enviado exitosamente.',
+        type: emailSent ? 'success' : 'warning',
+        title: 'Usuario Creado',
+        message,
       });
     } catch (err: any) {
       console.error('Error creating user:', err);
-      const errorMessage = err.message || 'Error al crear el usuario. Por favor, intenta de nuevo.';
+      const errorMessage = err.message || 'Error creating user. Please try again.';
       setSaveError(errorMessage);
       useUIStore.getState().addNotification({
         type: 'error',
@@ -160,20 +188,20 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     return (
       <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800 font-medium">No hay organización seleccionada</p>
-          <p className="text-sm text-yellow-700 mt-1">Por favor, selecciona una organización para continuar.</p>
+          <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to continue.</p>
         </div>
       </div>
     );
   }
 
-  // Sin permisos (solo Superadmin puede crear usuarios)
+  // No permissions (only Superadmin can create users)
   if (!isSuperAdmin) {
     return (
       <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800 font-medium">Sin permisos</p>
-          <p className="text-sm text-yellow-700 mt-1">Solo los Superadmins pueden crear usuarios.</p>
+          <p className="text-sm text-yellow-800 font-medium">No permissions</p>
+          <p className="text-sm text-yellow-700 mt-1">Only Superadmins can create users.</p>
         </div>
       </div>
     );
@@ -181,7 +209,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
 
   const content = (
     <>
-      {/* Header */}
+      {/* Header with Action Buttons */}
       {!embedded && (
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -192,31 +220,159 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               <ChevronLeft className="w-5 h-5" />
             </button>
             <div>
-              <h1 className="text-xl font-semibold text-foreground">Agregar Usuario</h1>
+              <h1 className="text-xl font-semibold text-foreground">Add User</h1>
               <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-                Agrega un nuevo usuario interno a tu organización (email + rol obligatorios)
+                Add a new internal user to your organization (email + role required)
               </p>
             </div>
           </div>
+          
+          {/* Action Buttons - Top Right - Dynamic based on active tab */}
+          {activeTab === 'details' && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.navigate('/settings/organization-user')}
+                disabled={isSaving}
+                className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const submitEvent = new Event('submit', { cancelable: true, bubbles: true });
+                  document.querySelector('form')?.dispatchEvent(submitEvent);
+                }}
+                disabled={isSaving}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                {isSaving ? 'Creating...' : 'Create User'}
+              </button>
+            </div>
+          )}
+          
+          {/* Permission tab buttons */}
+          {activeTab === 'permissions' && createdUserId && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.navigate('/settings/organization-user')}
+                disabled={isSavingPermissions}
+                className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (savePermissionsFnRef.current) {
+                    savePermissionsFnRef.current();
+                  }
+                }}
+                disabled={isSavingPermissions || !isDirtyPermissions}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                {isSavingPermissions ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (savePermissionsFnRef.current) {
+                    savePermissionsFnRef.current().then(() => {
+                      router.navigate('/settings/organization-user');
+                    });
+                  }
+                }}
+                disabled={isSavingPermissions || !isDirtyPermissions}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                {isSavingPermissions ? 'Saving...' : 'Save and Close'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {embedded && (
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Agregar Usuario</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Add User</h2>
             <p className="text-sm text-gray-600">
-              Agrega un nuevo usuario interno a tu organización (email + rol obligatorios)
+              Add a new internal user to your organization (email + role required)
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.navigate('/settings/organization-user')}
-            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
-            title="Cerrar y volver a la lista"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          
+          {/* Action Buttons - Top Right - Dynamic based on active tab */}
+          {activeTab === 'details' && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.navigate('/settings/organization-user')}
+                disabled={isSaving}
+                className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const submitEvent = new Event('submit', { cancelable: true, bubbles: true });
+                  document.querySelector('form')?.dispatchEvent(submitEvent);
+                }}
+                disabled={isSaving}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                {isSaving ? 'Creating...' : 'Create User'}
+              </button>
+            </div>
+          )}
+          
+          {/* Permission tab buttons */}
+          {activeTab === 'permissions' && createdUserId && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => router.navigate('/settings/organization-user')}
+                disabled={isSavingPermissions}
+                className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (savePermissionsFnRef.current) {
+                    savePermissionsFnRef.current();
+                  }
+                }}
+                disabled={isSavingPermissions || !isDirtyPermissions}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                {isSavingPermissions ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (savePermissionsFnRef.current) {
+                    savePermissionsFnRef.current().then(() => {
+                      router.navigate('/settings/organization-user');
+                    });
+                  }
+                }}
+                disabled={isSavingPermissions || !isDirtyPermissions}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                {isSavingPermissions ? 'Saving...' : 'Save and Close'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -285,7 +441,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                 </p>
               )}
               <p className="mt-1 text-xs text-gray-500">
-                El nombre del usuario (opcional).
+                The user's name (optional).
               </p>
             </div>
 
@@ -309,14 +465,14 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                 </p>
               )}
               <p className="mt-1 text-xs text-gray-500">
-                El email debe ser único en la organización y será usado para identificar al usuario.
+                The email must be unique in the organization and will be used to identify the user.
               </p>
             </div>
 
-            {/* Rol - Campo obligatorio */}
+            {/* Role - Required field */}
             <div>
               <Label htmlFor="role" className="text-xs" required>
-                Rol
+                Role
               </Label>
               <select
                 id="role"
@@ -362,7 +518,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                 <option value="operator">{getRoleLabel('operator')}</option>
                 <option value="procurement">{getRoleLabel('procurement')}</option>
                 <option value="finance">{getRoleLabel('finance')}</option>
-                <option value="member">Member (Solo puede ver/editar/borrar sus propias cotizaciones)</option>
+                <option value="member">Member (Can only view/edit/delete own quotes)</option>
               </select>
               {form.formState.errors.role && (
                 <p className="mt-1 text-xs text-red-600">
@@ -370,7 +526,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                 </p>
               )}
               <p className="mt-1 text-xs text-gray-500">
-                Selecciona el rol para el nuevo usuario en esta organización.
+                Select the role for the new user in this organization.
               </p>
             </div>
 
@@ -381,32 +537,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={() => router.navigate('/settings/organization-user')}
-                className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm"
-                disabled={isSaving}
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-              >
-                {isSaving ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    <span>Creando...</span>
-                  </>
-                ) : (
-                  <span>Crear Usuario</span>
-                )}
-              </button>
-            </div>
+            {/* Hidden submit button for form submission */}
+            <button type="submit" style={{ display: 'none' }} />
           </form>
         </div>
       </div>
@@ -432,7 +564,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               externalSave={(saveFn) => {
                 savePermissionsFnRef.current = saveFn;
               }}
-              showActions={true}
+              showActions={false}
             />
           </div>
         </>

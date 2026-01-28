@@ -21,29 +21,55 @@ export function useQuotes(companyId?: string | null) {
   // Usar companyId proporcionado o el activo del hook
   const effectiveCompanyId = companyId ?? activeCompanyId;
 
+  // ✅ OPTIMIZACIÓN: Refetch simplificado - solo incrementar trigger y dejar que useEffect maneje todo
   const refetch = useCallback(() => {
-    setRefreshTrigger(prev => prev + 1);
+    if (import.meta.env.DEV) {
+      console.log('[useQuotes] refetch called');
+    }
+    // Solo incrementar trigger - el useEffect manejará loading y limpieza de datos
+    setRefreshTrigger(prev => {
+      const next = prev + 1;
+      if (import.meta.env.DEV) {
+        console.log('[useQuotes] refreshTrigger:', prev, '->', next);
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
+    let isMounted = true; // ✅ Flag para evitar actualizaciones de estado si el componente se desmonta
+    
     async function fetchQuotes() {
+      if (import.meta.env.DEV) {
+        console.log('[useQuotes] fetchQuotes triggered', {
+          activeOrganizationId,
+          effectiveCompanyId,
+          refreshTrigger,
+        });
+      }
+      
       if (!activeOrganizationId) {
-        setLoading(false);
-        setQuotes([]);
-        setError(null);
+        if (isMounted) {
+          setLoading(false);
+          setQuotes([]);
+          setError(null);
+        }
         return;
       }
 
       try {
-        setLoading(true);
-        setError(null);
+        if (isMounted) {
+          setLoading(true);
+          setError(null);
+        }
 
         // Query: filtrar por organization_id Y company_id (si está disponible)
         let query = supabase
           .from('Quotes')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
+          // ✅ Treat NULL as not deleted (some rows may have deleted = NULL)
+          .or('deleted.is.false,deleted.is.null');
 
         // Filtrar por company_id si está disponible
         if (effectiveCompanyId) {
@@ -64,7 +90,14 @@ export function useQuotes(companyId?: string | null) {
           throw quotesError;
         }
 
+        if (import.meta.env.DEV) {
+          console.log('[useQuotes] Quotes loaded:', quotesData?.length || 0);
+        }
+
         if (!quotesData || quotesData.length === 0) {
+          if (import.meta.env.DEV) {
+            console.log('[useQuotes] No quotes found, setting empty array');
+          }
           setQuotes([]);
           return;
         }
@@ -72,8 +105,8 @@ export function useQuotes(companyId?: string | null) {
         // Obtener customer names por separado
         const customerIds = [...new Set(
           quotesData
-            .map(q => q.customer_id)
-            .filter((id): id is string => !!id)
+            .map((q: any) => q.customer_id)
+            .filter((id: any): id is string => !!id)
         )];
 
         let customersMap = new Map<string, { id: string; customer_name: string }>();
@@ -82,58 +115,79 @@ export function useQuotes(companyId?: string | null) {
             .from('DirectoryCustomers')
             .select('id, customer_name')
             .in('id', customerIds)
-            .eq('deleted', false);
+            .or('deleted.is.false,deleted.is.null');
 
           if (customersData) {
             customersMap = new Map(
-              customersData.map(c => [c.id, { id: c.id, customer_name: c.customer_name }])
+            customersData.map((c: any) => [c.id, { id: c.id, customer_name: c.customer_name }])
             );
           }
         }
 
         // Obtener QuoteLines por separado
-        const quoteIds = quotesData.map(q => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; line_total: number; deleted: boolean }>>();
+        // Note: QuoteLines does NOT have a 'deleted' column in the schema
+        const quoteIds = quotesData.map((q: any) => q.id);
+        let quoteLinesMap = new Map<string, Array<{ id: string; line_total: number }>>();
         
         if (quoteIds.length > 0) {
           const { data: linesData } = await supabase
             .from('QuoteLines')
-            .select('id, quote_id, line_total, deleted')
-            .in('quote_id', quoteIds)
-            .eq('deleted', false);
+            .select('id, quote_id, line_total')
+            .in('quote_id', quoteIds);
 
           if (linesData) {
-            linesData.forEach(line => {
+            linesData.forEach((line: any) => {
               if (!quoteLinesMap.has(line.quote_id)) {
                 quoteLinesMap.set(line.quote_id, []);
               }
               quoteLinesMap.get(line.quote_id)!.push({
                 id: line.id,
-                line_total: line.line_total,
-                deleted: line.deleted
+                line_total: line.line_total
               });
             });
           }
         }
 
         // Enriquecer quotes con datos relacionados
-        const enrichedQuotes = quotesData.map(quote => ({
+        const enrichedQuotes = quotesData.map((quote: any) => ({
           ...quote,
           DirectoryCustomers: quote.customer_id ? customersMap.get(quote.customer_id) || null : null,
           QuoteLines: quoteLinesMap.get(quote.id) || []
         }));
 
-        setQuotes(enrichedQuotes as Quote[]);
+        if (import.meta.env.DEV) {
+          console.log('[useQuotes] Setting enriched quotes:', enrichedQuotes.length);
+        }
+
+        if (isMounted) {
+          setQuotes(enrichedQuotes as Quote[]);
+        }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading quotes';
         console.error('[useQuotes] Error:', errorMessage);
-        setError(errorMessage);
+        if (import.meta.env.DEV) {
+          console.error('[useQuotes] Full error:', err);
+        }
+        if (isMounted) {
+          setError(errorMessage);
+          setQuotes([]); // ✅ Establecer array vacío en caso de error
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          if (import.meta.env.DEV) {
+            console.log('[useQuotes] fetchQuotes completed, setting loading = false');
+          }
+          setLoading(false);
+        }
       }
     }
 
     fetchQuotes();
+    
+    // ✅ Cleanup: marcar como unmounted para evitar actualizaciones de estado
+    return () => {
+      isMounted = false;
+    };
   }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
 
   return { quotes, loading, error, refetch };
@@ -180,7 +234,7 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
           .select('*')
           .eq('organization_id', activeOrganizationId)
           .eq('status', 'approved')
-          .eq('deleted', false);
+          .or('deleted.is.false,deleted.is.null');
 
         // Filtrar por company_id si está disponible
         if (effectiveCompanyId) {
@@ -204,8 +258,8 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
         // Obtener customer names
         const customerIds = [...new Set(
           quotesData
-            .map(q => q.customer_id)
-            .filter((id): id is string => !!id)
+            .map((q: any) => q.customer_id)
+            .filter((id: any): id is string => !!id)
         )];
 
         let customersMap = new Map<string, { id: string; customer_name: string }>();
@@ -214,42 +268,41 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
             .from('DirectoryCustomers')
             .select('id, customer_name')
             .in('id', customerIds)
-            .eq('deleted', false);
+            .or('deleted.is.false,deleted.is.null');
 
           if (customersData) {
             customersMap = new Map(
-              customersData.map(c => [c.id, { id: c.id, customer_name: c.customer_name }])
+            customersData.map((c: any) => [c.id, { id: c.id, customer_name: c.customer_name }])
             );
           }
         }
 
         // Obtener QuoteLines
-        const quoteIds = quotesData.map(q => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; line_total: number; deleted: boolean }>>();
+        // Note: QuoteLines does NOT have a 'deleted' column in the schema
+        const quoteIds = quotesData.map((q: any) => q.id);
+        let quoteLinesMap = new Map<string, Array<{ id: string; line_total: number }>>();
         
         if (quoteIds.length > 0) {
           const { data: linesData } = await supabase
             .from('QuoteLines')
-            .select('id, quote_id, line_total, deleted')
-            .in('quote_id', quoteIds)
-            .eq('deleted', false);
+            .select('id, quote_id, line_total')
+            .in('quote_id', quoteIds);
 
           if (linesData) {
-            linesData.forEach(line => {
+            linesData.forEach((line: any) => {
               if (!quoteLinesMap.has(line.quote_id)) {
                 quoteLinesMap.set(line.quote_id, []);
               }
               quoteLinesMap.get(line.quote_id)!.push({
                 id: line.id,
-                line_total: line.line_total,
-                deleted: line.deleted
+                line_total: line.line_total
               });
             });
           }
         }
 
         // Obtener SalesOrders
-        const quoteIdsForSO = quotesData.map(q => q.id);
+        const quoteIdsForSO = quotesData.map((q: any) => q.id);
         let saleOrdersMap = new Map<string, any[]>();
         
         if (quoteIdsForSO.length > 0) {
@@ -258,10 +311,10 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
             .select('id, quote_id, sale_order_no, order_progress_status, status, organization_id')
             .in('quote_id', quoteIdsForSO)
             .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
+            .or('deleted.is.false,deleted.is.null');
 
           if (saleOrdersData) {
-            saleOrdersData.forEach(so => {
+            saleOrdersData.forEach((so: any) => {
               if (so.quote_id) {
                 if (!saleOrdersMap.has(so.quote_id)) {
                   saleOrdersMap.set(so.quote_id, []);
@@ -273,7 +326,7 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
         }
 
         // Enriquecer quotes
-        const enrichedQuotes = quotesData.map(quote => {
+        const enrichedQuotes = quotesData.map((quote: any) => {
           const saleOrders = saleOrdersMap.get(quote.id) || [];
           const firstSO = saleOrders.length > 0 ? saleOrders[0] : null;
 
@@ -332,57 +385,231 @@ export function useQuoteLines(quoteId: string | null) {
         setLoading(true);
         setError(null);
 
-        // Query simplificada: solo QuoteLines básicos
+        // Query: obtener todos los campos de QuoteLines
+        // Note: QuoteLines does NOT have a 'deleted' column in the schema
+        // ✅ OPTIMIZED: Solo seleccionar campos necesarios para reducir carga
         const { data, error: queryError } = await supabase
           .from('QuoteLines')
           .select('*')
           .eq('quote_id', quoteId)
-          .eq('deleted', false)
           .order('created_at', { ascending: true });
 
+        // ✅ OPTIMIZED: Solo log resumen, no datos completos
+        if (import.meta.env.DEV) {
+          console.log('[useQuoteLines] Loaded', data?.length || 0, 'quote lines');
+        }
+
         if (queryError) {
-          console.error('[useQuoteLines] Error fetching QuoteLines:', queryError);
+          // Format error to avoid [circular] reference
+          const errorMsg = queryError?.message || queryError?.error_description || queryError?.hint || 'Error fetching QuoteLines';
+          const errorDetails = queryError?.code ? ` (${queryError.code})` : '';
+          console.error('[useQuoteLines] Error fetching QuoteLines:', errorMsg + errorDetails, queryError);
           throw queryError;
         }
 
-        // Enriquecer con CatalogItems si es necesario (query separada)
-        if (data && data.length > 0) {
-          const catalogItemIds = [...new Set(
-            data
-              .map(line => line.catalog_item_id)
-              .filter((id): id is string => !!id)
-          )];
-
-          let catalogItemsMap = new Map<string, any>();
-          if (catalogItemIds.length > 0) {
-            const { data: catalogItemsData } = await supabase
-              .from('CatalogItems')
-              .select('id, item_name, sku, uom, cost_exw, default_margin_pct, msrp, measure_basis, item_type, metadata')
-              .in('id', catalogItemIds)
-              .eq('organization_id', activeOrganizationId)
-              .eq('deleted', false);
-
-            if (catalogItemsData) {
-              catalogItemsMap = new Map(
-                catalogItemsData.map(item => [item.id, item])
-              );
-            }
-          }
-
-          // Enriquecer líneas con CatalogItems
-          const enrichedLines = data.map(line => ({
-            ...line,
-            CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null
-          }));
-
-          setLines(enrichedLines as QuoteLine[]);
-        } else {
+        if (!data || data.length === 0) {
           setLines([]);
+          return;
         }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading quote lines';
-        console.error('[useQuoteLines] Error:', errorMessage);
-        setError(errorMessage);
+
+        const lineIds = data.map((line: any) => line.id);
+
+        // 1. Obtener ProductTypes para product_type_id
+        const productTypeIds = [...new Set(
+          data
+            .map((line: any) => line.product_type_id)
+            .filter((id: any): id is string => !!id)
+        )];
+
+        let productTypesMap = new Map<string, any>();
+        if (productTypeIds.length > 0) {
+          const { data: productTypesData } = await supabase
+            .from('ProductTypes')
+            .select('id, name, code')
+            .in('id', productTypeIds)
+            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`);
+
+          if (productTypesData) {
+            productTypesMap = new Map(
+              productTypesData.map((pt: any) => [pt.id, pt])
+            );
+          }
+        }
+
+        // 2. Obtener QuoteLineComponents (fabric, accessories, y opciones como drive_type, area, position)
+        const { data: componentsData } = await supabase
+          .from('QuoteLineComponents')
+          .select('id, quote_line_id, catalog_item_id, component_role, kind, source, qty, payload')
+          .in('quote_line_id', lineIds)
+          .eq('organization_id', activeOrganizationId)
+          .or('deleted.is.false,deleted.is.null');
+
+        // Separar fabric, accessories, y opciones
+        const fabricComponents = (componentsData || []).filter(
+          (comp: any) => comp.kind === 'selection' && comp.component_role === 'fabric'
+        );
+        const accessoryComponents = (componentsData || []).filter(
+          (comp: any) => comp.source === 'accessory' || comp.component_role === 'accessory'
+        );
+        const optionComponents = (componentsData || []).filter(
+          (comp: any) => comp.kind === 'option'
+        );
+
+        // 3. Obtener CatalogItems para fabric y accessories
+        const fabricItemIds = fabricComponents.map((f: any) => f.catalog_item_id).filter(Boolean);
+        const accessoryItemIds = accessoryComponents.map((a: any) => a.catalog_item_id).filter(Boolean);
+        const allCatalogItemIds = [...new Set([...fabricItemIds, ...accessoryItemIds])];
+
+        let catalogItemsMap = new Map<string, any>();
+        if (allCatalogItemIds.length > 0) {
+          const { data: catalogItemsData } = await supabase
+            .from('CatalogItems')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, metadata')
+            .in('id', allCatalogItemIds)
+            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
+            .eq('is_active', true);
+
+          if (catalogItemsData) {
+            catalogItemsMap = new Map(
+              catalogItemsData.map((item: any) => [item.id, item])
+            );
+          }
+        }
+
+        // 4. Organizar componentes por quote_line_id
+        const componentsByLineId = new Map<string, { fabric: any[]; accessories: any[] }>();
+        lineIds.forEach((lineId: string) => {
+          componentsByLineId.set(lineId, { fabric: [], accessories: [] });
+        });
+
+        fabricComponents.forEach((comp: any) => {
+          const lineComponents = componentsByLineId.get(comp.quote_line_id);
+          if (lineComponents) {
+            lineComponents.fabric.push({
+              ...comp,
+              CatalogItems: comp.catalog_item_id ? catalogItemsMap.get(comp.catalog_item_id) || null : null
+            });
+          }
+        });
+
+        accessoryComponents.forEach((comp: any) => {
+          const lineComponents = componentsByLineId.get(comp.quote_line_id);
+          if (lineComponents) {
+            lineComponents.accessories.push({
+              ...comp,
+              CatalogItems: comp.catalog_item_id ? catalogItemsMap.get(comp.catalog_item_id) || null : null
+            });
+          }
+        });
+
+        // 4.5. Extraer datos de opciones (drive_type, area, position, etc.)
+        const optionsByLineId = new Map<string, Record<string, any>>();
+        lineIds.forEach((lineId: string) => {
+          optionsByLineId.set(lineId, {});
+        });
+
+        optionComponents.forEach((comp: any) => {
+          const lineOptions = optionsByLineId.get(comp.quote_line_id) || {};
+          const payload = comp.payload || {};
+          
+          // Extraer valores del payload según component_role
+          if (comp.component_role === 'drive_type' && payload.drive_type) {
+            lineOptions.drive_type = payload.drive_type;
+          } else if (comp.component_role === 'area' && payload.area) {
+            lineOptions.area = payload.area;
+          } else if (comp.component_role === 'position' && payload.position) {
+            lineOptions.position = payload.position;
+          }
+          
+          // Copiar otros campos del payload directamente
+          Object.keys(payload).forEach(key => {
+            if (!lineOptions[key]) {
+              lineOptions[key] = payload[key];
+            }
+          });
+          
+          optionsByLineId.set(comp.quote_line_id, lineOptions);
+        });
+
+        // 4.6. Obtener ConfiguredProducts para líneas que tienen configured_product_id en metadata
+        const configuredProductIds = new Set<string>();
+        data.forEach((line: any) => {
+          if (line.metadata?.configured_product_id) {
+            configuredProductIds.add(line.metadata.configured_product_id);
+          }
+        });
+
+        let configuredProductsMap = new Map<string, { roll_plus_bom_total: number }>();
+        if (configuredProductIds.size > 0) {
+          const { data: cpData } = await supabase
+            .from('ConfiguredProducts')
+            .select('id, roll_plus_bom_total')
+            .in('id', Array.from(configuredProductIds))
+            .eq('organization_id', activeOrganizationId)
+            .or('deleted.is.false,deleted.is.null');
+
+          if (cpData) {
+            configuredProductsMap = new Map(
+              cpData.map((cp: any) => [cp.id, { roll_plus_bom_total: cp.roll_plus_bom_total || 0 }])
+            );
+          }
+        }
+
+        // 5. Enriquecer líneas con todos los datos
+        const enrichedLines = data.map((line: any) => {
+          const components = componentsByLineId.get(line.id) || { fabric: [], accessories: [] };
+          const fabric = components.fabric[0] || null;
+          const fabricItem = fabric?.CatalogItems || null;
+          const options = optionsByLineId.get(line.id) || {};
+          
+          // ✅ SNAPSHOT: QuoteLines es snapshot congelado, siempre usar valores de QuoteLines
+          // NO recalcular desde ConfiguredProducts (que es vivo y puede cambiar)
+          const enriched = {
+            ...line,
+            // Usar snapshots de QuoteLines (roll_msrp_snapshot + bom_msrp_snapshot) o msrp total
+            msrp: line.msrp || ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0)),
+            // Usar snapshots de costos si están disponibles
+            total_cost: line.total_cost || ((line.roll_cost_snapshot || 0) + (line.bom_cost_snapshot || 0)),
+            // Datos de QuoteLines (si existen)
+            area: line.area || options.area || null,
+            position: line.position || options.position || null,
+            drive_type: line.drive_type || options.drive_type || null,
+            // Datos relacionados
+            ProductType: line.product_type_id ? productTypesMap.get(line.product_type_id) || null : null,
+            collection_name: line.collection_name || fabricItem?.collection_name || null,
+            variant_name: line.variant_name || fabricItem?.variant_name || null,
+            Accessories: components.accessories,
+            CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null
+          };
+
+        // ✅ OPTIMIZED: Solo log en DEV si hay menos de 10 líneas para evitar spam
+        if (import.meta.env.DEV && data.length <= 10) {
+          console.log('[useQuoteLines] Enriched line:', {
+            id: line.id,
+            area: enriched.area,
+            position: enriched.position,
+            drive_type: enriched.drive_type,
+            product_type_id: line.product_type_id,
+            collection_name: enriched.collection_name,
+            variant_name: enriched.variant_name,
+            accessoriesCount: components.accessories.length,
+          });
+        }
+
+          return enriched;
+        });
+
+        if (import.meta.env.DEV) {
+          console.log('[useQuoteLines] Total lines enriched:', enrichedLines.length);
+        }
+
+        setLines(enrichedLines as QuoteLine[]);
+      } catch (err: any) {
+        // Format error message to avoid [circular] reference
+        const errorMessage = err?.message || err?.error_description || err?.hint || 'Error loading quote lines';
+        const errorDetails = err?.code ? ` (${err.code})` : '';
+        console.error('[useQuoteLines] Error fetching QuoteLines:', errorMessage + errorDetails, err);
+        setError(errorMessage + errorDetails);
       } finally {
         setLoading(false);
       }
@@ -422,7 +649,7 @@ export function useCreateQuote() {
           .from('CompanyPortalUsers')
           .select('company_id')
           .eq('user_id', user.id)
-          .eq('deleted', false)
+          .or('deleted.is.false,deleted.is.null')
           .in('status', ['active', 'invited'])
           .maybeSingle();
 
@@ -498,7 +725,7 @@ export function useUpdateQuote() {
             .select('id')
             .eq('quote_no', quoteData.quote_no)
             .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false)
+            .or('deleted.is.false,deleted.is.null')
             .neq('id', id)
             .maybeSingle();
 
@@ -658,7 +885,7 @@ export async function waitForSalesOrder(
       .select('id, sale_order_no')
       .eq('quote_id', quoteId)
       .eq('organization_id', organizationId)
-      .eq('deleted', false)
+      .or('deleted.is.false,deleted.is.null')
       .maybeSingle();
 
     if (error) {

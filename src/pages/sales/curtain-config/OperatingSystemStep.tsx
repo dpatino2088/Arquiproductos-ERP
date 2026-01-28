@@ -1,516 +1,857 @@
-import { useMemo, useEffect, useState } from 'react';
+/**
+ * Operating System Step - FILTRADO PROGRESIVO
+ * 
+ * Step 4: Configure operating system
+ * - Operating system (manual/motor) - cards
+ * - Motor item selection (cards, only if motor)
+ * - Manual drive item selection (cards, only if manual)
+ * - Tube item selection (cards)
+ * 
+ * ✅ NUEVA ARQUITECTURA (Filtrado progresivo):
+ * - Opciones se cargan desde templates filtrados por Hardware Step
+ * - Motor y Tube NO dependen de color, pero SÍ de templates filtrados
+ * - El matching de template se hace AL FINAL con matchBOMTemplate()
+ */
+
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
-import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/SelectShadcn';
-import { useBOMComponents } from '../../../hooks/useBOM';
-import { useBOMTemplates } from '../../../hooks/useBOMTemplates';
-import { useOrganizationContext } from '../../../context/OrganizationContext';
-import { supabase } from '../../../lib/supabase/client';
 import { useBOMTemplateQuestions } from '../../../hooks/useBOMTemplateQuestions';
+import { useBOMTemplateOptionsSimple, RoleOption } from '../../../hooks/useBOMTemplateOptionsSimple';
+import { Image as ImageIcon, X } from 'lucide-react';
+import { supabase } from '../../../lib/supabase/client';
 
 interface OperatingSystemStepProps {
   config: CurtainConfiguration | ProductConfig;
   onUpdate: (updates: Partial<CurtainConfiguration | ProductConfig>) => void;
+  /** Templates filtrados desde HardwareStep */
+  filteredTemplateIds?: string[];
 }
 
-// Drive options (Motor SKUs from your list)
-const DRIVE_SKUS = [
-  'CM-06',
-  'CM-06-E-R',
-  'CM-07',
-  'CM-08',
-  'CM-08-E',
-  'CM-09-C120',
-  'CM-09-MC120',
-  'CM-09-QC120',
-  'CM-09-QMC120',
-  'CM-10-QC120',
-  'CM-10-QMC120',
-];
-
-// Tube Type options - RTU-42, RTU-50, RTU-65, RTU-80
-const TUBE_TYPE_OPTIONS = [
-  { id: 'RTU-42' as const, name: 'RTU-42', maxWidth_m: 3.00 },
-  { id: 'RTU-50' as const, name: 'RTU-50', maxWidth_m: 3.50 },
-  { id: 'RTU-65' as const, name: 'RTU-65', maxWidth_m: 4.00 },
-  { id: 'RTU-80' as const, name: 'RTU-80', maxWidth_m: 5.00 },
-];
-
-// Calculate recommended tube type based on width (in meters)
-// Rule: You can use a tube with MORE capacity but never one with LESS
-// RTU-42: up to 3.00 m, RTU-50: up to 3.50 m, RTU-65: up to 4.00 m, RTU-80: up to 5.00 m
-function calculateRecommendedTubeType(width_mm: number | undefined): 'RTU-42' | 'RTU-50' | 'RTU-65' | 'RTU-80' {
-  if (!width_mm) return 'RTU-42'; // Default
-  
-  const width_m = width_mm / 1000; // Convert mm to meters
-  
-  // Rules based on max width in meters:
-  // RTU-42: up to 3.00 m (3000 mm)
-  // RTU-50: up to 3.50 m (3500 mm)
-  // RTU-65: up to 4.00 m (4000 mm)
-  // RTU-80: up to 5.00 m (5000 mm)
-  if (width_m <= 3.00) return 'RTU-42';
-  if (width_m <= 3.50) return 'RTU-50';
-  if (width_m <= 4.00) return 'RTU-65';
-  return 'RTU-80';
-}
-
-// Check if a tube type is valid for the given width
-// Rule: Tube must have capacity >= width (can use more, never less)
-function isValidTubeForWidth(tubeType: 'RTU-42' | 'RTU-50' | 'RTU-65' | 'RTU-80', width_mm: number | undefined): boolean {
-  if (!width_mm) return true; // Allow any if no width
-  
-  const width_m = width_mm / 1000;
-  const tubeOption = TUBE_TYPE_OPTIONS.find(t => t.id === tubeType);
-  
-  if (!tubeOption) return false;
-  
-  // Tube is valid if its max capacity is >= width
-  return tubeOption.maxWidth_m >= width_m;
-}
-
-export default function OperatingSystemStep({ config, onUpdate }: OperatingSystemStepProps) {
-  const { activeOrganizationId } = useOrganizationContext();
-  const productTypeId = (config as any).productTypeId;
+export default function OperatingSystemStep({
+  config,
+  onUpdate,
+}: OperatingSystemStepProps) {
   const bomTemplateId = (config as any).bom_template_id;
-  const [motorDescriptions, setMotorDescriptions] = useState<Record<string, string>>({});
+  const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
   
-  // ✅ Get BOM template questions to determine if operating system step should be shown
+  // ✅ Templates filtrados desde HardwareStep
+  const hardwareFilteredTemplates = (config as any)._hardware_filtered_templates as string[] | undefined;
+  
+  // ✅ NUEVO: Guardar los templates BASE del Hardware step (antes de cualquier selección de Motor/Drive)
+  // Esto evita que al seleccionar Motor, los templates de Manual desaparezcan
+  const baseTemplatesRef = useRef<string[] | null>(null);
+  
+  // Get BOM template questions to determine what to show
   const questions = useBOMTemplateQuestions(bomTemplateId);
   const showOperatingSystem = questions.requiredSteps.operatingSystem;
   const showDriveType = questions.selectQuestions.drive_type;
   
-  // Fetch motor descriptions from CatalogItems
+  // Get current selections (CAPITALIZED colors to match DB)
+  const operationType = (config as any).operation_type || (config as any).drive_type || undefined;
+  const hardwareColor = (config as any).hardware_color || (config as any).hardwareColor || (config as any).operatingSystemColor || null;
+  const motorItemId = (config as any).motor_item_id || undefined;
+  const driveItemId = (config as any).drive_item_id || undefined;
+  const tubeItemId = (config as any).tube_item_id || undefined;
+  
+  // ✅ CRÍTICO: Determinar si ya hay CUALQUIER selección de operación
+  // Incluir operationType para que cuando el usuario clickea Manual/Motor,
+  // los templates base NO se sobreescriban
+  const hasAnyOperationSelection = !!(operationType || motorItemId || driveItemId);
+  
+  // ✅ Capturar templates base en MONTAJE INICIAL o cuando no hay selección
+  // Si ya hay selección pero no tenemos base capturado, intentar recuperar de HardwareStep
   useEffect(() => {
-    const fetchMotorDescriptions = async () => {
-      if (!activeOrganizationId) return;
-      
-      try {
-        const { data, error } = await supabase
-          .from('CatalogItems')
-          .select('sku, item_name, description')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .in('sku', DRIVE_SKUS);
-        
-        if (!error && data) {
-          const descriptions: Record<string, string> = {};
-          data.forEach((item: any) => {
-            descriptions[item.sku] = item.description || item.item_name || '';
-          });
-          setMotorDescriptions(descriptions);
+    // Capturar solo si NO tenemos base capturado O si no hay selección
+    if (hardwareFilteredTemplates && hardwareFilteredTemplates.length > 0) {
+      if (!hasAnyOperationSelection) {
+        // Sin selección: capturar como templates puros del Hardware step
+        baseTemplatesRef.current = [...hardwareFilteredTemplates];
+        if (import.meta.env.DEV) {
+          console.debug('[OperatingSystemStep] Captured base templates (no selection):', hardwareFilteredTemplates.length);
         }
-      } catch (err) {
-        console.error('Error fetching motor descriptions:', err);
+      } else if (!baseTemplatesRef.current || baseTemplatesRef.current.length === 0) {
+        // Con selección pero sin base: usar los actuales como fallback inicial
+        // Esto puede pasar al volver a este step después de navegar
+        baseTemplatesRef.current = [...hardwareFilteredTemplates];
+        if (import.meta.env.DEV) {
+          console.debug('[OperatingSystemStep] Captured base templates (fallback on mount):', hardwareFilteredTemplates.length);
+        }
       }
-    };
-    
-    fetchMotorDescriptions();
-  }, [activeOrganizationId]);
+    }
+  }, [hardwareFilteredTemplates, hasAnyOperationSelection]);
   
-  // Create drive options with descriptions
-  const driveOptions = useMemo(() => {
-    return DRIVE_SKUS.map(sku => ({
-      id: sku as any,
-      name: sku,
-      description: motorDescriptions[sku] || '',
-    }));
-  }, [motorDescriptions]);
-  
-  // Initialize default values if they don't exist (except operation_type - no default)
+  // ✅ Los templates base para calcular opciones de Manual y Motor
+  // Usa los capturados, o si no hay, usa los actuales
+  const baseTemplatesForOptions = baseTemplatesRef.current && baseTemplatesRef.current.length > 0
+    ? baseTemplatesRef.current
+    : hardwareFilteredTemplates;
+
+  const uniq = (ids: string[] | null | undefined): string[] | null => {
+    if (!ids) return null;
+    const u = Array.from(new Set(ids.filter(Boolean)));
+    return u.length > 0 ? u : null;
+  };
+
+  const relevantTemplateCount = (optionTemplateIds: string[] | undefined, currentIds: string[] | null | undefined) => {
+    const a = optionTemplateIds ? Array.from(new Set(optionTemplateIds.filter(Boolean))) : [];
+    if (!currentIds) return a.length;
+    const s = new Set(currentIds);
+    return a.filter(t => s.has(t)).length;
+  };
+
+  // ✅ FILTRADO PROGRESIVO: Usar templates filtrados de Hardware step
+  const canLoadOptions = !!productTypeId;
+
+  // ✅ NUEVO: Separar templates por operación para evitar opciones “fantasma”
+  // Regla: motor/tube NO filtran por color, PERO manual vs motor debe separar templates:
+  // - manual: tiene drive y NO tiene motor
+  // - motor: tiene motor y NO tiene drive (si existen templates mixtos, se resolverán por selección SKU)
+  const [manualTemplateIds, setManualTemplateIds] = useState<string[] | null>(null);
+  const [motorTemplateIds, setMotorTemplateIds] = useState<string[] | null>(null);
+
   useEffect(() => {
-    const updates: Partial<ProductConfig> = {};
-    let hasUpdates = false;
-    
-    // Do NOT set default operation_type - let user select
-    
-    // Set default operating_system_variant if not present
-    if (!(config as any).operating_system_variant) {
-      // Default to standard_m if not set
-      (updates as any).operating_system_variant = 'standard_m';
-      hasUpdates = true;
-    }
-    
-    // Set default tube_type based on operating_system_variant if not manually set
-    const operatingSystemVariant = (config as any).operating_system_variant || 'standard_m';
-    const tubeTypeManual = (config as any).tube_type_manual;
-    
-    if (!(config as any).tube_type && !tubeTypeManual) {
-      // Default based on operating_system_variant
-      if (operatingSystemVariant === 'standard_m') {
-        (updates as any).tube_type = 'RTU-42';
-      } else if (operatingSystemVariant === 'standard_l') {
-        (updates as any).tube_type = 'RTU-65';
-      } else {
-        // Fallback: calculate from width
-        const width_mm = (config as any).width_mm || (config as any).panels?.[0]?.width_mm;
-        const recommendedTube = calculateRecommendedTubeType(width_mm);
-        (updates as any).tube_type = recommendedTube;
-      }
-      hasUpdates = true;
-    }
-    
-    // Don't set default motor_family - let user select from cards
-    
-    if (hasUpdates) {
-      onUpdate(updates);
-    }
-  }, []); // Only run once on mount
-  
-  // Auto-update tube type when operating_system_variant changes (if not manually set)
-  useEffect(() => {
-    const operatingSystemVariant = (config as any).operating_system_variant;
-    const tubeTypeManual = (config as any).tube_type_manual;
-    const currentTubeType = (config as any).tube_type;
-    
-    // Only auto-update if not manually set
-    if (operatingSystemVariant && !tubeTypeManual) {
-      let defaultTube: 'RTU-42' | 'RTU-65' | undefined;
-      if (operatingSystemVariant === 'standard_m') {
-        defaultTube = 'RTU-42';
-      } else if (operatingSystemVariant === 'standard_l') {
-        defaultTube = 'RTU-65';
-      }
-      
-      if (defaultTube && currentTubeType !== defaultTube) {
-        onUpdate({ tube_type: defaultTube } as any);
-      }
-    }
-  }, [(config as any).operating_system_variant, (config as any).tube_type_manual]);
-  
-  // Auto-update tube type when width or cassette changes (if not manually set)
-  useEffect(() => {
-    const width_mm = (config as any).width_mm || (config as any).panels?.[0]?.width_mm;
-    const currentTubeType = (config as any).tube_type;
-    const cassetteShape = (config as any).cassette_shape || 'none';
-    const hasCassette = cassetteShape !== 'none';
-    // Only round and square cassette require RTU-42; L_shape is flexible
-    const requiresRTU42 = hasCassette && (cassetteShape === 'round' || cassetteShape === 'square');
-    const tubeTypeManual = (config as any).tube_type_manual;
-    
-    // If round/square cassette is selected, tube must be RTU-42 (always enforce this)
-    if (requiresRTU42 && currentTubeType !== 'RTU-42') {
-      onUpdate({ tube_type: 'RTU-42', tube_type_manual: false } as any); // Reset manual flag when forced
+    if (!canLoadOptions) {
+      setManualTemplateIds(null);
+      setMotorTemplateIds(null);
       return;
     }
+    // ✅ Usar baseTemplatesForOptions en lugar de hardwareFilteredTemplates
+    // Esto asegura que aunque Motor esté seleccionado, Manual todavía muestre sus opciones
+    if (!baseTemplatesForOptions || baseTemplatesForOptions.length === 0) {
+      setManualTemplateIds(null);
+      setMotorTemplateIds(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadRolePresence = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('BOMComponents')
+          .select('bom_template_id, component_role')
+          .in('bom_template_id', baseTemplatesForOptions)
+          .is('parent_component_id', null)
+          .eq('deleted', false)
+          .eq('archived', false);
+
+        if (error) throw error;
+
+        const hasMotor = new Set<string>();
+        const hasDrive = new Set<string>();
+
+        (data || []).forEach((row: any) => {
+          const tid = row.bom_template_id as string;
+          const role = String(row.component_role || '').toLowerCase().trim();
+          if (role === 'motor') hasMotor.add(tid);
+          if (role === 'drive') hasDrive.add(tid);
+        });
+
+        // ✅ SIMPLIFICADO: Templates que tienen el rol correspondiente
+        // NO excluir templates que tienen ambos roles - dejar que el matching final decida
+        const manualIds = baseTemplatesForOptions.filter(tid => hasDrive.has(tid));
+        const motorIds = baseTemplatesForOptions.filter(tid => hasMotor.has(tid));
+        
+        if (import.meta.env.DEV) {
+          console.debug('[OperatingSystemStep] Role presence:', {
+            templatesWithDrive: hasDrive.size,
+            templatesWithMotor: hasMotor.size,
+            driveTemplateIds: Array.from(hasDrive).slice(0, 3),
+            motorTemplateIds: Array.from(hasMotor).slice(0, 3),
+          });
+        }
+
+        if (!cancelled) {
+          setManualTemplateIds(manualIds);
+          setMotorTemplateIds(motorIds);
+          if (import.meta.env.DEV) {
+            console.debug('[OperatingSystemStep] operation template split', {
+              base: baseTemplatesForOptions.length,
+              manualIds: manualIds.length,
+              motorIds: motorIds.length,
+            });
+          }
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          // fallback: no split
+          setManualTemplateIds(null);
+          setMotorTemplateIds(null);
+          if (import.meta.env.DEV) {
+            console.warn('[OperatingSystemStep] failed to split templates by operation', e?.message || e);
+          }
+        }
+      }
+    };
+
+    loadRolePresence();
+    return () => {
+      cancelled = true;
+    };
+  }, [canLoadOptions, baseTemplatesForOptions?.join(',')]); // ✅ Dependencia correcta
+
+  const templatesForManual = useMemo(() => {
+    // ✅ si split no aplica, usar base templates (no los filtrados actuales)
+    return manualTemplateIds && manualTemplateIds.length > 0 ? manualTemplateIds : baseTemplatesForOptions;
+  }, [manualTemplateIds, baseTemplatesForOptions]);
+
+  const templatesForMotor = useMemo(() => {
+    // ✅ si split no aplica, usar base templates (no los filtrados actuales)
+    return motorTemplateIds && motorTemplateIds.length > 0 ? motorTemplateIds : baseTemplatesForOptions;
+  }, [motorTemplateIds, baseTemplatesForOptions]);
+  
+  // ✅ Motor: desde templates filtrados (motor NO depende de color)
+  const { options: motorOptions, loading: loadingMotor, error: motorError } = useBOMTemplateOptionsSimple(
+    canLoadOptions ? productTypeId : null,
+    null, // Motor no depende de color
+    'motor',
+    templatesForMotor // ✅ solo templates motor cuando aplica
+  );
+  
+  // ✅ Drive: desde templates filtrados (drive SÍ depende de color)
+  const { options: driveOptions, loading: loadingDrive, error: driveError } = useBOMTemplateOptionsSimple(
+    canLoadOptions ? productTypeId : null,
+    canLoadOptions ? hardwareColor : null,
+    'drive',
+    templatesForManual // ✅ solo templates manual cuando aplica
+  );
+  
+  // ✅ Calcular templates filtrados por motor/drive seleccionado
+  const selectedMotor = motorOptions.find(opt => opt.id === motorItemId);
+  const selectedDrive = driveOptions.find(opt => opt.id === driveItemId);
+  
+  const templatesAfterOperation = useMemo(() => {
+    // ✅ Usar baseTemplatesForOptions como fallback cuando no hay operationType
+    const base =
+      operationType === 'motor'
+        ? (templatesForMotor || null)
+        : operationType === 'manual'
+        ? (templatesForManual || null)
+        : (baseTemplatesForOptions || null);
     
-    // Only auto-update if not manually set
-    if (width_mm && !tubeTypeManual && !requiresRTU42) {
-      // Normal recommendation based on width
-      const recommendedTube = calculateRecommendedTubeType(width_mm);
-      if (currentTubeType !== recommendedTube && isValidTubeForWidth(recommendedTube, width_mm)) {
-        onUpdate({ tube_type: recommendedTube });
+    if (operationType === 'motor' && selectedMotor?.templateIds) {
+      if (base) {
+        const set = new Set(selectedMotor.templateIds);
+        return base.filter(tid => set.has(tid));
+      }
+      return selectedMotor.templateIds;
+    }
+    
+    if (operationType === 'manual' && selectedDrive?.templateIds) {
+      if (base) {
+        const set = new Set(selectedDrive.templateIds);
+        return base.filter(tid => set.has(tid));
+      }
+      return selectedDrive.templateIds;
+    }
+    
+    return base;
+  }, [operationType, selectedMotor, selectedDrive, baseTemplatesForOptions, templatesForMotor, templatesForManual]);
+  
+  // ✅ Tube: desde templates filtrados por motor/drive (tube NO depende de color)
+  const { options: tubeOptions, loading: loadingTube, error: tubeError } = useBOMTemplateOptionsSimple(
+    canLoadOptions ? productTypeId : null,
+    null, // Tube no depende de color
+    'tube',
+    templatesAfterOperation
+  );
+
+  const loading = loadingMotor || loadingDrive || loadingTube;
+
+  // ✅ Calcular templates finales después de seleccionar tube
+  const selectedTube = tubeOptions.find(opt => opt.id === tubeItemId);
+  const finalFilteredTemplates = useMemo(() => {
+    if (!selectedTube || !selectedTube.templateIds) {
+      return templatesAfterOperation;
+    }
+    if (templatesAfterOperation) {
+      const set = new Set(selectedTube.templateIds);
+      return templatesAfterOperation.filter(tid => set.has(tid));
+    }
+    return selectedTube.templateIds;
+  }, [selectedTube, templatesAfterOperation]);
+
+  // ✅ Guardar templates finales en config para el matcher
+  useEffect(() => {
+    if (finalFilteredTemplates && finalFilteredTemplates.length > 0) {
+      const currentSaved = (config as any)._hardware_filtered_templates;
+      const deduped = [...new Set(finalFilteredTemplates)];
+      const newValue = JSON.stringify([...deduped].sort());
+      const oldValue = currentSaved ? JSON.stringify(currentSaved.sort()) : '';
+      
+      if (newValue !== oldValue) {
+        onUpdate({
+          _hardware_filtered_templates: deduped,
+        } as any);
+        
+        if (import.meta.env.DEV) {
+          console.debug('[OperatingSystemStep] Updated filtered templates:', deduped.length);
+        }
+      }
+    }
+  }, [finalFilteredTemplates]);
+
+  // Debug logging for results
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.debug('[OperatingSystemStep] Progressive filtering', {
+        productTypeId,
+        hardwareColor,
+        hardwareFilteredTemplates: hardwareFilteredTemplates?.length ?? 'none',
+        operationType,
+        motorCount: motorOptions.length,
+        driveCount: driveOptions.length,
+        templatesAfterOperation: templatesAfterOperation?.length ?? 'all',
+        tubeCount: tubeOptions.length,
+        finalFilteredTemplates: finalFilteredTemplates?.length ?? 'all',
+      });
+    }
+  }, [productTypeId, hardwareColor, hardwareFilteredTemplates, operationType, motorOptions.length, driveOptions.length, templatesAfterOperation, tubeOptions.length, finalFilteredTemplates]);
+
+  // Operating system type options
+  const operatingSystemOptions: Array<{ value: 'manual' | 'motor'; label: string }> = [
+    { value: 'manual', label: 'Manual' },
+    { value: 'motor', label: 'Motor' },
+  ];
+
+  // ✅ Track image load errors
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [imageSources, setImageSources] = useState<Record<string, string>>({
+    manual: '/images/drive-manual.png',
+    motor: '/images/drive-motor.png',
+  });
+
+  const handleImageError = (optionValue: string, currentSrc: string) => {
+    const formats = ['png', 'jpg', 'jpeg', 'webp'];
+    const basePath = currentSrc.replace(/\.(jpg|jpeg|png|webp)$/i, '');
+    const currentFormat = currentSrc.match(/\.(jpg|jpeg|png|webp)$/i)?.[1]?.toLowerCase();
+    const currentFormatIndex = currentFormat ? formats.indexOf(currentFormat) : -1;
+    
+    if (currentFormatIndex >= 0 && currentFormatIndex < formats.length - 1) {
+      const nextFormat = formats[currentFormatIndex + 1];
+      setImageSources(prev => ({
+        ...prev,
+        [optionValue]: `${basePath}.${nextFormat}`,
+      }));
+    } else {
+      setImageErrors(prev => ({ ...prev, [optionValue]: true }));
+    }
+  };
+
+  const handleOperatingSystemChange = (value: 'manual' | 'motor') => {
+    // ✅ REMOVIDO: guardrail que bloqueaba el cambio
+    // El usuario debe poder cambiar libremente entre Manual y Motor
+    // Si no hay opciones, verá el mensaje "No options available"
+
+    const updates: any = {
+      operation_type: value,
+      drive_type: value,
+      operatingSystem: value === 'manual' ? 'manual' : 'motorized',
+    };
+    
+    // Clear selections when switching
+    if (value === 'motor') {
+      updates.manual_drive = undefined;
+      updates.drive_item_id = undefined;
+      updates.drive_sku = null;
+      // ✅ Resetear a templates de Motor (usando baseTemplatesForOptions como origen)
+      updates._hardware_filtered_templates = uniq(templatesForMotor) ?? uniq(baseTemplatesForOptions) ?? null;
+    } else {
+      updates.motor_family = undefined;
+      updates.motor_item_id = undefined;
+      updates.motor_sku = null;
+      updates.remote_control = undefined;
+      // ✅ Resetear a templates de Manual (usando baseTemplatesForOptions como origen)
+      updates._hardware_filtered_templates = uniq(templatesForManual) ?? uniq(baseTemplatesForOptions) ?? null;
+    }
+    
+    // Clear tube when switching operation type
+    updates.tube_item_id = undefined;
+    updates.tube_sku = null;
+    updates.tube_type = undefined;
+    
+    if (import.meta.env.DEV) {
+      console.debug('[OperatingSystemStep] Switching to:', value, {
+        templatesForMotor: templatesForMotor?.length,
+        templatesForManual: templatesForManual?.length,
+        baseTemplatesForOptions: baseTemplatesForOptions?.length,
+      });
+    }
+    
+    onUpdate(updates);
+  };
+
+  const handleMotorSelect = (item: RoleOption) => {
+    const isVirtual = String(item.id).startsWith('sku:');
+    
+    // ✅ Calcular templates filtrados usando templatesForMotor
+    let newFilteredTemplates = item.templateIds || [];
+    const motorBase = templatesForMotor || baseTemplatesForOptions;
+    if (motorBase && motorBase.length > 0 && newFilteredTemplates.length > 0) {
+      const set = new Set(newFilteredTemplates);
+      newFilteredTemplates = motorBase.filter(tid => set.has(tid));
+    }
+    newFilteredTemplates = uniq(newFilteredTemplates) || [];
+    
+    if (import.meta.env.DEV) {
+      console.debug('[OperatingSystemStep] Motor selected:', {
+        sku: item.sku,
+        templateIds: newFilteredTemplates.length,
+      });
+    }
+    
+    onUpdate({
+      motor_item_id: isVirtual ? null : item.id,
+      motor_sku: item.sku,
+      motor_family: item.name,
+      drive_item_id: undefined,
+      drive_sku: null,
+      manual_drive: undefined,
+      // Clear tube when motor changes
+      tube_item_id: undefined,
+      tube_sku: null,
+      tube_type: undefined,
+      // ✅ Guardar templates filtrados
+      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForMotor) ?? uniq(baseTemplatesForOptions) ?? null,
+    } as any);
+  };
+
+  const handleDriveSelect = (item: RoleOption) => {
+    const isVirtual = String(item.id).startsWith('sku:');
+    
+    // ✅ Calcular templates filtrados usando templatesForManual
+    let newFilteredTemplates = item.templateIds || [];
+    const manualBase = templatesForManual || baseTemplatesForOptions;
+    if (manualBase && manualBase.length > 0 && newFilteredTemplates.length > 0) {
+      const set = new Set(newFilteredTemplates);
+      newFilteredTemplates = manualBase.filter(tid => set.has(tid));
+    }
+    newFilteredTemplates = uniq(newFilteredTemplates) || [];
+    
+    if (import.meta.env.DEV) {
+      console.debug('[OperatingSystemStep] Drive selected:', {
+        sku: item.sku,
+        templateIds: newFilteredTemplates.length,
+      });
+    }
+    
+    onUpdate({
+      drive_item_id: isVirtual ? null : item.id,
+      drive_sku: item.sku,
+      manual_drive: item.name,
+      motor_item_id: undefined,
+      motor_sku: null,
+      motor_family: undefined,
+      remote_control: undefined,
+      // Clear tube when drive changes
+      tube_item_id: undefined,
+      tube_sku: null,
+      tube_type: undefined,
+      // ✅ Guardar templates filtrados
+      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForManual) ?? uniq(baseTemplatesForOptions) ?? null,
+    } as any);
+  };
+
+  const handleTubeSelect = (item: RoleOption) => {
+    const isVirtual = String(item.id).startsWith('sku:');
+    
+    // ✅ Calcular templates finales después de seleccionar tube
+    let finalTemplates = templatesAfterOperation;
+    if (item.templateIds && item.templateIds.length > 0) {
+      if (templatesAfterOperation) {
+        const set = new Set(item.templateIds);
+        finalTemplates = templatesAfterOperation.filter(tid => set.has(tid));
+      } else {
+        finalTemplates = item.templateIds;
       }
     }
     
-    // If manually set but tube doesn't have enough capacity, force update
-    if (width_mm && currentTubeType && !isValidTubeForWidth(currentTubeType as any, width_mm) && !requiresRTU42) {
-      const recommendedTube = calculateRecommendedTubeType(width_mm);
-      onUpdate({ tube_type: recommendedTube, tube_type_manual: false } as any);
-    }
-  }, [(config as any).width_mm, (config as any).panels, (config as any).cassette_shape, (config as any).tube_type, (config as any).tube_type_manual]);
-  
-  // Load BOM Templates for this product type
-  const { templates: bomTemplates, loading: loadingBOMTemplates } = useBOMTemplates(productTypeId || undefined);
-  
-  // Get current selections
-  const operationType = (config as any).operation_type || (config as any).drive_type || undefined;
-  const isMotor = operationType === 'motor';
-  const motorFamily = (config as any).motor_family || undefined;
-  const operatingSystemVariant = (config as any).operating_system_variant || 'standard_m';
-  const tubeType = (config as any).tube_type || 'RTU-42';
-  const tubeTypeManual = (config as any).tube_type_manual;
-  const cassetteShape = (config as any).cassette_shape || 'none';
-  const hasCassette = cassetteShape !== 'none';
-  // Only round and square cassette require RTU-42; L_shape is flexible (allows RTU-42, RTU-50, RTU-65, RTU-80)
-  const requiresRTU42 = hasCassette && (cassetteShape === 'round' || cassetteShape === 'square');
-  
-  // Calculate recommended tube type from width
-  const width_mm = (config as any).width_mm || (config as any).panels?.[0]?.width_mm;
-  const recommendedTubeType = useMemo(() => {
-    // If round/square cassette is selected, only RTU-42 is valid
-    if (requiresRTU42) return 'RTU-42';
-    return calculateRecommendedTubeType(width_mm);
-  }, [width_mm, requiresRTU42]);
-  const isTubeAutoSelected = !tubeTypeManual;
-  
-  // ✅ Don't render if operating system step is not required
+    onUpdate({
+      tube_item_id: isVirtual ? null : item.id,
+      tube_type: item.sku,
+      tube_sku: item.sku,
+      // ✅ Guardar templates finales
+      _hardware_filtered_templates: uniq(finalTemplates as any) ?? null,
+    } as any);
+  };
+
+  const clearOperationType = () => {
+    onUpdate({
+      operation_type: undefined,
+      drive_type: undefined,
+      operatingSystem: undefined,
+      drive_item_id: undefined,
+      drive_sku: null,
+      manual_drive: undefined,
+      motor_item_id: undefined,
+      motor_sku: null,
+      motor_family: undefined,
+      remote_control: undefined,
+      tube_item_id: undefined,
+      tube_sku: null,
+      tube_type: undefined,
+      // ✅ Usar baseTemplatesForOptions para restaurar al estado original
+      _hardware_filtered_templates: uniq(baseTemplatesForOptions) ?? null,
+    } as any);
+  };
+
+  // Don't render if operating system step is not required
   if (!showOperatingSystem) {
     return null;
   }
   
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
-        {/* Operating System Variant - Dropdown */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-8">
         <div>
-          <Label className="text-sm font-medium mb-4 block">OPERATING SYSTEM VARIANT</Label>
-          <div className="mb-4">
-            <Label htmlFor="operating_system_variant" className="text-xs mb-1">Operating System Variant</Label>
-            <SelectShadcn
-              value={operatingSystemVariant || ''}
-              onValueChange={(value) => {
-                if (!value) {
-                  onUpdate({ operating_system_variant: undefined } as any);
-                  return;
-                }
-                const variant = value as 'standard_m' | 'standard_l';
-                const updates: any = { operating_system_variant: variant };
-                
-                // Set default tube_type based on variant (only if not manually set)
-                if (!tubeTypeManual) {
-                  if (variant === 'standard_m') {
-                    updates.tube_type = 'RTU-42';
-                  } else if (variant === 'standard_l') {
-                    updates.tube_type = 'RTU-65';
-                  }
-                }
-                
-                onUpdate(updates);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select operating system variant" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="standard_m">Standard M</SelectItem>
-                <SelectItem value="standard_l">Standard L</SelectItem>
-              </SelectContent>
-            </SelectShadcn>
-            <p className="text-xs text-gray-500 mt-1">
-              Determines default tube type (M → RTU-42, L → RTU-65). Can be overridden below.
-            </p>
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Operating System</h3>
+          <p className="text-sm text-gray-600">
+            Select the operating system type and choose the specific components.
+          </p>
         </div>
 
-        {/* ✅ Operation Type - Dropdown (only show if drive_type is required) */}
+        {/* Operating System Type (Manual/Motor) */}
         {showDriveType && (
-        <div>
-          <Label className="text-sm font-medium mb-4 block">OPERATION TYPE</Label>
-          <div className="mb-4">
-            <Label htmlFor="operation_type" className="text-xs mb-1">Operation Type</Label>
-            <SelectShadcn
-              value={operationType || ''}
-              onValueChange={(value) => {
-                if (!value) {
-                  // Clear selection
-                  onUpdate({ 
-                    operation_type: undefined,
-                    drive_type: undefined,
-                    operatingSystem: undefined,
-                    motor_family: undefined
-                  });
-                  return;
-                }
-                const opType = value as 'manual' | 'motor';
-                const updates: any = { 
-                  operation_type: opType,
-                  drive_type: opType,
-                  operatingSystem: opType === 'manual' ? 'manual' : 'motorized'
-                };
-                // Clear motor_family if switching to manual
-                if (opType === 'manual') {
-                  updates.motor_family = undefined;
-                }
-                // Don't set default motor_family - let user select from cards
-                onUpdate(updates);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select operation type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="motor">Motor</SelectItem>
-                <SelectItem value="manual">Manual</SelectItem>
-              </SelectContent>
-            </SelectShadcn>
-            <p className="text-xs text-gray-500 mt-1">
-              Determines which drive block components are included in the BOM
-            </p>
+          <div>
+            <Label className="text-sm font-medium mb-4 block">OPERATION TYPE</Label>
+            <p className="text-xs text-gray-500 mb-2">Determines which drive block components are included in the BOM</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {operatingSystemOptions.map((option) => {
+                const isSelected = operationType === option.value;
+                const imageError = imageErrors[option.value] || false;
+                
+                // ✅ Verificar si hay opciones disponibles para este tipo
+                const hasOptions = option.value === 'motor' 
+                  ? motorOptions.length > 0 
+                  : driveOptions.length > 0;
+                
+                return (
+                  <div
+                    key={option.value}
+                    onClick={() => handleOperatingSystemChange(option.value)}
+                    className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                      isSelected
+                        ? 'border-2 border-primary shadow-lg'
+                        : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                    }`}
+                  >
+                    {/* X to deselect */}
+                    {isSelected && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          clearOperationType();
+                        }}
+                        className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                        title="Remove selection"
+                      >
+                        <X className="w-4 h-4 text-gray-600" />
+                      </button>
+                    )}
+                    <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden relative">
+                      {imageError ? (
+                        <ImageIcon className="w-16 h-16 text-gray-300" />
+                      ) : (
+                        <img
+                          src={imageSources[option.value]}
+                          alt={option.label}
+                          className="w-full h-full object-cover"
+                          style={{ display: 'block' }}
+                          onError={(e) => handleImageError(option.value, (e.target as HTMLImageElement).src)}
+                        />
+                      )}
+                    </div>
+                    
+                    <div className="p-4">
+                      <h3 className={`font-semibold text-sm truncate text-center ${
+                        isSelected ? 'text-primary' : 'text-gray-900'
+                      }`} title={option.label}>
+                        {option.label}
+                      </h3>
+                      {!hasOptions && !loading && (
+                        <p className="text-xs text-gray-400 text-center mt-1">
+                          No options available
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
         )}
 
-        {/* Drive (Motor Family) - Only show if Motor selected - Cards */}
-        {isMotor && (
+        {/* Motor Selection (only if motor) */}
+        {operationType === 'motor' && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">DRIVE</Label>
-            {motorFamily ? (
-              // Show only selected drive card
-              <div className="grid grid-cols-4 gap-6">
-                {driveOptions
-                  .filter(option => option.id === motorFamily)
-                  .map((option) => {
-                    return (
-                      <div key={option.id} className="flex flex-col items-center">
-                        <button
-                          onClick={() => onUpdate({ motor_family: undefined })}
-                          className="w-full aspect-square rounded-lg transition-all relative flex items-center justify-center border-2 border-gray-400 bg-gray-600"
-                          style={{ padding: '2px' }}
-                        >
-                          <div className="w-full h-full rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                            {/* TODO: Add image from Supabase storage */}
-                          </div>
-                        </button>
-                        <div className="text-center mt-2">
-                          <span className="text-sm font-semibold block text-gray-900">
-                            {option.name}
-                          </span>
-                          {option.description && (
-                            <span className="text-xs text-gray-500 block mt-0.5 line-clamp-2">{option.description}</span>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => onUpdate({ motor_family: undefined })}
-                          className="mt-2 text-xs text-gray-500 hover:text-gray-700 underline"
-                        >
-                          Change drive
-                        </button>
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : (
-              // Show all drive options
-              <div className="grid grid-cols-4 gap-6">
-                {driveOptions.map((option) => {
+            <Label className="text-sm font-medium mb-4 block">MOTORS</Label>
+            {loadingMotor ? (
+              <div className="text-sm text-gray-500 mt-2">Loading motors...</div>
+            ) : motorOptions.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {motorOptions.map((item) => {
+                  const isSelected = motorItemId === item.id;
                   return (
-                    <div key={option.id} className="flex flex-col items-center">
-                      <button
-                        onClick={() => onUpdate({ motor_family: option.id })}
-                        className="w-full aspect-square rounded-lg transition-all relative flex items-center justify-center border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm"
-                        style={{ padding: '2px' }}
-                      >
-                        <div className="w-full h-full rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                          {/* TODO: Add image from Supabase storage */}
-                        </div>
-                      </button>
-                      <div className="text-center mt-2">
-                        <span className="text-sm font-semibold block text-gray-900">
-                          {option.name}
-                        </span>
-                        {option.description && (
-                          <span className="text-xs text-gray-500 block mt-0.5 line-clamp-2">{option.description}</span>
+                    <div
+                      key={item.id}
+                      onClick={() => handleMotorSelect(item)}
+                      className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                        isSelected
+                          ? 'border-2 border-primary shadow-lg'
+                          : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                      }`}
+                    >
+                      {/* X to deselect */}
+                      {isSelected && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdate({
+                              motor_item_id: undefined,
+                              motor_sku: null,
+                              motor_family: undefined,
+                              remote_control: undefined,
+                              tube_item_id: undefined,
+                              tube_sku: null,
+                              tube_type: undefined,
+                              // ✅ Volver a templatesForMotor (no afecta opciones de Manual)
+                              _hardware_filtered_templates: uniq(templatesForMotor as any) ?? uniq(baseTemplatesForOptions) ?? null,
+                            } as any);
+                          }}
+                          className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                          title="Remove selection"
+                        >
+                          <X className="w-4 h-4 text-gray-600" />
+                        </button>
+                      )}
+                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                        {item.image_url ? (
+                          <img
+                            src={item.image_url}
+                            alt={item.name || item.sku}
+                            className="w-full h-full object-contain p-2"
+                          />
+                        ) : (
+                          <ImageIcon className="w-12 h-12 text-gray-400" />
+                        )}
+                      </div>
+                      <div className="p-4">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                          {item.name || item.sku}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
+                        {import.meta.env.DEV && item.templateIds && (
+                          <p className="text-xs text-blue-500 mt-1">
+                            {relevantTemplateCount(item.templateIds, templatesAfterOperation as any)} template(s)
+                          </p>
                         )}
                       </div>
                     </div>
                   );
                 })}
               </div>
+            ) : (
+              <div className="text-sm text-gray-500">
+                No motors available for ProductType
+                {import.meta.env.DEV && (
+                  <div className="text-xs text-red-500 mt-1">
+                    Debug: productTypeId={productTypeId}, filteredTemplates={hardwareFilteredTemplates?.length ?? 'none'}, error={motorError}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
 
-        {/* Tube Type - Cards with auto-selection (only RTU-42, RTU-65, RTU-80) */}
-        <div>
-          <Label className="text-sm font-medium mb-4 block">
-            TUBE TYPE
-            {isTubeAutoSelected && width_mm && (
-              <span className="text-xs font-normal text-gray-500 ml-2">
-                (Auto-selected based on width: {recommendedTubeType})
-              </span>
-            )}
-            {requiresRTU42 && (
-              <span className="text-xs font-normal text-orange-600 ml-2">
-                (RTU-42 required for {cassetteShape} cassette)
-              </span>
-            )}
-            {hasCassette && !requiresRTU42 && (
-              <span className="text-xs font-normal text-blue-600 ml-2">
-                (L-Shape cassette: flexible tube sizes available)
-              </span>
-            )}
-          </Label>
-          <div className="grid grid-cols-4 gap-6">
-            {TUBE_TYPE_OPTIONS.map((option) => {
-              const isSelected = tubeType === option.id;
-              const isRecommended = option.id === recommendedTubeType && isTubeAutoSelected;
-              // Only round/square cassette require RTU-42; L_shape allows all sizes
-              const isDisabled = requiresRTU42 && option.id !== 'RTU-42';
-              // Check if tube has enough capacity for width
-              const isValidForWidth = isValidTubeForWidth(option.id, width_mm);
-              const isDisabledByCapacity = !isValidForWidth;
-              
-              return (
-                <div key={option.id} className="flex flex-col items-center">
-                  <button
-                    onClick={() => {
-                      if (isDisabled || isDisabledByCapacity) return;
-                      onUpdate({ 
-                        tube_type: option.id,
-                        tube_type_manual: true // Mark as manually selected to prevent auto-update
-                      } as any);
-                    }}
-                    disabled={isDisabled || isDisabledByCapacity}
-                    className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                      isDisabled || isDisabledByCapacity
-                        ? 'border border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed'
-                        : isSelected
-                        ? 'border-2 border-gray-400 bg-gray-600'
-                        : isRecommended
-                        ? 'border-2 border-blue-400 bg-blue-50'
-                        : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                    }`}
-                    style={{ padding: '2px' }}
-                  >
-                    <div className={`w-full h-full rounded overflow-hidden border ${
-                      isDisabled || isDisabledByCapacity
-                        ? 'border-gray-200 bg-gray-100'
-                        : isSelected 
-                        ? 'border-gray-200 bg-gray-100' 
-                        : isRecommended 
-                        ? 'border-blue-200 bg-blue-50'
-                        : 'border-gray-200 bg-gray-100'
-                    }`} style={{ width: '95%', height: '95%' }}>
-                      {/* TODO: Add image from Supabase storage */}
+        {/* Manual Drive Selection (only if manual) */}
+        {operationType === 'manual' && (
+          <div>
+            <Label className="text-sm font-medium mb-4 block">MECHANISM / MANUAL DRIVE</Label>
+            {loadingDrive ? (
+              <div className="text-sm text-gray-500 mt-2">Loading drive options...</div>
+            ) : driveOptions.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {driveOptions.map((item) => {
+                  const isSelected = driveItemId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => handleDriveSelect(item)}
+                      className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                        isSelected
+                          ? 'border-2 border-primary shadow-lg'
+                          : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                      }`}
+                    >
+                      {/* X to deselect */}
+                      {isSelected && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdate({
+                              drive_item_id: undefined,
+                              drive_sku: null,
+                              manual_drive: undefined,
+                              tube_item_id: undefined,
+                              tube_sku: null,
+                              tube_type: undefined,
+                              // ✅ Volver a templatesForManual (no afecta opciones de Motor)
+                              _hardware_filtered_templates: uniq(templatesForManual as any) ?? uniq(baseTemplatesForOptions) ?? null,
+                            } as any);
+                          }}
+                          className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                          title="Remove selection"
+                        >
+                          <X className="w-4 h-4 text-gray-600" />
+                        </button>
+                      )}
+                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                        {item.image_url ? (
+                          <img
+                            src={item.image_url}
+                            alt={item.name || item.sku}
+                            className="w-full h-full object-contain p-2"
+                          />
+                        ) : (
+                          <ImageIcon className="w-12 h-12 text-gray-400" />
+                        )}
+                      </div>
+                      <div className="p-4">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                          {item.name || item.sku}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
+                        {import.meta.env.DEV && item.templateIds && (
+                          <p className="text-xs text-blue-500 mt-1">
+                            {relevantTemplateCount(item.templateIds, templatesAfterOperation as any)} template(s)
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </button>
-                  <div className="text-center">
-                    <span className={`text-sm font-semibold block mt-2 ${
-                      isDisabled || isDisabledByCapacity
-                        ? 'text-gray-400'
-                        : isSelected 
-                        ? 'text-gray-900' 
-                        : isRecommended 
-                        ? 'text-blue-700' 
-                        : 'text-gray-900'
-                    }`}>
-                      {option.name}
-                    </span>
-                    <span className="text-xs text-gray-500 block mt-0.5">
-                      Max: {option.maxWidth_m}m
-                    </span>
-                    {isDisabled && (
-                      <span className="text-xs text-orange-600 block mt-0.5">{cassetteShape} cassette requires RTU-42</span>
-                    )}
-                    {isDisabledByCapacity && !isDisabled && (
-                      <span className="text-xs text-red-600 block mt-0.5">Insufficient capacity</span>
-                    )}
-                    {isRecommended && !isSelected && !isDisabled && !isDisabledByCapacity && (
-                      <span className="text-xs text-blue-600 block mt-0.5">Recommended</span>
-                    )}
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">
+                No manual drive options available
+                {import.meta.env.DEV && (
+                  <div className="text-xs text-red-500 mt-1">
+                    Debug: productTypeId={productTypeId}, hardwareColor={hardwareColor}, filteredTemplates={hardwareFilteredTemplates?.length ?? 'none'}, error={driveError}
                   </div>
-                </div>
-              );
-            })}
+                )}
+              </div>
+            )}
           </div>
-          {isTubeAutoSelected && width_mm && !requiresRTU42 && (
-            <p className="text-xs text-gray-500 mt-2">
-              Tube type is automatically selected based on width ({width_mm}mm = {(width_mm / 1000).toFixed(2)}m). You can use a tube with more capacity, but never one with less. Click a card to override.
+        )}
+
+        {/* Tube Selection (show when motor or drive is selected) */}
+        {((operationType === 'motor' && motorItemId) || (operationType === 'manual' && driveItemId)) && (
+          <div>
+            <Label className="text-sm font-medium mb-4 block">TUBE TYPE</Label>
+            {loadingTube ? (
+              <div className="text-sm text-gray-500 mt-2">Loading tube options...</div>
+            ) : tubeOptions.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {tubeOptions.map((item) => {
+                  const isSelected = tubeItemId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => handleTubeSelect(item)}
+                      className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                        isSelected
+                          ? 'border-2 border-primary shadow-lg'
+                          : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                      }`}
+                    >
+                      {/* X to deselect */}
+                      {isSelected && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // ✅ Volver al estado antes de seleccionar tube
+                            // templatesAfterOperation ya tiene en cuenta motor/drive seleccionado
+                            const targetTemplates = operationType === 'motor'
+                              ? (selectedMotor?.templateIds ? 
+                                  (templatesForMotor || []).filter(tid => new Set(selectedMotor.templateIds).has(tid)) 
+                                  : templatesForMotor)
+                              : operationType === 'manual'
+                              ? (selectedDrive?.templateIds ?
+                                  (templatesForManual || []).filter(tid => new Set(selectedDrive.templateIds).has(tid))
+                                  : templatesForManual)
+                              : baseTemplatesForOptions;
+                            
+                            onUpdate({
+                              tube_item_id: undefined,
+                              tube_sku: null,
+                              tube_type: undefined,
+                              _hardware_filtered_templates: uniq(targetTemplates as any) ?? uniq(baseTemplatesForOptions) ?? null,
+                            } as any);
+                          }}
+                          className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                          title="Remove selection"
+                        >
+                          <X className="w-4 h-4 text-gray-600" />
+                        </button>
+                      )}
+                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                        {item.image_url ? (
+                          <img
+                            src={item.image_url}
+                            alt={item.name || item.sku}
+                            className="w-full h-full object-contain p-2"
+                          />
+                        ) : (
+                          <ImageIcon className="w-12 h-12 text-gray-400" />
+                        )}
+                      </div>
+                      <div className="p-4">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                          {item.name || item.sku}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
+                        {import.meta.env.DEV && item.templateIds && (
+                          <p className="text-xs text-blue-500 mt-1">
+                            {relevantTemplateCount(item.templateIds, templatesAfterOperation as any)} template(s)
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">
+                No tube options available for current selection
+                {import.meta.env.DEV && (
+                  <div className="text-xs text-red-500 mt-1">
+                    Debug: templatesAfterOperation={templatesAfterOperation?.length ?? 'none'}, error={tubeError}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Debug: Templates filtrados */}
+        {import.meta.env.DEV && (
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-xs text-blue-700">
+              <strong>Templates after Operation step:</strong>{' '}
+              {templatesAfterOperation?.length ?? 'not filtered'} template(s) match current selection
             </p>
-          )}
-          {requiresRTU42 && (
-            <p className="text-xs text-orange-600 mt-2">
-              {cassetteShape.charAt(0).toUpperCase() + cassetteShape.slice(1)} cassette requires RTU-42 tube type. Only RTU-42 is available for this cassette type.
-            </p>
-          )}
-          {hasCassette && !requiresRTU42 && (
-            <p className="text-xs text-blue-600 mt-2">
-              L-Shape cassette allows flexible tube sizes (RTU-42, RTU-65, RTU-80) based on your width requirements.
-            </p>
-          )}
-        </div>
+            {hardwareFilteredTemplates && (
+              <p className="text-xs text-blue-600 mt-1">
+                From Hardware step: {hardwareFilteredTemplates.length} template(s)
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

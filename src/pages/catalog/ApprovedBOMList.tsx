@@ -203,14 +203,14 @@ export default function ApprovedBOMList() {
           console.log('✅ ApprovedBOMList: Found', saleOrderLineIds.length, 'SalesOrderLines');
         }
 
-        // STEP 1: Fetch BomInstances (no embedded joins)
+        // STEP 1: Fetch BOMInstances (no embedded joins)
         let materialList: any[] = [];
         let bomInstances: any[] = [];
         let queryErrors: string[] = [];
         
         if (saleOrderLineIds.length > 0) {
           if (import.meta.env.DEV) {
-            console.log('🔍 ApprovedBOMList: Step 1 - Fetching BomInstances for saleOrderLineIds:', saleOrderLineIds.length);
+            console.log('🔍 ApprovedBOMList: Step 1 - Fetching BOMInstances for saleOrderLineIds:', saleOrderLineIds.length);
           }
           
           const { data: bomInstancesData, error: bomError } = await supabase
@@ -221,36 +221,36 @@ export default function ApprovedBOMList() {
             .eq('organization_id', activeOrganizationId);
           
           if (bomError) {
-            console.error('ApprovedBOMList query failed', { step: '1 - BomInstances', error: bomError });
-            queryErrors.push('Failed to fetch BomInstances');
+            console.error('ApprovedBOMList query failed', { step: '1 - BOMInstances', error: bomError });
+            queryErrors.push('Failed to fetch BOMInstances');
           } else {
             bomInstances = bomInstancesData || [];
             if (import.meta.env.DEV) {
-              console.log('✅ ApprovedBOMList: Step 1 - Found', bomInstances.length, 'BomInstances');
+              console.log('✅ ApprovedBOMList: Step 1 - Found', bomInstances.length, 'BOMInstances');
             }
           }
 
           if (bomInstances.length > 0) {
             const bomInstanceIds = bomInstances.map((bi: any) => bi.id);
 
-            // STEP 2: Fetch BomInstanceLines (flat fields only, no joins)
+            // STEP 2: Fetch BOMInstanceLines (flat fields only, no joins)
             if (import.meta.env.DEV) {
-              console.log('🔍 ApprovedBOMList: Step 2 - Fetching BomInstanceLines for bomInstanceIds:', bomInstanceIds.length);
+              console.log('🔍 ApprovedBOMList: Step 2 - Fetching BOMInstanceLines for bomInstanceIds:', bomInstanceIds.length);
             }
             
             const { data: bomLines, error: linesError } = await supabase
-              .from('BomInstanceLines')
+              .from('BOMInstanceLines')
               .select('id, bom_instance_id, resolved_part_id, resolved_sku, part_role, category_code, qty, uom, unit_cost_exw, total_cost_exw, organization_id, description')
               .in('bom_instance_id', bomInstanceIds)
               .eq('deleted', false)
               .eq('organization_id', activeOrganizationId);
 
             if (linesError) {
-              console.error('ApprovedBOMList query failed', { step: '2 - BomInstanceLines', error: linesError });
-              queryErrors.push('Failed to fetch BomInstanceLines');
+              console.error('ApprovedBOMList query failed', { step: '2 - BOMInstanceLines', error: linesError });
+              queryErrors.push('Failed to fetch BOMInstanceLines');
             } else if (bomLines && bomLines.length > 0) {
               if (import.meta.env.DEV) {
-                console.log('✅ ApprovedBOMList: Step 2 - Found', bomLines.length, 'BomInstanceLines');
+                console.log('✅ ApprovedBOMList: Step 2 - Found', bomLines.length, 'BOMInstanceLines');
                 console.log('null resolved_part_id lines', bomLines.filter((l: any) => !l.resolved_part_id).length);
               }
 
@@ -381,7 +381,7 @@ export default function ApprovedBOMList() {
                 }
               }
 
-              // STEP 5: Map BomInstanceLines to material list format using the maps
+              // STEP 5: Map BOMInstanceLines to material list format using the maps
               if (import.meta.env.DEV) {
                 console.log('🔍 ApprovedBOMList: Step 5 - Mapping data using catalogItemById and quoteLineToProductTypeName maps');
               }
@@ -435,7 +435,7 @@ export default function ApprovedBOMList() {
               }
             } else {
               if (import.meta.env.DEV) {
-                console.warn('⚠️ ApprovedBOMList: Step 2 - No BomInstanceLines found for', bomInstanceIds.length, 'BomInstances');
+                console.warn('⚠️ ApprovedBOMList: Step 2 - No BOMInstanceLines found for', bomInstanceIds.length, 'BOMInstances');
               }
             }
           }
@@ -453,11 +453,11 @@ export default function ApprovedBOMList() {
         if (import.meta.env.DEV) {
           console.log('✅ ApprovedBOMList: Found', materialList.length, 'BOM materials');
           if (materialList.length === 0 && bomInstances && bomInstances.length > 0) {
-            console.warn('⚠️ ApprovedBOMList: Found BomInstances but no BomInstanceLines. This suggests the trigger may not have copied QuoteLineComponents to BomInstanceLines.');
-            console.warn('   BomInstances found:', bomInstances.length);
+            console.warn('⚠️ ApprovedBOMList: Found BOMInstances but no BOMInstanceLines. This suggests the trigger may not have copied QuoteLineComponents to BOMInstanceLines.');
+            console.warn('   BOMInstances found:', bomInstances.length);
             console.warn('   This may require running VERIFY_AND_FIX_BOM_TRIGGER_ROBUST.sql');
           } else if (materialList.length === 0 && (!bomInstances || bomInstances.length === 0)) {
-            console.warn('⚠️ ApprovedBOMList: No BomInstances found for ManufacturingOrders.');
+            console.warn('⚠️ ApprovedBOMList: No BOMInstances found for ManufacturingOrders.');
             console.warn('   This suggests the BOM generation trigger may not have fired when the MO was created.');
             console.warn('   ManufacturingOrders found:', manufacturingOrders.length);
             console.warn('   SalesOrders found:', saleOrders.length);

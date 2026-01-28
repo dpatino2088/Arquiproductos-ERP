@@ -108,7 +108,6 @@ export function useQuoteLineComponentsCRUD() {
       .from('QuoteLines')
       .select('id, catalog_item_id, qty, computed_qty, organization_id')
       .eq('id', quoteLineId)
-      .eq('deleted', false)
       .single();
 
     if (quoteLineError || !quoteLine) {
@@ -124,7 +123,7 @@ export function useQuoteLineComponentsCRUD() {
       .from('CatalogItems')
       .select('id, cost_exw')
       .eq('id', quoteLine.catalog_item_id)
-      .eq('deleted', false)
+      .eq('is_active', true)
       .single();
 
     if (catalogError) {

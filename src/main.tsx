@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
-// ✅ CRITICAL: Import supabase client FIRST to ensure fetch interceptor is active before any other code
+// ✅ CRITICAL: Import logger FIRST to override console methods before React uses them
+import './lib/logger' // This overrides console.error/warn/log to prevent TypeError
+// ✅ CRITICAL: Import supabase client SECOND to ensure fetch interceptor is active before any other code
 import './lib/supabase/client' // This sets up the fetch interceptor that blocks telemetry requests
 
 import React from 'react'
@@ -14,7 +16,8 @@ import { logger } from './lib/logger'
 import './lib/error-tracker' // Initialize error tracking
 import './lib/trusted-types' // Initialize Trusted Types
 import './lib/service-worker' // Initialize Service Worker
-import './lib/rum-monitoring' // Initialize RUM
+// ⚠️ RUM monitoring disabled to prevent TypeError crash (will fix later)
+// import './lib/rum-monitoring'
 import './lib/performance-budgets' // Initialize performance budgets
 import { useAuthStore } from './stores/auth-store'
 import { OrganizationProvider } from './context/OrganizationContext'

@@ -232,8 +232,9 @@ serve(async (req) => {
         }
       }
       
-      // Construct redirect URL for the magic link
-      const redirectTo = `${appUrl}/auth/callback?next=/dashboard`;
+      // Construct redirect URL for the magic link - always redirect to set-password for invites
+      // Include email parameter for invite safety (prevent accepting invite with different user logged in)
+      const redirectTo = `${appUrl}/auth/callback?next=/set-password&email=${encodeURIComponent(normalizedEmail)}`;
 
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
         normalizedEmail,
@@ -319,7 +320,8 @@ serve(async (req) => {
           .update({
             role: role,
             user_name: userName,
-            email: userEmail,
+            user_email: userEmail, // Use user_email instead of email
+            status: 'invited', // ✅ Reset status to 'invited' when reactivating
             deleted: false,
             updated_at: new Date().toISOString(),
           })
@@ -349,8 +351,9 @@ serve(async (req) => {
         user_id: userId,
         role: role,
         user_name: userName,
-        email: userEmail,
-        invited_by: invitedByUserId,
+        user_email: userEmail, // Use user_email instead of email
+        status: 'invited', // ✅ Explicitly set status to 'invited' for new invitations
+        invited_by_user_id: invitedByUserId, // Use invited_by_user_id instead of invited_by
         deleted: false,
       };
 

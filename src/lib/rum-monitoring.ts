@@ -118,11 +118,23 @@ class RUMMonitor {
       };
 
       this.addMetric(metric);
-      logger.error('JavaScript error tracked', new Error(event.message), {
+      
+      // ✅ Safe error creation and logging
+      try {
+        const errorMsg = event.message || 'Unknown error';
+        const safeError = event.error instanceof Error 
+          ? event.error 
+          : new Error(errorMsg);
+        
+        logger.error('JavaScript error tracked', safeError, {
         filename: (event as ErrorEvent).filename || 'unknown',
         lineno: (event as ErrorEvent).lineno || 0,
         colno: (event as ErrorEvent).colno || 0
       });
+      } catch (e) {
+        // Fallback if error creation fails
+        logger.error('JavaScript error tracked (fallback)', new Error('Error event'), {});
+      }
     });
 
     window.addEventListener('unhandledrejection', (event) => {
@@ -140,9 +152,19 @@ class RUMMonitor {
       };
 
       this.addMetric(metric);
-      logger.error('Unhandled promise rejection tracked', new Error('Promise rejection'), {
-        reason: String((event as PromiseRejectionEvent).reason)
-      });
+      
+      // ✅ Safe error creation and logging
+      try {
+        const reason = (event as PromiseRejectionEvent).reason;
+        const safeError = reason instanceof Error 
+          ? reason 
+          : new Error(String(reason || 'Unhandled promise rejection'));
+        
+        logger.error('Unhandled promise rejection tracked', safeError, {});
+      } catch (e) {
+        // Fallback if error creation fails
+        logger.error('Unhandled promise rejection tracked (fallback)', new Error('Promise rejection'), {});
+      }
     });
   }
 

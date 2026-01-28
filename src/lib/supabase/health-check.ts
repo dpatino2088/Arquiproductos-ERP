@@ -1,26 +1,14 @@
-import { createClient } from '@supabase/supabase-js';
 import { logger } from '../logger';
 
-// Get Supabase URL for health checks (avoid circular dependency)
-const getSupabaseUrl = () => {
-  return import.meta.env.VITE_SUPABASE_URL || '';
-};
+// Get Supabase URL/Key for health checks (avoid circular dependency with client.ts)
+const getSupabaseUrl = () =>
+  import.meta.env.VITE_SUPABASE_URL || '';
 
-const getSupabaseKey = () => {
-  return import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
-};
+const getSupabaseKey = () =>
+  import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
-// Create a minimal client for health checks
-const healthCheckClient = createClient(
-  getSupabaseUrl() || 'https://placeholder.supabase.co',
-  getSupabaseKey() || 'placeholder-key',
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
+// ✅ No second createClient: use fetch to avoid "Multiple GoTrueClient instances" warning.
+// Health check only needs to know if Supabase REST is reachable.
 
 export interface HealthStatus {
   healthy: boolean;
@@ -38,55 +26,61 @@ class SupabaseHealthChecker {
   async checkHealth(): Promise<HealthStatus> {
     const startTime = Date.now();
     const timestamp = new Date().toISOString();
+    const url = getSupabaseUrl();
+    const key = getSupabaseKey();
+
+    if (!url || !key) {
+      const status: HealthStatus = {
+        healthy: false,
+        timestamp,
+        responseTime: 0,
+        error: 'Missing VITE_SUPABASE_URL or anon key',
+      };
+      this.lastCheck = status;
+      this.notifySubscribers(status);
+      return status;
+    }
 
     try {
-      // Simple health check - try to get session (lightweight)
-      const { error } = await Promise.race([
-        healthCheckClient.auth.getSession(),
-        new Promise((_, reject) => 
+      const res = await Promise.race([
+        fetch(`${url}/rest/v1/`, {
+          method: 'GET',
+          headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Accept': 'application/json' },
+        }),
+        new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('Health check timeout')), 5000)
         ),
-      ]) as any;
+      ]);
 
       const responseTime = Date.now() - startTime;
-
-      // Even if there's an error, if we got a response, service is up
-      // (auth errors are different from service being down)
-      const healthy = !error || (error.status < 500);
+      const healthy = res.ok || res.status === 401 || res.status === 404;
 
       const status: HealthStatus = {
         healthy,
         timestamp,
         responseTime,
-        error: error?.message,
-        status: error?.status,
+        error: healthy ? undefined : res.statusText || `HTTP ${res.status}`,
+        status: res.status,
       };
 
       this.lastCheck = status;
-
-      // Notify subscribers
       this.notifySubscribers(status);
-
       return status;
-    } catch (error: any) {
+    } catch (error: unknown) {
       const responseTime = Date.now() - startTime;
+      const msg = error instanceof Error ? error.message : String(error);
       const status: HealthStatus = {
         healthy: false,
         timestamp,
         responseTime,
-        error: error?.message || 'Health check failed',
-        status: error?.status || 0,
+        error: msg || 'Health check failed',
+        status: 0,
       };
 
       this.lastCheck = status;
       this.notifySubscribers(status);
 
-      logger.warn('Supabase health check failed', {
-        timestamp,
-        error: error?.message,
-        responseTime,
-      });
-
+      logger.warn('Supabase health check failed', { timestamp, error: msg, responseTime });
       return status;
     }
   }

@@ -2,9 +2,11 @@ import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useManufacturersCRUD } from '../../hooks/useCatalog';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { supabase } from '../../lib/supabase/client';
 import { 
   Search, 
   Plus,
@@ -21,8 +23,42 @@ import {
 
 export default function Manufacturers() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { activeOrganizationId } = useOrganizationContext();
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+
+  const [manufacturerIdsWithItems, setManufacturerIdsWithItems] = useState<Set<string>>(new Set());
+  const [manufacturerIdsLoaded, setManufacturerIdsLoaded] = useState(false);
+
+  // Solo manufacturers que tienen al menos un ítem con is_roll=true
+  useEffect(() => {
+    if (!activeOrganizationId) {
+      setManufacturerIdsLoaded(true);
+      return;
+    }
+    let mounted = true;
+    setManufacturerIdsLoaded(false);
+    (async () => {
+      const { data } = await supabase
+        .from('CatalogItems')
+        .select('manufacturer_id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('is_active', true)
+        .eq('is_roll', true)
+        .not('manufacturer_id', 'is', null);
+      if (!mounted) return;
+      setManufacturerIdsWithItems(new Set((data || []).map((r: { manufacturer_id?: string | null }) => r.manufacturer_id).filter((x: string | null | undefined): x is string => Boolean(x))));
+      setManufacturerIdsLoaded(true);
+    })();
+    return () => { mounted = false; };
+  }, [activeOrganizationId]);
+
+  // Base: solo manufacturers con al menos un ítem is_roll=true (si ya cargamos; si no, mostramos todos mientras carga)
+  const manufacturersToShow = useMemo(() => {
+    if (!manufacturerIdsLoaded) return manufacturers;
+    return manufacturers.filter(m => manufacturerIdsWithItems.has(m.id));
+  }, [manufacturers, manufacturerIdsWithItems, manufacturerIdsLoaded]);
+
   // Register sub-tabs for Manufacturers (only manufacturers now)
   useEffect(() => {
     const currentPath = window.location.pathname;
@@ -42,9 +78,9 @@ export default function Manufacturers() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: '', code: '', notes: '' });
 
-  // Filter and sort
+  // Filter and sort (sobre manufacturersToShow, ya sin los de "cero que mostrar")
   const filteredManufacturers = useMemo(() => {
-    const filtered = manufacturers.filter(m => {
+    const filtered = manufacturersToShow.filter(m => {
       const searchLower = searchTerm.toLowerCase();
       return !searchTerm || 
         m.name.toLowerCase().includes(searchLower) ||
@@ -68,7 +104,7 @@ export default function Manufacturers() {
       if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [manufacturers, searchTerm, sortBy, sortOrder]);
+  }, [manufacturersToShow, searchTerm, sortBy, sortOrder]);
 
   // Pagination
   const totalPages = Math.ceil(filteredManufacturers.length / itemsPerPage);

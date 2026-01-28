@@ -93,7 +93,7 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
       
       // Verify BOM was created successfully
       const { data: bomData, error: bomError } = await supabase
-        .from('BomInstanceLines')
+        .from('BOMInstanceLines')
         .select('id', { count: 'exact', head: true })
           .eq('bom_instance_id', (await supabase
           .from('vw_bom_instances_safe')

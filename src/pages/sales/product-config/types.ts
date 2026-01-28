@@ -25,6 +25,11 @@ export interface BaseProductConfig {
   area?: string;
   position: number | string;
   quantity?: number;
+  // Operating system selections (shared)
+  manual_drive?: string;
+  remote_control?: string;
+  manual_drive_role?: string;
+  remote_control_role?: string;
 }
 
 // Roller Shade Configuration

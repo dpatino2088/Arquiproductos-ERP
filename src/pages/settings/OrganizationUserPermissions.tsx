@@ -453,34 +453,34 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
 
       if (userPermsError) throw userPermsError;
       
-      const currentPerms = new Set((userPerms || []).map(p => p.permission_code));
-      setAssignedPermissions(new Set(currentPerms));
+      const currentPerms = new Set<string>((userPerms || []).map((p: any) => p.permission_code));
+      setAssignedPermissions(new Set<string>(currentPerms));
       
       // Initialize draftPermissions based on current role
       if (userRole === 'superadmin') {
         // Superadmin: don't use DB permissions, they're implicit
-        setOriginalPermissions(new Set());
-        setDraftPermissions(new Set());
+        setOriginalPermissions(new Set<string>());
+        setDraftPermissions(new Set<string>());
       } else if (isValidOrgRole(userRole)) {
         // New roles: use role preset if no DB permissions, otherwise use DB permissions
-        const allCodes = (allPermissions || []).map(p => p.code);
+        const allCodes = (allPermissions || []).map((p: Permission) => p.code);
         const rolePreset = getDefaultPermissionsForRole(userRole, allCodes);
         
         if (currentPerms.size > 0) {
           // User has DB permissions, use those
-          setOriginalPermissions(new Set(currentPerms));
-          setDraftPermissions(new Set(currentPerms));
+          setOriginalPermissions(new Set<string>(currentPerms));
+          setDraftPermissions(new Set<string>(currentPerms));
         } else {
           // No DB permissions: initialize originalPermissions as EMPTY (so save will insert preset)
           // and draftPermissions with preset (so UI shows them)
           // This ensures that when user saves, all preset permissions get inserted
-          setOriginalPermissions(new Set()); // Empty = no permissions in DB yet
+          setOriginalPermissions(new Set<string>()); // Empty = no permissions in DB yet
           setDraftPermissions(rolePreset); // Preset = what we want to save
         }
       } else {
         // Member or other legacy roles: use only DB permissions
-        setOriginalPermissions(new Set(currentPerms));
-        setDraftPermissions(new Set(currentPerms));
+        setOriginalPermissions(new Set<string>(currentPerms));
+        setDraftPermissions(new Set<string>(currentPerms));
       }
     } catch (err: any) {
       if (import.meta.env.DEV) {
@@ -489,7 +489,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: 'Error al cargar permisos. Por favor, intenta de nuevo.',
+        message: 'Error loading permissions. Please try again.',
       });
     } finally {
       setLoading(false);
@@ -531,7 +531,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
       useUIStore.getState().addNotification({
         type: 'info',
         title: 'Información',
-        message: 'Los Superadmins tienen todos los permisos automáticamente. No es necesario guardar permisos.',
+        message: 'Superadmins have all permissions automatically. No need to save permissions.',
       });
       if (onSave) {
         onSave(finish);
@@ -663,8 +663,8 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
 
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Permisos guardados',
-        message: 'Los permisos se han guardado correctamente.',
+        title: 'Permissions Saved',
+        message: 'Permissions have been saved successfully.',
       });
 
       if (onSave) {
@@ -677,7 +677,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: 'Error al guardar permisos. Por favor, intenta de nuevo.',
+        message: 'Error saving permissions. Please try again.',
       });
     } finally {
       setSaving(false);
@@ -712,7 +712,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
         <div className="flex items-center justify-center min-h-[200px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Cargando permisos...</p>
+            <p className="text-sm text-gray-600">Loading permissions...</p>
           </div>
         </div>
       </div>
@@ -780,7 +780,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
               disabled={saving}
               className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Cancelar
+              Close
             </button>
           )}
           {userRole !== 'superadmin' && (
@@ -800,10 +800,10 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
                 {saving ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    <span>Guardando...</span>
+                    <span>Saving...</span>
                   </>
                 ) : (
-                  <span>Guardar</span>
+                  <span>Save</span>
                 )}
               </button>
               <button
@@ -816,15 +816,15 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
                 }}
                 disabled={saving || !isDirtyPermissions}
                 className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                style={{ backgroundColor: '#10b981' }}
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               >
                 {saving ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    <span>Guardando...</span>
+                    <span>Saving...</span>
                   </>
                 ) : (
-                  <span>Guardar y Finalizar</span>
+                  <span>Save and Close</span>
                 )}
               </button>
             </>

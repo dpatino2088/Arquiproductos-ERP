@@ -301,11 +301,10 @@ export function useCostSettings() {
         setLoading(true);
         setError(null);
 
-        const { data, error: queryError } = await supabase
+        const { data, error: queryError} = await supabase
           .from('CostSettings')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
           .maybeSingle();
 
         if (queryError) {
@@ -385,11 +384,19 @@ export function useUpdateCostSettings() {
     setIsUpdating(true);
     try {
       // CostSettings has unique constraint on organization_id, so we update by organization_id
+      // Use upsert to create if not exists
       const { data, error } = await supabase
         .from('CostSettings')
-        .update(settingsData)
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
+        .upsert(
+          {
+            ...settingsData,
+            organization_id: activeOrganizationId,
+          },
+          {
+            onConflict: 'organization_id',
+            ignoreDuplicates: false,
+          }
+        )
         .select()
         .maybeSingle();
 

@@ -136,18 +136,24 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     `.replace(/\s+/g, ' ').trim();
     
     try {
-      let query = supabase
+      // ✅ SIEMPRE filtrar por organization_id primero (necesario para RLS)
+      // Luego opcionalmente filtrar por company_id si existen
+      if (companyIds.length > 0) {
+        // Query 1: Contacts con company_id en la lista
+        const { data: companyData, error: companyError } = await supabase
         .from('DirectoryContacts')
         .select(explicitAndGeneric)
+          .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id primero
+          .in('company_id', companyIds)
         .eq('deleted', false)
         .order('created_at', { ascending: false });
 
-      // Filtrar por company_id si existen, sino por organization_id
-      if (companyIds.length > 0) {
-        query = query.in('company_id', companyIds);
-        // También incluir contacts sin company_id pero con organization_id (transición)
-        const { data: companyData } = await query;
-        const { data: orgData } = await supabase
+        if (companyError) {
+          throw companyError;
+        }
+
+        // Query 2: Contacts sin company_id pero con organization_id (transición)
+        const { data: orgData, error: orgError } = await supabase
           .from('DirectoryContacts')
           .select(explicitAndGeneric)
           .eq('organization_id', orgId)
@@ -155,11 +161,21 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
+        if (orgError) {
+          throw orgError;
+        }
+
         // Combinar sin duplicados
-        const all = [...(companyData || []), ...(orgData || [])];
-        return Array.from(new Map(all.filter((item: any): item is { id: string } => item && typeof item === 'object' && 'id' in item).map(item => [item.id, item])).values());
+        const all = [...(companyData || []), ...(orgData || [])] as unknown as Array<{ id: string }>;
+        return Array.from(new Map(all.filter((item: any) => item && typeof item === 'object' && 'id' in item && typeof item.id === 'string').map((item: { id: string }) => [item.id, item])).values());
       } else {
-        const { data, error: queryError } = await query.eq('organization_id', orgId);
+        // Query simple: solo por organization_id
+        const { data, error: queryError } = await supabase
+          .from('DirectoryContacts')
+          .select(explicitAndGeneric)
+          .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id
+          .eq('deleted', false)
+          .order('created_at', { ascending: false });
         
         if (queryError) {
           throw queryError;
@@ -181,15 +197,23 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
           deleted, created_at, updated_at
         `.replace(/\s+/g, ' ').trim();
         
-        let retryQuery = supabase
+        // ✅ Retry también debe filtrar por organization_id primero
+        if (companyIds.length > 0) {
+          // Retry Query 1: Contacts con company_id
+          const { data: retryCompanyData, error: retryCompanyError } = await supabase
           .from('DirectoryContacts')
           .select(explicitOnly)
+            .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id primero
+            .in('company_id', companyIds)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
-        if (companyIds.length > 0) {
-          const { data: retryCompanyData } = await retryQuery.in('company_id', companyIds);
-          const { data: retryOrgData } = await supabase
+          if (retryCompanyError) {
+            throw retryCompanyError;
+          }
+
+          // Retry Query 2: Contacts sin company_id
+          const { data: retryOrgData, error: retryOrgError } = await supabase
             .from('DirectoryContacts')
             .select(explicitOnly)
             .eq('organization_id', orgId)
@@ -197,10 +221,20 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
             .eq('deleted', false)
             .order('created_at', { ascending: false });
 
-          const all = [...(retryCompanyData || []), ...(retryOrgData || [])];
+          if (retryOrgError) {
+            throw retryOrgError;
+          }
+
+          const all = [...(retryCompanyData || []), ...(retryOrgData || [])] as unknown as Array<{ id: string }>;
           return Array.from(new Map(all.map(item => [item.id, item])).values());
         } else {
-          const { data: retryData, error: retryError } = await retryQuery.eq('organization_id', orgId);
+          // Retry Query simple: solo por organization_id
+          const { data: retryData, error: retryError } = await supabase
+            .from('DirectoryContacts')
+            .select(explicitOnly)
+            .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id
+            .eq('deleted', false)
+            .order('created_at', { ascending: false });
           
           if (retryError) {
             throw retryError;

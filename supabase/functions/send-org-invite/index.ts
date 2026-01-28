@@ -1,30 +1,91 @@
 // Supabase Edge Function: send-org-invite
-// Invites organization users via MagicLink using Supabase Auth SMTP
+// Invites organization users via Supabase Auth SMTP (PKCE)
+// - Upserts public."OrganizationUsers" (status=invited)
+// - Sends invite email with redirect to your frontend /auth/callback?next=/set-password&email=...
+// - Returns ok + redirect_to (and invite meta for debugging)
+//
+// REQUIRED SECRETS (Supabase Dashboard → Edge Functions → Secrets):
+// - SUPABASE_URL
+// - SUPABASE_SERVICE_ROLE_KEY
+// - APP_ORIGIN   (e.g. http://localhost:5173  |  https://your-domain.com)
+//
+// Frontend should call:
+// supabase.functions.invoke('send-org-invite', { body: { organization_id, user_email, role, redirect_to }})
+//
+// NOTE: redirect_to is optional; if not provided, APP_ORIGIN is used.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+type OrgRole = "owner" | "admin" | "member" | "viewer" | "superadmin" | "operator" | "procurement" | "finance";
+
 type Payload = {
   organization_id: string;
   user_email: string;
-  role: 'owner' | 'admin' | 'member' | 'viewer';
+  user_name?: string | null;
+  role: OrgRole;
   redirect_to?: string;
 };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    },
   });
 }
 
+function isUuid(v: string) {
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(v);
+}
+
+function isEmail(v: string) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(v);
+}
+
+function safeRedirectTo(raw: string | undefined | null) {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!v) return null;
+
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
+  // ✅ Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      },
+    });
+  }
+
   if (req.method !== "POST") {
     return json({ error: "Use POST" }, 405);
   }
 
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  // ✅ CRITICAL: trim() to remove any spaces
+  const APP_ORIGIN = (Deno.env.get("APP_ORIGIN") ?? "").trim();
 
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     return json(
@@ -32,6 +93,10 @@ Deno.serve(async (req) => {
       500
     );
   }
+
+  // Default frontend origin if not set (local dev fallback)
+  // ✅ Ensure no spaces in the final URL
+  const effectiveOrigin = (APP_ORIGIN || "http://localhost:5173").trim();
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
     auth: {
@@ -49,148 +114,183 @@ Deno.serve(async (req) => {
 
   const { organization_id, user_email, role, redirect_to } = payload;
 
-  // Validate organization_id (UUID)
-  if (!organization_id || typeof organization_id !== 'string') {
+  // Validate organization_id
+  if (!organization_id || typeof organization_id !== "string") {
     return json({ error: "Missing or invalid organization_id" }, 400);
   }
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(organization_id)) {
-    return json({ error: "Invalid organization_id format. Must be a valid UUID." }, 400);
+  if (!isUuid(organization_id)) {
+    return json(
+      { error: "Invalid organization_id format. Must be a valid UUID." },
+      400
+    );
   }
 
   // Validate user_email
-  if (!user_email || typeof user_email !== 'string') {
+  if (!user_email || typeof user_email !== "string") {
     return json({ error: "Missing or invalid user_email" }, 400);
   }
   const normalizedEmail = user_email.trim().toLowerCase();
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(normalizedEmail)) {
+  if (!isEmail(normalizedEmail)) {
     return json({ error: "Invalid email format" }, 400);
   }
 
-  // Validate role
-  const allowedRoles = ['owner', 'admin', 'member', 'viewer'];
+  // Validate role - allow all OrgRole types
+  const allowedRoles: OrgRole[] = ["owner", "admin", "member", "viewer", "superadmin", "operator", "procurement", "finance"];
   if (!role || !allowedRoles.includes(role)) {
-    return json({ error: `Invalid role. Must be one of: ${allowedRoles.join(', ')}` }, 400);
+    return json(
+      { error: `Invalid role. Must be one of: ${allowedRoles.join(", ")}` },
+      400
+    );
   }
 
-  // Set default redirect_to
-  const finalRedirectTo = redirect_to || `${SUPABASE_URL.replace('/rest/v1', '')}/auth/callback`;
+  // ✅ Redirect MUST be your frontend callback AND include email= for mismatch detection in AuthCallback
+  const safeOverride = safeRedirectTo(redirect_to);
+
+  // ✅ CRITICAL: Build clean URL without spaces
+  // Use /auth/callback which already handles invite flow correctly
+  const baseRedirect = safeOverride 
+    ? safeOverride.trim() 
+    : `${effectiveOrigin.trim()}/auth/callback?next=/set-password`;
+
+  const finalRedirectTo = baseRedirect.includes("email=")
+    ? baseRedirect
+    : `${baseRedirect}${baseRedirect.includes("?") ? "&" : "?"}email=${encodeURIComponent(normalizedEmail)}`;
 
   try {
-    // Get current user from Authorization header (if available)
+    // Attempt to resolve inviter from Authorization header (optional)
     const authHeader = req.headers.get("Authorization");
     let invitedByUserId: string | null = null;
     
-    if (authHeader) {
+    if (authHeader?.toLowerCase().startsWith("bearer ")) {
+      const token = authHeader.slice(7).trim();
+      if (token) {
       try {
-        const token = authHeader.replace("Bearer ", "");
-        const { data: { user } } = await admin.auth.getUser(token);
-        invitedByUserId = user?.id || null;
+          const { data, error } = await admin.auth.getUser(token);
+          if (!error) invitedByUserId = data.user?.id ?? null;
       } catch {
-        // If token is invalid, continue with null
+          // ignore
+        }
       }
     }
 
-    // Upsert in OrganizationUsers
-    // First, try to get existing record
-    const { data: existingUser } = await admin
+    // 1) Upsert/insert OrganizationUsers (status=invited)
+    const { data: existingUser, error: existingErr } = await admin
       .from("OrganizationUsers")
       .select("id, deleted, user_id")
       .eq("organization_id", organization_id)
       .eq("user_email", normalizedEmail)
       .maybeSingle();
 
-    let orgUser;
-    if (existingUser && !existingUser.deleted) {
-      // User exists and is active - update
-      const { data: updated, error: updateError } = await admin
-        .from("OrganizationUsers")
-        .update({
-          role,
-          status: 'invited',
-          invited_at: new Date().toISOString(),
-          invited_by_user_id: invitedByUserId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existingUser.id)
-        .select()
-        .single();
-
-      if (updateError) {
-        console.error("Error updating OrganizationUsers:", updateError);
-        return json({ error: `Failed to update organization user: ${updateError.message}` }, 500);
-      }
-      orgUser = updated;
-    } else if (existingUser && existingUser.deleted) {
-      // User exists but is deleted - reactivate
-      const { data: reactivated, error: reactivateError } = await admin
-        .from("OrganizationUsers")
-        .update({
-          role,
-          status: 'invited',
-          deleted: false,
-          invited_at: new Date().toISOString(),
-          invited_by_user_id: invitedByUserId,
-          user_id: null, // Reset user_id for new invite
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existingUser.id)
-        .select()
-        .single();
-
-      if (reactivateError) {
-        console.error("Error reactivating OrganizationUsers:", reactivateError);
-        return json({ error: `Failed to reactivate organization user: ${reactivateError.message}` }, 500);
-      }
-      orgUser = reactivated;
-    } else {
-      // New user - insert
-      const upsertData = {
-        organization_id,
-        user_email: normalizedEmail,
-        role,
-        status: 'invited' as const,
-        deleted: false,
-        invited_at: new Date().toISOString(),
-        invited_by_user_id: invitedByUserId,
-        user_id: null, // Will be linked when user accepts invite
-      };
-
-      const { data: inserted, error: insertError } = await admin
-        .from("OrganizationUsers")
-        .insert(upsertData)
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error("Error inserting OrganizationUsers:", insertError);
-        return json({ error: `Failed to create organization user: ${insertError.message}` }, 500);
-      }
-      orgUser = inserted;
+    if (existingErr) {
+      console.error("send-org-invite: existingUser lookup error:", existingErr);
+      return json(
+        { error: `Failed checking existing org user: ${existingErr.message}` },
+        500
+      );
     }
 
-    // Send MagicLink via Supabase Auth SMTP
-    const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(
-      normalizedEmail,
-      {
+    const nowIso = new Date().toISOString();
+
+    if (existingUser && !existingUser.deleted) {
+      const { error: updateError } = await admin
+        .from("OrganizationUsers")
+        .update({
+          user_name: payload.user_name ?? null,
+          role,
+          status: "invited",
+          invited_at: nowIso,
+          invited_by_user_id: invitedByUserId,
+          updated_at: nowIso,
+        })
+        .eq("id", existingUser.id);
+
+      if (updateError) {
+        console.error("send-org-invite: update OrganizationUsers error:", updateError);
+        return json(
+          { error: `Failed to update organization user: ${updateError.message}` },
+          500
+        );
+      }
+    } else if (existingUser && existingUser.deleted) {
+      const { error: reactivateError } = await admin
+        .from("OrganizationUsers")
+        .update({
+          user_name: payload.user_name ?? null,
+          role,
+          status: "invited",
+          deleted: false,
+          invited_at: nowIso,
+          invited_by_user_id: invitedByUserId,
+          user_id: null, // reset for fresh accept
+          updated_at: nowIso,
+        })
+        .eq("id", existingUser.id);
+
+      if (reactivateError) {
+        console.error(
+          "send-org-invite: reactivate OrganizationUsers error:",
+          reactivateError
+        );
+        return json(
+          {
+            error: `Failed to reactivate organization user: ${reactivateError.message}`,
+          },
+          500
+        );
+      }
+    } else {
+      const { error: insertError } = await admin.from("OrganizationUsers").insert({
+        organization_id,
+        user_email: normalizedEmail,
+        user_name: payload.user_name ?? null,
+        role,
+        status: "invited",
+        deleted: false,
+        invited_at: nowIso,
+        invited_by_user_id: invitedByUserId,
+        user_id: null, // will link on accept
+      });
+
+      if (insertError) {
+        console.error("send-org-invite: insert OrganizationUsers error:", insertError);
+        return json(
+          { error: `Failed to create organization user: ${insertError.message}` },
+          500
+        );
+      }
+    }
+
+    // 2) Send Supabase Auth invite email (SMTP) with correct redirect
+    // Note: inviteUserByEmail doesn't support PKCE, but it works for invites
+    // The callback will handle the session establishment
+    const { data: inviteData, error: inviteError } =
+      await admin.auth.admin.inviteUserByEmail(normalizedEmail, {
         redirectTo: finalRedirectTo,
         data: {
           organization_id,
           role,
         },
-      }
-    );
+      });
 
     if (inviteError) {
-      console.error("Error sending invite:", inviteError);
-      return json({ error: `Failed to send invitation: ${inviteError.message}` }, 500);
+      console.error("send-org-invite: inviteUserByEmail error:", inviteError);
+      return json(
+        { error: `Failed to send invitation: ${inviteError.message}` },
+        500
+      );
     }
 
-    // Return success
-    return json({ ok: true });
+    // ✅ Return useful info for debugging
+    return json({
+      ok: true,
+      email: normalizedEmail,
+      organization_id,
+      role,
+      redirect_to: finalRedirectTo,
+      invite: inviteData ?? null,
+    });
   } catch (error: any) {
     console.error("Unexpected error in send-org-invite:", error);
-    return json({ error: error.message || "Internal server error" }, 500);
+    return json({ error: error?.message || "Internal server error" }, 500);
   }
 });

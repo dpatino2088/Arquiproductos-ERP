@@ -15,340 +15,85 @@ import { RequireModule } from './components/auth/RequireModule';
 import AuthGate from './auth/AuthGate';
 
 // Code splitting with React.lazy
-const ManagementDashboard = lazy(() => {
-  logger.debug('Loading ManagementDashboard component');
-  return import('./pages/Dashboard');
-});
-
-
-
-const Inbox = lazy(() => {
-  logger.debug('Loading Inbox component');
-  return import('./pages/Inbox');
-});
-
+const ManagementDashboard = lazy(() => import('./pages/Dashboard'));
+const Inbox = lazy(() => import('./pages/Inbox'));
 
 // Error pages
-const BadRequest = lazy(() => {
-  logger.debug('Loading BadRequest component');
-  return import('./pages/error-pages/BadRequest');
-});
+const BadRequest = lazy(() => import('./pages/error-pages/BadRequest'));
+const Unauthorized = lazy(() => import('./pages/error-pages/Unauthorized'));
+const Forbidden = lazy(() => import('./pages/error-pages/Forbidden'));
+const NotFound = lazy(() => import('./pages/error-pages/NotFound'));
+const InternalServerError = lazy(() => import('./pages/error-pages/InternalServerError'));
+const BadGateway = lazy(() => import('./pages/error-pages/BadGateway'));
+const ServiceUnavailable = lazy(() => import('./pages/error-pages/ServiceUnavailable'));
+const GatewayTimeout = lazy(() => import('./pages/error-pages/GatewayTimeout'));
 
-const Unauthorized = lazy(() => {
-  logger.debug('Loading Unauthorized component');
-  return import('./pages/error-pages/Unauthorized');
-});
-
-const Forbidden = lazy(() => {
-  logger.debug('Loading Forbidden component');
-  return import('./pages/error-pages/Forbidden');
-});
-
-const NotFound = lazy(() => {
-  logger.debug('Loading NotFound component');
-  return import('./pages/error-pages/NotFound');
-});
-
-const InternalServerError = lazy(() => {
-  logger.debug('Loading InternalServerError component');
-  return import('./pages/error-pages/InternalServerError');
-});
-
-const BadGateway = lazy(() => {
-  logger.debug('Loading BadGateway component');
-  return import('./pages/error-pages/BadGateway');
-});
-
-const ServiceUnavailable = lazy(() => {
-  logger.debug('Loading ServiceUnavailable component');
-  return import('./pages/error-pages/ServiceUnavailable');
-});
-
-const GatewayTimeout = lazy(() => {
-  logger.debug('Loading GatewayTimeout component');
-  return import('./pages/error-pages/GatewayTimeout');
-});
-
-
-const Branches = lazy(() => {
-  logger.debug('Loading Branches component');
-  return import('./pages/branches/Branches');
-});
+const Branches = lazy(() => import('./pages/branches/Branches'));
 
 // Directory module pages
-const DirectoryContacts = lazy(() => {
-  try {
-    if (import.meta.env.DEV) {
-      logger.debug('Loading Directory Contacts component');
-    }
-    return import('./pages/directory/Contacts').catch((error) => {
-      console.error('Failed to load DirectoryContacts:', error);
-      throw error;
-    });
-  } catch (error) {
-    console.error('Error in DirectoryContacts lazy import:', error);
-    throw error;
-  }
-});
+const DirectoryContacts = lazy(() => import('./pages/directory/Contacts'));
 
-const DirectoryContactNew = lazy(() => {
-  try {
-    if (import.meta.env.DEV) {
-      logger.debug('Loading Directory Contact New component');
-    }
-    return import('./pages/directory/ContactNew').catch((error) => {
-      console.error('Failed to load DirectoryContactNew:', error);
-      throw error;
-    });
-  } catch (error) {
-    console.error('Error in DirectoryContactNew lazy import:', error);
-    throw error;
-  }
-});
+const DirectoryContactNew = lazy(() => import('./pages/directory/ContactNew'));
 
-const DirectoryCustomers = lazy(() => {
-  try {
-    if (import.meta.env.DEV) {
-      logger.debug('Loading Directory Customers component');
-    }
-    return import('./pages/directory/Customers').catch((error) => {
-      console.error('Failed to load DirectoryCustomers:', error);
-      throw error;
-    });
-  } catch (error) {
-    console.error('Error in DirectoryCustomers lazy import:', error);
-    throw error;
-  }
-});
-
-const DirectoryCustomerNew = lazy(() => {
-  try {
-    if (import.meta.env.DEV) {
-      logger.debug('Loading Directory Customer New component');
-    }
-    return import('./pages/directory/CustomerNew').catch((error) => {
-      console.error('Failed to load DirectoryCustomerNew:', error);
-      throw error;
-    });
-  } catch (error) {
-    console.error('Error in DirectoryCustomerNew lazy import:', error);
-    throw error;
-  }
-});
-
-const TestDirectory = lazy(() => {
-  logger.debug('Loading Test Directory component');
-  return import('./pages/directory/TestDirectory');
-});
+const DirectoryCustomers = lazy(() => import('./pages/directory/Customers'));
+const DirectoryCustomerNew = lazy(() => import('./pages/directory/CustomerNew'));
+const TestDirectory = lazy(() => import('./pages/directory/TestDirectory'));
 
 // Time and Attendance modules removed - no longer using employees table
 
 
 
-const CompanyReports = lazy(() => {
-  logger.debug('Loading Company Reports component');
-  return import('./pages/reports/CompanyReports');
-});
+const CompanyReports = lazy(() => import('./pages/reports/CompanyReports'));
 
 // New module pages
-const Sales = lazy(() => {
-  logger.debug('Loading Sales component');
-  return import('./pages/sales/Sales');
-});
+const Sales = lazy(() => import('./pages/sales/Sales'));
+const Orders = lazy(() => import('./pages/sales/Orders'));
+const Quotes = lazy(() => import('./pages/sales/Quotes'));
+const QuoteApproved = lazy(() => import('./pages/sales/QuoteApproved'));
+const QuoteNew = lazy(() => import('./pages/sales/QuoteNew'));
+const SaleOrders = lazy(() => import('./pages/sales/SaleOrders'));
+const SaleOrderNew = lazy(() => import('./pages/sales/SaleOrderNew'));
 
-const Orders = lazy(() => {
-  logger.debug('Loading Orders component');
-  return import('./pages/sales/Orders');
-});
+const Catalog = lazy(() => import('./pages/catalog/Catalog'));
+const Items = lazy(() => import('./pages/catalog/Items'));
+const Manufacturers = lazy(() => import('./pages/catalog/Manufacturers'));
+const Categories = lazy(() => import('./pages/catalog/Categories'));
+const Collections = lazy(() => import('./pages/catalog/Collections'));
+const BOM = lazy(() => import('./pages/catalog/BOM'));
+const BOMTemplates = lazy(() => import('./pages/catalog/BOMTemplates'));
 
-const Quotes = lazy(() => {
-  logger.debug('Loading Quotes component');
-  return import('./pages/sales/Quotes');
-});
-
-const QuoteApproved = lazy(() => {
-  logger.debug('Loading QuoteApproved component');
-  return import('./pages/sales/QuoteApproved');
-});
-
-const QuoteNew = lazy(() => {
-  logger.debug('Loading QuoteNew component');
-  return import('./pages/sales/QuoteNew');
-});
-
-const SaleOrders = lazy(() => {
-  logger.debug('Loading SaleOrders component');
-  return import('./pages/sales/SaleOrders');
-});
-
-const SaleOrderNew = lazy(() => {
-  logger.debug('Loading SaleOrderNew component');
-  return import('./pages/sales/SaleOrderNew');
-});
-
-const Catalog = lazy(() => {
-  logger.debug('Loading Catalog component');
-  return import('./pages/catalog/Catalog');
-});
-
-const Items = lazy(() => {
-  logger.debug('Loading Items component');
-  return import('./pages/catalog/Items');
-});
-
-const Manufacturers = lazy(() => {
-  logger.debug('Loading Manufacturers component');
-  return import('./pages/catalog/Manufacturers');
-});
-
-const Categories = lazy(() => {
-  logger.debug('Loading Categories component');
-  return import('./pages/catalog/Categories');
-});
-
-const Collections = lazy(() => {
-  logger.debug('Loading Collections component');
-  return import('./pages/catalog/Collections');
-});
-
-const BOM = lazy(() => {
-  logger.debug('Loading BOM component');
-  return import('./pages/catalog/BOM');
-});
-
-const BOMTemplates = lazy(() => {
-  logger.debug('Loading BOMTemplates component');
-  return import('./pages/catalog/BOMTemplates');
-});
-
-const BOMReadiness = lazy(() => {
-  logger.debug('Loading BOMReadiness component');
-  return import('./pages/catalog/BOMReadiness');
-});
-
-
-const ManufacturingOrders = lazy(() => {
-  logger.debug('Loading ManufacturingOrders component');
-  return import('./pages/manufacturing/ManufacturingOrders');
-});
-
-const ManufacturingOrderDetail = lazy(() => {
-  logger.debug('Loading ManufacturingOrderDetail component');
-  return import('./pages/manufacturing/ManufacturingOrderDetail');
-});
+const ManufacturingOrders = lazy(() => import('./pages/manufacturing/ManufacturingOrders'));
+const ManufacturingOrderDetail = lazy(() => import('./pages/manufacturing/ManufacturingOrderDetail'));
 
 // Variants component removed - use CollectionsCatalog instead
 
-const CatalogItemNew = lazy(() => {
-  logger.debug('Loading CatalogItemNew component');
-  return import('./pages/catalog/CatalogItemNew');
-});
+const CatalogItemNew = lazy(() => import('./pages/catalog/CatalogItemNew'));
+const Inventory = lazy(() => import('./pages/inventory/Inventory'));
+const Warehouse = lazy(() => import('./pages/inventory/Warehouse'));
+const Manufacturing = lazy(() => import('./pages/manufacturing/Manufacturing'));
+const BillOfMaterials = lazy(() => import('./pages/manufacturing/BillOfMaterials'));
+const ApprovedBOMList = lazy(() => import('./pages/catalog/ApprovedBOMList'));
+const OrderList = lazy(() => import('./pages/manufacturing/OrderList'));
+const Financials = lazy(() => import('./pages/financials/Financials'));
 
-const Inventory = lazy(() => {
-  logger.debug('Loading Inventory component');
-  return import('./pages/inventory/Inventory');
-});
+const CompanySettings = lazy(() => import('./pages/settings/CompanySettings'));
 
-const Warehouse = lazy(() => {
-  logger.debug('Loading Warehouse component');
-  return import('./pages/inventory/Warehouse');
-});
+const OrganizationUsers = lazy(() => import('./pages/settings/OrganizationUsers'));
+const OrganizationUser = lazy(() => import('./pages/settings/OrganizationUser'));
+const OrganizationUserNew = lazy(() => import('./pages/settings/OrganizationUserNew'));
+const CompanyPortalUsers = lazy(() => import('./pages/settings/CompanyPortalUsers'));
 
-const Manufacturing = lazy(() => {
-  logger.debug('Loading Manufacturing component');
-  return import('./pages/manufacturing/Manufacturing');
-});
-
-const BillOfMaterials = lazy(() => {
-  logger.debug('Loading BillOfMaterials component');
-  return import('./pages/manufacturing/BillOfMaterials');
-});
-
-const ApprovedBOMList = lazy(() => {
-  logger.debug('Loading ApprovedBOMList component');
-  return import('./pages/catalog/ApprovedBOMList');
-});
-
-const OrderList = lazy(() => {
-  logger.debug('Loading OrderList component');
-  return import('./pages/manufacturing/OrderList');
-});
-
-const Financials = lazy(() => {
-  logger.debug('Loading Financials component');
-  return import('./pages/financials/Financials');
-});
-
-const CompanySettings = lazy(() => {
-  logger.debug('Loading Company Settings component');
-  return import('./pages/settings/CompanySettings');
-});
-
-const OrganizationUsers = lazy(() => {
-  logger.debug('Loading Organization Users component');
-  return import('./pages/settings/OrganizationUsers');
-});
-
-const OrganizationUser = lazy(() => {
-  logger.debug('Loading Organization User component');
-  return import('./pages/settings/OrganizationUser');
-});
-
-const OrganizationUserNew = lazy(() => {
-  logger.debug('Loading Organization User New component');
-  return import('./pages/settings/OrganizationUserNew');
-});
-
-const CompanyPortalUsers = lazy(() => {
-  logger.debug('Loading Company Portal Users component');
-  return import('./pages/settings/CompanyPortalUsers');
-});
-
-// Auth pages
-const Login = lazy(() => {
-  logger.debug('Loading Login component');
-  return import('./pages/auth/Login');
-});
-
-const Signup = lazy(() => {
-  logger.debug('Loading Signup component');
-  return import('./pages/auth/Signup');
-});
-
-const CompanyRegistration = lazy(() => {
-  logger.debug('Loading Company Registration component');
-  return import('./pages/auth/CompanyRegistration');
-});
-
-const ResetPassword = lazy(() => {
-  logger.debug('Loading Reset Password component');
-  return import('./pages/auth/ResetPassword');
-});
-
-const AuthCallback = lazy(() => {
-  logger.debug('Loading Auth Callback component');
-  return import('./pages/auth/AuthCallback');
-});
-
-const ResetPasswordForm = lazy(() => {
-  logger.debug('Loading Reset Password Form component');
-  return import('./pages/auth/ResetPasswordForm');
-});
-
-const NewPassword = lazy(() => {
-  logger.debug('Loading New Password component');
-  return import('./pages/auth/NewPassword');
-});
-
-const SetPassword = lazy(() => {
-  logger.debug('Loading Set Password component');
-  return import('./pages/auth/SetPassword');
-});
-
-const AccessDenied = lazy(() => {
-  logger.debug('Loading Access Denied component');
-  return import('./pages/auth/AccessDenied');
-});
+// Auth pages (NO lazy - son críticas para el flujo)
+import Login from './pages/auth/Login';
+import Signup from './pages/auth/Signup';
+import CompanyRegistration from './pages/auth/CompanyRegistration';
+import ResetPassword from './pages/auth/ResetPassword';
+import AuthCallback from './pages/auth/AuthCallback';
+import ResetPasswordForm from './pages/auth/ResetPasswordForm';
+import NewPassword from './pages/auth/NewPassword';
+import SetPassword from './pages/auth/SetPassword';
+import AcceptInvite from './pages/auth/AcceptInvite';
+import AccessDenied from './pages/auth/AccessDenied';
 
 
 
@@ -386,7 +131,7 @@ function App() {
   // Check if current page is auth page (memoized - must be before all useEffect)
   const isAuthPage = useMemo(() => [
     'login', 'signup', 'company-registration', 'reset-password', 'new-password', 'set-password',
-    'auth-callback', 'auth-reset-password', 'access-denied'
+    'auth-callback', 'auth-reset-password', 'auth-accept', 'accept-invite', 'access-denied'
   ].includes(currentPage), [currentPage]);
 
   // Initialize auth on mount with safety timeout
@@ -395,6 +140,24 @@ function App() {
     let isMounted = true;
 
     const initializeAuth = async () => {
+      // Skip auth init on auth flow pages - they handle their own auth
+      const path = window.location.pathname;
+      const isAuthFlow =
+        path.startsWith('/auth/callback') ||
+        path.startsWith('/auth/accept') ||
+        path.startsWith('/accept-invite') ||
+        path.startsWith('/set-password') ||
+        path.startsWith('/auth/reset-password') ||
+        path.startsWith('/new-password') ||
+        path.startsWith('/login') ||
+        path.startsWith('/signup');
+
+      if (isAuthFlow) {
+        console.log('[App] Skipping auth init on auth flow page:', path);
+        useAuthStore.setState({ isLoading: false });
+        return;
+      }
+
       try {
         // Set a safety timeout: if initAuth takes more than 10 seconds, force loading=false
         timeoutId = setTimeout(() => {
@@ -414,10 +177,7 @@ function App() {
           timeoutId = null;
         }
       } catch (error) {
-        if (import.meta.env.DEV) {
-          console.error('[App] Error initializing auth:', error);
-        }
-        logger.error('Error initializing auth', error as Error);
+        logger.error('Error initializing auth', error instanceof Error ? error : new Error(String(error)));
         // Don't break the app if auth init fails
         if (isMounted) {
           useAuthStore.getState().setLoading(false);
@@ -456,6 +216,22 @@ function App() {
   // - Email confirmation (type=signup/invite) ? processes and redirects to dashboard
 
   // Note: auth state changes handled inside auth store init
+  
+  // ✅ CRITICAL: Redirect magic links to /auth/callback
+  // If URL has hash with token/code, redirect to AuthCallback to process it
+  useEffect(() => {
+    const hash = window.location.hash;
+    const hasAuthToken = hash.includes('access_token') || hash.includes('refresh_token');
+    const searchParams = new URLSearchParams(window.location.search);
+    const hasCode = searchParams.has('code');
+    
+    if ((hasAuthToken || hasCode) && window.location.pathname === '/') {
+      console.log('🔀 Detected auth token/code in URL, redirecting to /auth/callback');
+      const newUrl = `/auth/callback${window.location.search}${window.location.hash}`;
+      window.history.replaceState(null, '', newUrl);
+      router.navigate(newUrl, false);
+    }
+  }, []);
 
   if (import.meta.env.DEV) {
   console.log('App render - isAuthenticated:', isAuthenticated, 'user:', user, 'isLoading:', isLoading);
@@ -493,6 +269,8 @@ function App() {
     router.addRoute('/reset-password', () => setCurrentPage('reset-password'));
     router.addRoute('/auth/reset-password', () => setCurrentPage('auth-reset-password'));
     router.addRoute('/auth/callback', () => setCurrentPage('auth-callback'));
+    router.addRoute('/auth/accept', () => setCurrentPage('auth-accept'));
+    router.addRoute('/accept-invite', () => setCurrentPage('auth-accept')); // Alias for auth/accept
     router.addRoute('/set-password', () => setCurrentPage('set-password'));
     router.addRoute('/new-password', () => setCurrentPage('new-password'));
     router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
@@ -689,7 +467,7 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/sales/quotes/edit/:id', () => {
+    router.addRoute('/sales/quotes/:id/edit', () => {
       if (isAuthenticated) {
         setCurrentPage('quote-new');
       } else {
@@ -758,13 +536,6 @@ function App() {
     router.addRoute('/catalog/bom', () => {
       if (isAuthenticated) {
         setCurrentPage('bom');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/catalog/bom-readiness', () => {
-      if (isAuthenticated) {
-        setCurrentPage('bom-readiness');
       } else {
         setCurrentPage('login');
       }
@@ -975,6 +746,50 @@ function App() {
       }
     });
     
+    // Dealer Profile routes
+    router.addRoute('/settings/dealer-profile', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/dealer-profile/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/dealer-profile/edit/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/dealer-profile/user', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/organization', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/cost-engine', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    
     // Other routes
     router.addRoute('/time-tracking', () => {
       if (isAuthenticated) {
@@ -1029,10 +844,37 @@ function App() {
 
   // Redirect to login if not authenticated (except for auth pages and error pages)
   useEffect(() => {
-    if (!isAuthenticated && !isLoading && !isAuthPage && !isErrorPage) {
+    // CRITICAL: Check pathname FIRST before any auth checks
+    // This prevents redirect during auth flows
+    const currentPath = window.location.pathname;
+    
+    // List of paths that should NEVER redirect to login
+    const authPaths = [
+      '/login',
+      '/signup',
+      '/auth/callback',
+      '/auth/accept',
+      '/accept-invite',
+      '/set-password',
+      '/reset-password',
+      '/new-password',
+      '/auth/reset-password',
+      '/company-registration',
+      '/access-denied'
+    ];
+    
+    const isAuthPath = authPaths.some(path => currentPath.startsWith(path));
+    
+    if (isAuthPath) {
+      console.log('[App] Skipping login redirect - on auth path:', currentPath);
+      return;
+    }
+
+    if (!isAuthenticated && !isLoading && !isErrorPage) {
+      console.log('[App] Redirecting to login - not authenticated');
       router.navigate('/login', true);
     }
-  }, [isAuthenticated, isLoading, isAuthPage, isErrorPage]);
+  }, [isAuthenticated, isLoading, isErrorPage]);
 
 
   const renderPage = () => {
@@ -1105,8 +947,6 @@ function App() {
         return <RequireModule module="catalog"><Collections /></RequireModule>;
       case 'bom':
         return <RequireModule module="catalog"><BOM /></RequireModule>;
-      case 'bom-readiness':
-        return <RequireModule module="catalog"><BOMReadiness /></RequireModule>;
       // Variants case removed - use CollectionsCatalog instead
       case 'inventory':
         return <Inventory />;
@@ -1158,6 +998,8 @@ function App() {
         return <AuthCallback />;
       case 'set-password':
         return <SetPassword />;
+      case 'auth-accept':
+        return <AcceptInvite />;
       case 'access-denied':
         return <AccessDenied />;
       case 'auth-reset-password':
@@ -1173,28 +1015,48 @@ function App() {
       <Toast />
       <SupabaseStatusBanner />
       <div className="min-h-dvh bg-background">
-        {!isAuthenticated && !isAuthPage ? (
+        {(() => {
+          // Check pathname directly to avoid timing issues
+          const currentPath = window.location.pathname;
+          const authPaths = [
+            '/login', '/signup', '/auth/callback', '/auth/accept', '/accept-invite', '/set-password',
+            '/reset-password', '/new-password', '/auth/reset-password',
+            '/company-registration', '/access-denied'
+          ];
+          const isAuthPath = authPaths.some(path => currentPath.startsWith(path));
+
+          if (!isAuthenticated && !isAuthPath && !isLoading) {
+            return (
           <div className="min-h-dvh flex items-center justify-center p-6">
             <div className="text-center">
               <p className="text-muted-foreground">Redirecting to login...</p>
             </div>
           </div>
-        ) : isAuthPage ? (
-          // Auth pages without layout
+            );
+          }
+
+          if (isAuthPage || isLoading || isAuthPath) {
+            return (
           <ErrorBoundary>
             <Suspense fallback={null}>
               {renderPage()}
             </Suspense>
           </ErrorBoundary>
-        ) : isErrorPage ? (
-          // Error pages without layout
+            );
+          }
+
+          if (isErrorPage) {
+            return (
           <ErrorBoundary>
             <Suspense fallback={null}>
               {renderPage()}
             </Suspense>
           </ErrorBoundary>
-        ) : currentPage === 'company-settings' ? (
-          // Settings pages with their own independent layout
+            );
+          }
+
+          if (currentPage === 'company-settings') {
+            return (
           <ErrorBoundary>
             <Suspense fallback={null}>
               <RequireModule module="settings">
@@ -1202,8 +1064,11 @@ function App() {
               </RequireModule>
             </Suspense>
           </ErrorBoundary>
-        ) : (
+            );
+          }
+
           // Regular pages with layout - protected by AuthGate
+          return (
           <AuthGate>
             <SubmoduleNavProvider>
               <Layout>
@@ -1225,7 +1090,8 @@ function App() {
             </Layout>
           </SubmoduleNavProvider>
           </AuthGate>
-        )}
+          );
+        })()}
       </div>
     </ErrorBoundary>
   );

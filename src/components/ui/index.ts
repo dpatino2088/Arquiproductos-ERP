@@ -42,7 +42,7 @@ export const tokens = {
     },
     success: {
       50: '#ecfdf5',
-      500: '#10b981',
+      500: '#15803d',  /* verde success del design system (antes #10b981) */
       600: '#059669',
       700: '#047857',
     },

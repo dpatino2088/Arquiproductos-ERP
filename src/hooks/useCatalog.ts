@@ -1,20 +1,47 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { CatalogItem } from '../types/catalog';
 
-export function useCatalogItems(family?: string, productTypeId?: string) {
+interface UseCatalogItemsOptions {
+  family?: string;
+  productTypeId?: string;
+  role?: string; // item_role filter
+  categoryId?: string; // category_id filter
+  isRoll?: boolean; // solo ítems con is_roll = true (rolls: telas, films, etc.)
+}
+
+export function useCatalogItems(
+  familyOrOptions?: string | UseCatalogItemsOptions,
+  productTypeId?: string
+) {
+  // ✅ FIX: Soporte para objeto de opciones o parámetros legacy
+  let options: UseCatalogItemsOptions;
+  if (typeof familyOrOptions === 'object' && familyOrOptions !== null) {
+    options = familyOrOptions;
+  } else {
+    // Legacy: family como string, productTypeId como segundo parámetro
+    options = {
+      family: familyOrOptions,
+      productTypeId,
+    };
+  }
+
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false); // ✅ Estado para carga progresiva
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+  
+  const { family, productTypeId: optProductTypeId, role, categoryId, isRoll } = options;
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
     // Force clear any cached data to ensure fresh fetch
     setItems([]);
     setLoading(true);
+    setLoadingMore(false);
   };
 
   useEffect(() => {
@@ -33,7 +60,7 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
       // Allow loading all items when both productTypeId and family are undefined
       // This is needed for AccessoriesStep where we want to search all items
       // Only skip if explicitly provided but invalid
-      if (productTypeId === null || family === null) {
+      if (optProductTypeId === null || family === null) {
         // Explicitly set to null means "don't load", undefined means "load all"
         if (isMounted) {
           setLoading(false);
@@ -42,6 +69,14 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
         }
         return;
       }
+
+      // ✅ FIX: Declarar isValidUUID ANTES de usarlo
+      // Validate productTypeId is a valid UUID before querying
+      const isValidUUID = (str: string | undefined): boolean => {
+        if (!str) return false;
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return uuidRegex.test(str);
+      };
 
       try {
         if (isMounted) {
@@ -52,10 +87,15 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
         if (import.meta.env.DEV) {
           console.log('🔍 useCatalogItems - Starting fetch:', {
             activeOrganizationId,
-            productTypeId,
+            productTypeId: optProductTypeId,
             family,
-            hasProductTypeId: !!productTypeId,
+            role,
+            categoryId,
+            hasProductTypeId: !!optProductTypeId,
             hasFamily: !!family,
+            hasRole: !!role,
+            hasCategoryId: !!categoryId,
+            isValidUUID: optProductTypeId ? isValidUUID(optProductTypeId) : false,
           });
         }
 
@@ -66,127 +106,33 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
           .from('CatalogItems')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
+          .eq('is_active', true);
 
-        // Filter by productTypeId (preferred) or family (fallback for backward compatibility)
-        let itemIds: string[] | undefined = undefined;
-        
-        // Validate productTypeId is a valid UUID before querying
-        const isValidUUID = (str: string | undefined): boolean => {
-          if (!str) return false;
-          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-          return uuidRegex.test(str);
-        };
-        
-        if (productTypeId && isValidUUID(productTypeId)) {
-          try {
-            // First, get item IDs from CatalogItemProductTypes relation WITH PAGINATION
-            // This is critical: if there are more than 1000 relations, we need to paginate
-            let allRelatedItems: any[] = [];
-            let relationPage = 0;
-            const relationPageSize = 1000;
-            let hasMoreRelations = true;
-            let relationError: any = null;
-            
-            console.log('🔍 Loading CatalogItemProductTypes with pagination...');
-            
-            while (hasMoreRelations) {
-              const relationFrom = relationPage * relationPageSize;
-              const relationTo = relationFrom + relationPageSize - 1;
-              
-              const { data: pageRelatedItems, error: pageRelationError } = await supabase
-                .from('CatalogItemProductTypes')
-                .select('catalog_item_id')
-                .eq('product_type_id', productTypeId)
-                .eq('organization_id', activeOrganizationId)
-                .eq('deleted', false)
-                .range(relationFrom, relationTo);
-              
-              if (pageRelationError) {
-                console.error(`❌ Error loading CatalogItemProductTypes page ${relationPage + 1}:`, pageRelationError);
-                relationError = pageRelationError;
-                hasMoreRelations = false;
-                break;
-              }
-              
-              if (pageRelatedItems && pageRelatedItems.length > 0) {
-                allRelatedItems = [...allRelatedItems, ...pageRelatedItems];
-                console.log(`✅ Loaded CatalogItemProductTypes page ${relationPage + 1}: ${pageRelatedItems.length} relations (Total: ${allRelatedItems.length})`);
-                
-                if (pageRelatedItems.length < relationPageSize) {
-                  hasMoreRelations = false;
-                } else {
-                  relationPage++;
-                }
-              } else {
-                hasMoreRelations = false;
-              }
-            }
-            
-            if (relationError) {
-              if (import.meta.env.DEV) {
-                console.error('❌ Error fetching CatalogItemProductTypes:', relationError);
-                console.log('   Falling back to family column...');
-              }
-              // Fallback to family if relation table doesn't exist or has errors
-              if (family) {
-                query = query.eq('family', family);
-              }
-            } else if (allRelatedItems && allRelatedItems.length > 0) {
-              itemIds = allRelatedItems.map(r => r.catalog_item_id).filter(id => id); // Filter out any null/undefined
-              
-              if (import.meta.env.DEV) {
-                console.log(`✅ Found ${itemIds.length} catalog_item_ids from CatalogItemProductTypes (across ${relationPage + 1} page(s))`);
-              }
-              
-              // Only use .in() if we have valid IDs
-              if (itemIds.length > 0) {
-                // Note: Supabase .in() can handle large arrays, but we'll still paginate the final CatalogItems query
-                query = query.in('id', itemIds);
-                
-                if (import.meta.env.DEV) {
-                  console.log('✅ Filtering CatalogItems by productTypeId:', productTypeId, `(${itemIds.length} items found)`);
-                }
-              } else {
-                // No valid IDs, try fallback
-                if (family) {
-                  query = query.eq('family', family);
-                } else {
-                  query = query.eq('id', '00000000-0000-0000-0000-000000000000'); // Impossible UUID
-                }
-              }
-            } else {
-              // No items found for this productType, try fallback to family
-              if (import.meta.env.DEV) {
-                console.warn('⚠️ No items found in CatalogItemProductTypes for productTypeId:', productTypeId);
-                console.log('   Trying fallback to family column...');
-              }
-              
-              if (family) {
-                query = query.eq('family', family);
-              } else {
-                // No fallback available, return empty result
-                query = query.eq('id', '00000000-0000-0000-0000-000000000000'); // Impossible UUID
-              }
-            }
-          } catch (err) {
-            // Catch any unexpected errors and fallback to family
-            if (import.meta.env.DEV) {
-              console.error('❌ Unexpected error in CatalogItemProductTypes query:', err);
-              console.log('   Falling back to family column...');
-            }
-            if (family) {
-              query = query.eq('family', family);
-            }
+        // ✅ FIX: Aplicar filtros por role y categoryId directamente en CatalogItems
+        if (role) {
+          query = query.eq('item_role', role);
+          if (import.meta.env.DEV) {
+            console.log('✅ Filtering CatalogItems by role:', role);
           }
-        } else if (family) {
+        }
+        
+        if (categoryId) {
+          query = query.eq('category_id', categoryId);
+          if (import.meta.env.DEV) {
+            console.log('✅ Filtering CatalogItems by categoryId:', categoryId);
+          }
+        }
+
+        // ✅ TEMPORAL: Deshabilitado filtro por ProductType para debugging
+        // Filter by family (fallback for backward compatibility)
+        if (family) {
           // Fallback to family column for backward compatibility
           query = query.eq('family', family);
           
           if (import.meta.env.DEV) {
             console.log('🔍 Filtering CatalogItems by family (fallback):', family);
-            if (productTypeId && !isValidUUID(productTypeId)) {
-              console.warn('⚠️ Invalid productTypeId format:', productTypeId);
+            if (optProductTypeId && !isValidUUID(optProductTypeId)) {
+              console.warn('⚠️ Invalid productTypeId format:', optProductTypeId);
             }
           }
         } else {
@@ -196,185 +142,191 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
           }
         }
 
-        // Execute query with pagination to load ALL items (not just first 1000)
-        // Supabase has a default limit of 1000 rows, so we need to paginate
+        // ✅ Cargar 500 items + sus MSRP antes del primer render; luego el resto en background
+        const INITIAL_LOAD_SIZE = 500;
+        const BATCH_SIZE = 100;
+        const MSRP_BATCH = 100;
+        
         let allData: any[] = [];
-        let currentPage = 0;
-        const pageSize = 1000;
-        let hasMore = true;
         let queryError: any = null;
         
-        console.log('🔍 Loading items with pagination...');
+        if (import.meta.env.DEV) {
+          console.log('🔍 Loading items with progressive rendering...', {
+            hasFamily: !!family,
+            family,
+            role,
+            categoryId,
+            initialLoad: INITIAL_LOAD_SIZE,
+            batchSize: BATCH_SIZE,
+            maxItems: 'all',
+          });
+        }
         
-        while (hasMore) {
-          const from = currentPage * pageSize;
-          const to = from + pageSize - 1;
-          
-          // Create a fresh query for each page (query is immutable, so we need to rebuild it)
+        // Helper function to build query
+        const buildQuery = (from: number, to: number) => {
           let pageQuery = supabase
             .from('CatalogItems')
             .select('*')
             .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
+            .eq('is_active', true);
           
-          // Apply the same filters as the main query
-          if (itemIds && itemIds.length > 0) {
-            // If we have itemIds from productTypeId filtering, use them
-            pageQuery = pageQuery.in('id', itemIds);
-          } else if (family) {
-            // If filtering by family, apply that filter
+          if (role) {
+            pageQuery = pageQuery.eq('item_role', role);
+          }
+          
+          if (categoryId) {
+            pageQuery = pageQuery.eq('category_id', categoryId);
+          }
+          
+          if (family) {
             pageQuery = pageQuery.eq('family', family);
           }
-          // If no filters, pageQuery will load all items for the organization
-          
-          const { data: pageData, error: pageError } = await pageQuery
-            .order('sku', { ascending: true })
-            .range(from, to);
-          
-          if (pageError) {
-            console.error(`❌ Error loading page ${currentPage + 1}:`, pageError);
-            queryError = pageError;
-            hasMore = false;
-            break;
+
+          if (isRoll === true) {
+            pageQuery = pageQuery.eq('is_roll', true);
           }
           
-          if (pageData && pageData.length > 0) {
-            allData = [...allData, ...pageData];
-            console.log(`✅ Loaded page ${currentPage + 1}: ${pageData.length} items (Total: ${allData.length})`);
-            
-            // If we got less than pageSize items, we've reached the end
-            if (pageData.length < pageSize) {
-              hasMore = false;
-            } else {
-              currentPage++;
+          return pageQuery.order('sku', { ascending: true }).range(from, to);
+        };
+        
+        type MsrpRow = { msrp_sale_in: number; msrp_sale_out: number; total_cost: number; shipping_cost: number; import_tax_cost: number };
+        const enrichItems = (d: any[], m: Map<string, MsrpRow>): CatalogItem[] => (d || []).map((item: any) => {
+          const msrpRow = m.get(item.id);
+          const finalMsrp = (msrpRow?.msrp_sale_out != null && !isNaN(msrpRow.msrp_sale_out)) ? msrpRow.msrp_sale_out : null;
+          let salePrice = 0;
+          if (finalMsrp != null) salePrice = finalMsrp;
+          else if (item.cost_exw && item.default_margin_pct) salePrice = item.cost_exw * (1 + item.default_margin_pct / 100);
+          else if (item.cost_exw) salePrice = item.cost_exw * 1.5;
+          const itemName = item.name || item.item_name || item.sku || `Item-${item.id.substring(0, 8)}`;
+          const normalizedMeasureBasis = item.measure_basis === 'linear_m' ? 'linear' : (item.measure_basis || 'unit');
+          const unitOfMeasure = item.unit_of_measure || item.uom || 'unit';
+          return {
+            id: item.id, organization_id: item.organization_id, sku: item.sku || '', name: itemName, item_name: item.item_name || item.name || null,
+            description: item.description || null, manufacturer_id: item.manufacturer_id || null, category_id: item.category_id || null, item_category_id: item.item_category_id || null,
+            measure_basis: normalizedMeasureBasis, unit_of_measure: unitOfMeasure, uom: unitOfMeasure, is_fabric: item.is_fabric || false,
+            roll_type: (item as any).roll_type || null, collection_name: item.collection_name || null, variant_name: item.variant_name || null,
+            roll_width: item.roll_width || item.roll_width_m || null, roll_width_m: item.roll_width_m || item.roll_width || null, fabric_pricing_mode: item.fabric_pricing_mode || null,
+            color: item.color || null, item_role: (item as any).item_role || null, cost_exw: item.cost_exw || null, default_margin_pct: item.default_margin_pct || null,
+            msrp: finalMsrp, cost_price: item.cost_exw || item.cost_price || 0, unit_price: salePrice,
+            is_active: item.is_active !== undefined && item.is_active !== null ? Boolean(item.is_active) : (item.active !== undefined && item.active !== null ? Boolean(item.active) : true),
+            active: item.active !== undefined && item.active !== null ? Boolean(item.active) : (item.is_active !== undefined && item.is_active !== null ? Boolean(item.is_active) : true),
+            discontinued: item.discontinued || false, image_url: item.image_url || null, deleted: item.deleted || false, archived: item.archived || false,
+            created_at: item.created_at || new Date().toISOString(), updated_at: item.updated_at || null, metadata: item.metadata || {}, created_by: item.created_by || null, updated_by: item.updated_by || null,
+          } as CatalogItem;
+        });
+        
+        // PASO 1: Cargar primeros 500 items
+        const { data: initialData, error: initialError } = await buildQuery(0, INITIAL_LOAD_SIZE - 1);
+        if (initialError) {
+          queryError = initialError;
+          console.error('❌ Error loading initial items:', initialError?.message || String(initialError));
+        } else if (initialData) {
+          allData = [...initialData];
+          if (import.meta.env.DEV) console.log(`✅ Initial load: ${initialData.length} items`);
+        }
+        
+        // Cargar MSRP de los primeros 500 ANTES de renderizar
+        const msrpMap = new Map<string, MsrpRow>();
+        const initialIds = allData?.map((i: any) => i.id).filter(Boolean) || [];
+        if (initialIds.length > 0 && activeOrganizationId) {
+          for (let i = 0; i < initialIds.length; i += MSRP_BATCH) {
+            const batch = initialIds.slice(i, i + MSRP_BATCH);
+            const { data: msrpData } = await supabase
+              .from('CatalogItemsMSRP')
+              .select('catalog_item_id, msrp_sale_in, msrp_sale_out, total_cost, shipping_cost, import_tax_cost')
+              .eq('organization_id', activeOrganizationId)
+              .in('catalog_item_id', batch);
+            (msrpData || []).forEach((row: any) => {
+              if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { msrp_sale_in: Number(row.msrp_sale_in ?? 0), msrp_sale_out: Number(row.msrp_sale_out ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) });
+            });
+          }
+          if (import.meta.env.DEV) console.log(`✅ MSRP loaded for first ${msrpMap.size} items (before first render)`);
+        }
+        
+        const validItemsInitial = enrichItems(allData, msrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
+        if (isMounted) { setItems(validItemsInitial); setLoading(false); setLoadingMore(true); }
+        
+        // PASO 2: Resto en background (items + MSRP por batch)
+        if (!queryError) {
+          let currentOffset = INITIAL_LOAD_SIZE;
+          while (isMounted) {
+            const { data: batchData, error: batchError } = await buildQuery(currentOffset, currentOffset + BATCH_SIZE - 1);
+            if (batchError) break;
+            if (!batchData?.length) break;
+            allData = [...allData, ...batchData];
+            const batchIds = batchData.map((i: any) => i.id).filter(Boolean);
+            if (batchIds.length > 0 && activeOrganizationId) {
+              const { data: mb } = await supabase.from('CatalogItemsMSRP').select('catalog_item_id, msrp_sale_in, msrp_sale_out, total_cost, shipping_cost, import_tax_cost').eq('organization_id', activeOrganizationId).in('catalog_item_id', batchIds);
+              (mb || []).forEach((row: any) => { if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { msrp_sale_in: Number(row.msrp_sale_in ?? 0), msrp_sale_out: Number(row.msrp_sale_out ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) }); });
             }
-          } else {
-            hasMore = false;
+            const valid = enrichItems(allData, msrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
+            if (isMounted) setItems(valid);
+            currentOffset += batchData.length;
+            if (batchData.length < BATCH_SIZE) break;
           }
+          if (isMounted) setLoadingMore(false);
         }
         
         const data = allData;
+        const normSku = (s: any) => String(s || '').toUpperCase().replace(/[\s\-_]/g, '');
         
         if (queryError) {
-          console.error('❌ Error during pagination:', queryError);
-        } else {
-          console.log(`✅ Finished loading all items: ${data.length} total across ${currentPage + 1} page(s)`);
+          console.error('❌ Error during loading:', queryError?.message || String(queryError));
+        } else if (import.meta.env.DEV) {
+          console.log(`✅ Finished loading items: ${data.length} total`);
+          
+          // Debug: verificar algunos SKUs específicos (deshabilitado por defecto para reducir ruido)
+          // Los SKUs de drives se cargan desde BOMComponents, no del catálogo general
         }
 
-        // Debug: Verify specific SKUs are loaded after pagination
-        const rc3006wh = data?.find((item: any) => {
-          const sku = (item.sku || '').toUpperCase().replace(/[-_]/g, '');
-          return sku === 'RC3006WH' || sku === 'RC3006-WH';
-        });
-        const rc3006bk = data?.find((item: any) => {
-          const sku = (item.sku || '').toUpperCase().replace(/[-_]/g, '');
-          return sku === 'RC3006BK' || sku === 'RC3006-BK';
-        });
-        const allRC3006Items = data?.filter((item: any) => {
-          const sku = (item.sku || '').toUpperCase().replace(/[-_]/g, '');
-          return sku.startsWith('RC3006');
-        }) || [];
-        
-        console.log('═══════════════════════════════════════════');
-        console.log('🔍 useCatalogItems - Final Results');
-        console.log('═══════════════════════════════════════════');
-        console.log('Total items loaded:', data?.length || 0);
-        console.log('Pages loaded:', currentPage + 1);
-        console.log('Active Organization ID:', activeOrganizationId);
-        console.log('ProductTypeId filter:', productTypeId || 'NONE (loading all)');
-        console.log('Family filter:', family || 'NONE (loading all)');
-        console.log('RC3006-BK:', rc3006bk ? {
-          sku: rc3006bk.sku,
-          item_name: rc3006bk.item_name,
-          active: rc3006bk.active,
-          deleted: rc3006bk.deleted,
-          archived: rc3006bk.archived,
-          organization_id: rc3006bk.organization_id
-        } : '❌ NOT FOUND');
-        console.log('RC3006-WH:', rc3006wh ? {
-          sku: rc3006wh.sku,
-          item_name: rc3006wh.item_name,
-          active: rc3006wh.active,
-          deleted: rc3006wh.deleted,
-          archived: rc3006wh.archived,
-          organization_id: rc3006wh.organization_id
-        } : '❌ NOT FOUND');
-        console.log('All RC3006-* items found:', allRC3006Items.map((item: any) => item.sku));
-        console.log('═══════════════════════════════════════════');
+        // Debug: Verify specific SKUs are loaded
+        if (import.meta.env.DEV && data && data.length > 0) {
+          const rc3006wh = data.find((item: any) => {
+            const sku = normSku(item.sku);
+            return sku === 'RC3006WH';
+          });
+          const rc3006bk = data.find((item: any) => {
+            const sku = normSku(item.sku);
+            return sku === 'RC3006BK';
+          });
+          const allRC3006Items = data.filter((item: any) => {
+            const sku = normSku(item.sku);
+            return sku.startsWith('RC3006');
+          });
+          
+          console.log('═══════════════════════════════════════════');
+          console.log('🔍 useCatalogItems - Final Results');
+          console.log('═══════════════════════════════════════════');
+          console.log('Total items loaded:', data.length);
+          console.log('Active Organization ID:', activeOrganizationId);
+          console.log('ProductTypeId filter:', optProductTypeId || 'NONE (loading all)');
+          console.log('Family filter:', family || 'NONE (loading all)');
+          if (rc3006bk) {
+            console.log('RC3006-BK:', `SKU: ${rc3006bk.sku}, Name: ${rc3006bk.item_name}, Active: ${rc3006bk.active}, Deleted: ${rc3006bk.deleted}, Archived: ${rc3006bk.archived}`);
+          } else {
+            console.log('RC3006-BK: ❌ NOT FOUND');
+          }
+          if (rc3006wh) {
+            console.log('RC3006-WH:', `SKU: ${rc3006wh.sku}, Name: ${rc3006wh.item_name}, Active: ${rc3006wh.active}, Deleted: ${rc3006wh.deleted}, Archived: ${rc3006wh.archived}`);
+          } else {
+            console.log('RC3006-WH: ❌ NOT FOUND');
+          }
+          console.log('All RC3006-* items found:', allRC3006Items.map((item: any) => item.sku).join(', ') || 'none');
+          console.log('═══════════════════════════════════════════');
+        }
 
         // No fallback needed - we're using select('*') directly, no JOINs
 
         if (queryError) {
           if (import.meta.env.DEV) {
-            console.error('Error fetching CatalogItems:', queryError);
+            console.error('Error fetching CatalogItems:', queryError?.message || String(queryError));
           }
           throw queryError;
-        }
-
-        // Map and enrich items - ensure item_name, sku, uom, and sale price are correctly mapped
-        const enrichedItems: CatalogItem[] = (data || []).map((item: any) => {
-          // Calculate sale price (PRECIO UN Venta):
-          // Priority: msrp > (cost_exw * (1 + default_margin_pct/100)) > cost_exw * 1.5 (default 50% margin)
-          let salePrice = 0;
-          if (item.msrp) {
-            salePrice = item.msrp;
-          } else if (item.cost_exw && item.default_margin_pct) {
-            salePrice = item.cost_exw * (1 + item.default_margin_pct / 100);
-          } else if (item.cost_exw) {
-            salePrice = item.cost_exw * 1.5; // Default 50% margin if no margin specified
-          }
-          
-          // Map to CatalogItem interface
-          // IMPORTANT: Ensure name is never null or empty
-          const itemName = item.item_name || item.sku || `Item-${item.id.substring(0, 8)}`;
-          
-          const catalogItem: CatalogItem = {
-            id: item.id,
-            organization_id: item.organization_id,
-            sku: item.sku || '',
-            name: itemName, // Map item_name to name for compatibility
-            item_name: item.item_name || null, // Keep original item_name
-            description: item.description || null,
-            manufacturer_id: item.manufacturer_id || null,
-            item_category_id: item.item_category_id || null,
-            item_type: item.item_type || 'accessory',
-            measure_basis: item.measure_basis || 'unit',
-            uom: item.uom || 'unit', // UOM from database
-            is_fabric: item.is_fabric || false,
-            roll_width_m: item.roll_width_m || null,
-            fabric_pricing_mode: item.fabric_pricing_mode || null,
-            cost_exw: item.cost_exw || null,
-            default_margin_pct: item.default_margin_pct || null,
-            msrp: item.msrp || null,
-            // Legacy pricing fields (mapped for backward compatibility)
-            cost_price: item.cost_exw || 0,
-            unit_price: salePrice, // PRECIO UN Venta (Sale Price)
-            active: item.active !== undefined ? item.active : true,
-            discontinued: item.discontinued || false,
-            collection_id: item.collection_id || null,
-            collection_name: item.collection_name || null,
-            variant_id: item.variant_id || null,
-            variant_name: item.variant_name || null,
-            deleted: item.deleted || false,
-            archived: item.archived || false,
-            created_at: item.created_at || new Date().toISOString(),
-            updated_at: item.updated_at || null,
-            image_url: item.image_url || null,
-            metadata: item.metadata || {},
-            created_by: item.created_by || null,
-            updated_by: item.updated_by || null,
-          };
-          
-          return catalogItem;
-        });
-
-        if (isMounted) {
-          setItems(enrichedItems);
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading catalog items';
         if (import.meta.env.DEV) {
-          console.error('Error fetching CatalogItems:', err);
+          console.error('Error fetching CatalogItems:', errorMessage);
         }
         if (isMounted) {
           setError(errorMessage);
@@ -391,9 +343,9 @@ export function useCatalogItems(family?: string, productTypeId?: string) {
     return () => {
       isMounted = false; // Cleanup: prevent state updates after unmount
     };
-  }, [activeOrganizationId, refreshTrigger, family, productTypeId]);
+  }, [activeOrganizationId, refreshTrigger, family, optProductTypeId, role, categoryId, isRoll]);
 
-  return { items, loading, error, refetch };
+  return { items, loading, loadingMore, error, refetch };
 }
 
 export function useCreateCatalogItem() {
@@ -428,19 +380,61 @@ export function useCreateCatalogItem() {
 
 export function useUpdateCatalogItem() {
   const [isUpdating, setIsUpdating] = useState(false);
+  const { activeOrganizationId } = useOrganizationContext();
 
   const updateItem = async (id: string, itemData: Partial<CatalogItem>) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+    
+    if (import.meta.env.DEV) {
+      console.log('🔄 useUpdateCatalogItem called with:', {
+        id,
+        organization_id: activeOrganizationId,
+        itemData,
+      });
+    }
+    
     setIsUpdating(true);
     try {
+      // IMPORTANT:
+      // - Always scope writes by organization_id (multi-tenant safety + common RLS requirement)
+      // - Do NOT rely on `.select().single()` for updates (RLS can allow update but block returning rows)
       const { data, error } = await supabase
         .from('CatalogItems')
         .update(itemData)
         .eq('id', id)
-        .select()
-        .single();
+        .eq('organization_id', activeOrganizationId);
 
-      if (error) throw error;
-      return data;
+      if (error) {
+        console.error('❌ Supabase update error:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+        throw error;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log('✅ Update successful, affected rows:', data);
+      }
+
+      // Best-effort refetch (do not fail the save if this select is blocked)
+      try {
+        const { data: refetchedData } = await supabase
+          .from('CatalogItems')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+        return refetchedData;
+      } catch (refetchErr) {
+        if (import.meta.env.DEV) {
+          console.warn('⚠️ Refetch failed (non-blocking):', refetchErr);
+        }
+        return null;
+      }
     } finally {
       setIsUpdating(false);
     }
@@ -451,19 +445,35 @@ export function useUpdateCatalogItem() {
 
 export function useDeleteCatalogItem() {
   const [isDeleting, setIsDeleting] = useState(false);
+  const { activeOrganizationId } = useOrganizationContext();
 
   const deleteItem = async (id: string) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
     setIsDeleting(true);
     try {
-      const { data, error } = await supabase
+      // Same considerations as updateItem: scope by org + don't depend on returned rows
+      const { error } = await supabase
         .from('CatalogItems')
         .update({ deleted: true })
         .eq('id', id)
-        .select()
-        .single();
+        .eq('organization_id', activeOrganizationId);
 
       if (error) throw error;
-      return data;
+
+      // Best-effort refetch
+      try {
+        const { data } = await supabase
+          .from('CatalogItems')
+          .select('*')
+          .eq('id', id)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+        return data;
+      } catch {
+        return null;
+      }
     } finally {
       setIsDeleting(false);
     }
@@ -503,8 +513,7 @@ export function useCatalogItemById(itemId: string | null | undefined) {
           .select('*')
           .eq('id', itemId)
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .eq('archived', false)
+          .eq('is_active', true)
           .maybeSingle();
 
         if (queryError) {
@@ -549,6 +558,20 @@ export interface CatalogCollection {
   archived: boolean;
   created_at: string;
   updated_at?: string | null;
+  /** Manufacturer IDs of items in this collection (for filtering by manufacturer) */
+  manufacturer_ids?: string[];
+}
+
+// Helper to format Supabase errors
+function formatSupabaseError(e: any): string {
+  if (!e) return "";
+  if (typeof e === "string") return e;
+  return (
+    e?.message ??
+    e?.error_description ??
+    e?.hint ??
+    JSON.stringify(e, null, 2)
+  );
 }
 
 export function useCatalogCollections(family?: string, productTypeId?: string) {
@@ -563,7 +586,7 @@ export function useCatalogCollections(family?: string, productTypeId?: string) {
   };
 
   useEffect(() => {
-    let isMounted = true; // Flag to prevent state updates if component unmounts
+    let isMounted = true;
 
     async function fetchCollections() {
       if (!activeOrganizationId) {
@@ -591,195 +614,140 @@ export function useCatalogCollections(family?: string, productTypeId?: string) {
         }
 
         if (import.meta.env.DEV) {
-          console.log('🔍 useCatalogCollections - Starting fetch:', {
-            activeOrganizationId,
-            productTypeId,
-            family,
-            hasProductTypeId: !!productTypeId,
-            hasFamily: !!family,
-          });
+          console.log('🔍 useCatalogCollections - Fetching roll items (is_roll=true)');
         }
 
-        let collectionsData: CatalogCollection[] = [];
-
-        // Skip trying CatalogCollections/Collections tables - they may not exist
-        // Go directly to extracting collections from CatalogItems
-        {
-          // Extract collections from CatalogItems
-          if (import.meta.env.DEV) {
-            console.log('📦 No collections found in tables, extracting from CatalogItems...', family ? `(filtered by family: ${family})` : '');
-          }
-
-          // First, let's check what family values exist in the database (for debugging)
-          if (import.meta.env.DEV && family) {
-            const { data: allFamilies } = await supabase
-              .from('CatalogItems')
-              .select('family')
-              .eq('organization_id', activeOrganizationId)
-              .eq('deleted', false)
-              .not('family', 'is', null);
-            
-            const uniqueFamilies = [...new Set((allFamilies || []).map((item: any) => item.family))];
-            console.log('🔍 Available family values in CatalogItems:', uniqueFamilies);
-            console.log('🔍 Looking for family:', family);
-            console.log('🔍 Exact match?', uniqueFamilies.includes(family));
-          }
-
-          let itemsQuery = supabase
+        // Query CatalogItems for roll items only (is_roll=true) WITH PAGINATION
+        // Collections are derived from collection_name grouping
+        // Supabase has a default limit of 1000 rows, so we need to paginate
+        let allRollItems: any[] = [];
+        let currentPage = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        let queryError: any = null;
+        
+        console.log('🔍 Loading roll items with pagination...');
+        
+        while (hasMore) {
+          const from = currentPage * pageSize;
+          const to = from + pageSize - 1;
+          
+          const { data: pageData, error: pageError } = await supabase
             .from('CatalogItems')
-            .select('collection_name, manufacturer_id, family')
+            .select(`
+              id,
+              organization_id,
+              manufacturer_id,
+              manufacturer,
+              collection_name,
+              variant_name,
+              sku,
+              roll_width,
+              cost_exw,
+              unit_of_measure,
+              measure_basis,
+              image_url
+            `)
             .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false)
-            .not('collection_name', 'is', null);
-
-          // Filter by productTypeId (preferred) or family (fallback)
-          // Validate productTypeId is a valid UUID before querying
-          const isValidUUID = (str: string | undefined): boolean => {
-            if (!str) return false;
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            return uuidRegex.test(str);
-          };
+            .eq('is_roll', true)
+            .not('collection_name', 'is', null)
+            .not('variant_name', 'is', null)
+            .not('sku', 'is', null)
+            .order('collection_name', { ascending: true })
+            .order('variant_name', { ascending: true })
+            .range(from, to);
           
-          if (productTypeId && isValidUUID(productTypeId)) {
-            try {
-              // First, get item IDs from CatalogItemProductTypes relation
-              const { data: relatedItems, error: relationError } = await supabase
-                .from('CatalogItemProductTypes')
-                .select('catalog_item_id')
-                .eq('product_type_id', productTypeId)
-                .eq('organization_id', activeOrganizationId)
-                .eq('deleted', false);
-              
-              if (relationError) {
-                if (import.meta.env.DEV) {
-                  console.error('Error fetching CatalogItemProductTypes:', relationError);
-                }
-                // Fallback to family if relation table doesn't exist
-                if (family) {
-                  itemsQuery = itemsQuery.eq('family', family);
-                } else {
-                  itemsQuery = itemsQuery.eq('id', '00000000-0000-0000-0000-000000000000');
-                }
-              } else if (relatedItems && relatedItems.length > 0) {
-                const itemIds = relatedItems.map(r => r.catalog_item_id).filter(id => id); // Filter out null/undefined
-                
-                // Only use .in() if we have valid IDs
-                if (itemIds.length > 0) {
-                  itemsQuery = itemsQuery.in('id', itemIds);
-                  
-                  if (import.meta.env.DEV) {
-                    console.log('🔍 Filtering CatalogItems by productTypeId:', productTypeId, `(${itemIds.length} items)`);
-                  }
-                } else {
-                  // No valid IDs, return empty result
-                  itemsQuery = itemsQuery.eq('id', '00000000-0000-0000-0000-000000000000');
-                }
-              } else {
-                // No items found, try fallback to family
-                if (family) {
-                  itemsQuery = itemsQuery.eq('family', family);
-                } else {
-                  itemsQuery = itemsQuery.eq('id', '00000000-0000-0000-0000-000000000000');
-                }
-              }
-            } catch (err) {
-              // Catch any unexpected errors and fallback to family
-              if (import.meta.env.DEV) {
-                console.error('❌ Unexpected error in CatalogItemProductTypes query (fallback):', err);
-              }
-              if (family) {
-                itemsQuery = itemsQuery.eq('family', family);
-              } else {
-                itemsQuery = itemsQuery.eq('id', '00000000-0000-0000-0000-000000000000');
-              }
-            }
-          } else if (family) {
-            itemsQuery = itemsQuery.eq('family', family);
+          if (pageError) {
+            console.error(`❌ Error loading roll items page ${currentPage + 1}:`, pageError);
+            queryError = pageError;
+            hasMore = false;
+            break;
+          }
+          
+          if (pageData && pageData.length > 0) {
+            allRollItems = [...allRollItems, ...pageData];
+            console.log(`✅ Loaded roll items page ${currentPage + 1}: ${pageData.length} items (Total: ${allRollItems.length})`);
             
-            if (import.meta.env.DEV) {
-              console.log('🔍 Filtering CatalogItems by family (fallback):', family);
-              if (productTypeId && !isValidUUID(productTypeId)) {
-                console.warn('⚠️ Invalid productTypeId format:', productTypeId);
-              }
+            if (pageData.length < pageSize) {
+              hasMore = false;
+            } else {
+              currentPage++;
             }
+          } else {
+            hasMore = false;
           }
+        }
+        
+        const data = allRollItems;
 
-          const { data: itemsData, error: itemsError } = await itemsQuery;
-          
-          if (import.meta.env.DEV) {
-            console.log('📊 CatalogItems query result:', {
-              family: family || 'none (all families)',
-              itemsFound: itemsData?.length || 0,
-              sampleItems: itemsData?.slice(0, 5).map((item: any) => ({
-                collection_name: item.collection_name,
-                family: item.family,
-              })),
-            });
-            
-            if (family && (!itemsData || itemsData.length === 0)) {
-              console.warn('⚠️ No items found with family:', family);
-              console.warn('💡 Tip: Check if family values in database match the expected format');
-            }
+        if (queryError) {
+          console.error('❌ Collections fetch error:', queryError);
+          if (isMounted) {
+            setError(formatSupabaseError(queryError));
           }
+          return;
+        }
 
-          if (itemsError) {
-            throw itemsError;
-          }
+        console.log(`✅ Finished loading all roll items: ${data.length} total across ${currentPage + 1} page(s)`);
 
-          // Extract unique collection names
-          const uniqueCollections = new Map<string, { name: string; manufacturer_id?: string }>();
-          
-          (itemsData || []).forEach((item: any) => {
-            const collectionName = item.collection_name ? String(item.collection_name).trim() : '';
-            if (collectionName && !uniqueCollections.has(collectionName)) {
+        // Group by collection_name; accumulate manufacturer_ids for filtering
+        const uniqueCollections = new Map<string, { name: string; manufacturerIds: Set<string>; itemCount: number }>();
+        
+        (data || []).forEach((item: any) => {
+          const collectionName = item.collection_name ? String(item.collection_name).trim() : '';
+          if (collectionName) {
+            if (!uniqueCollections.has(collectionName)) {
+              const manIds = new Set<string>();
+              if (item.manufacturer_id) manIds.add(item.manufacturer_id);
               uniqueCollections.set(collectionName, {
                 name: collectionName,
-                manufacturer_id: item.manufacturer_id,
+                manufacturerIds: manIds,
+                itemCount: 1,
               });
+            } else {
+              const existing = uniqueCollections.get(collectionName)!;
+              if (item.manufacturer_id) existing.manufacturerIds.add(item.manufacturer_id);
+              existing.itemCount++;
             }
-          });
-
-          // Convert to CatalogCollection format
-          collectionsData = Array.from(uniqueCollections.entries()).map(([name, data], index) => ({
-            id: `collection-${name.toLowerCase().replace(/\s+/g, '-')}`, // Generate ID from name
-            organization_id: activeOrganizationId,
-            name: name,
-            code: name.substring(0, 3).toUpperCase(),
-            description: null,
-            active: true,
-            sort_order: index,
-            deleted: false,
-            archived: false,
-            created_at: new Date().toISOString(),
-            updated_at: null,
-          }));
-
-          if (import.meta.env.DEV) {
-            console.log(`✅ Extracted ${collectionsData.length} collections from CatalogItems:`, collectionsData.map(c => c.name));
           }
+        });
+
+        // Convert to CatalogCollection format
+        const collectionsData: CatalogCollection[] = Array.from(uniqueCollections.entries()).map(([name, collData], index) => ({
+          id: `collection-${name.toLowerCase().replace(/\s+/g, '-')}`,
+          organization_id: activeOrganizationId,
+          name: name,
+          code: name.substring(0, 3).toUpperCase(),
+          description: `${collData.itemCount} variants`,
+          active: true,
+          sort_order: index,
+          deleted: false,
+          archived: false,
+          created_at: new Date().toISOString(),
+          updated_at: null,
+          manufacturer_ids: Array.from(collData.manufacturerIds),
+        }));
+
+        if (import.meta.env.DEV) {
+          console.log(`✅ Extracted ${collectionsData.length} collections from roll items`);
         }
 
-        // Sort manually if sort_order exists, otherwise sort by name
-        // Use spread operator to avoid mutating the original array
-        const sortedData = [...collectionsData].sort((a, b) => {
-          if (a.sort_order !== undefined && b.sort_order !== undefined) {
-            if (a.sort_order !== b.sort_order) {
-              return (a.sort_order || 999) - (b.sort_order || 999);
-            }
-          }
-          return (a.name || '').localeCompare(b.name || '');
-        });
+        // Sort by name
+        const sortedData = [...collectionsData].sort((a, b) => 
+          (a.name || '').localeCompare(b.name || '')
+        );
 
         if (isMounted) {
           setCollections(sortedData);
         }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading collections';
+        const errorMessage = formatSupabaseError(err);
         if (import.meta.env.DEV) {
-          console.error('Error fetching CatalogCollections:', err);
+          console.error('❌ Error fetching Collections:', errorMessage);
+          console.error('Full error:', err);
         }
         if (isMounted) {
-          setError(errorMessage);
+          setError(errorMessage || 'Error loading collections');
         }
       } finally {
         if (isMounted) {
@@ -1147,10 +1115,9 @@ export function useOperatingDrives() {
             .from('CatalogItems')
             .select('*')
             .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false)
-            .eq('active', true)
-            .in('item_type', ['component', 'accessory'])
-            .order('item_name', { ascending: true })
+            .eq('is_active', true)
+            .eq('is_fabric', false) // Operating drives are components, not fabrics
+            .order('name', { ascending: true })
             .range(driveFrom, driveTo);
           
           if (pageError) {
@@ -1261,17 +1228,24 @@ export function useItemCategories() {
         setLoading(true);
         setError(null);
 
+        // ✅ FIX: Use CatalogCategories (real table) instead of ItemCategories
         const { data, error: queryError } = await supabase
-          .from('ItemCategories')
+          .from('CatalogCategories')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
           .order('sort_order', { ascending: true })
           .order('name', { ascending: true });
 
         if (queryError) {
           if (import.meta.env.DEV) {
-            console.error('Error fetching ItemCategories:', queryError);
+            // ✅ FIX: Formatear error para evitar "[circular]"
+            const errorDetails = { 
+              message: queryError.message, 
+              code: queryError.code, 
+              details: queryError.details,
+              hint: queryError.hint 
+            };
+            console.error('Error fetching CatalogCategories:', errorDetails);
           }
           throw queryError;
         }
@@ -1280,7 +1254,13 @@ export function useItemCategories() {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading categories';
         if (import.meta.env.DEV) {
-          console.error('Error fetching ItemCategories:', err);
+          // ✅ FIX: Formatear error para evitar "[circular]"
+          const errorDetails = err instanceof Error 
+            ? { message: err.message, name: err.name, stack: err.stack }
+            : typeof err === 'object' && err !== null
+            ? { message: (err as any).message || String(err), code: (err as any).code, details: (err as any).details }
+            : String(err);
+          console.error('Error fetching CatalogCategories:', errorDetails);
         }
         setError(errorMessage);
       } finally {
@@ -1303,9 +1283,23 @@ export function useLeafItemCategories() {
   return { categories: leafCategories, loading, error };
 }
 
-// Hook para CRUD de ItemCategories
+// Hook para CRUD de CatalogCategories (UPDATED to use real table)
+export interface CatalogCategoryCRUD {
+  id: string;
+  organization_id: string;
+  name: string;
+  code?: string | null;
+  parent_id?: string | null; // DB uses parent_id (not parent_category_id)
+  sort_order: number;
+  is_group: boolean; // true = parent group (not selectable for SKUs), false = leaf (selectable)
+  deleted: boolean;
+  archived: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export function useItemCategoriesCRUD() {
-  const [categories, setCategories] = useState<ItemCategory[]>([]);
+  const [categories, setCategories] = useState<CatalogCategoryCRUD[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -1326,26 +1320,32 @@ export function useItemCategoriesCRUD() {
         setLoading(true);
         setError(null);
 
+        // CatalogCategories table does NOT have deleted/archived columns
+        // Query without those filters
         const { data, error: queryError } = await supabase
-          .from('ItemCategories')
+          .from('CatalogCategories')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
           .order('sort_order', { ascending: true })
           .order('name', { ascending: true });
 
         if (queryError) {
           if (import.meta.env.DEV) {
-            console.error('Error fetching ItemCategories:', queryError);
+            console.error('❌ Error fetching CatalogCategories:', queryError.message);
+            console.error('Full error:', queryError);
           }
           throw queryError;
+        }
+
+        if (import.meta.env.DEV) {
+          console.log('✅ CatalogCategories loaded:', data?.length || 0, 'categories');
         }
 
         setCategories(data || []);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading categories';
         if (import.meta.env.DEV) {
-          console.error('Error fetching ItemCategories:', err);
+          console.error('❌ Error in useItemCategoriesCRUD:', errorMessage);
         }
         setError(errorMessage);
       } finally {
@@ -1356,7 +1356,7 @@ export function useItemCategoriesCRUD() {
     fetchCategories();
   }, [activeOrganizationId]);
 
-  const createCategory = async (categoryData: Omit<ItemCategory, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>) => {
+  const createCategory = async (categoryData: Omit<CatalogCategoryCRUD, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>) => {
     if (!activeOrganizationId) {
       throw new Error('No organization selected');
     }
@@ -1364,10 +1364,12 @@ export function useItemCategoriesCRUD() {
     setIsCreating(true);
     try {
       const { data, error } = await supabase
-        .from('ItemCategories')
+        .from('CatalogCategories') // UPDATED: Use CatalogCategories
         .insert({
           ...categoryData,
           organization_id: activeOrganizationId,
+          deleted: false,
+          archived: false,
         })
         .select()
         .single();
@@ -1382,11 +1384,11 @@ export function useItemCategoriesCRUD() {
     }
   };
 
-  const updateCategory = async (id: string, categoryData: Partial<ItemCategory>) => {
+  const updateCategory = async (id: string, categoryData: Partial<CatalogCategoryCRUD>) => {
     setIsUpdating(true);
     try {
       const { data, error } = await supabase
-        .from('ItemCategories')
+        .from('CatalogCategories') // UPDATED: Use CatalogCategories
         .update({
           ...categoryData,
           updated_at: new Date().toISOString(),
@@ -1409,7 +1411,7 @@ export function useItemCategoriesCRUD() {
     setIsDeleting(true);
     try {
       const { error } = await supabase
-        .from('ItemCategories')
+        .from('CatalogCategories') // UPDATED: Use CatalogCategories
         .update({ deleted: true })
         .eq('id', id);
 
@@ -1433,6 +1435,149 @@ export function useItemCategoriesCRUD() {
     isUpdating,
     isDeleting,
   };
+}
+
+// Hook para cargar CatalogCategories (category tree using parent_id)
+export interface CatalogCategory {
+  id: string;
+  organization_id: string;
+  name: string;
+  code?: string | null;
+  parent_id?: string | null;
+  sort_order?: number | null;
+  is_group?: boolean; // true = parent group (not selectable), false = leaf (selectable)
+  deleted?: boolean; // Optional - table may not have this column
+  archived?: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export function useCatalogCategories() {
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { activeOrganizationId } = useOrganizationContext();
+
+  useEffect(() => {
+    async function fetchCategories() {
+      if (!activeOrganizationId) {
+        setLoading(false);
+        setCategories([]);
+        setError(null);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        // CatalogCategories table does NOT have deleted/archived columns
+        const { data, error: queryError } = await supabase
+          .from('CatalogCategories')
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
+          .order('sort_order', { ascending: true, nullsFirst: false })
+          .order('name', { ascending: true });
+        let categoriesData = data;
+        let categoriesError = queryError;
+
+        // If CatalogCategories doesn't exist, fall back to ItemCategories
+        if (categoriesError && (categoriesError.code === '42P01' || categoriesError.message?.includes('does not exist'))) {
+          if (import.meta.env.DEV) {
+            console.log('CatalogCategories table not found, using ItemCategories as fallback');
+          }
+          const { data: itemCategories, error: itemCatError } = await supabase
+            .from('ItemCategories')
+            .select('*')
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .order('sort_order', { ascending: true })
+            .order('name', { ascending: true });
+
+          if (itemCatError) throw itemCatError;
+          
+          // Map ItemCategories to CatalogCategories format
+          categoriesData = (itemCategories || []).map((cat: any) => ({
+            id: cat.id,
+            organization_id: cat.organization_id,
+            name: cat.name,
+            parent_id: cat.parent_category_id || cat.parent_id || null,
+            sort_order: cat.sort_order || null,
+            deleted: cat.deleted || false, // Default to false if not present
+            created_at: cat.created_at,
+            updated_at: cat.updated_at || null,
+          }));
+          categoriesError = null;
+        }
+
+        if (categoriesError) throw categoriesError;
+        
+        setCategories(categoriesData || []);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Error loading categories';
+        if (import.meta.env.DEV) {
+          console.error('Error fetching CatalogCategories:', err);
+        }
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchCategories();
+  }, [activeOrganizationId]);
+
+  // Helper function to build category tree
+  const buildCategoryTree = useCallback((categories: CatalogCategory[]): Array<CatalogCategory & { level: number; path: string }> => {
+    const tree: Array<CatalogCategory & { level: number; path: string }> = [];
+    const categoryMap = new Map<string, CatalogCategory>(categories.map(cat => [cat.id, cat]));
+    
+    const buildPath = (category: CatalogCategory): string => {
+      const path: string[] = [category.name];
+      let current = category;
+      while (current.parent_id) {
+        const parent = categoryMap.get(current.parent_id);
+        if (!parent) break;
+        path.unshift(parent.name);
+        current = parent;
+      }
+      return path.join(' > ');
+    };
+
+    const getLevel = (category: CatalogCategory): number => {
+      let level = 0;
+      let current = category;
+      while (current.parent_id) {
+        const parent = categoryMap.get(current.parent_id);
+        if (!parent) break;
+        level++;
+        current = parent;
+      }
+      return level;
+    };
+
+    categories.forEach(cat => {
+      tree.push({
+        ...cat,
+        level: getLevel(cat),
+        path: buildPath(cat),
+      });
+    });
+
+    return tree.sort((a, b) => {
+      if (a.level !== b.level) return a.level - b.level;
+      return a.path.localeCompare(b.path);
+    });
+  }, []);
+
+  const categoryTree = buildCategoryTree(categories);
+  
+  // Helper: get only leaf categories (is_group=false) for CatalogItems selection
+  const leafCategories = useMemo(() => {
+    return categoryTree.filter(cat => !cat.is_group);
+  }, [categoryTree]);
+
+  return { categories, categoryTree, leafCategories, loading, error };
 }
 
 // Hook para CRUD de Manufacturers

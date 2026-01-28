@@ -1,38 +1,40 @@
-import React, { useState } from 'react';
-import { Eye, EyeOff, Mail, Lock, ArrowRight, Phone, Box } from 'lucide-react';
-import { supabase, getUserProfile } from '../../lib/supabase/client';
-import { useAuthStore } from '../../stores/auth-store';
-import { router } from '../../lib/router';
+import React, { useState } from "react";
+import { Eye, EyeOff, Mail, Lock, ArrowRight, Box } from "lucide-react";
+import { supabase, getUserProfile } from "../../lib/supabase/client";
+import { useAuthStore } from "../../stores/auth-store";
+import { router } from "../../lib/router";
 
-// Microsoft and Google SVG Icons
-const MicrosoftIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-    <rect x="1" y="1" width="8" height="8" fill="#F25022"/>
-    <rect x="11" y="1" width="8" height="8" fill="#7FBA00"/>
-    <rect x="1" y="11" width="8" height="8" fill="#00A4EF"/>
-    <rect x="11" y="11" width="8" height="8" fill="#FFB900"/>
-  </svg>
-);
 
-const GoogleIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-    <path d="M19.6 10.23c0-.82-.1-1.42-.25-2.05H10v3.72h5.5c-.15.96-.74 2.38-2.13 3.34v2.66h3.44c2.01-1.85 3.19-4.58 3.19-7.67z" fill="#4285F4"/>
-    <path d="M10 20c2.7 0 4.96-.89 6.61-2.4l-3.44-2.66c-.9.6-2.06 1.03-3.17 1.03-2.44 0-4.5-1.64-5.24-3.85H1.3v2.75A9.99 9.99 0 0010 20z" fill="#34A853"/>
-    <path d="M4.76 11.12c-.18-.6-.28-1.24-.28-1.9s.1-1.3.28-1.9V4.57H1.3A9.99 9.99 0 000 10c0 1.61.39 3.14 1.3 4.43l3.46-2.31z" fill="#FBBC05"/>
-    <path d="M10 3.98c1.35 0 2.56.46 3.51 1.36l2.64-2.64C14.96.89 12.7 0 10 0 6.09 0 2.72 2.25 1.3 5.57l3.46 2.75c.74-2.21 2.8-3.85 5.24-3.85z" fill="#EA4335"/>
-  </svg>
-);
+function safeNext(raw: string | null) {
+  if (!raw) return "/dashboard";
+  try {
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      const u = new URL(raw);
+      return u.pathname + u.search + u.hash;
+    }
+  } catch {}
+  if (!raw.startsWith("/")) return "/dashboard";
+  return raw;
+}
 
 export default function Login() {
-  const { setAuth, setError, setLoading } = useAuthStore();
-  const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [password, setPassword] = useState('');
+  const { setAuth, setError } = useAuthStore();
+
+  const [emailOrPhone, setEmailOrPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [sendingMagicLink, setSendingMagicLink] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [sendingOtp, setSendingOtp] = useState(false);
+
+  const params = new URLSearchParams(window.location.search);
+  const reason = params.get("reason");
+  const showInviteMismatch = reason === "invite_mismatch";
+
+  const next = safeNext(params.get("next"));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,75 +43,72 @@ export default function Login() {
     setError(null);
     
     try {
-      // Check if Supabase is configured
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
-      console.log('Environment variables check:', {
-        url: supabaseUrl,
-        urlLength: supabaseUrl?.length,
-        hasKey: !!supabaseAnonKey,
-        keyLength: supabaseAnonKey?.length,
-        keyStart: supabaseAnonKey?.substring(0, 20)
-      });
-      
-      if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
+      if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes("placeholder")) {
         setLoginError(
-          'Supabase no está configurado. Por favor, configura las variables de entorno VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en un archivo .env.local y REINICIA el servidor de desarrollo.'
+          "Supabase no está configurado. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.local y REINICIA Vite."
         );
-        setIsLoading(false);
         return;
       }
 
-      // Sign in with Supabase
-      console.log('Attempting to sign in with Supabase...', {
-        url: supabaseUrl,
-        hasKey: !!supabaseAnonKey,
-        email: emailOrPhone
-      });
+      const email = emailOrPhone.trim().toLowerCase();
       
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: emailOrPhone, // Supabase uses email, not phone
-        password: password,
+        email,
+        password,
       });
 
-      console.log('Supabase sign in response:', { data, error });
-
-      if (error) {
-        console.error('Supabase auth error:', error);
-        
-        // Handle rate limiting specifically
-        if (error.message?.includes('For security purposes') || error.message?.includes('429')) {
-          const waitTimeMatch = error.message.match(/(\d+) seconds?/);
-          const waitTime = waitTimeMatch ? waitTimeMatch[1] : '17';
-          throw new Error(`Too many login attempts. Please wait ${waitTime} seconds before trying again.`);
-        }
-        
-        throw error;
-      }
+      if (error) throw error;
 
       if (data.user && data.session) {
-        // Set basic user immediately for fast navigation
         setAuth(
           {
             id: data.user.id,
-            email: data.user.email || '',
-            name: data.user.user_metadata?.name || data.user.email || '',
-            role: 'user',
+            email: data.user.email || "",
+            name: data.user.user_metadata?.name || data.user.email || "",
+            role: "user",
           },
           data.session.access_token
         );
 
-        // Navigate immediately
-        router.navigate('/dashboard', true);
+        // ✅ Check if user must change password (temp password flow)
+        const { data: orgCheck } = await supabase
+          .from('OrganizationUsers')
+          .select('must_change_password')
+          .eq('user_id', data.user.id)
+          .eq('deleted', false)
+          .maybeSingle();
 
-        // Background enrich profile (no await)
+        const { data: portalCheck } = await supabase
+          .from('CompanyPortalUsers')
+          .select('must_change_password')
+          .eq('user_id', data.user.id)
+          .eq('deleted', false)
+          .maybeSingle();
+
+        if (orgCheck?.must_change_password || portalCheck?.must_change_password) {
+          console.log('[Login] User must change password, redirecting to /set-password');
+          router.navigate('/set-password', true);
+          return;
+        }
+
+        const pendingInvite = sessionStorage.getItem("pending_invite_url");
+        if (pendingInvite) {
+          sessionStorage.removeItem("pending_invite_url");
+          window.location.href = pendingInvite;
+          return;
+        }
+
+        router.navigate(next, true);
+
         getUserProfile(data.user.id)
           .then((profile) => {
             if (!profile) return;
             useAuthStore.getState().updateUser({
-              name: profile.name || data.user?.email || '',
-              role: (profile.role as 'user' | 'admin') || 'user',
+              name: profile.name || data.user?.email || "",
+              role: (profile.role as "user" | "admin") || "user",
               department: profile.department,
               position: profile.position,
             });
@@ -117,153 +116,169 @@ export default function Login() {
           .catch(() => {});
       }
     } catch (error: any) {
-      let errorMessage = 'Failed to sign in';
-      
-      console.error('Login error:', error);
-      
-      if (error?.message) {
-        // Check for rate limiting errors
-        if (error.message.includes('Too many login attempts') || 
-            error.message.includes('For security purposes') ||
-            error.message.includes('429')) {
-          errorMessage = error.message;
-        } else {
-          errorMessage = error.message;
-        }
-      } else if (error?.toString().includes('Failed to fetch') || error?.toString().includes('NetworkError')) {
-        errorMessage = 'No se pudo conectar con Supabase. Verifica:\n1. Que tu proyecto de Supabase esté activo\n2. Que las credenciales en .env.local sean correctas\n3. Que no haya problemas de red o CORS';
-      } else if (error?.code === 'PGRST301' || error?.message?.includes('JWT')) {
-        errorMessage = 'Error de autenticación con Supabase. Verifica que tu anon key sea correcta.';
-      } else if (error?.code === 'invalid_credentials' || error?.message?.includes('Invalid login')) {
-        errorMessage = 'Email o contraseña incorrectos.';
-      } else if (error?.status === 429 || error?.code === '429') {
-        errorMessage = 'Too many login attempts. Please wait a few seconds before trying again.';
-      }
-      
-      setLoginError(errorMessage);
-      setError(errorMessage);
+      const msg =
+        error?.message ||
+        (error?.toString?.().includes("Failed to fetch")
+          ? "No se pudo conectar con Supabase (red/CORS/proyecto dormido)."
+          : "Failed to sign in");
+
+      setLoginError(msg);
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSendMagicLink = async () => {
+  const handleSendOtp = async () => {
     if (!emailOrPhone) {
-      setLoginError('Please enter your email address');
+      setLoginError("Please enter your email address");
       return;
     }
 
-    // Basic email validation
+    const email = emailOrPhone.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(emailOrPhone)) {
-      setLoginError('Please enter a valid email address');
+    if (!emailRegex.test(email)) {
+      setLoginError("Please enter a valid email address");
       return;
     }
 
-    setSendingMagicLink(true);
+    setSendingOtp(true);
     setLoginError(null);
     setError(null);
 
     try {
+      // ✅ OTP sin emailRedirectTo (envía código, no magic link)
       const { error } = await supabase.auth.signInWithOtp({
-        email: emailOrPhone,
+        email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          shouldCreateUser: true,
+          // NO incluir emailRedirectTo - esto envía OTP numérico
         },
       });
 
-      if (error) {
-        console.error('Magic link error:', error);
-        setLoginError(error.message || 'Failed to send magic link');
-        return;
-      }
-
-      setMagicLinkSent(true);
+      if (error) throw error;
+      setOtpSent(true);
     } catch (error: any) {
-      console.error('Magic link error:', error);
-      setLoginError(error.message || 'Failed to send magic link');
+      setLoginError(error?.message || "Failed to send OTP code");
     } finally {
-      setSendingMagicLink(false);
+      setSendingOtp(false);
     }
   };
 
-  const handleO365Login = async () => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-      setLoginError('Supabase no está configurado. Por favor, configura las variables de entorno.');
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode || otpCode.length !== 6) {
+      setLoginError("Please enter the 6-digit code");
       return;
     }
 
+    setIsLoading(true);
+    setLoginError(null);
+    setError(null);
+
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'azure',
-        options: {
-          redirectTo: `${window.location.origin}/dashboard`,
-        },
+      const email = emailOrPhone.trim().toLowerCase();
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token: otpCode,
+        type: 'email',
       });
       
       if (error) throw error;
-    } catch (error: any) {
-      setLoginError(error.message || 'Failed to sign in with Microsoft');
-    }
-  };
 
-  const handleGoogleLogin = async () => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (data.user && data.session) {
+        setAuth(
+          {
+            id: data.user.id,
+            email: data.user.email || "",
+            name: data.user.user_metadata?.name || data.user.email || "",
+            role: "user",
+          },
+          data.session.access_token
+        );
+
+        // ✅ Check if user must change password (temp password flow)
+        const { data: orgCheck } = await supabase
+          .from('OrganizationUsers')
+          .select('must_change_password')
+          .eq('user_id', data.user.id)
+          .eq('deleted', false)
+          .maybeSingle();
+
+        const { data: portalCheck } = await supabase
+          .from('CompanyPortalUsers')
+          .select('must_change_password')
+          .eq('user_id', data.user.id)
+          .eq('deleted', false)
+          .maybeSingle();
     
-    if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
-      setLoginError('Supabase no está configurado. Por favor, configura las variables de entorno.');
+        if (orgCheck?.must_change_password || portalCheck?.must_change_password) {
+          console.log('[Login] User must change password, redirecting to /set-password');
+          router.navigate('/set-password', true);
+          return;
+        }
+
+        const pendingInvite = sessionStorage.getItem("pending_invite_url");
+        if (pendingInvite) {
+          sessionStorage.removeItem("pending_invite_url");
+          window.location.href = pendingInvite;
       return;
     }
 
-    try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/dashboard`,
-        },
-      });
-      
-      if (error) throw error;
+        router.navigate(next, true);
+
+        getUserProfile(data.user.id)
+          .then((profile) => {
+            if (!profile) return;
+            useAuthStore.getState().updateUser({
+              name: profile.name || data.user?.email || "",
+              role: (profile.role as "user" | "admin") || "user",
+              department: profile.department,
+              position: profile.position,
+            });
+          })
+          .catch(() => {});
+      }
     } catch (error: any) {
-      setLoginError(error.message || 'Failed to sign in with Google');
+      setLoginError(error?.message || "Invalid code. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
+
 
   return (
     <div className="min-h-screen flex">
-      {/* Left Side - Login Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
         <div className="w-full max-w-md">
-          {/* Mobile Header */}
           <div className="lg:hidden text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center gap-2">
-              <Box size={32} style={{ color: 'var(--primary-brand-hex)' }} />
+              <Box size={32} style={{ color: "var(--primary-brand-hex)" }} />
               <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
           </div>
 
-          {/* Login Form */}
           <div className="bg-white border border-gray-200 rounded-lg py-6 px-6 shadow-card">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-foreground mb-2">Sign In</h2>
               <p className="text-muted-foreground">Enter your credentials to access your company portal</p>
-              {loginError && (
-                <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                  {loginError}
+
+              {showInviteMismatch && (
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+                  Estás logueado con otra cuenta. Para aceptar esta invitación, cierra sesión o abre el link en una ventana
+                  incógnita.
                 </div>
+              )}
+
+              {loginError && (
+                <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">{loginError}</div>
               )}
             </div>
 
-
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Email or Phone Input */}
               <div>
                 <label htmlFor="emailOrPhone" className="block text-sm font-medium text-foreground mb-2">
-                  Email or Phone
+                  Email
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -273,13 +288,12 @@ export default function Login() {
                     value={emailOrPhone}
                     onChange={(e) => setEmailOrPhone(e.target.value)}
                     className="w-full pl-10 pr-3 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                    placeholder="Enter your email or phone number"
+                    placeholder="Enter your email"
                     required
                   />
                 </div>
               </div>
 
-              {/* Password Input */}
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-foreground mb-2">
                   Password
@@ -288,7 +302,7 @@ export default function Login() {
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
                     id="password"
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-10 pr-10 h-8 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
@@ -305,7 +319,6 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* Remember Me & Forgot Password */}
               <div className="flex items-center justify-between">
                 <label className="flex items-center">
                   <input
@@ -316,22 +329,13 @@ export default function Login() {
                   />
                   <span className="ml-2 text-sm text-muted-foreground">Remember me</span>
                 </label>
-                {/* Forgot Password */}
-                <button
-                  type="button"
-                  onClick={() => router.navigate('/reset-password', true)}
-                  className="text-sm text-primary hover:text-primary/80 transition-colors"
-                >
-                  Forgot password?
-                </button>
               </div>
 
-              {/* Login Button */}
               <button
                 type="submit"
-                disabled={isLoading || magicLinkSent}
+                disabled={isLoading || otpSent}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                style={{ backgroundColor: "var(--primary-brand-hex)" }}
               >
                 {isLoading ? (
                   <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
@@ -344,100 +348,92 @@ export default function Login() {
               </button>
             </form>
 
-            {/* Magic Link Section */}
-            {magicLinkSent ? (
-              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
-                <p className="font-medium">Magic link sent!</p>
-                <p className="text-xs mt-1 text-green-700">Check your email inbox and click the link to sign in.</p>
+            {otpSent ? (
+              <form onSubmit={handleVerifyOtp} className="mt-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Enter 6-digit code
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 h-10 border border-gray-300 rounded text-center text-lg tracking-widest focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="000000"
+                    required
+                    autoFocus
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Check your email for the code
+                  </p>
               </div>
+                <button
+                  type="submit"
+                  disabled={isLoading || otpCode.length !== 6}
+                  className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: "var(--primary-brand-hex)" }}
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    "Verify Code"
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpSent(false);
+                    setOtpCode('');
+                  }}
+                  className="w-full text-sm text-primary hover:text-primary/80 transition-colors"
+                >
+                  Use different email
+                </button>
+              </form>
             ) : (
               <div className="mt-4">
                 <button
                   type="button"
-                  onClick={handleSendMagicLink}
-                  disabled={sendingMagicLink || !emailOrPhone}
+                  onClick={handleSendOtp}
+                  disabled={sendingOtp || !emailOrPhone}
                   className="w-full flex items-center justify-center gap-2 px-4 h-8 border border-gray-300 rounded text-sm text-foreground hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {sendingMagicLink ? (
+                  {sendingOtp ? (
                     <>
                       <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
                       Sending...
                     </>
                   ) : (
                     <>
-                      Send magic link
+                      Send OTP code
                       <Mail className="w-4 h-4" />
                     </>
                   )}
                 </button>
               </div>
             )}
-
-            {/* Divider and Social Login */}
-            <div className="my-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-200" />
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-muted-foreground">Or continue with</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Social Login Buttons */}
-            <div className="space-y-3">
-                  <button
-                    onClick={handleO365Login}
-                    className="w-full flex items-center justify-center gap-2 px-4 h-8 border border-gray-300 rounded text-sm text-foreground hover:bg-gray-50 transition-colors"
-                  >
-                    <MicrosoftIcon />
-                    Microsoft
-                  </button>
-
-                  <button
-                    onClick={handleGoogleLogin}
-                    className="w-full flex items-center justify-center gap-2 px-4 h-8 border border-gray-300 rounded text-sm text-foreground hover:bg-gray-50 transition-colors"
-                  >
-                    <GoogleIcon />
-                    Google
-                  </button>
-            </div>
           </div>
 
-          {/* Footer */}
           <div className="text-center mt-6">
             <p className="text-sm text-muted-foreground">
-              Don't have a user account?{' '}
-              <button 
-                onClick={() => window.location.href = '/signup'}
-                className="text-primary hover:text-primary/80 transition-colors"
-              >
-                Sign up
-              </button>
-              {' '}or contact your administrator, or{' '}
-              <button 
-                onClick={() => window.location.href = '/company-registration'}
-                className="text-primary hover:text-primary/80 transition-colors"
-              >
-                register your company
-              </button>
-              {' '}to create a new portal.
+              Don't have a user account or need reset Password? Contact your administrator.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Right Side - Brand Background */}
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#172554' }}>
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: "#1f4456" }}>
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">
-              <Box size={48} style={{ color: 'var(--primary-brand-hex)' }} />
+              <Box size={48} style={{ color: "var(--primary-brand-hex)" }} />
               <span className="text-4xl font-semibold text-white">Adaptio</span>
             </div>
           </div>
-          
         </div>
       </div>
     </div>

@@ -39,7 +39,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     if (!manufacturingOrder) return;
 
     // 🛡️ Guard Rail: Validate status transitions according to business rules
-    // DRAFT → PLANNED: Requires valid BOM (BomInstanceLines > 0)
+    // DRAFT → PLANNED: Requires valid BOM (BOMInstanceLines > 0)
     if (newStatus === 'planned') {
       try {
         // Normalize UUID before query
@@ -53,11 +53,32 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
           return;
         }
 
-        // Get BomInstances for this ManufacturingOrder
-        const { data: bomInstances, error: biError } = await supabase
-          .from('BomInstances')
-          .select('id')
+        // Get BOMInstances for this ManufacturingOrder
+        // BOMInstances se relaciona con ManufacturingOrders a través de SaleOrderLines -> QuoteLines
+        const { data: saleOrderLines, error: solError } = await supabase
+          .from('SaleOrderLines')
+          .select('quote_line_id')
           .eq('manufacturing_order_id', safeMoId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false);
+
+        if (solError) throw solError;
+
+        const quoteLineIds = saleOrderLines?.map(sol => sol.quote_line_id).filter(Boolean) || [];
+
+        if (quoteLineIds.length === 0) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Cannot Advance to Planned',
+            message: 'No quote lines found for this manufacturing order. Please generate BOM first.',
+          });
+          return;
+        }
+
+        const { data: bomInstances, error: biError } = await supabase
+          .from('BOMInstances')
+          .select('id')
+          .in('quote_line_id', quoteLineIds)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
@@ -74,9 +95,9 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
         const bomInstanceIds = bomInstances.map(bi => bi.id);
 
-        // Check if BomInstanceLines exist
+        // Check if BOMInstanceLines exist
         const { data: bomLines, error: bilError } = await supabase
-          .from('BomInstanceLines')
+          .from('BOMInstanceLines')
           .select('id')
           .in('bom_instance_id', bomInstanceIds)
           .eq('organization_id', activeOrganizationId)
@@ -117,11 +138,32 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
           return;
         }
 
-        // Get BomInstances for this ManufacturingOrder
-        const { data: bomInstances, error: biError } = await supabase
-          .from('BomInstances')
-          .select('id')
+        // Get BOMInstances for this ManufacturingOrder
+        // BOMInstances se relaciona con ManufacturingOrders a través de SaleOrderLines -> QuoteLines
+        const { data: saleOrderLines, error: solError } = await supabase
+          .from('SaleOrderLines')
+          .select('quote_line_id')
           .eq('manufacturing_order_id', safeMoId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false);
+
+        if (solError) throw solError;
+
+        const quoteLineIds = saleOrderLines?.map(sol => sol.quote_line_id).filter(Boolean) || [];
+
+        if (quoteLineIds.length === 0) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Cannot Start Production',
+            message: 'No quote lines found for this manufacturing order. Please generate BOM first.',
+          });
+          return;
+        }
+
+        const { data: bomInstances, error: biError } = await supabase
+          .from('BOMInstances')
+          .select('id')
+          .in('quote_line_id', quoteLineIds)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
@@ -138,9 +180,9 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
         const bomInstanceIds = bomInstances.map(bi => bi.id);
 
-        // Check if BomInstanceLines exist
+        // Check if BOMInstanceLines exist
         const { data: bomLines, error: bilError } = await supabase
-          .from('BomInstanceLines')
+          .from('BOMInstanceLines')
           .select('id')
           .in('bom_instance_id', bomInstanceIds)
           .eq('organization_id', activeOrganizationId)

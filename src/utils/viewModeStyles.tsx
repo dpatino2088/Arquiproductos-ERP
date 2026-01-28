@@ -2,26 +2,33 @@ import React from 'react';
 
 export type ViewMode = 'manager';
 
-// View mode color constants
+// Sidebar: tono base #163342 y colores relacionados (más oscuro para active/hover, acento en el mismo tono)
+const SIDEBAR_BASE = '#163342';
+const SIDEBAR_ACTIVE_HOVER = '#122d3b';   // Variante más oscura de #163342
+const SIDEBAR_ACCENT = '#1e4555';         // Acento claro en el mismo tono (borde activo)
+const SIDEBAR_TEXT_INACTIVE = '#8fa3ad';  // Texto inactivo, legible sobre #163342
+
+// View mode color constants – sidebar y colores relacionados con el tono #163342
 export const VIEW_MODE_COLORS = {
   manager: {
     sidebar: {
-      background: '#172554',
-      border: '#172554',
+      background: SIDEBAR_BASE,
+      border: SIDEBAR_BASE,
       textPrimary: 'var(--gray-300)',
-      textSecondary: 'var(--gray-100)'
+      textSecondary: 'var(--gray-100)',
+      textShadow: SIDEBAR_BASE
     },
     buttons: {
       active: {
-        background: 'var(--gray-800)',
-        color: 'var(--primary-brand-hex)',
-        border: 'var(--primary-brand-hex)'
+        background: SIDEBAR_ACTIVE_HOVER,
+        color: '#ffffff',
+        border: SIDEBAR_ACCENT
       },
       inactive: {
-        color: 'var(--gray-300)'
+        color: SIDEBAR_TEXT_INACTIVE
       },
       hover: {
-        background: 'var(--gray-800)'
+        background: SIDEBAR_ACTIVE_HOVER
       }
     }
   },
@@ -72,12 +79,14 @@ export const getTextStyles = (viewMode: ViewMode, isActive: boolean) => {
   
   if (isActive) {
     return {
-      color: colors.buttons.active.color
+      color: colors.buttons.active.color,
+      textShadow: `0 1px 2px ${colors.sidebar.textShadow}`
     };
   }
   
   return {
-    color: colors.buttons.inactive.color
+    color: colors.buttons.inactive.color,
+    textShadow: `0 1px 2px ${colors.sidebar.textShadow}`
   };
 };
 

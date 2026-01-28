@@ -389,30 +389,51 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           console.log('🔍 useManufacturingMaterials: Fetching BOM for manufacturingOrderId:', safeManufacturingOrderId, 'organization:', activeOrganizationId);
         }
 
-        // Get BomInstances for this manufacturing_order_id
-        const { data: bomInstances, error: bomError } = await supabase
-          .from('BomInstances')
-          .select('id, organization_id, labor_cost, total_cost_with_labor, total_msrp_sale_out_with_labor')
+        // Get BOMInstances for this manufacturing_order_id
+        // BOMInstances se relaciona con ManufacturingOrders a través de SaleOrderLines -> QuoteLines
+        // Primero obtener SaleOrderLines del MO, luego QuoteLines, luego BOMInstances
+        const { data: saleOrderLines, error: solError } = await supabase
+          .from('SaleOrderLines')
+          .select('quote_line_id')
           .eq('manufacturing_order_id', safeManufacturingOrderId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false);
+
+        if (solError) throw solError;
+
+        const quoteLineIds = saleOrderLines?.map(sol => sol.quote_line_id).filter(Boolean) || [];
+
+        if (quoteLineIds.length === 0) {
+          setMaterials([]);
+          setBomLinesCount(0);
+          setBomInstancesCount(0);
+          setLoading(false);
+          return;
+        }
+
+        const { data: bomInstances, error: bomError } = await supabase
+          .from('BOMInstances')
+          .select('id, organization_id, quote_line_id')
+          .in('quote_line_id', quoteLineIds)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
         if (bomError) throw bomError;
         
         if (import.meta.env.DEV) {
-          console.log('📊 useManufacturingMaterials: Found', bomInstances?.length || 0, 'BomInstances');
+          console.log('📊 useManufacturingMaterials: Found', bomInstances?.length || 0, 'BOMInstances');
         }
         
         const bomInstancesCount = bomInstances?.length || 0;
         setBomInstancesCount(bomInstancesCount);
         
         if (import.meta.env.DEV) {
-          console.log('📊 useManufacturingMaterials: Found', bomInstancesCount, 'BomInstances');
+          console.log('📊 useManufacturingMaterials: Found', bomInstancesCount, 'BOMInstances');
         }
         
         if (!bomInstances || bomInstances.length === 0) {
           if (import.meta.env.DEV) {
-            console.warn('⚠️ useManufacturingMaterials: No BomInstances found for manufacturingOrderId:', manufacturingOrderId);
+            console.warn('⚠️ useManufacturingMaterials: No BOMInstances found for manufacturingOrderId:', manufacturingOrderId);
           }
           setMaterials([]);
           setBomLinesCount(0);
@@ -421,32 +442,23 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
         }
 
         const bomInstanceIds = bomInstances.map(bi => bi.id);
-        
-        const totalLaborCost = bomInstances.reduce((sum, bi) => sum + (Number(bi.labor_cost) || 0), 0);
-        const totalCostWithLabor = bomInstances.reduce((sum, bi) => sum + (Number(bi.total_cost_with_labor) || 0), 0);
-        const totalMSRPWithLabor = bomInstances.reduce((sum, bi) => sum + (Number(bi.total_msrp_sale_out_with_labor) || 0), 0);
 
-        // Get BomInstanceLines for these BomInstances
+        // Get BOMInstanceLines for these BOMInstances
+        // Solo seleccionar columnas que existen en BOMInstanceLines
         const { data: bomLines, error: linesError } = await supabase
-          .from('BomInstanceLines')
+          .from('BOMInstanceLines')
           .select(`
             id,
             bom_instance_id,
-            category_code,
             resolved_part_id,
-            resolved_sku,
             part_role,
             qty,
             uom,
             unit_cost_exw,
             total_cost_exw,
-            unit_msrp_sale_out,
-            total_msrp_sale_out,
-            description,
             cut_length_mm,
             cut_width_mm,
             cut_height_mm,
-            calc_notes,
             organization_id
           `)
           .in('bom_instance_id', bomInstanceIds)
@@ -459,36 +471,64 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
         setBomLinesCount(bomLinesCount);
         
         if (import.meta.env.DEV) {
-          console.log('📊 useManufacturingMaterials: Found', bomLinesCount, 'BomInstanceLines');
+          console.log('📊 useManufacturingMaterials: Found', bomLinesCount, 'BOMInstanceLines');
         }
 
-        const materialsList: ManufacturingMaterial[] = bomLines?.map((line: any) => ({
-          bom_instance_line_id: line.id,
-          bom_instance_id: line.bom_instance_id,
-          category_code: line.category_code || 'accessory',
-          catalog_item_id: line.resolved_part_id || '',
-          sku: line.resolved_sku || 'N/A',
-          item_name: line.description || 'N/A',
-          part_role: line.part_role || line.category_code || 'accessory',
-          uom: line.uom || 'ea',
-          qty: Number(line.qty) || 0,
-          total_qty: Number(line.qty) || 0,
-          unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
-          total_cost_exw: Number(line.total_cost_exw) || 0,
-          unit_msrp_sale_out: line.unit_msrp_sale_out ? Number(line.unit_msrp_sale_out) : undefined,
-          total_msrp_sale_out: line.total_msrp_sale_out ? Number(line.total_msrp_sale_out) : undefined,
-          cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
-          cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
-          cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,
-          calc_notes: line.calc_notes || null,
-        })) || [];
+        // Obtener CatalogItems para resolved_part_id
+        const catalogItemIds = [...new Set(
+          bomLines
+            ?.map((line: any) => line.resolved_part_id)
+            .filter((id: string | null) => id !== null) || []
+        )];
+
+        let catalogItemsMap = new Map<string, any>();
+        if (catalogItemIds.length > 0) {
+          const { data: catalogItems } = await supabase
+            .from('CatalogItems')
+            .select('id, sku, item_name, item_category_id')
+            .in('id', catalogItemIds)
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false);
+
+          if (catalogItems) {
+            catalogItemsMap = new Map(catalogItems.map((item: any) => [item.id, item]));
+          }
+        }
+
+        const materialsList: ManufacturingMaterial[] = bomLines?.map((line: any) => {
+          const catalogItem = line.resolved_part_id ? catalogItemsMap.get(line.resolved_part_id) : null;
+          
+          return {
+            bom_instance_line_id: line.id,
+            bom_instance_id: line.bom_instance_id,
+            category_code: 'accessory', // Default, se puede mejorar obteniendo de CatalogItems
+            catalog_item_id: line.resolved_part_id || '',
+            sku: catalogItem?.sku || 'N/A',
+            item_name: catalogItem?.item_name || 'N/A',
+            part_role: line.part_role || 'accessory',
+            uom: line.uom || 'ea',
+            qty: Number(line.qty) || 0,
+            total_qty: Number(line.qty) || 0,
+            unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
+            total_cost_exw: Number(line.total_cost_exw) || 0,
+            unit_msrp_sale_out: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
+            total_msrp_sale_out: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
+            cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
+            cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
+            cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,
+            calc_notes: null, // No existe en BOMInstanceLines
+          };
+        }) || [];
+
+        // Calcular totales desde las líneas
+        const totalCost = materialsList.reduce((sum, m) => sum + (m.total_cost_exw || 0), 0);
 
         setMaterials(materialsList);
         
         setBomTotals({
-          totalLaborCost,
-          totalCostWithLabor,
-          totalMSRPWithLabor,
+          totalLaborCost: 0, // No existe en BOMInstances, se puede calcular desde otra fuente si es necesario
+          totalCostWithLabor: totalCost, // Usar total de líneas
+          totalMSRPWithLabor: 0, // No existe en BOMInstances, se puede calcular desde CatalogItems si es necesario
         });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading materials';

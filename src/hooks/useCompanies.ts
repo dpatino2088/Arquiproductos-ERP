@@ -26,6 +26,24 @@ export interface CreateCompanyInput {
   company_email?: string;
   company_phone?: string;
   status?: string;
+  identification_number?: string;
+  website?: string;
+  alt_phone?: string;
+  primary_contact_id?: string;
+  street_address_line_1?: string;
+  street_address_line_2?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  country?: string;
+  billing_same_as_location?: boolean;
+  billing_street_address_line_1?: string;
+  billing_street_address_line_2?: string;
+  billing_city?: string;
+  billing_state?: string;
+  billing_zip_code?: string;
+  billing_country?: string;
+  notes?: string;
 }
 
 /**
@@ -36,6 +54,24 @@ export interface UpdateCompanyInput {
   company_email?: string;
   company_phone?: string;
   status?: string;
+  identification_number?: string;
+  website?: string;
+  alt_phone?: string;
+  primary_contact_id?: string;
+  street_address_line_1?: string;
+  street_address_line_2?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  country?: string;
+  billing_same_as_location?: boolean;
+  billing_street_address_line_1?: string;
+  billing_street_address_line_2?: string;
+  billing_city?: string;
+  billing_state?: string;
+  billing_zip_code?: string;
+  billing_country?: string;
+  notes?: string;
 }
 
 /**
@@ -65,7 +101,7 @@ export function useCompanies() {
 
       const { data, error: queryError } = await supabase
         .from('Companies')
-        .select('id, organization_id, company_no, company_name, company_email, company_phone, status, deleted, created_at, updated_at')
+        .select('id, organization_id, company_no, company_name, company_email, company_phone, status, deleted, created_at, updated_at, identification_number, website, alt_phone, primary_contact_id, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_same_as_location, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country, notes')
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .order('created_at', { ascending: false });
@@ -97,7 +133,12 @@ export function useCompanies() {
       setCompanies(mapped);
     } catch (err: any) {
       const errorMessage = err?.message || 'Error loading companies';
-      console.error('[useCompanies] Error:', errorMessage, err);
+      const errorDetails = err instanceof Error
+        ? { message: err.message, name: err.name }
+        : typeof err === 'object' && err !== null
+        ? { message: err.message || String(err), code: err.code, details: err.details }
+        : String(err);
+      console.error('[useCompanies] Error:', errorDetails);
       setError(errorMessage);
       setCompanies([]);
     } finally {
@@ -122,6 +163,24 @@ export function useCompanies() {
         company_phone: input.company_phone?.trim() || null,
         status: input.status || 'active',
         deleted: false,
+        identification_number: input.identification_number?.trim() || null,
+        website: input.website?.trim() || null,
+        alt_phone: input.alt_phone?.trim() || null,
+        primary_contact_id: input.primary_contact_id || null,
+        street_address_line_1: input.street_address_line_1?.trim() || null,
+        street_address_line_2: input.street_address_line_2?.trim() || null,
+        city: input.city?.trim() || null,
+        state: input.state?.trim() || null,
+        zip_code: input.zip_code?.trim() || null,
+        country: input.country?.trim() || null,
+        billing_same_as_location: input.billing_same_as_location ?? true,
+        billing_street_address_line_1: input.billing_street_address_line_1?.trim() || null,
+        billing_street_address_line_2: input.billing_street_address_line_2?.trim() || null,
+        billing_city: input.billing_city?.trim() || null,
+        billing_state: input.billing_state?.trim() || null,
+        billing_zip_code: input.billing_zip_code?.trim() || null,
+        billing_country: input.billing_country?.trim() || null,
+        notes: input.notes?.trim() || null,
         // company_no is NOT included - trigger will generate it automatically
       };
 
@@ -132,7 +191,7 @@ export function useCompanies() {
       const { data, error: insertError } = await supabase
         .from('Companies')
         .insert(payload)
-        .select('id, organization_id, company_no, company_name, company_email, company_phone, status, deleted, created_at, updated_at')
+        .select('id, organization_id, company_no, company_name, company_email, company_phone, status, deleted, created_at, updated_at, identification_number, website, alt_phone, primary_contact_id, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_same_as_location, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country, notes')
         .single();
 
       if (insertError) {
@@ -196,6 +255,60 @@ export function useCompanies() {
       if (input.status !== undefined) {
         payload.status = input.status || null;
       }
+      if (input.identification_number !== undefined) {
+        payload.identification_number = input.identification_number?.trim() || null;
+      }
+      if (input.website !== undefined) {
+        payload.website = input.website?.trim() || null;
+      }
+      if (input.alt_phone !== undefined) {
+        payload.alt_phone = input.alt_phone?.trim() || null;
+      }
+      if (input.primary_contact_id !== undefined) {
+        payload.primary_contact_id = input.primary_contact_id || null;
+      }
+      if (input.street_address_line_1 !== undefined) {
+        payload.street_address_line_1 = input.street_address_line_1?.trim() || null;
+      }
+      if (input.street_address_line_2 !== undefined) {
+        payload.street_address_line_2 = input.street_address_line_2?.trim() || null;
+      }
+      if (input.city !== undefined) {
+        payload.city = input.city?.trim() || null;
+      }
+      if (input.state !== undefined) {
+        payload.state = input.state?.trim() || null;
+      }
+      if (input.zip_code !== undefined) {
+        payload.zip_code = input.zip_code?.trim() || null;
+      }
+      if (input.country !== undefined) {
+        payload.country = input.country?.trim() || null;
+      }
+      if (input.billing_same_as_location !== undefined) {
+        payload.billing_same_as_location = input.billing_same_as_location;
+      }
+      if (input.billing_street_address_line_1 !== undefined) {
+        payload.billing_street_address_line_1 = input.billing_street_address_line_1?.trim() || null;
+      }
+      if (input.billing_street_address_line_2 !== undefined) {
+        payload.billing_street_address_line_2 = input.billing_street_address_line_2?.trim() || null;
+      }
+      if (input.billing_city !== undefined) {
+        payload.billing_city = input.billing_city?.trim() || null;
+      }
+      if (input.billing_state !== undefined) {
+        payload.billing_state = input.billing_state?.trim() || null;
+      }
+      if (input.billing_zip_code !== undefined) {
+        payload.billing_zip_code = input.billing_zip_code?.trim() || null;
+      }
+      if (input.billing_country !== undefined) {
+        payload.billing_country = input.billing_country?.trim() || null;
+      }
+      if (input.notes !== undefined) {
+        payload.notes = input.notes?.trim() || null;
+      }
 
       const { data, error: updateError } = await supabase
         .from('Companies')
@@ -203,7 +316,7 @@ export function useCompanies() {
         .eq('id', id)
         .eq('organization_id', activeOrganizationId || '')
         .eq('deleted', false)
-        .select('id, organization_id, company_no, company_name, company_email, company_phone, status, deleted, created_at, updated_at')
+        .select('id, organization_id, company_no, company_name, company_email, company_phone, status, deleted, created_at, updated_at, identification_number, website, alt_phone, primary_contact_id, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_same_as_location, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country, notes')
         .single();
 
       if (updateError) {

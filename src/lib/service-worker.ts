@@ -21,6 +21,13 @@ class ServiceWorkerManager {
     }
 
     try {
+      // In development, unregister any existing service workers to prevent conflicts with Vite HMR
+      if (import.meta.env.DEV) {
+        logger.debug('Development mode: Unregistering any existing service workers');
+        await this.unregister();
+        return;
+      }
+
       // Only register in production or when explicitly enabled
       if (import.meta.env.PROD || import.meta.env.VITE_SW_ENABLED === 'true') {
         this.registration = await navigator.serviceWorker.register('/sw.js', {

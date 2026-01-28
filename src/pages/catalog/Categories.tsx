@@ -1,9 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useItemCategoriesCRUD } from '../../hooks/useCatalog';
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { router } from '../../lib/router';
 import { 
   Search, 
   Plus,
@@ -18,27 +21,64 @@ import {
   Building2,
   FolderTree,
   Book,
+  Eye,
 } from 'lucide-react';
 
 export default function Categories() {
   const { registerSubmodules } = useSubmoduleNav();
   const { categories, loading, error, createCategory, updateCategory, deleteCategory, isCreating, isDeleting } = useItemCategoriesCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  const { activeOrganizationId } = useOrganizationContext();
 
   // Don't register submodules here - Catalog.tsx handles that
   // This component is now used as a tab content within Items.tsx
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
+  const [formData, setFormData] = useState({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [itemCounts, setItemCounts] = useState<Map<string, number>>(new Map());
+
+  // Fetch item counts per category
+  useEffect(() => {
+    async function fetchItemCounts() {
+      if (!activeOrganizationId) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('CatalogItems')
+          .select('category_id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('is_active', true)
+          .eq('archived', false)
+          .not('category_id', 'is', null);
+
+        if (error) {
+          console.error('Error fetching item counts:', error);
+          return;
+        }
+
+        // Count items per category
+        const counts = new Map<string, number>();
+        (data || []).forEach((item: any) => {
+          const catId = item.category_id;
+          counts.set(catId, (counts.get(catId) || 0) + 1);
+        });
+
+        setItemCounts(counts);
+      } catch (err) {
+        console.error('Error fetching item counts:', err);
+      }
+    }
+
+    fetchItemCounts();
+  }, [activeOrganizationId, categories]); // Re-fetch when categories change
 
   // Build tree structure
   interface CategoryNode {
     id: string;
     organization_id: string;
-    parent_id?: string | null;
-    parent_category_id?: string | null;
+    parent_id?: string | null; // DB column name
     name: string;
     code?: string | null;
     is_group?: boolean;
@@ -60,8 +100,8 @@ export default function Categories() {
       const node = categoryMap.get(category.id);
       if (!node) return;
       
-      // Use parent_category_id (preferred) or parent_id (legacy)
-      const parentId = category.parent_category_id || (category as any).parent_id;
+      // Use parent_id (DB column name)
+      const parentId = category.parent_id;
       
       if (parentId && categoryMap.has(parentId)) {
         const parent = categoryMap.get(parentId);
@@ -128,7 +168,7 @@ export default function Categories() {
     setFormData({ 
       name: '', 
       code: '', 
-      parent_category_id: parentId || '', 
+      parent_id: parentId || '', 
       is_group: isGroup,
       sort_order: 0 
     });
@@ -140,7 +180,7 @@ export default function Categories() {
     setFormData({
       name: category.name,
       code: category.code || '',
-      parent_category_id: category.parent_category_id || category.parent_id || '',
+      parent_id: category.parent_id || '',
       is_group: category.is_group || false,
       sort_order: category.sort_order || 0,
     });
@@ -153,7 +193,7 @@ export default function Categories() {
       const data = {
         name: formData.name.trim(),
         code: formData.code.trim() || null,
-        parent_category_id: formData.parent_category_id || null,
+        parent_id: formData.parent_id || null, // UPDATED: use parent_id
         is_group: formData.is_group,
         sort_order: formData.sort_order,
       };
@@ -174,7 +214,7 @@ export default function Categories() {
         });
       }
       setShowNewModal(false);
-      setFormData({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
+      setFormData({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
       setEditingId(null);
     } catch (error) {
       useUIStore.getState().addNotification({
@@ -251,8 +291,22 @@ export default function Categories() {
                 Group
               </span>
             )}
+            {!isGroup && itemCounts.get(category.id) !== undefined && (
+              <span className="ml-2 text-xs text-gray-500">
+                ({itemCounts.get(category.id)} items)
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1 ml-4">
+            {!isGroup && itemCounts.get(category.id) && itemCounts.get(category.id)! > 0 && (
+              <button
+                onClick={() => router.navigate(`/catalog/items?category_id=${category.id}`)}
+                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                title={`View ${itemCounts.get(category.id)} items in ${category.name}`}
+              >
+                <Eye className="w-3 h-3" />
+              </button>
+            )}
             {!isGroup && (
               <button
                 onClick={() => handleNew(category.id, false)}
@@ -406,7 +460,7 @@ export default function Categories() {
             <button
               onClick={() => {
                 setShowNewModal(false);
-                setFormData({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
+                setFormData({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
                 setEditingId(null);
               }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
@@ -453,7 +507,7 @@ export default function Categories() {
                   <input
                     type="checkbox"
                     checked={formData.is_group}
-                    onChange={(e) => setFormData({ ...formData, is_group: e.target.checked, parent_category_id: e.target.checked ? formData.parent_category_id : '' })}
+                    onChange={(e) => setFormData({ ...formData, is_group: e.target.checked, parent_id: e.target.checked ? formData.parent_id : '' })}
                     className="w-4 h-4"
                   />
                   <span className="text-sm text-gray-700">
@@ -468,8 +522,8 @@ export default function Categories() {
                     Parent Category
                   </label>
                   <select
-                    value={formData.parent_category_id}
-                    onChange={(e) => setFormData({ ...formData, parent_category_id: e.target.value })}
+                    value={formData.parent_id}
+                    onChange={(e) => setFormData({ ...formData, parent_id: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <option value="">None (Root Category)</option>
@@ -502,7 +556,7 @@ export default function Categories() {
               <button
                 onClick={() => {
                   setShowNewModal(false);
-                  setFormData({ name: '', code: '', parent_category_id: '', is_group: false, sort_order: 0 });
+                  setFormData({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
                   setEditingId(null);
                 }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"

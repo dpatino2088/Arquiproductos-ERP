@@ -59,7 +59,7 @@
     --orange-900: #7c2d12;
     --orange-800: #9a3412;
     --orange-700: #c2410c;
-    --orange-600: #ea580c;
+    --orange-600: #111827;
     --orange-500: #f97316;
     --orange-400: #fb923c;
     --orange-300: #fdba74;
@@ -67,7 +67,7 @@
     --orange-100: #ffedd5;
     --orange-50: #fff7ed;
     
-    --blue-950: #172554;
+    --blue-950: #1f4456;
     --blue-900: #1e3a8a;
     --blue-800: #1e40af;
     --blue-700: #1d4ed8;
@@ -118,7 +118,7 @@
     --purple-50: #faf5ff;
 
     /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
-    --foreground: 218 15% 12%;               /* Dark text - HSL for new gray-900 #1c1f26 */
+    --foreground: 221 39% 11%;               /* Dark text - HSL for gray-900 #111827 */
     --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
     --brand-primary: 20 92% 48%;           /* Primary brand color #ea580c in HSL */
     --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-500 */
@@ -189,6 +189,12 @@
     /* Additional utility colors */
     --neutral-gray: #9E9E9E;               /* Disabled/Inactive elements */
     --highlight-bg: #E3F2FD;               /* Hover states, highlighted rows */
+    --tab-active-underline: #122d3b;  /* Línea inferior de tabs (módulos y submódulos) */
+    /* Sidebar – tono base #163342 y colores relacionados */
+    --sidebar-base: #163342;
+    --sidebar-active-hover: #122d3b;        /* Variante más oscura para active/hover */
+    --sidebar-accent: #1e4555;             /* Acento borde activo, mismo tono */
+    --sidebar-text-inactive: #8fa3ad;      /* Texto inactivo sobre sidebar */
   }
 
   .dark {

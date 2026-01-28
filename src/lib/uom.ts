@@ -65,7 +65,7 @@ export function isUomValidForMeasureBasis(
   
   // Check if UOM is valid for this measure basis
   const validUoms = UOM_OPTIONS_BY_MEASURE_BASIS[mb as keyof typeof UOM_OPTIONS_BY_MEASURE_BASIS];
-  return validUoms.includes(unit as any);
+  return (validUoms as readonly string[]).includes(unit);
 }
 
 /**

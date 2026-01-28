@@ -110,30 +110,7 @@ export function useSaleOrders() {
         setLoading(true);
         setError(null);
 
-        if (import.meta.env.DEV) {
-          console.log('🔍 useSaleOrders: Fetching SalesOrders for organization:', activeOrganizationId);
-        }
-
-        // First, try without JOINs to see if basic query works
-        const { data: basicData, error: basicError } = await supabase
-          .from('SalesOrders')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-
-        if (basicError) {
-          if (import.meta.env.DEV) {
-            console.error('❌ Error fetching SalesOrders (basic query):', basicError);
-          }
-          throw basicError;
-        }
-
-        if (import.meta.env.DEV) {
-          console.log('✅ useSaleOrders: Found', basicData?.length || 0, 'SalesOrders (basic query)');
-        }
-
-        // Now try with JOINs
+        // Query with JOINs (DirectoryCustomers and Quotes)
         const { data, error: queryError } = await supabase
           .from('SalesOrders')
           .select(`
@@ -152,26 +129,16 @@ export function useSaleOrders() {
           .order('created_at', { ascending: false });
 
         if (queryError) {
-          if (import.meta.env.DEV) {
-            console.warn('⚠️ Error fetching SaleOrders with JOINs:', queryError);
-            console.log('📋 Using basic data without JOINs');
-          }
-          // Use basic data if JOINs fail
-          setSaleOrders(basicData || []);
-          return;
-        }
-
-        if (import.meta.env.DEV) {
-          console.log('✅ useSaleOrders: Found', data?.length || 0, 'SalesOrders (with JOINs)');
+          console.error('[useSaleOrders] Error fetching SalesOrders:', queryError);
+          throw queryError;
         }
 
         setSaleOrders(data || []);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading sale orders';
-        if (import.meta.env.DEV) {
-          console.error('Error fetching SaleOrders:', err instanceof Error ? err.message : String(err));
-        }
+        console.error('[useSaleOrders] Error:', errorMessage);
         setError(errorMessage);
+        setSaleOrders([]);
       } finally {
         setLoading(false);
       }

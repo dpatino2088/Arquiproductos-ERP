@@ -121,7 +121,8 @@ Deno.serve(async (req) => {
         siteUrl = SUPABASE_URL.replace(/\.supabase\.co$/, '').replace(/https?:\/\//, 'https://');
       }
     }
-    const defaultRedirectTo = `${siteUrl}/auth/callback?next=/set-password`;
+    // Include email parameter for invite safety (prevent accepting invite with different user logged in)
+    const defaultRedirectTo = `${siteUrl}/auth/callback?next=/set-password&email=${encodeURIComponent(normalizedEmail)}`;
     const finalRedirectTo = redirect_to || defaultRedirectTo;
 
     // Check if user exists in auth

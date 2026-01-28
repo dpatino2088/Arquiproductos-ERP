@@ -274,7 +274,11 @@ serve(async (req) => {
 
     if (getUserError && getUserError.message?.includes('User not found')) {
       // User doesn't exist - invite them
-      const redirectUrl = redirect_to || `${appUrl}/auth/callback?next=/dashboard`;
+      // Include email parameter for invite safety (prevent accepting invite with different user logged in)
+      const baseRedirectUrl = redirect_to || `${appUrl}/auth/callback?next=/set-password`;
+      const redirectUrl = redirect_to 
+        ? redirect_to 
+        : `${baseRedirectUrl.split('?')[0]}?next=/set-password&email=${encodeURIComponent(normalizedEmail)}`;
       
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
         normalizedEmail,

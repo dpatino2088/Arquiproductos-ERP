@@ -1,276 +1,176 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { logger } from '../logger';
-import { devLog } from '../dev-logger';
-import { retryWithBackoff } from './retry-handler';
-import { supabaseCircuitBreaker } from './circuit-breaker';
-import { useSupabaseStatus } from '../services/supabase-status';
+// src/lib/supabase/client.ts
+import { createClient } from "@supabase/supabase-js";
+import { logger } from "../logger";
+import { devLog } from "../dev-logger";
+import { useSupabaseStatus } from "../services/supabase-status";
 
 const getSupabaseConfig = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL || '';
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
-  
-  devLog('🔧 Supabase config loaded:', {
-    url: url || 'MISSING',
+  const url = import.meta.env.VITE_SUPABASE_URL || "";
+  const key =
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    "";
+
+  devLog("🔧 Supabase config loaded:", {
+    url: url || "MISSING",
     hasKey: !!key,
     keyLength: key?.length || 0,
-    keyStart: key?.substring(0, 20) || 'N/A'
+    keyStart: key?.substring(0, 20) || "N/A",
   });
-  
+
   return { url, key };
 };
 
 const { url: supabaseUrl, key: supabaseAnonKey } = getSupabaseConfig();
 
-// Create base Supabase client
-const baseClient = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key',
-  {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: true,
-    },
-    global: {
-      headers: {
-        'X-Client-Info': 'adaptio-erp',
-      },
-    },
-  }
-);
-
-// ✅ FIX: Simple rate limiter for DEV (prevent request storms)
-const requestHistory = new Map<string, number[]>();
-const RATE_LIMIT_WINDOW_MS = 5000; // 5 seconds
-const RATE_LIMIT_MAX_REQUESTS = 5; // Max 5 requests per window
-
-function checkRateLimit(url: string): boolean {
-  if (!import.meta.env.DEV) return true; // Only in DEV
-  
-  const now = Date.now();
-  const requests = requestHistory.get(url) || [];
-  
-  // Remove old requests outside the window
-  const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW_MS);
-  
-  if (recentRequests.length >= RATE_LIMIT_MAX_REQUESTS) {
-    console.error('🚨 Request storm prevented:', {
-      url,
-      count: recentRequests.length,
-      window: RATE_LIMIT_WINDOW_MS,
-      max: RATE_LIMIT_MAX_REQUESTS,
-    });
-    return false;
-  }
-  
-  recentRequests.push(now);
-  requestHistory.set(url, recentRequests);
-  return true;
-}
-
-// Setup fetch interceptor for error tracking
-// ✅ CRITICAL: This must run BEFORE any other code that might use fetch
-if (typeof window !== 'undefined') {
+// ✅ Telemetry/agent-log blocker (CSP safe)
+if (typeof window !== "undefined") {
   const originalFetch = window.fetch;
-  window.fetch = async (...args) => {
-    const url = args[0]?.toString() || '';
-    
-    // ✅ BLOCK telemetry/agent log requests immediately (CSP violation prevention)
-    // This prevents CSP errors by rejecting the request before it's attempted
-    if (url.includes('127.0.0.1:7242') || url.includes('/ingest/') || url.includes(':7242')) {
-      // Silently reject telemetry requests to prevent CSP errors
-      // Don't log to avoid console spam
-      return Promise.reject(new Error('Telemetry requests are disabled'));
-    }
-    
-    const isSupabaseRequest = url.includes(supabaseUrl) || 
-                              url.includes('/auth/') || 
-                              url.includes('/rest/v1/');
 
-    if (isSupabaseRequest) {
-      // ✅ FIX: Rate limit check (DEV-only)
-      if (!checkRateLimit(url)) {
-        // Return a rejected promise to prevent the request
-        throw new Error(`Rate limit exceeded for ${url}`);
+  // Avoid double-wrapping fetch (HMR)
+  // @ts-ignore
+  if (!(window as any).__adaptio_fetch_wrapped__) {
+    // @ts-ignore
+    (window as any).__adaptio_fetch_wrapped__ = true;
+
+  window.fetch = async (...args) => {
+      const reqUrl = args[0]?.toString() || "";
+
+      // Block cursor/agent ingest / telemetry
+      // ✅ NO rechazar (rechazar puede tumbar el UI si alguien hace await fetch sin try/catch)
+      // Devolvemos 204 para "simular" éxito silencioso.
+      if (
+        reqUrl.includes("127.0.0.1:7242") ||
+        reqUrl.includes("/ingest/") ||
+        reqUrl.includes(":7242")
+      ) {
+        return new Response(null, { status: 204 });
       }
 
-      const timestamp = new Date().toISOString();
-      const startTime = Date.now();
+      // ✅ CRITICAL: DO NOT INTERCEPT EDGE FUNCTION CALLS
+      // Edge Functions use URLs like: https://[project].supabase.co/functions/v1/[function-name]
+      if (reqUrl.includes("/functions/v1/")) {
+        return originalFetch(...args);
+      }
 
-      try {
-        const response = await originalFetch(...args);
-        const duration = Date.now() - startTime;
+      const isSupabaseRequest =
+        (supabaseUrl && reqUrl.includes(supabaseUrl)) ||
+        reqUrl.includes("/auth/") ||
+        reqUrl.includes("/rest/v1/");
 
-        // ✅ FIX: Don't retry on 404/400 errors
-        if (response.status >= 400 && response.status < 500) {
-          // Client errors (404, 400, etc.) should not be retried
-          // Log only in DEV to reduce overhead
-          if (import.meta.env.DEV && response.status === 404) {
-            console.warn('[Supabase] Client error (not retrying):', {
-              url,
-              status: response.status,
-              statusText: response.statusText,
-            });
-          }
-        }
+      if (!isSupabaseRequest) return originalFetch(...args);
 
-        // SOLO loguear errores críticos para reducir overhead
-        // No loguear requests exitosos ni lentos para reducir carga
-        
-        // Log server errors (500+) - estos son críticos
-        if (response.status >= 500) {
-          const errorData = {
-            timestamp,
-            url,
-            status: response.status,
-            statusText: response.statusText,
-            duration,
-          };
+      const start = Date.now();
+    try {
+      const res = await originalFetch(...args);
 
-          logger.error('Supabase server error', undefined, errorData);
-          
-          // Update status store (safely)
-          try {
-            const statusStore = useSupabaseStatus.getState();
-            if (statusStore && statusStore.recordError) {
-              statusStore.recordError({
-                message: `Server error ${response.status}`,
-                status: response.status,
-              });
-            }
-          } catch (storeError) {
-            // Store no disponible, solo loguear
-            logger.debug('Supabase status store not available', { storeError });
-          }
-        }
-
-        return response;
-      } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        // Solo loguear errores críticos
-        logger.error('Supabase request failed', error, {
-          timestamp,
-          url,
-          duration,
+        // Track only server errors (500+)
+      if (res.status >= 500) {
+        logger.error("Supabase server error", undefined, {
+            url: reqUrl,
+          status: res.status,
+          statusText: res.statusText,
+            duration: Date.now() - start,
         });
 
-        // Update status store (safely)
+          // Update status store (best effort)
         try {
-          const statusStore = useSupabaseStatus.getState();
-          if (statusStore && statusStore.recordError) {
-            statusStore.recordError(error);
-          }
-        } catch (storeError) {
-          // Store no disponible, solo loguear
-          logger.debug('Supabase status store not available', { storeError });
-        }
-
-        throw error;
+            const st = useSupabaseStatus.getState();
+            st?.recordError?.({
+            message: `Server error ${res.status}`,
+            status: res.status,
+          });
+          } catch {}
       }
-    }
 
-    return originalFetch(...args);
+      return res;
+    } catch (err: any) {
+        logger.error(
+          "Supabase request failed",
+          err instanceof Error ? err : undefined,
+          { url: reqUrl, duration: Date.now() - start }
+        );
+
+      try {
+          const st = useSupabaseStatus.getState();
+          st?.recordError?.(err);
+        } catch {}
+
+      throw err;
+    }
   };
 }
-
-// Enhanced Supabase client with error handling
-class EnhancedSupabaseClient {
-  private client: SupabaseClient;
-
-  constructor(client: SupabaseClient) {
-    this.client = client;
-  }
-
-  // Wrapper methods with circuit breaker and retry
-  async getSession() {
-    return supabaseCircuitBreaker.execute(() =>
-      retryWithBackoff(
-        () => this.client.auth.getSession(),
-        { maxRetries: 3, baseDelay: 1000 },
-        (attempt, error) => {
-          logger.debug('Retrying getSession', {
-            attempt,
-            error: error?.message,
-          });
-        }
-      )
-    );
-  }
-
-  async getUser() {
-    return supabaseCircuitBreaker.execute(() =>
-      retryWithBackoff(
-        () => this.client.auth.getUser(),
-        { maxRetries: 3, baseDelay: 1000 }
-      )
-    );
-  }
-
-  // Proxy all other methods
-  get auth() {
-    const self = this;
-    return {
-      ...this.client.auth,
-      getSession: () => self.getSession(),
-      getUser: () => self.getUser(),
-      signInWithPassword: this.client.auth.signInWithPassword.bind(this.client.auth),
-      signInWithOtp: this.client.auth.signInWithOtp.bind(this.client.auth),
-      signUp: this.client.auth.signUp.bind(this.client.auth),
-      signOut: this.client.auth.signOut.bind(this.client.auth),
-      onAuthStateChange: this.client.auth.onAuthStateChange.bind(this.client.auth),
-      resetPasswordForEmail: this.client.auth.resetPasswordForEmail.bind(this.client.auth),
-      updateUser: this.client.auth.updateUser.bind(this.client.auth),
-    };
-  }
-
-  get from() {
-    return this.client.from.bind(this.client);
-  }
-
-  get storage() {
-    return this.client.storage;
-  }
-
-  get functions() {
-    return this.client.functions;
-  }
-
-  get rpc() {
-    return this.client.rpc.bind(this.client);
-  }
 }
 
-// Export enhanced client
-// Type assertion is safe here as EnhancedSupabaseClient implements all SupabaseClient methods
-export const supabase = new EnhancedSupabaseClient(baseClient) as unknown as SupabaseClient;
+// ✅ ONE Supabase client singleton (fixes "Multiple GoTrueClient instances detected")
+const createSupabaseSingleton = () =>
+  createClient(
+    supabaseUrl || "https://placeholder.supabase.co",
+    supabaseAnonKey || "placeholder-key",
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        // ✅ IMPORTANT: Enable detectSessionInUrl for magic links to work automatically
+        // AuthCallback will still handle explicit flows (code, token_hash) but this helps with hash-based flows
+        detectSessionInUrl: true,
+      },
+      global: {
+        headers: { "X-Client-Info": "adaptio-erp" },
+      },
+    }
+  );
 
-// Helper function to get current user (with retry)
+// @ts-ignore
+const g = globalThis as any;
+export const supabase =
+  g.__adaptio_supabase__ ?? (g.__adaptio_supabase__ = createSupabaseSingleton());
+
 export const getCurrentUser = async () => {
   try {
-    const { data: { user }, error } = await supabase.auth.getUser();
+    const { data, error } = await supabase.auth.getUser();
     if (error) throw error;
-    return user;
-  } catch (error) {
-    logger.error('Error getting current user', error instanceof Error ? error : undefined);
+    return data.user ?? null;
+  } catch (e) {
+    logger.error("Error getting current user", e instanceof Error ? e : undefined);
     return null;
   }
 };
 
-// Helper function to get user profile (with retry)
-export const getUserProfile = async (userId: string) => {
+export const getUserProfile = async (userId: string | null | undefined) => {
+  // ✅ Guard: si no hay userId, NO busques profile
+  if (!userId) return null;
+
   try {
     const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
       .single();
 
-    if (error) throw error;
-    return data;
-  } catch (error) {
-    logger.error('Error getting user profile', error instanceof Error ? error : undefined);
+    if (error) {
+      // ✅ NO revientes la app por profile missing (es común que no exista)
+      if (error.code === "PGRST116") return null;
+      throw error;
+    }
+
+    return data ?? null;
+  } catch (e) {
+    // ✅ Log warning pero retorna null (no bloquees la app)
+    // ✅ Solo primitivos en errorDetails para evitar "[circular]" al serializar
+    const err = e as { message?: string; code?: string; name?: string; stack?: string; details?: unknown };
+    const errorDetails =
+      e instanceof Error
+        ? { message: e.message, name: e.name, ...(import.meta.env.DEV && e.stack ? { stack: e.stack } : {}) }
+        : typeof e === "object" && e !== null
+        ? {
+            message: (err.message && String(err.message)) || String(e),
+            code: err.code != null ? String(err.code) : undefined,
+            details: err.details != null ? (typeof err.details === "object" ? "[object]" : String(err.details).slice(0, 120)) : undefined,
+          }
+        : { message: String(e) };
+
+    logger.warn("Error getting user profile", errorDetails);
     return null;
   }
 };
-

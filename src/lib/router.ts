@@ -8,6 +8,9 @@ export class Router {
   private viewModeChangeHandler?: (viewMode: 'manager') => void;
 
   constructor() {
+    // Initialize with current browser path
+    this.currentRoute = window.location.pathname || '/';
+    
     // Handle browser back/forward buttons
     window.addEventListener('popstate', () => {
       this.navigate(window.location.pathname, false);

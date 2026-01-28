@@ -554,9 +554,9 @@ export default function CustomerNew() {
                 height: '100%',
                 minWidth: '140px',
                 width: 'auto',
-                color: activeTab === 'details' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
+                color: 'var(--graphite-black-hex)',
                 borderColor: 'var(--gray-250)',
-                borderBottom: activeTab === 'details' ? '2px solid var(--primary-brand-hex)' : 'none'
+                borderBottom: activeTab === 'details' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
               aria-selected={activeTab === 'details'}
@@ -577,8 +577,8 @@ export default function CustomerNew() {
                 height: '100%',
                 minWidth: '140px',
                 width: 'auto',
-                color: activeTab === 'billing' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
-                borderBottom: activeTab === 'billing' ? '2px solid var(--primary-brand-hex)' : 'none'
+                color: 'var(--graphite-black-hex)',
+                borderBottom: activeTab === 'billing' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
               aria-selected={activeTab === 'billing'}

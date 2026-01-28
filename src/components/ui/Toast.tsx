@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useUIStore } from '../../stores/ui-store';
 import { CheckCircle, AlertCircle, X } from 'lucide-react';
 
@@ -19,13 +20,14 @@ export default function Toast() {
   }, [latestNotification, removeNotification]);
 
   if (!latestNotification) return null;
+  if (typeof document === 'undefined') return null;
 
   const isSuccess = latestNotification.type === 'success';
   const isError = latestNotification.type === 'error';
 
-  return (
+  const toast = (
     <div
-      className={`fixed top-4 right-4 z-50 min-w-[300px] max-w-md p-4 rounded-lg border-2 shadow-lg flex items-start gap-3 animate-in slide-in-from-top-5 ${
+      className={`fixed top-4 right-4 z-[20000] min-w-[300px] max-w-md p-4 rounded-lg border-2 shadow-lg flex items-start gap-3 animate-in slide-in-from-top-5 ${
         isSuccess
           ? 'bg-green-50 border-green-300 text-green-800'
           : isError
@@ -60,5 +62,7 @@ export default function Toast() {
       </button>
     </div>
   );
+
+  return createPortal(toast, document.body);
 }
 

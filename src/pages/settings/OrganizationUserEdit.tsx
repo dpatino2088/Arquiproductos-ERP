@@ -25,6 +25,7 @@ const organizationUserEditSchema = z.object({
   email: z.string().email('Debes ingresar un email válido'),
   user_name: z.string().min(1, 'El nombre es requerido').optional().or(z.literal('')),
   role: z.enum(['superadmin', 'admin', 'operator', 'procurement', 'finance', 'member']), // Keep 'member' for backward compatibility
+  status: z.enum(['invited', 'active', 'disabled']),
   customer_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
   contact_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
 });
@@ -60,6 +61,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
       email: '',
       user_name: '',
       role: 'operator',
+      status: 'active',
       customer_id: null,
       contact_id: null,
     },
@@ -99,7 +101,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
 
       const userData = data?.find((u: any) => u.id === userId);
       if (!userData) {
-        setSaveError('Usuario no encontrado o no tienes permisos para verlo');
+        setSaveError('User not found or you do not have permission to view it');
         setLoading(false);
         loadingRef.current = false;
         return;
@@ -116,6 +118,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
         email: (userData.user_email ?? userData.email ?? '').toString().trim(),
         user_name: userData.user_name || '',
         role: normalizedRole as any,
+        status: (userData.status || 'active') as 'invited' | 'active' | 'disabled',
         customer_id: userData.customer_id || null,
         contact_id: userData.contact_id || null,
       });
@@ -127,7 +130,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
       if (import.meta.env.DEV) {
         console.error('Error loading user:', err);
       }
-      setSaveError('Error al cargar el usuario');
+      setSaveError('Error loading user');
     } finally {
       setLoading(false);
       loadingRef.current = false;
@@ -143,10 +146,10 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     // If there are changes, ask for confirmation
     if (isDirtyAny) {
       const confirmed = await showConfirm({
-        title: '¿Salir sin guardar?',
-        message: 'Tienes cambios sin guardar. ¿Estás seguro de que deseas salir sin guardar?',
-        confirmText: 'Salir sin guardar',
-        cancelText: 'Cancelar',
+        title: 'Exit without saving?',
+        message: 'You have unsaved changes. Are you sure you want to exit without saving?',
+        confirmText: 'Exit without saving',
+        cancelText: 'Cancel',
         variant: 'warning',
       });
 
@@ -256,7 +259,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     setDebugInfo(prev => ({ ...prev, clicks: debugClickCount, lastAction: action, banner: `Clicked ${action}` }));
 
     if (!activeOrganizationId || (!isSuperAdmin && !isAdmin)) {
-      setSaveError('No tienes permisos para editar usuarios.');
+      setSaveError('You do not have permission to edit users.');
       setDebugInfo(prev => ({ ...prev, banner: 'ERROR: No permissions' }));
       return;
     }
@@ -331,7 +334,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
         }
 
         if (!currentUserData) {
-          throw new Error('Usuario no encontrado o no tienes permisos para editarlo');
+          throw new Error('User not found or you do not have permission to edit it');
         }
 
         // Usar RPC upsert para actualizar (el RPC valida permisos y evita recursión)
@@ -341,7 +344,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
             p_user_email: normalizedEmail,
             p_user_name: (formData.user_name || '').trim() || null, // Use user_name from form
             p_role: formData.role as any,
-            p_status: (currentUserData.status || 'active') as any, // Mantener status actual
+            p_status: (formData.status || currentUserData.status || 'active') as any, // Use status from form
           });
 
         if (rpcError) {
@@ -350,11 +353,11 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
           }
           
           if (rpcError.message?.includes('Only owners and admins')) {
-            throw new Error('No tienes permisos para editar usuarios. Solo los owners y admins pueden editar usuarios.');
+            throw new Error('You do not have permission to edit users. Only owners and admins can edit users.');
           }
           
           if (rpcError.message?.includes('Admins cannot create owners')) {
-            throw new Error('Los admins no pueden cambiar el rol a owner. Solo los owners pueden asignar rol owner.');
+            throw new Error('Admins cannot change role to owner. Only owners can assign owner role.');
           }
 
           throw new Error(`Error actualizando usuario: ${rpcError.message || 'Error desconocido'}`);
@@ -399,7 +402,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
       if (import.meta.env.DEV) {
         console.error('Error updating user:', err);
       }
-      const errorMsg = err.message || 'Error al actualizar el usuario';
+      const errorMsg = err.message || 'Error updating user';
       setSaveError(errorMsg);
       setDebugInfo(prev => ({ ...prev, banner: `ERROR: ${errorMsg}` }));
       useUIStore.getState().addNotification({
@@ -437,8 +440,8 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     return (
       <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800 font-medium">Sin permisos</p>
-          <p className="text-sm text-yellow-700 mt-1">Solo los administradores pueden editar usuarios.</p>
+          <p className="text-sm text-yellow-800 font-medium">No permissions</p>
+          <p className="text-sm text-yellow-700 mt-1">Only administrators can edit users.</p>
         </div>
       </div>
     );
@@ -500,7 +503,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
             }}
             disabled={isSaving}
             className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: '#10b981' }}
+            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
           >
             {isSaving ? 'Saving...' : 'Save & Finish'}
           </button>
@@ -622,6 +625,33 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
                     {form.formState.errors.role.message}
                   </p>
                 )}
+              </div>
+
+              <div className="col-span-12 md:col-span-6">
+                <Label htmlFor="status" required>
+                  Status
+                </Label>
+                <select
+                  id="status"
+                  {...form.register('status')}
+                  className={`w-full px-2.5 py-1.5 text-xs border rounded-md bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
+                    form.formState.errors.status 
+                      ? 'border-red-300 bg-red-50 focus:ring-red-500/20 focus:border-red-500' 
+                      : 'border-gray-200 focus:ring-primary/20 focus:border-primary/50'
+                  }`}
+                >
+                  <option value="invited">Invited</option>
+                  <option value="active">Active</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+                {form.formState.errors.status && (
+                  <p className="mt-1 text-xs text-red-600">
+                    {form.formState.errors.status.message}
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  Invited: User needs to set password. Active: User can access. Disabled: User cannot access.
+                </p>
               </div>
             </div>
 

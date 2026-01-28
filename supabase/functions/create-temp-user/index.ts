@@ -1,0 +1,284 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function randomPassword(length = 14) {
+  const chars =
+    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+/**
+ * Origin dinámico:
+ * - En local: el browser manda Origin: http://localhost:5173
+ * - En prod: mandará Origin: https://arquiproductos-erp.vercel.app
+ * - Fallback: APP_ORIGIN o localhost
+ */
+function getAppOrigin(req: Request) {
+  const origin = req.headers.get("origin");
+  if (origin) return origin;
+
+  const fallback = (Deno.env.get("APP_ORIGIN") ?? "http://localhost:5173").trim();
+  return fallback;
+}
+
+type Body =
+  | {
+      kind: "org";
+      organization_id: string;
+      role: string;
+      name?: string | null;
+      email?: string;
+      user_email?: string;
+      debug_return_password?: boolean;
+    }
+  | {
+      kind: "portal";
+      organization_id: string;
+      company_id: string;
+      role: "member" | "member_manager" | string;
+      name?: string | null;
+      email?: string;
+      portal_user_email?: string;
+      user_email?: string;
+      debug_return_password?: boolean;
+    };
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json({ ok: false, error: "Use POST" }, 405);
+
+  try {
+    const body = (await req.json()) as Body;
+
+    // --- secrets ---
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")?.trim();
+    const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim();
+    const RESEND_KEY = Deno.env.get("RESEND_API_KEY")?.trim();
+    // ✅ Usar RESEND_FROM (como send-invite) o FROM_EMAIL como fallback
+    const FROM_EMAIL = Deno.env.get("RESEND_FROM")?.trim() || Deno.env.get("FROM_EMAIL")?.trim();
+    const ALLOW_RETURN_TEMP_PASSWORD = Deno.env.get("ALLOW_RETURN_TEMP_PASSWORD") === "true";
+
+    if (!SUPABASE_URL) throw new Error("Missing secret: SUPABASE_URL");
+    if (!SERVICE_ROLE) throw new Error("Missing secret: SUPABASE_SERVICE_ROLE_KEY");
+    // ✅ RESEND_KEY y FROM_EMAIL son opcionales (email puede fallar, pero devolvemos temp_password)
+    if (!RESEND_KEY) console.warn("[create-temp-user] Missing secret: RESEND_API_KEY. Email sending will fail.");
+    if (!FROM_EMAIL) console.warn("[create-temp-user] Missing secret: RESEND_FROM or FROM_EMAIL. Email sending will fail.");
+
+    const appOrigin = getAppOrigin(req);
+    const loginUrl = `${appOrigin}/login`;
+
+    // --- get email from any supported key ---
+    const rawEmail =
+      (body as any).email ??
+      (body as any).user_email ??
+      (body as any).portal_user_email;
+
+    if (!rawEmail || typeof rawEmail !== "string") {
+      return json(
+        {
+          ok: false,
+          error:
+            "Missing email. Provide one of: email | user_email | portal_user_email",
+        },
+        400,
+      );
+    }
+
+    if (!body.kind || (body.kind !== "org" && body.kind !== "portal")) {
+      return json({ ok: false, error: "Missing/invalid kind: org | portal" }, 400);
+    }
+
+    if (body.kind === "org" && !(body as any).organization_id) {
+      return json({ ok: false, error: "Missing organization_id" }, 400);
+    }
+
+    if (body.kind === "portal" && !(body as any).company_id) {
+      return json({ ok: false, error: "Missing company_id" }, 400);
+    }
+
+    const email = normalizeEmail(rawEmail);
+    const tempPassword = randomPassword();
+    const now = new Date().toISOString();
+
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
+      auth: { persistSession: false },
+    });
+
+    // 1) Create auth user (or update if exists)
+    // If the user already exists, createUser can fail. We'll try to find by email and then update password.
+    let userId: string | null = null;
+
+    const created = await admin.auth.admin.createUser({
+      email,
+      password: tempPassword,
+      email_confirm: true,
+    });
+
+    if (created.error) {
+      // If already exists, try lookup + reset password
+      const list = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+      if (list.error) throw list.error;
+
+      const existing = list.data?.users?.find((u) => (u.email ?? "").toLowerCase() === email);
+      if (!existing) throw created.error;
+
+      userId = existing.id;
+
+      const upd = await admin.auth.admin.updateUserById(userId, {
+        password: tempPassword,
+        email_confirm: true,
+      });
+      if (upd.error) throw upd.error;
+    } else {
+      userId = created.data.user?.id ?? null;
+    }
+
+    if (!userId) throw new Error("Could not resolve user id after create/update");
+
+    // 2) Membership upsert
+    if (body.kind === "org") {
+      const { error } = await admin
+        .from("OrganizationUsers")
+        .upsert(
+          {
+            organization_id: (body as any).organization_id,
+            user_id: userId,
+            user_email: email,
+            user_name: (body as any).name ?? null,
+            role: (body as any).role,
+            status: "active",
+            must_change_password: true,
+            temp_password_set_at: now,
+            deleted: false,
+            updated_at: now,
+          },
+          { onConflict: "organization_id,user_email" },
+        );
+
+      if (error) throw new Error(`OrganizationUsers upsert failed: ${error.message}`);
+    }
+
+    if (body.kind === "portal") {
+      const { error } = await admin
+        .from("CompanyPortalUsers")
+        .upsert(
+          {
+            organization_id: (body as any).organization_id,
+            company_id: (body as any).company_id,
+            user_id: userId,
+            portal_user_email: email,
+            portal_user_name: (body as any).name ?? null,
+            role: (body as any).role,
+            status: "active",
+            must_change_password: true,
+            temp_password_set_at: now,
+            deleted: false,
+            updated_at: now,
+          },
+          { onConflict: "company_id,portal_user_email" },
+        );
+
+      if (error) throw new Error(`CompanyPortalUsers upsert failed: ${error.message}`);
+    }
+
+    // 3) Send email via Resend (only if secrets are configured)
+    let emailSent = false;
+    let emailError: string | null = null;
+
+    if (RESEND_KEY && FROM_EMAIL) {
+      try {
+        console.log("[create-temp-user] 📧 Preparing to send email...");
+        console.log("[create-temp-user] To:", email);
+        console.log("[create-temp-user] From:", FROM_EMAIL);
+        console.log("[create-temp-user] Login URL:", loginUrl);
+        console.log("[create-temp-user] RESEND_KEY length:", RESEND_KEY.length);
+        
+        const emailRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${RESEND_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: FROM_EMAIL,
+            to: [email],
+            subject: "Acceso a Adaptio (Password temporal)",
+            html: `
+              <div style="font-family:Arial,sans-serif;line-height:1.5;max-width:600px;margin:0 auto;padding:20px;">
+                <h2 style="color:#333;">Tu usuario fue creado</h2>
+                <p>Hola,</p>
+                <p>Tu usuario ha sido creado en Adaptio. Aquí están tus credenciales temporales:</p>
+                <div style="background:#f5f5f5;padding:15px;border-radius:5px;margin:20px 0;">
+                  <p style="margin:5px 0;"><b>Email:</b> ${email}</p>
+                  <p style="margin:5px 0;"><b>Password temporal:</b> <code style="background:#fff;padding:2px 6px;border-radius:3px;">${tempPassword}</code></p>
+                </div>
+                <p><a href="${loginUrl}" style="display:inline-block;background:#FF6B35;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;margin:10px 0;">Iniciar Sesión</a></p>
+                <p style="color:#666;font-size:12px;margin-top:20px;">Al iniciar sesión te pediremos cambiar la contraseña por seguridad.</p>
+              </div>
+            `,
+          }),
+        });
+
+        if (emailRes.ok) {
+          const emailData = await emailRes.json();
+          emailSent = true;
+          console.log("[create-temp-user] ✅ Email sent successfully. Resend ID:", emailData.id);
+        } else {
+          // ✅ Try to parse as JSON first (like send-invite does)
+          let errorText: string;
+          try {
+            const errorJson = await emailRes.json();
+            errorText = errorJson.message || JSON.stringify(errorJson);
+          } catch {
+            errorText = await emailRes.text();
+          }
+          emailError = `Resend error (${emailRes.status}): ${errorText}`;
+          console.error("[create-temp-user] ❌ Email failed:", emailError);
+          console.error("[create-temp-user] Response status:", emailRes.status);
+        }
+      } catch (e: any) {
+        emailError = `Exception: ${e?.message ?? String(e)}`;
+        console.error("[create-temp-user] Email exception:", emailError);
+      }
+    } else {
+      console.warn("[create-temp-user] Skipping email send: RESEND_KEY or FROM_EMAIL not configured.");
+      console.warn("[create-temp-user] RESEND_KEY present:", !!RESEND_KEY);
+      console.warn("[create-temp-user] FROM_EMAIL present:", !!FROM_EMAIL);
+    }
+
+    // ✅ Return success with temp password (when requested or email failed)
+    const debugReturnPassword = (body as any).debug_return_password === true;
+    const shouldReturnPassword = debugReturnPassword || ALLOW_RETURN_TEMP_PASSWORD || !emailSent;
+    
+    return json({ 
+      ok: true, 
+      user_id: userId,
+      email_sent: emailSent,
+      // Return temp password if debug_return_password=true, ALLOW_RETURN_TEMP_PASSWORD=true, or email failed
+      ...(shouldReturnPassword ? { temp_password: tempPassword } : {}),
+      ...(emailError ? { email_error: emailError } : {}),
+    });
+  } catch (e: any) {
+    console.error("[create-temp-user] error:", e);
+    return json({ ok: false, error: e?.message ?? String(e) }, 500);
+  }
+});

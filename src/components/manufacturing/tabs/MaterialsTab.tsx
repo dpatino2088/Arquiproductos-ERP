@@ -141,7 +141,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'BOM Generation Failed',
-          message: `${errorMsg}. BomInstances: ${bomInstancesCreated}, Lines: ${bomLinesCreated}`,
+          message: `${errorMsg}. BOMInstances: ${bomInstancesCreated}, Lines: ${bomLinesCreated}`,
         });
       } else if (warnings.length > 0) {
         useUIStore.getState().addNotification({
@@ -153,7 +153,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
         useUIStore.getState().addNotification({
           type: 'warning',
           title: 'BOM Generated',
-          message: `BOM generated but 0 lines created. BomInstances: ${bomInstancesCreated}. Check component mappings and BOM template configuration.`,
+          message: `BOM generated but 0 lines created. BOMInstances: ${bomInstancesCreated}. Check component mappings and BOM template configuration.`,
         });
       } else {
         useUIStore.getState().addNotification({
@@ -291,13 +291,13 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
             </div>
             <div className="flex-1">
               <h3 className="text-sm font-medium text-yellow-800 mb-1">
-                No se crearon BomInstances para este Manufacturing Order
+                No se crearon BOMInstances para este Manufacturing Order
               </h3>
               <p className="text-sm text-yellow-700 mb-3">
-                No hay BomInstances asociados a este MO. Ejecuta "Generate BOM" o revisa que el MO tenga ManufacturingOrderLines y BOM Templates configurados.
+                No hay BOMInstances asociados a este MO. Ejecuta "Generate BOM" o revisa que el MO tenga ManufacturingOrderLines y BOM Templates configurados.
               </p>
               <div className="text-xs text-yellow-600 space-y-1">
-                <p>• Debug: BomInstances = {debugCounts.bomInstances}, BomInstanceLines = {debugCounts.bomLines}</p>
+                <p>• Debug: BOMInstances = {debugCounts.bomInstances}, BOMInstanceLines = {debugCounts.bomLines}</p>
                 <p>• Verifica que el MO tenga SalesOrderLines asociados</p>
                 <p>• Verifica que exista un BOM Template activo para el product_type de cada línea</p>
               </div>
@@ -327,13 +327,13 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
             </div>
             <div className="flex-1">
               <h3 className="text-sm font-medium text-orange-800 mb-1">
-                BomInstances creados pero 0 líneas generadas
+                BOMInstances creados pero 0 líneas generadas
               </h3>
               <p className="text-sm text-orange-700 mb-3">
-                Se crearon {debugCounts.bomInstances} BomInstance(s) pero no se generaron BomInstanceLines. Revisa BomTemplateComponents y reglas de auto-select.
+                Se crearon {debugCounts.bomInstances} BOMInstance(s) pero no se generaron BOMInstanceLines. Revisa BomTemplateComponents y reglas de auto-select.
               </p>
               <div className="text-xs text-orange-600 space-y-1">
-                <p>• Debug: BomInstances = {debugCounts.bomInstances}, BomInstanceLines = {debugCounts.bomLines}</p>
+                <p>• Debug: BOMInstances = {debugCounts.bomInstances}, BOMInstanceLines = {debugCounts.bomLines}</p>
                 <p>• Verifica que el BOM Template tenga componentes (BomTemplateComponents) con component_item_id no NULL</p>
                 <p>• Verifica que los CatalogItems referenciados existan y estén activos</p>
                 <p>• Revisa los logs de la RPC para ver warnings específicos</p>

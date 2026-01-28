@@ -49,11 +49,15 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
           .select('sku, collection_name, variant_name')
           .eq('id', variantId)
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
+          .eq('is_active', true) // Use is_active instead of deleted
           .maybeSingle();
 
         if (error) {
-          console.error('Error loading fabric data:', error);
+          // Format error to avoid [circular] reference
+          const errorMsg = error?.message || error?.error_description || error?.hint || 'Error loading fabric data';
+          const errorCode = error?.code ? ` (${error.code})` : '';
+          console.error('Error loading fabric data:', errorMsg + errorCode);
+          // Don't block - just show no fabric data
           setFabricData(null);
           return;
         }
@@ -67,8 +71,11 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
         } else {
           setFabricData(null);
         }
-      } catch (err) {
-        console.error('Error loading fabric data:', err);
+      } catch (err: any) {
+        // Format error to avoid [circular] reference
+        const errorMsg = err?.message || err?.error_description || err?.hint || 'Error loading fabric data';
+        console.error('Error loading fabric data:', errorMsg);
+        // Don't block - just show no fabric data
         setFabricData(null);
       } finally {
         setLoadingFabric(false);

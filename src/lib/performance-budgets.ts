@@ -49,7 +49,8 @@ class PerformanceBudgetMonitor {
       };
       
       this.violations.push(violation);
-      console.warn(`Performance budget exceeded for ${metric}:`, violation);
+      // Log only primitives to avoid "[circular]" when console serializes
+      console.warn(`Performance budget exceeded for ${metric}: actual=${value} ms, budget=${budget} ms`);
       
       // Report to monitoring service
       if (typeof window !== 'undefined' && 'gtag' in window) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCompanyPortalUsers, type CompanyPortalUser } from '../../hooks/useCompanyPortalUsers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
@@ -6,7 +6,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
-import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check } from 'lucide-react';
+import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check, Search, Filter, List, Grid3X3 } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { normalizeRole, getRoleLabel, getRoleDescription, type CompanyPortalRole } from '../../portal/portalAccess';
@@ -166,35 +166,52 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
         return;
       }
 
-      // Use Edge Function send-invite to create auth user and send invitation email
-      const { data, error: inviteError } = await supabase.functions.invoke('send-invite', {
+      // ✅ Use create-temp-user (temporary password flow)
+      const normalizedEmail = trimmedEmail.trim().toLowerCase();
+      
+      const { data, error: createError } = await supabase.functions.invoke('create-temp-user', {
         body: {
           kind: 'portal',
           organization_id: organizationId,
           company_id: company_id,
-          email: trimmedEmail.trim().toLowerCase(),
-          role: role, // 'member' | 'member_manager'
+          email: normalizedEmail,
           name: trimmedName || null,
-          redirect_to: `${window.location.origin}/auth/callback`,
+          role: role,
         },
       });
 
-      if (inviteError) {
-        throw inviteError;
+      console.log('[CreatePortalUserModal] create-temp-user response:', { data, error: createError });
+
+      if (createError) {
+        console.error('[CreatePortalUserModal] createError:', createError);
+        throw new Error(createError.message || 'Failed to create user');
       }
 
       if (!data?.ok) {
-        throw new Error(data?.error || 'Invite failed');
+        console.error('[CreatePortalUserModal] Response not ok:', data);
+        throw new Error(data?.error || 'Edge Function failed');
       }
 
-      if (import.meta.env.DEV) {
-        console.log('[CreatePortalUserModal] Invite OK:', data);
+      // ✅ Success message - mostrar password temporal si está disponible
+      const emailSent = data?.email_sent === true;
+      let message = emailSent 
+        ? `Usuario creado. Se envió email con credenciales temporales a ${normalizedEmail}.`
+        : `Usuario creado. Email no pudo enviarse (configura RESEND_API_KEY y FROM_EMAIL en Supabase).`;
+      
+      if (data?.temp_password) {
+        message += `\n\n🔑 Contraseña temporal: ${data.temp_password}\n\nCopia esta contraseña y compártela con el usuario.`;
+        console.log('[CreatePortalUserModal] Temp password:', data.temp_password);
+      }
+
+      if (data?.email_error) {
+        console.warn('[CreatePortalUserModal] Email error:', data.email_error);
+        message += `\n\n⚠️ Error de email: ${data.email_error}`;
       }
 
       addNotification({
-        type: 'success',
-        title: 'Portal User Invited',
-        message: 'Invitation email has been sent successfully.',
+        type: emailSent ? 'success' : 'warning',
+        title: 'Usuario Creado',
+        message,
       });
 
       onSuccess();
@@ -836,6 +853,12 @@ export default function CompanyPortalUsers() {
   const { user: currentUser } = useAuthStore();
   const { addNotification } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  
+  // Search and view state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<CompanyPortalUser | null>(null);
@@ -845,6 +868,17 @@ export default function CompanyPortalUsers() {
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+
+  // Filter users by search term
+  const filteredUsers = useMemo(() => {
+    if (!searchTerm) return users;
+    const search = searchTerm.toLowerCase();
+    return users.filter(user => 
+      (user.portal_user_name?.toLowerCase() || '').includes(search) ||
+      (user.portal_user_email?.toLowerCase() || '').includes(search) ||
+      (user.company_name?.toLowerCase() || '').includes(search)
+    );
+  }, [users, searchTerm]);
 
   // Handle Authorize action
   const handleAuthorize = async (userId: string) => {
@@ -887,58 +921,13 @@ export default function CompanyPortalUsers() {
     setIsEditOpen(true);
   };
 
-  // Handle Delete action
-  const handleDelete = async (user: CompanyPortalUser) => {
-    if (!activeOrganizationId) return;
-
-    const confirmed = await showConfirm({
-      title: 'Delete Portal User',
-      message: `Are you sure you want to delete "${user.portal_user_name || user.portal_user_email || 'this user'}"? This action cannot be undone.`,
-      variant: 'danger',
-      confirmText: 'Delete',
-      cancelText: 'Cancel',
-    });
-
-    if (!confirmed) return;
-
-    setDeletingId(user.id);
-    setLoading(true);
-
-    try {
-      const { error } = await supabase
-        .from('CompanyPortalUsers')
-        .update({ deleted: true, updated_at: new Date().toISOString() })
-        .eq('id', user.id)
-        .eq('organization_id', activeOrganizationId);
-
-      if (error) throw error;
-
-      addNotification({
-        type: 'success',
-        title: 'User Deleted',
-        message: 'Portal user has been deleted successfully.',
-      });
-
-      refetch();
-    } catch (err: any) {
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err.message || 'Failed to delete user',
-      });
-    } finally {
-      setDeletingId(null);
-      setLoading(false);
-    }
-  };
-
   // Handle Archive action
   const handleArchive = async (user: CompanyPortalUser) => {
     if (!activeOrganizationId) return;
 
     const confirmed = await showConfirm({
       title: 'Archive Portal User',
-      message: `Are you sure you want to archive "${user.portal_user_name || user.portal_user_email || 'this user'}"?`,
+      message: `Are you sure you want to archive "${user.portal_user_name || user.portal_user_email || 'this user'}"? The user will be disabled and can be restored later.`,
       variant: 'warning',
       confirmText: 'Archive',
       cancelText: 'Cancel',
@@ -952,7 +941,7 @@ export default function CompanyPortalUsers() {
     try {
       const { error } = await supabase
         .from('CompanyPortalUsers')
-        .update({ status: 'disabled', updated_at: new Date().toISOString() }) // Use 'status' column name (not 'portal_user_status')
+        .update({ status: 'disabled', updated_at: new Date().toISOString() })
         .eq('id', user.id)
         .eq('organization_id', activeOrganizationId);
 
@@ -973,6 +962,63 @@ export default function CompanyPortalUsers() {
       });
     } finally {
       setArchivingId(null);
+      setLoading(false);
+    }
+  };
+
+  // Handle Delete action
+  const handleDelete = async (user: CompanyPortalUser) => {
+    if (!activeOrganizationId) return;
+
+    const confirmed = await showConfirm({
+      title: 'Delete Portal User',
+      message: `Are you sure you want to permanently delete "${user.portal_user_name || user.portal_user_email || 'this user'}"? This action cannot be undone.`,
+      variant: 'danger',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed) return;
+
+    setDeletingId(user.id);
+    setLoading(true);
+
+    try {
+      // Use RPC to bypass RLS (same approach as OrganizationUser)
+      const { data, error } = await supabase.rpc('delete_company_portal_user', {
+        p_portal_user_id: user.id,
+        p_organization_id: activeOrganizationId,
+      });
+
+      if (error) {
+        console.error('[CompanyPortalUsers] Delete RPC error:', error);
+        throw error;
+      }
+
+      // Check RPC response
+      if (!data || (typeof data === 'object' && 'success' in data && !data.success)) {
+        const errorMsg = (data && typeof data === 'object' && 'error' in data) 
+          ? data.error 
+          : 'Could not delete portal user. User not found or already deleted.';
+        throw new Error(errorMsg);
+      }
+
+      addNotification({
+        type: 'success',
+        title: 'User Deleted',
+        message: 'Portal user has been deleted successfully.',
+      });
+
+      refetch();
+    } catch (err: any) {
+      console.error('[CompanyPortalUsers] Error in handleDelete:', err);
+      addNotification({
+        type: 'error',
+        title: 'Delete Error',
+        message: err.message || 'Failed to delete user',
+      });
+    } finally {
+      setDeletingId(null);
       setLoading(false);
     }
   };
@@ -1059,7 +1105,7 @@ export default function CompanyPortalUsers() {
   // Show loading state
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
@@ -1073,7 +1119,7 @@ export default function CompanyPortalUsers() {
   // Show error state
   if (error) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-800 font-medium mb-2">Error loading portal users</p>
           <p className="text-sm text-red-700">{error}</p>
@@ -1085,7 +1131,7 @@ export default function CompanyPortalUsers() {
   // Show message if no organization
   if (!activeOrganizationId) {
     return (
-      <div className="p-6">
+      <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
           <p className="text-sm text-yellow-700 mt-1">Please select an organization to view portal users.</p>
@@ -1095,23 +1141,16 @@ export default function CompanyPortalUsers() {
   }
 
   return (
-    <div className="p-6">
+    <div className="py-6 px-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Company Portal Users</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage company portal access and permissions
+            Manage company portal access and permissions ({filteredUsers.length} total)
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => refetch()}
-            className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm"
-          >
-            <Shield className="w-4 h-4" />
-            Refresh
-          </button>
           {activeOrganizationId && (
             <button
               onClick={() => setIsCreateOpen(true)}
@@ -1125,34 +1164,104 @@ export default function CompanyPortalUsers() {
         </div>
       </div>
 
+      {/* Search and Filters */}
+      <div className="mb-4">
+        <div className={`bg-white border border-gray-200 py-6 px-6 ${
+          showFilters ? 'rounded-t-lg' : 'rounded-lg'
+        }`}>
+          <div className="flex items-center justify-between gap-3">
+            {/* Search Bar */}
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search portal users by name, email, company..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search portal users"
+              />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {/* Filters Button */}
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                  showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Filter style={{ width: '14px', height: '14px' }} />
+                Filters
+              </button>
+
+              {/* View Mode Toggle */}
+              <div className="flex border border-gray-200 rounded overflow-hidden">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`p-1.5 transition-colors ${
+                    viewMode === 'table'
+                      ? 'bg-gray-300 text-black'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                  aria-label="Switch to list view"
+                  title="Switch to list view"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-gray-300 text-black'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                  aria-label="Switch to grid view"
+                  title="Switch to grid view"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Advanced Filters (placeholder for future) */}
+        {showFilters && (
+          <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
+            <p className="text-sm text-gray-500">Additional filters will be available here.</p>
+          </div>
+        )}
+      </div>
+
       {/* Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-100 border-b border-gray-200">
+            <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Name</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Company</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Role</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Email</th>
+                <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Role</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Status</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Date Added</th>
                 <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {users.length === 0 ? (
+              {filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 px-6 text-center">
-                    <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 mb-2">No portal users found</p>
-                    <p className="text-sm text-gray-500">
-                      Portal users will appear here once they are created.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                users.map((user: CompanyPortalUser) => (
+                  <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 mb-2">No portal users found</p>
+                  <p className="text-sm text-gray-500">
+                    {searchTerm ? 'No users match your search criteria.' : 'Portal users will appear here once they are created.'}
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              filteredUsers.map((user: CompanyPortalUser) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer">
                     {/* Name */}
                     <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
@@ -1169,6 +1278,11 @@ export default function CompanyPortalUsers() {
                     {/* Company */}
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
                       {user.company_name || '-'}
+                    </td>
+                    
+                    {/* Email */}
+                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
+                      {user.portal_user_email || '-'}
                     </td>
                     
                     {/* Role */}
@@ -1194,11 +1308,6 @@ export default function CompanyPortalUsers() {
                           </span>
                         );
                       })()}
-                    </td>
-                    
-                    {/* Email */}
-                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
-                      {user.portal_user_email || '-'}
                     </td>
                     
                     {/* Status */}

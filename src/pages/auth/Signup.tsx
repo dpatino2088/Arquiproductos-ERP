@@ -314,7 +314,7 @@ export default function Signup() {
       </div>
 
       {/* Right Side - Brand Background */}
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#172554' }}>
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#1f4456' }}>
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">

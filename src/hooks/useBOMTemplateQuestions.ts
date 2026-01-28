@@ -7,9 +7,11 @@
  * - Which select questions are needed (hardware_color, drive_type)
  */
 
-import { useMemo } from 'react';
-import { useBOMComponents, BOMComponent } from './useBOM';
-import { CANONICAL_COMPONENT_ROLES } from '../lib/bom/roles';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../lib/supabase/client';
+import { useOrganizationContext } from '../context/OrganizationContext';
+import { useBOMComponents } from './useBOM';
+import { normalizeRole } from '../lib/bom/roles';
 
 // Roles that can have color variants (hardware color applicable)
 const COLORIZABLE_ROLES = [
@@ -51,7 +53,52 @@ export interface BOMTemplateQuestions {
  * @returns Questions object indicating which steps/questions to show
  */
 export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined): BOMTemplateQuestions {
+  const { activeOrganizationId } = useOrganizationContext();
   const { components, loading } = useBOMComponents(bomTemplateId || null);
+  const [slots, setSlots] = useState<{ item_role: string | null }[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!bomTemplateId || !activeOrganizationId) {
+      setSlots([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchSlots = async () => {
+      try {
+        setSlotsLoading(true);
+        const { data, error } = await supabase
+          .from('BOMTemplateSlots')
+          .select('item_role')
+          .eq('organization_id', activeOrganizationId)
+          .eq('bom_template_id', bomTemplateId);
+
+        if (error) throw error;
+        if (isMounted) {
+          setSlots((data as { item_role: string | null }[]) || []);
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          const errorDetails = err instanceof Error
+            ? { message: err.message, name: err.name }
+            : typeof err === 'object' && err !== null
+            ? { message: (err as any).message || String(err), code: (err as any).code }
+            : { message: String(err) };
+          console.error('[useBOMTemplateQuestions] Error loading slots', errorDetails);
+        }
+      } finally {
+        if (isMounted) setSlotsLoading(false);
+      }
+    };
+
+    fetchSlots();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [bomTemplateId, activeOrganizationId]);
 
   return useMemo(() => {
     // Default: show all steps if no bomTemplateId (fallback for compatibility)
@@ -74,8 +121,9 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
       };
     }
 
+    const isLoading = loading || slotsLoading;
     // If still loading, return defaults
-    if (loading) {
+    if (isLoading) {
       return {
         requiredSteps: {
           variants: true,
@@ -96,23 +144,23 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
 
     // ✅ FIX: Analyze components - Show steps based on component roles, not just auto_select
     // In MVP mode, components have auto_select=false but we still need to show steps if roles exist
-    const hasFabric = components.some(
-      (comp) => comp.component_role === 'fabric'
+    const roleSet = new Set(
+      [
+        ...components.map((comp) => normalizeRole(comp.component_role) || comp.component_role || ''),
+        ...slots.map((slot) => normalizeRole(slot.item_role) || slot.item_role || ''),
+      ].filter(Boolean)
     );
+
+    const hasRole = (role: string) => roleSet.has(role);
+    const hasAnyRole = (roles: string[]) => roles.some((role) => roleSet.has(role));
+
+    const hasFabric = hasRole('fabric');
     
-    const hasColorizableAutoSelect = components.some(
-      (comp) =>
-        comp.component_role &&
-        COLORIZABLE_ROLES.includes(comp.component_role as any)
-    );
+    const hasColorizableAutoSelect = hasAnyRole([...COLORIZABLE_ROLES]);
     
-    const hasDriveManual = components.some(
-      (comp) => comp.component_role === 'drive_manual'
-    );
+    const hasDriveManual = hasRole('drive_manual') || hasRole('drive');
     
-    const hasDriveMotorized = components.some(
-      (comp) => comp.component_role === 'drive_motorized'
-    );
+    const hasDriveMotorized = hasRole('drive_motorized') || hasRole('motor');
     
     // Check for block_condition that references cassette
     const hasCassetteBlockCondition = components.some(
@@ -131,19 +179,13 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
     );
     
     // Check if any component has cassette role
-    const hasCassetteComponent = components.some(
-      (comp) => comp.component_role === 'cassette'
-    );
+    const hasCassetteComponent = hasRole('cassette') || hasRole('headbox');
     
     // Check if any component has side_channel role
-    const hasSideChannelComponent = components.some(
-      (comp) => comp.component_role === 'side_channel'
-    );
+    const hasSideChannelComponent = hasRole('side_channel');
     
     // Check for accessories
-    const hasAccessories = components.some(
-      (comp) => comp.component_role === 'accessory'
-    );
+    const hasAccessories = hasRole('accessory');
 
     // Build questions object
     return {
@@ -170,7 +212,7 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
         drive_type: hasDriveManual || hasDriveMotorized,
       },
     };
-  }, [bomTemplateId, components, loading]);
+  }, [bomTemplateId, components, loading, slots, slotsLoading]);
 }
 
 

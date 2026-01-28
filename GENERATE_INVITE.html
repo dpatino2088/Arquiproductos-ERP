@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Invite Link</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        button {
+            background: #ff5722;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #e64a19;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            word-wrap: break-word;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 Generate Organization Invite</h1>
+    <p>Genera un nuevo invite link para tu usuario</p>
+
+    <label>Supabase URL:</label>
+    <input type="text" id="supabaseUrl" placeholder="https://xxx.supabase.co" value="https://gfanmftbdztyifagpmfn.supabase.co">
+
+    <label>Service Role Key (⚠️ SECRETO - solo para dev):</label>
+    <input type="password" id="serviceKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+
+    <label>Email del usuario a invitar:</label>
+    <input type="email" id="userEmail" placeholder="dpv_2088@hotmail.com" value="dpv_2088@hotmail.com">
+
+    <label>Organization ID:</label>
+    <input type="text" id="orgId" placeholder="3acbb54c-c71f-4cb2-9fe3-d3ac513ba...">
+
+    <label>Role:</label>
+    <select id="role">
+        <option value="viewer">Viewer</option>
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+        <option value="owner">Owner</option>
+    </select>
+
+    <button onclick="generateInvite()">🚀 Generate Invite Link</button>
+
+    <div id="result"></div>
+
+    <script>
+        async function generateInvite() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '⏳ Generating invite...';
+            resultDiv.className = '';
+
+            try {
+                const supabaseUrl = document.getElementById('supabaseUrl').value.trim();
+                const serviceKey = document.getElementById('serviceKey').value.trim();
+                const userEmail = document.getElementById('userEmail').value.trim().toLowerCase();
+                const orgId = document.getElementById('orgId').value.trim();
+                const role = document.getElementById('role').value;
+
+                if (!supabaseUrl || !serviceKey || !userEmail || !orgId) {
+                    throw new Error('All fields are required');
+                }
+
+                // Create Supabase admin client
+                const supabase = window.supabase.createClient(supabaseUrl, serviceKey, {
+                    auth: {
+                        autoRefreshToken: false,
+                        persistSession: false
+                    }
+                });
+
+                // Call your edge function
+                const { data, error } = await supabase.functions.invoke('send-org-invite', {
+                    body: {
+                        organization_id: orgId,
+                        user_email: userEmail,
+                        role: role
+                    }
+                });
+
+                if (error) throw error;
+
+                resultDiv.className = 'success';
+                resultDiv.innerHTML = `
+                    <h3>✅ Invite Generated Successfully!</h3>
+                    <p><strong>Email:</strong> ${data.email}</p>
+                    <p><strong>Redirect To:</strong> ${data.redirect_to}</p>
+                    <p><strong>Organization ID:</strong> ${data.organization_id}</p>
+                    <p><strong>Role:</strong> ${data.role}</p>
+                    <br>
+                    <p>✉️ <strong>Check your email inbox for the magic link!</strong></p>
+                    <p style="font-size: 12px; color: #666;">
+                        Note: The link will expire in 1 hour or after first use.
+                    </p>
+                `;
+            } catch (error) {
+                resultDiv.className = 'error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Error</h3>
+                    <p>${error.message || 'Unknown error'}</p>
+                    <pre>${JSON.stringify(error, null, 2)}</pre>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

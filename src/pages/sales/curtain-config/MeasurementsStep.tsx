@@ -2,7 +2,7 @@ import React from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Image as ImageIcon } from 'lucide-react';
 import type { Panel } from '../product-config/types';
 
 interface MeasurementsStepProps {
@@ -336,30 +336,44 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
         {!isTripleShade && (
           <div>
             <Label className="text-sm font-medium mb-4 block">FABRIC DROP</Label>
-            <div className="grid grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {FABRIC_DROP_OPTIONS.map((option) => {
                 const isSelected = config.fabricDrop === option.id;
                 return (
-                  <div key={option.id} className="flex flex-col items-center">
-                    <button
-                      onClick={() => onUpdate({ fabricDrop: isSelected ? undefined : option.id })}
-                      className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                        isSelected
-                          ? 'border-2 border-gray-400 bg-gray-600'
-                          : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                      }`}
-                      style={{ padding: '2px' }}
-                    >
-                      {/* Imagen - 5% más chica que el card (95% del tamaño) respetando padding de 2px */}
-                      <div className="rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                        {/* TODO: Add image from Supabase storage */}
-                      </div>
-                    </button>
+                  <div
+                    key={option.id}
+                    onClick={() => onUpdate({ fabricDrop: isSelected ? undefined : option.id })}
+                    className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-2 border-primary shadow-lg'
+                        : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                    }`}
+                  >
+                    {/* Image */}
+                    <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {option.imageUrl ? (
+                        <img
+                          src={option.imageUrl}
+                          alt={option.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <ImageIcon className="w-16 h-16 text-gray-300" />
+                      )}
+                    </div>
                     
-                    {/* Nombre abajo del card */}
-                    <span className={`text-sm font-semibold block mt-2 ${isSelected ? 'text-gray-900' : 'text-gray-900'}`}>
-                      {option.name}
-                    </span>
+                    {/* Card Content */}
+                    <div className="p-4">
+                      {/* Option Name */}
+                      <h3 className={`font-semibold text-sm truncate text-center ${
+                        isSelected ? 'text-primary' : 'text-gray-900'
+                      }`} title={option.name}>
+                        {option.name}
+                      </h3>
+                    </div>
                   </div>
                 );
               })}
@@ -370,45 +384,45 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
         {/* 3. INSTALLATION TYPE & LOCATION - En una sola línea */}
         <div>
           <Label className="text-sm font-medium mb-4 block">INSTALLATION TYPE & LOCATION</Label>
-          <div className="grid grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {/* Installation Type Options */}
             {INSTALLATION_TYPE_OPTIONS.map((option) => {
               const isSelected = config.installationType === option.id;
               return (
-                <div key={option.id} className="flex flex-col items-center">
-                  <button
-                    onClick={() => onUpdate({ installationType: isSelected ? undefined : option.id })}
-                    className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                      isSelected
-                        ? 'border-2 border-gray-400 bg-gray-600'
-                        : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                    }`}
-                    style={{ padding: '2px' }}
-                  >
-                    {/* Imagen - 5% más chica que el card (95% del tamaño) respetando padding de 2px */}
-                    <div className="rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                      {option.imageUrl ? (
-                        <img
-                          src={option.imageUrl}
-                          alt={option.name}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <span className="text-xs text-gray-500">{option.name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </button>
+                <div
+                  key={option.id}
+                  onClick={() => onUpdate({ installationType: isSelected ? undefined : option.id })}
+                  className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-2 border-primary shadow-lg'
+                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                  }`}
+                >
+                  {/* Image */}
+                  <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                    {option.imageUrl ? (
+                      <img
+                        src={option.imageUrl}
+                        alt={option.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <ImageIcon className="w-16 h-16 text-gray-300" />
+                    )}
+                  </div>
                   
-                  {/* Nombre abajo del card */}
-                  <span className={`text-sm font-semibold block mt-2 ${isSelected ? 'text-gray-900' : 'text-gray-900'}`}>
-                    {option.name}
-                  </span>
+                  {/* Card Content */}
+                  <div className="p-4">
+                    {/* Option Name */}
+                    <h3 className={`font-semibold text-sm truncate text-center ${
+                      isSelected ? 'text-primary' : 'text-gray-900'
+                    }`} title={option.name}>
+                      {option.name}
+                    </h3>
+                  </div>
                 </div>
               );
             })}
@@ -417,40 +431,40 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
             {INSTALLATION_LOCATION_OPTIONS.map((option) => {
               const isSelected = config.installationLocation === option.id;
               return (
-                <div key={option.id} className="flex flex-col items-center">
-                  <button
-                    onClick={() => onUpdate({ installationLocation: isSelected ? undefined : option.id })}
-                    className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                      isSelected
-                        ? 'border-2 border-gray-400 bg-gray-600'
-                        : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                    }`}
-                    style={{ padding: '2px' }}
-                  >
-                    {/* Imagen - 5% más chica que el card (95% del tamaño) respetando padding de 2px */}
-                    <div className="rounded overflow-hidden border border-gray-200 bg-gray-100" style={{ width: '95%', height: '95%' }}>
-                      {option.imageUrl ? (
-                        <img
-                          src={option.imageUrl}
-                          alt={option.name}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement;
-                            target.style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <span className="text-xs text-gray-500">{option.name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </button>
+                <div
+                  key={option.id}
+                  onClick={() => onUpdate({ installationLocation: isSelected ? undefined : option.id })}
+                  className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-2 border-primary shadow-lg'
+                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                  }`}
+                >
+                  {/* Image */}
+                  <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                    {option.imageUrl ? (
+                      <img
+                        src={option.imageUrl}
+                        alt={option.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <ImageIcon className="w-16 h-16 text-gray-300" />
+                    )}
+                  </div>
                   
-                  {/* Nombre abajo del card */}
-                  <span className={`text-sm font-semibold block mt-2 ${isSelected ? 'text-gray-900' : 'text-gray-900'}`}>
-                    {option.name}
-                  </span>
+                  {/* Card Content */}
+                  <div className="p-4">
+                    {/* Option Name */}
+                    <h3 className={`font-semibold text-sm truncate text-center ${
+                      isSelected ? 'text-primary' : 'text-gray-900'
+                    }`} title={option.name}>
+                      {option.name}
+                    </h3>
+                  </div>
                 </div>
               );
             })}

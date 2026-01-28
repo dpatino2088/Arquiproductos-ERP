@@ -11,30 +11,103 @@
  * - sub_role: Part type/specific variant (optional, for granularity)
  */
 
-// Canonical roles from ComponentRoleMap (migration 363)
+// Canonical roles - EXACT list from user requirements (all lowercase)
 export const CANONICAL_COMPONENT_ROLES = [
-  'fabric',
   'tube',
-  'bracket',
-  'cassette',
-  'side_channel',
+  'track',
   'bottom_bar',
-  'bottom_rail',
+  'bottom_channel',
+  'hem_weight',
+  'side_channel',
   'top_rail',
-  'drive_manual',
-  'drive_motorized',
-  'remote_control',
-  'battery',
-  'tool',
-  'hardware',
-  'accessory',
-  'service',
-  'window_film',
+  'headbox',
+  'bracket',
+  'idler',
+  'drive',
+  'motor',
+  'chain',
+  'chain_stop',
+  'chain_tensioner',
+  'wand',
   'end_cap',
-  'operating_system',
+  'filler',
+  'tape',
+  'consumable',
+  'fastener',
+  'accessory',
+  'carrier',
+  'belt',
+  'belt_connector',
+  'hook',
+  'brush',
+  'fabric',
+  'adapter', // ✅ Agregado: necesario para child roles
+  // ✅ Nuevos roles child (agregados según requerimiento del usuario)
+  'bearing',
+  'connector',
+  'guide',
+  'rail_connector',
+  'spring',
+  'stopper',
+  'mounting_clip',
+  'end_plug', // Aunque no era canónico originalmente, se requiere como child role
 ] as const;
 
 export type CanonicalComponentRole = typeof CANONICAL_COMPONENT_ROLES[number];
+
+/**
+ * Valid Child Roles
+ * 
+ * Child roles MUST be canonical roles that are also allowed in CatalogItemComponents.child_role.
+ * According to the database schema:
+ * - Canonical roles are defined in BOMComponents.component_role CHECK constraint
+ * - Child roles are defined in CatalogItemComponents.child_role CHECK constraint
+ * - Valid child roles = intersection of canonical roles and child_role constraint
+ * 
+ * ✅ Lista completa de child roles según requerimiento del usuario:
+ * - chain, belt, belt_connector, hem_weight, brush, accessory, carrier, consumable, hook
+ * - mounting_clip, bearing, connector, end_plug, guide, rail_connector, spring, stopper, idler
+ */
+export const VALID_CHILD_ROLES = [
+  // Roles originales
+  'adapter',
+  'end_cap',
+  'fastener',
+  'idler',
+  'chain_stop',
+  'chain_tensioner',
+  'filler',
+  // ✅ Nuevos child roles (según requerimiento del usuario)
+  'chain',
+  'belt',
+  'belt_connector',
+  'hem_weight',
+  'brush',
+  'accessory',
+  'carrier',
+  'consumable',
+  'hook',
+  'mounting_clip',
+  'bearing',
+  'connector',
+  'end_plug',
+  'guide',
+  'rail_connector',
+  'spring',
+  'stopper',
+] as const;
+
+export type ValidChildRole = typeof VALID_CHILD_ROLES[number];
+
+/**
+ * Check if a role is a valid child role (canonical and allowed as child)
+ */
+export function isValidChildRole(role: string | null | undefined): boolean {
+  if (!role) return false;
+  const normalized = normalizeSubRole(role);
+  if (!normalized) return false;
+  return (VALID_CHILD_ROLES as readonly string[]).includes(normalized);
+}
 
 /**
  * Sub-roles mapping: which roles have available sub_roles
@@ -125,11 +198,7 @@ export function getRoleLabel(role: string | null | undefined): string {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
   
-  // Add "(legacy)" indicator for non-canonical roles
-  if (!isCanonical) {
-    return `${label} (legacy)`;
-  }
-  
+  // Show label without legacy suffix (use exact names in UI)
   return label;
 }
 

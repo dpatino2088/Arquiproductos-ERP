@@ -1,19 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCostSettings, useCreateCostSettings, useUpdateCostSettings } from '../../hooks/useCosts';
-import { useImportTaxRulesCRUD } from '../../hooks/useImportTaxRules';
-import { useCategoryMarginsCRUD } from '../../hooks/useCategoryMargins';
-import { useLeafItemCategories } from '../../hooks/useCatalog';
+import { useCostSettings, useImportTaxRules, useCategoryMargins } from '../../hooks/useCostEngineSettings';
+import { useCatalogCategories } from '../../hooks/useCatalog';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
-import { DollarSign, Save, AlertCircle, Plus, Trash2, Edit2, X, Check } from 'lucide-react';
+import { DollarSign, Save, AlertCircle, Plus, Trash2, Edit2, X, Check, Search, Filter } from 'lucide-react';
 
 const costSettingsSchema = z.object({
   labor_percentage: z.number().min(0, 'Labor percentage must be >= 0').max(100, 'Labor percentage must be <= 100'),
   shipping_percentage: z.number().min(0, 'Shipping percentage must be >= 0').max(100, 'Shipping percentage must be <= 100'),
   import_tax_percent: z.number().min(0, 'Import tax percentage must be >= 0').max(100, 'Import tax percentage must be <= 100'),
+  msrp_pct_sale_out: z.number().min(0, 'MSRP % must be >= 0').max(200, 'MSRP % must be <= 200'),
   discount_reseller_pct: z.number().min(0, 'Discount must be >= 0').max(100, 'Discount must be <= 100').optional(),
   discount_distributor_pct: z.number().min(0, 'Discount must be >= 0').max(100, 'Discount must be <= 100').optional(),
   discount_partner_pct: z.number().min(0, 'Discount must be >= 0').max(100, 'Discount must be <= 100').optional(),
@@ -25,10 +24,11 @@ type CostSettingsFormData = z.infer<typeof costSettingsSchema>;
 
 export default function CostEngineSettings() {
   const [activeTab, setActiveTab] = useState<'defaults' | 'import_taxes' | 'category_margins'>('defaults');
-  const { settings, loading, error, refetch } = useCostSettings();
-  const { createSettings, isCreating } = useCreateCostSettings();
-  const { updateSettings, isUpdating } = useUpdateCostSettings();
+  const { settings, loading, error, upsertSettings } = useCostSettings();
+  const { rules, loading: rulesLoading, upsertRule, deleteRule } = useImportTaxRules();
+  const { margins, loading: marginsLoading, upsertMargin, deleteMargin } = useCategoryMargins();
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const {
     register,
@@ -41,6 +41,7 @@ export default function CostEngineSettings() {
       labor_percentage: 10.0000,
       shipping_percentage: 15.0000,
       import_tax_percent: 0,
+      msrp_pct_sale_out: 65, // Default 65% MSRP % Sale Out (0.65 in DB)
       discount_reseller_pct: 0,
       discount_distributor_pct: 0,
       discount_partner_pct: 0,
@@ -49,9 +50,7 @@ export default function CostEngineSettings() {
     },
   });
 
-  const { categories } = useLeafItemCategories(); // Only show leaf categories (is_group=false)
-  const { rules, loading: rulesLoading, createRule, updateRule, deleteRule } = useImportTaxRulesCRUD();
-  const { margins, loading: marginsLoading, createMargin, updateMargin, deleteMargin } = useCategoryMarginsCRUD();
+  const { leafCategories: categories } = useCatalogCategories(); // Only show leaf categories (is_group=false)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [newRuleCategoryId, setNewRuleCategoryId] = useState<string>('');
@@ -61,63 +60,135 @@ export default function CostEngineSettings() {
   const [editingMarginId, setEditingMarginId] = useState<string | null>(null);
   const [editingMarginCategoryId, setEditingMarginCategoryId] = useState<string | null>(null);
   const [editingMarginPercentage, setEditingMarginPercentage] = useState<string>('');
+  const [editingMsrpPctSaleOut, setEditingMsrpPctSaleOut] = useState<string>('');
+  // Search and filter state for Category Margins
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterHasCustomMargin, setFilterHasCustomMargin] = useState<string>('all'); // 'all', 'custom', 'default'
+  // Search and filter state for Import Taxes
+  const [importTaxSearchTerm, setImportTaxSearchTerm] = useState('');
+  const [showImportTaxFilters, setShowImportTaxFilters] = useState(false);
+  const [filterImportTaxType, setFilterImportTaxType] = useState<string>('all'); // 'all', 'custom', 'default'
+
+  // Filtered categories for Category Margins tab
+  const filteredCategories = useMemo(() => {
+    let filtered = categories;
+    
+    // Apply search filter
+    if (searchTerm) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(cat => 
+        cat.name.toLowerCase().includes(search)
+      );
+    }
+    
+    // Apply margin type filter
+    if (filterHasCustomMargin === 'custom') {
+      filtered = filtered.filter(cat => 
+        margins.some(m => m.category_id === cat.id)
+      );
+    } else if (filterHasCustomMargin === 'default') {
+      filtered = filtered.filter(cat => 
+        !margins.some(m => m.category_id === cat.id)
+      );
+    }
+    
+    return filtered;
+  }, [categories, margins, searchTerm, filterHasCustomMargin]);
+
+  // Filtered categories for Import Taxes tab
+  const filteredImportTaxCategories = useMemo(() => {
+    let filtered = categories;
+    
+    // Apply search filter
+    if (importTaxSearchTerm) {
+      const search = importTaxSearchTerm.toLowerCase();
+      filtered = filtered.filter(cat => 
+        cat.name.toLowerCase().includes(search)
+      );
+    }
+    
+    // Apply tax type filter
+    if (filterImportTaxType === 'custom') {
+      filtered = filtered.filter(cat => 
+        rules.some(r => r.category_id === cat.id)
+      );
+    } else if (filterImportTaxType === 'default') {
+      filtered = filtered.filter(cat => 
+        !rules.some(r => r.category_id === cat.id)
+      );
+    }
+    
+    return filtered;
+  }, [categories, rules, importTaxSearchTerm, filterImportTaxType]);
 
   // Load settings when they become available
   useEffect(() => {
     if (settings) {
-      setValue('labor_percentage', settings.labor_percentage ?? 10.0000);
-      setValue('shipping_percentage', settings.shipping_percentage ?? 15.0000);
-      setValue('import_tax_percent', settings.import_tax_percent ?? 0);
-      setValue('discount_reseller_pct', settings.discount_reseller_pct ?? 0);
-      setValue('discount_distributor_pct', settings.discount_distributor_pct ?? 0);
-      setValue('discount_partner_pct', settings.discount_partner_pct ?? 0);
-      setValue('discount_vip_pct', settings.discount_vip_pct ?? 0);
-      setValue('min_margin_pct', settings.min_margin_pct ?? 35);
+      console.log('📥 Loading CostSettings into form:', {
+        default_msrp_pct_sale_out: settings.default_msrp_pct_sale_out,
+        default_msrp_pct_sale_out_ui: Math.round((settings.default_msrp_pct_sale_out || 0.65) * 100),
+      });
+      
+      // DB: 0.10 → UI: 10 (rounded)
+      setValue('labor_percentage', Math.round(settings.labor_pct * 100));
+      setValue('shipping_percentage', Math.round(settings.shipping_pct * 100));
+      setValue('import_tax_percent', Math.round(settings.global_import_tax_pct * 100));
+      
+      const msrpValue = Math.round((settings.default_msrp_pct_sale_out || 0.65) * 100);
+      console.log('📥 Setting msrp_pct_sale_out to:', msrpValue);
+      setValue('msrp_pct_sale_out', msrpValue);
+      
+      setValue('discount_reseller_pct', Math.round(settings.reseller_discount_pct * 100));
+      setValue('discount_distributor_pct', Math.round(settings.distributor_discount_pct * 100));
+      setValue('discount_partner_pct', Math.round(settings.partner_discount_pct * 100));
+      setValue('discount_vip_pct', Math.round(settings.vip_discount_pct * 100));
+      setValue('min_margin_pct', Math.round(settings.minimum_margin_pct * 100));
     }
   }, [settings, setValue]);
 
   const onSubmit = async (data: CostSettingsFormData) => {
     try {
+      setIsSaving(true);
       setSaveSuccess(false);
       
-      if (settings) {
-        // Update existing
-        await updateSettings({
-          labor_percentage: data.labor_percentage,
-          shipping_percentage: data.shipping_percentage,
-          import_tax_percent: data.import_tax_percent,
-          discount_reseller_pct: data.discount_reseller_pct ?? 0,
-          discount_distributor_pct: data.discount_distributor_pct ?? 0,
-          discount_partner_pct: data.discount_partner_pct ?? 0,
-          discount_vip_pct: data.discount_vip_pct ?? 0,
-          min_margin_pct: data.min_margin_pct ?? 35,
-        });
-      } else {
-        // Create new
-        await createSettings({
-          currency_code: 'USD',
-          labor_percentage: data.labor_percentage,
-          shipping_percentage: data.shipping_percentage,
-          import_tax_percent: data.import_tax_percent,
-          discount_reseller_pct: data.discount_reseller_pct ?? 0,
-          discount_distributor_pct: data.discount_distributor_pct ?? 0,
-          discount_partner_pct: data.discount_partner_pct ?? 0,
-          discount_vip_pct: data.discount_vip_pct ?? 0,
-          min_margin_pct: data.min_margin_pct ?? 35,
-          // Legacy fields (set to 0 for v1)
-          labor_rate_per_hour: 0,
-          default_labor_minutes_per_unit: 0,
-          shipping_base_cost: 0,
-          shipping_cost_per_kg: 0,
-          handling_fee: 0,
-        });
-      }
+      // Convert percentages to decimals: UI 10 → DB 0.10
+      // MSRP % Sale Out is not editable in Defaults; preserve existing value when not in form
+      const msrpSaleOut = data.msrp_pct_sale_out != null
+        ? data.msrp_pct_sale_out / 100
+        : (settings?.default_msrp_pct_sale_out ?? 0.65);
+      const payload = {
+        labor_pct: data.labor_percentage / 100,
+        shipping_pct: data.shipping_percentage / 100,
+        global_import_tax_pct: data.import_tax_percent / 100,
+        default_msrp_pct_sale_out: msrpSaleOut,
+        reseller_discount_pct: (data.discount_reseller_pct ?? 0) / 100,
+        distributor_discount_pct: (data.discount_distributor_pct ?? 0) / 100,
+        partner_discount_pct: (data.discount_partner_pct ?? 0) / 100,
+        vip_discount_pct: (data.discount_vip_pct ?? 0) / 100,
+        minimum_margin_pct: (data.min_margin_pct ?? 35) / 100,
+      };
       
-      await refetch();
+      console.log('💾 Saving CostSettings payload:', payload);
+      console.log('💾 MSRP % Sale Out value:', data.msrp_pct_sale_out, '→ DB:', payload.default_msrp_pct_sale_out);
+      
+      await upsertSettings(payload);
+      
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (err) {
-      console.error('Error saving cost settings:', err);
+    } catch (err: any) {
+      // Format error message properly (avoid circular reference)
+      const errorMessage = err?.message || err?.error_description || err?.hint || JSON.stringify(err, Object.getOwnPropertyNames(err), 2) || 'Unknown error';
+      console.error('Error saving cost settings:', {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+        hint: err?.hint,
+        fullError: errorMessage,
+      });
+      alert(`Error saving settings: ${errorMessage}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -141,9 +212,6 @@ export default function CostEngineSettings() {
         <h1 className="text-xl font-semibold text-foreground mb-1">
           Cost Engine Settings
         </h1>
-        <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-          Configure and manage your cost engine settings and content
-        </p>
       </div>
 
       {error && (
@@ -187,9 +255,9 @@ export default function CostEngineSettings() {
                 height: '100%',
                 minWidth: '140px',
                 width: 'auto',
-                color: activeTab === 'defaults' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
+                color: 'var(--graphite-black-hex)',
                 borderColor: 'var(--gray-250)',
-                borderBottom: activeTab === 'defaults' ? '2px solid var(--primary-brand-hex)' : 'none'
+                borderBottom: activeTab === 'defaults' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
               aria-selected={activeTab === 'defaults'}
@@ -210,9 +278,9 @@ export default function CostEngineSettings() {
                 height: '100%',
                 minWidth: '140px',
                 width: 'auto',
-                color: activeTab === 'import_taxes' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
+                color: 'var(--graphite-black-hex)',
                 borderColor: 'var(--gray-250)',
-                borderBottom: activeTab === 'import_taxes' ? '2px solid var(--primary-brand-hex)' : 'none'
+                borderBottom: activeTab === 'import_taxes' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
               aria-selected={activeTab === 'import_taxes'}
@@ -233,8 +301,8 @@ export default function CostEngineSettings() {
                 height: '100%',
                 minWidth: '140px',
                 width: 'auto',
-                color: activeTab === 'category_margins' ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
-                borderBottom: activeTab === 'category_margins' ? '2px solid var(--primary-brand-hex)' : 'none'
+                color: 'var(--graphite-black-hex)',
+                borderBottom: activeTab === 'category_margins' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
               aria-selected={activeTab === 'category_margins'}
@@ -248,181 +316,150 @@ export default function CostEngineSettings() {
         {/* Form Body - Matching CustomerNew content structure */}
         <div className="py-6 px-6">
           {activeTab === 'defaults' && (
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-              {/* Cost Engine Defaults Section */}
-              <div className="mb-8">
-                <div className="flex items-center gap-2 mb-4">
-                  <DollarSign className="w-5 h-5 text-gray-700" />
-                  <h3 className="text-sm font-semibold text-gray-900">Cost Engine Defaults</h3>
-                </div>
-                <p className="text-xs text-gray-600 mb-4">
-                  Configure default cost percentages for new quote lines. These values only affect new quotes or explicit resets.
-                </p>
-
-                <div className="grid grid-cols-12 gap-x-4 gap-y-4">
-                  <div className="col-span-4">
-                    <Label htmlFor="labor_percentage" className="text-xs" required>
-                      Labor Percentage (%)
-                    </Label>
-                    <Input
-                      id="labor_percentage"
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      max="100"
-                      {...register('labor_percentage', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.labor_percentage?.message}
-                      placeholder="10.0000"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default labor cost as a percentage of base material cost
-                    </p>
+            <form onSubmit={handleSubmit(onSubmit)}>
+              <div className="space-y-10">
+                {/* Row 1: Cost Engine Defaults */}
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <DollarSign className="w-5 h-5 text-gray-700" />
+                    <h3 className="text-sm font-semibold text-gray-900">Cost Engine Defaults</h3>
                   </div>
-
-                  <div className="col-span-4">
-                    <Label htmlFor="shipping_percentage" className="text-xs" required>
-                      Shipping Percentage (%)
-                    </Label>
-                    <Input
-                      id="shipping_percentage"
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      max="100"
-                      {...register('shipping_percentage', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.shipping_percentage?.message}
-                      placeholder="15.0000"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default shipping cost as a percentage of base material cost
-                    </p>
-                  </div>
-
-                  <div className="col-span-4">
-                    <Label htmlFor="import_tax_percent" className="text-xs" required>
-                      Global Import Tax % (Fallback)
-                    </Label>
-                    <Input
-                      id="import_tax_percent"
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      max="100"
-                      {...register('import_tax_percent', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.import_tax_percent?.message}
-                      placeholder="0.0000"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default import tax percentage. Used when no category-specific rule exists
-                    </p>
+                  <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+                    <div className="col-span-3">
+                      <Label htmlFor="labor_percentage" className="text-xs" required>
+                        Labor Percentage (%)
+                      </Label>
+                      <Input
+                        id="labor_percentage"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('labor_percentage', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.labor_percentage?.message}
+                        placeholder="10"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Label htmlFor="shipping_percentage" className="text-xs" required>
+                        Shipping Percentage (%)
+                      </Label>
+                      <Input
+                        id="shipping_percentage"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('shipping_percentage', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.shipping_percentage?.message}
+                        placeholder="15"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Label htmlFor="import_tax_percent" className="text-xs" required>
+                        Global Import Tax % (Fallback)
+                      </Label>
+                      <Input
+                        id="import_tax_percent"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('import_tax_percent', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.import_tax_percent?.message}
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Customer Discounts Section */}
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <DollarSign className="w-5 h-5 text-gray-700" />
-                  <h3 className="text-sm font-semibold text-gray-900">Customer Discounts</h3>
-                </div>
-                <p className="text-xs text-gray-600 mb-4">
-                  Set default discount percentages by customer type. These discounts will be applied automatically when a customer's type matches, unless the customer has a manual discount override.
-                </p>
-
-                <div className="grid grid-cols-12 gap-x-4 gap-y-4">
-                  <div className="col-span-3">
-                    <Label htmlFor="discount_reseller_pct" className="text-xs">
-                      Reseller Discount (%)
-                    </Label>
-                    <Input
-                      id="discount_reseller_pct"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      {...register('discount_reseller_pct', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.discount_reseller_pct?.message}
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default discount for Reseller customers
-                    </p>
+                {/* Row 2: Customer Discounts */}
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <DollarSign className="w-5 h-5 text-gray-700" />
+                    <h3 className="text-sm font-semibold text-gray-900">Customer Discounts</h3>
                   </div>
-
-                  <div className="col-span-3">
-                    <Label htmlFor="discount_distributor_pct" className="text-xs">
-                      Distributor Discount (%)
-                    </Label>
-                    <Input
-                      id="discount_distributor_pct"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      {...register('discount_distributor_pct', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.discount_distributor_pct?.message}
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default discount for Distributor customers
-                    </p>
-                  </div>
-
-                  <div className="col-span-3">
-                    <Label htmlFor="discount_partner_pct" className="text-xs">
-                      Partner Discount (%)
-                    </Label>
-                    <Input
-                      id="discount_partner_pct"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      {...register('discount_partner_pct', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.discount_partner_pct?.message}
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default discount for Partner customers
-                    </p>
-                  </div>
-
-                  <div className="col-span-3">
-                    <Label htmlFor="discount_vip_pct" className="text-xs">
-                      VIP Discount (%)
-                    </Label>
-                    <Input
-                      id="discount_vip_pct"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      {...register('discount_vip_pct', { valueAsNumber: true })}
-                      className="py-1 text-xs"
-                      error={errors.discount_vip_pct?.message}
-                      placeholder="0.00"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Default discount for VIP customers
-                    </p>
+                  <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+                    <div className="col-span-3">
+                      <Label htmlFor="discount_distributor_pct" className="text-xs">
+                        Distributor Discount (%)
+                      </Label>
+                      <Input
+                        id="discount_distributor_pct"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('discount_distributor_pct', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.discount_distributor_pct?.message}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Label htmlFor="discount_reseller_pct" className="text-xs">
+                        Reseller Discount (%)
+                      </Label>
+                      <Input
+                        id="discount_reseller_pct"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('discount_reseller_pct', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.discount_reseller_pct?.message}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Label htmlFor="discount_partner_pct" className="text-xs">
+                        Partner Discount (%)
+                      </Label>
+                      <Input
+                        id="discount_partner_pct"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('discount_partner_pct', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.discount_partner_pct?.message}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Label htmlFor="discount_vip_pct" className="text-xs">
+                        VIP Discount (%)
+                      </Label>
+                      <Input
+                        id="discount_vip_pct"
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        {...register('discount_vip_pct', { valueAsNumber: true })}
+                        className="py-1 text-xs"
+                        error={errors.discount_vip_pct?.message}
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Minimum Margin Section */}
+              {/* Minimum Margin Section - HIDDEN (deprecated, use CategoryMargins instead) */}
+              {false && (
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <DollarSign className="w-5 h-5 text-gray-700" />
                   <h3 className="text-sm font-semibold text-gray-900">Minimum Margin (Pricing Guardrail)</h3>
                 </div>
                 <p className="text-xs text-gray-600 mb-4">
-                  Minimum margin percentage (margin-on-sale) used as pricing floor. This ensures quotes never go below this margin percentage, protecting profitability even with tier discounts.
+                  DEPRECATED: Use Category Margins tab instead. This global value is only used as fallback for categories without CategoryMargin.
                 </p>
 
                 <div className="grid grid-cols-12 gap-x-4 gap-y-4">
@@ -433,7 +470,7 @@ export default function CostEngineSettings() {
                     <Input
                       id="min_margin_pct"
                       type="number"
-                      step="0.01"
+                      step="1"
                       min="0"
                       max="95"
                       {...register('min_margin_pct', { valueAsNumber: true })}
@@ -447,16 +484,17 @@ export default function CostEngineSettings() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Save Button */}
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
                   type="submit"
-                  disabled={isCreating || isUpdating || !isDirty}
+                  disabled={isSaving || !isDirty}
                   className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <Save className="w-4 h-4" />
-                  {isCreating || isUpdating ? 'Saving...' : 'Save Settings'}
+                  {isSaving ? 'Saving...' : 'Save Settings'}
                 </button>
               </div>
             </form>
@@ -464,150 +502,200 @@ export default function CostEngineSettings() {
 
           {activeTab === 'import_taxes' && (
             <div>
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">Import Tax Rules by Category</h3>
-                <p className="text-xs text-gray-600">
-                  Set category-specific import tax percentages. These override the global default for items in those categories.
-                </p>
+              {/* Header */}
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">Import Tax Rules by Category</h3>
               </div>
 
-              {rulesLoading ? (
-                <div className="text-center py-4 text-sm text-gray-500">Loading rules...</div>
-              ) : (
-                <div className="border border-gray-200 rounded-lg">
-                  <div className="divide-y divide-gray-200">
-                    {categories.map((category) => {
-                      const existingRule = rules.find(r => r.category_id === category.id && r.active && !r.deleted);
-                      const isEditing = editingRuleId === existingRule?.id || editingCategoryId === category.id;
+              {/* Search and Filters */}
+              <div className="mb-4">
+                <div className={`bg-white border border-gray-200 py-6 px-6 ${
+                  showImportTaxFilters ? 'rounded-t-lg' : 'rounded-lg'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search categories by name..."
+                        value={importTaxSearchTerm}
+                        onChange={(e) => setImportTaxSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                        aria-label="Search categories"
+                      />
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowImportTaxFilters(!showImportTaxFilters)}
+                        className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                          showImportTaxFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Filter style={{ width: '14px', height: '14px' }} />
+                        Filters
+                      </button>
+                    </div>
+                  </div>
 
-                      return (
-                        <div key={category.id} className="p-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <Label className="text-xs font-medium text-gray-900">{category.name}</Label>
-                              {existingRule && !isEditing ? (
-                                <div className="mt-1">
-                                  <p className="text-xs text-gray-700 font-medium">
-                                    Current: {existingRule.import_tax_percentage.toFixed(4)}%
-                                  </p>
-                                  {existingRule.default_value_percentage !== null && existingRule.default_value_percentage !== undefined && (
-                                    <p className="text-xs text-gray-500 mt-0.5">
-                                      Default: {existingRule.default_value_percentage.toFixed(4)}%
-                                      {existingRule.is_using_default && (
-                                        <span className="ml-2 text-blue-600">(Using default)</span>
-                                      )}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : !isEditing && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Default: {settings?.import_tax_percent || 0}% (from global settings)
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {isEditing ? (
-                                <>
-                                  <Input
-                                    type="number"
-                                    step="0.0001"
-                                    min="0"
-                                    max="100"
-                                    value={editingPercentage}
-                                    onChange={(e) => setEditingPercentage(e.target.value)}
-                                    className="w-32 py-1 text-xs"
-                                    placeholder="0.0000"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      const percentage = parseFloat(editingPercentage);
-                                      if (isNaN(percentage) || percentage < 0) {
-                                        alert('Please enter a valid non-negative number');
-                                        return;
-                                      }
-                                      try {
-                                        const defaultTax = settings?.import_tax_percent || 0;
-                                        
-                                        if (existingRule) {
-                                          await updateRule(existingRule.id, { 
-                                            import_tax_percentage: percentage,
-                                            default_value_percentage: defaultTax,
-                                            is_using_default: percentage === defaultTax,
-                                          });
-                                        } else {
-                                          await createRule({
-                                            category_id: category.id,
-                                            import_tax_percentage: percentage,
-                                            default_value_percentage: defaultTax,
-                                            is_using_default: percentage === defaultTax,
-                                            active: true,
-                                          });
-                                        }
-                                        setEditingRuleId(null);
-                                        setEditingCategoryId(null);
-                                        setEditingPercentage('');
-                                      } catch (err) {
-                                        console.error('Error saving rule:', err);
-                                      }
-                                    }}
-                                    className="p-1 text-green-600 hover:text-green-700"
-                                    title="Save"
-                                  >
-                                    <Check className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingRuleId(null);
-                                      setEditingCategoryId(null);
-                                      setEditingPercentage('');
-                                    }}
-                                    className="p-1 text-gray-600 hover:text-gray-700"
-                                    title="Cancel"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingRuleId(existingRule?.id || null);
-                                      setEditingCategoryId(existingRule ? null : category.id);
-                                      setEditingPercentage(existingRule?.import_tax_percentage.toString() || '0');
-                                    }}
-                                    className="p-1 text-primary hover:text-primary/80"
-                                    title={existingRule ? 'Edit' : 'Add'}
-                                  >
-                                    {existingRule ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                  </button>
-                                  {existingRule && (
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        if (confirm('Are you sure you want to delete this rule?')) {
-                                          try {
-                                            await deleteRule(existingRule.id);
-                                          } catch (err) {
-                                            console.error('Error deleting rule:', err);
-                                          }
-                                        }
-                                      }}
-                                      className="p-1 text-red-600 hover:text-red-700"
-                                      title="Delete"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          </div>
+                  {/* Filters Panel */}
+                  {showImportTaxFilters && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-3">
+                          <Label className="text-xs">Tax Type</Label>
+                          <select
+                            value={filterImportTaxType}
+                            onChange={(e) => setFilterImportTaxType(e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                          >
+                            <option value="all">All Categories</option>
+                            <option value="custom">Custom Rules</option>
+                            <option value="default">Default Only</option>
+                          </select>
                         </div>
-                      );
-                    })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Table */}
+              {rulesLoading ? (
+                <div className="text-center py-8 bg-white border border-gray-200 rounded-lg">
+                  <div className="text-sm text-gray-500">Loading rules...</div>
+                </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <th className="text-left py-2 px-4 text-xs font-semibold text-gray-700">Category</th>
+                          <th className="text-left py-2 px-4 text-xs font-semibold text-gray-700">Import Tax %</th>
+                          <th className="text-right py-2 px-4 text-xs font-semibold text-gray-700">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredImportTaxCategories.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="py-8 text-center text-sm text-gray-500">
+                              No categories found matching your search criteria.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredImportTaxCategories.map((category) => {
+                            const existingRule = rules.find(r => r.category_id === category.id);
+                            const isEditing = editingRuleId === existingRule?.id || editingCategoryId === category.id;
+                            const taxPct = existingRule 
+                              ? Math.round(existingRule.import_tax_pct * 100)
+                              : Math.round((settings?.global_import_tax_pct ?? 0) * 100);
+
+                            return (
+                              <tr key={category.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                <td className="py-3 px-4 text-xs text-gray-900 font-medium">
+                                  {category.name}
+                                </td>
+                                <td className="py-3 px-4 text-xs text-gray-700">
+                                  {isEditing ? (
+                                    <Input
+                                      type="number"
+                                      step="1"
+                                      min="0"
+                                      max="100"
+                                      value={editingPercentage}
+                                      onChange={(e) => setEditingPercentage(e.target.value)}
+                                      className="w-20 py-1 text-xs"
+                                      placeholder="0"
+                                    />
+                                  ) : (
+                                    <span>{taxPct}%{!existingRule && <span className="text-gray-400 ml-1">(default)</span>}</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {isEditing ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const percentage = parseFloat(editingPercentage);
+                                            if (isNaN(percentage) || percentage < 0) {
+                                              alert('Please enter a valid non-negative number');
+                                              return;
+                                            }
+                                            
+                                            try {
+                                              await upsertRule(category.id, percentage / 100);
+                                              setEditingRuleId(null);
+                                              setEditingCategoryId(null);
+                                              setEditingPercentage('');
+                                            } catch (err) {
+                                              console.error('Error saving rule:', err);
+                                              alert('Error saving rule. Check console for details.');
+                                            }
+                                          }}
+                                          className="p-1.5 hover:bg-green-50 rounded transition-colors text-green-600"
+                                          title="Save"
+                                        >
+                                          <Check className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingRuleId(null);
+                                            setEditingCategoryId(null);
+                                            setEditingPercentage('');
+                                          }}
+                                          className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                          title="Cancel"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingRuleId(existingRule?.id || null);
+                                            setEditingCategoryId(existingRule ? null : category.id);
+                                            const valueFromDb = existingRule?.import_tax_pct ?? (settings?.global_import_tax_pct ?? 0);
+                                            setEditingPercentage(Math.round(valueFromDb * 100).toString());
+                                          }}
+                                          className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                          title={existingRule ? 'Edit' : 'Add'}
+                                        >
+                                          {existingRule ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                        </button>
+                                        {existingRule && (
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              if (confirm('Are you sure you want to delete this rule?')) {
+                                                try {
+                                                  await deleteRule(existingRule.id);
+                                                } catch (err) {
+                                                  console.error('Error deleting rule:', err);
+                                                }
+                                              }
+                                            }}
+                                            className="p-1.5 hover:bg-red-50 rounded transition-colors text-red-600"
+                                            title="Delete"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -616,167 +704,254 @@ export default function CostEngineSettings() {
 
           {activeTab === 'category_margins' && (
             <div>
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">Category Margins</h3>
-                <p className="text-xs text-gray-600">
-                  Set global margin percentages per category. These margins will be used as defaults when creating new catalog items or calculating MSRP.
-                </p>
+              {/* Header */}
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">Category Margins</h3>
               </div>
 
-              {marginsLoading ? (
-                <div className="text-center py-4 text-sm text-gray-500">Loading margins...</div>
-              ) : (
-                <div className="border border-gray-200 rounded-lg">
-                  <div className="divide-y divide-gray-200">
-                    {categories.map((category) => {
-                      const existingMargin = margins.find(m => m.category_id === category.id && m.active && !m.deleted);
-                      const isEditing = editingMarginId === existingMargin?.id || editingMarginCategoryId === category.id;
+              {/* Search and Filters */}
+              <div className="mb-4">
+                <div className={`bg-white border border-gray-200 py-6 px-6 ${
+                  showFilters ? 'rounded-t-lg' : 'rounded-lg'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search categories by name..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                        aria-label="Search categories"
+                      />
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowFilters(!showFilters)}
+                        className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                          showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Filter style={{ width: '14px', height: '14px' }} />
+                        Filters
+                      </button>
+                    </div>
+                  </div>
 
-                      return (
-                        <div key={category.id} className="p-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <Label className="text-xs font-medium text-gray-900">{category.name}</Label>
-                              {existingMargin && !isEditing ? (
-                                <div className="mt-1">
-                                  <p className="text-xs text-gray-700 font-medium">
-                                    Current: {existingMargin.margin_percentage.toFixed(2)}%
-                                  </p>
-                                  {existingMargin.default_value_percentage !== null && existingMargin.default_value_percentage !== undefined && (
-                                    <p className="text-xs text-gray-500 mt-0.5">
-                                      Default: {existingMargin.default_value_percentage.toFixed(2)}%
-                                      {existingMargin.is_using_default && (
-                                        <span className="ml-2 text-blue-600">(Using default)</span>
-                                      )}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : !isEditing && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  No margin set (default: 35%)
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {isEditing ? (
-                                <>
+                  {/* Filters Panel */}
+                  {showFilters && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-3">
+                          <Label className="text-xs">Margin Type</Label>
+                          <select
+                            value={filterHasCustomMargin}
+                            onChange={(e) => setFilterHasCustomMargin(e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                          >
+                            <option value="all">All Categories</option>
+                            <option value="custom">Custom Margins</option>
+                            <option value="default">Default Only</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Table */}
+              {marginsLoading ? (
+                <div className="text-center py-8 bg-white border border-gray-200 rounded-lg">
+                  <div className="text-sm text-gray-500">Loading margins...</div>
+                </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <th className="text-left py-2 px-4 text-xs font-semibold text-gray-700">Category</th>
+                          <th className="text-left py-2 px-4 text-xs font-semibold text-gray-700">MSRP % Sale-In</th>
+                          <th className="text-left py-2 px-4 text-xs font-semibold text-gray-700">MSRP % Sale Out</th>
+                          <th className="text-right py-2 px-4 text-xs font-semibold text-gray-700">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          // Filter categories
+                          let filtered = categories;
+                          
+                          // Apply search filter
+                          if (searchTerm) {
+                            const search = searchTerm.toLowerCase();
+                            filtered = filtered.filter(cat => 
+                              cat.name.toLowerCase().includes(search)
+                            );
+                          }
+                          
+                          // Apply margin type filter
+                          if (filterHasCustomMargin === 'custom') {
+                            filtered = filtered.filter(cat => 
+                              margins.some(m => m.category_id === cat.id)
+                            );
+                          } else if (filterHasCustomMargin === 'default') {
+                            filtered = filtered.filter(cat => 
+                              !margins.some(m => m.category_id === cat.id)
+                            );
+                          }
+                          
+                          return filtered;
+                        })().map((category) => {
+                          const existingMargin = margins.find(m => m.category_id === category.id);
+                          const isEditing = editingMarginId === existingMargin?.id || editingMarginCategoryId === category.id;
+                          const saleInPct = existingMargin 
+                            ? Math.round(((existingMargin as any).msrp_pct_sale_in || (existingMargin as any).default_margin_pct || 0.35) * 100)
+                            : 35;
+                          const saleOutPct = existingMargin && (existingMargin as any).msrp_pct_sale_out
+                            ? Math.round((existingMargin as any).msrp_pct_sale_out * 100)
+                            : 65;
+
+                          return (
+                            <tr key={category.id} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-3 px-4 text-xs text-gray-900 font-medium">
+                                {category.name}
+                              </td>
+                              <td className="py-3 px-4 text-xs text-gray-700">
+                                {isEditing ? (
                                   <Input
                                     type="number"
-                                    step="0.01"
+                                    step="1"
                                     min="0"
                                     max="100"
                                     value={editingMarginPercentage}
                                     onChange={(e) => setEditingMarginPercentage(e.target.value)}
-                                    className="w-32 py-1 text-xs"
-                                    placeholder="35.00"
+                                    className="w-20 py-1 text-xs"
+                                    placeholder="35"
                                   />
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      const percentage = parseFloat(editingMarginPercentage);
-                                      if (isNaN(percentage) || percentage < 0 || percentage > 100) {
-                                        alert('Please enter a valid number between 0 and 100');
-                                        return;
-                                      }
-                                      try {
-                                        const defaultMargin = 35;
-                                        
-                                        if (existingMargin) {
-                                          await updateMargin(existingMargin.id, { 
-                                            margin_percentage: percentage,
-                                            default_value_percentage: defaultMargin,
-                                            is_using_default: percentage === defaultMargin,
-                                          });
-                                        } else {
-                                          await createMargin({
-                                            category_id: category.id,
-                                            margin_percentage: percentage,
-                                            default_value_percentage: defaultMargin,
-                                            is_using_default: percentage === defaultMargin,
-                                            active: true,
-                                          });
-                                        }
-                                        setEditingMarginId(null);
-                                        setEditingMarginCategoryId(null);
-                                        setEditingMarginPercentage('');
-                                      } catch (err) {
-                                        console.error('Error saving margin:', err);
-                                        alert('Error saving margin. Please try again.');
-                                      }
-                                    }}
-                                    className="p-1 text-green-600 hover:text-green-700"
-                                    title="Save"
-                                  >
-                                    <Check className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingMarginId(null);
-                                      setEditingMarginCategoryId(null);
-                                      setEditingMarginPercentage('');
-                                    }}
-                                    className="p-1 text-gray-600 hover:text-gray-700"
-                                    title="Cancel"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingMarginId(existingMargin?.id || null);
-                                      setEditingMarginCategoryId(existingMargin ? null : category.id);
-                                      setEditingMarginPercentage(existingMargin?.margin_percentage.toString() || '35.00');
-                                    }}
-                                    className="p-1 text-primary hover:text-primary/80"
-                                    title={existingMargin ? 'Edit' : 'Add'}
-                                  >
-                                    {existingMargin ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                  </button>
-                                  {existingMargin && (
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        if (confirm('Are you sure you want to delete this margin?')) {
-                                          try {
-                                            await deleteMargin(existingMargin.id);
-                                          } catch (err) {
-                                            console.error('Error deleting margin:', err);
-                                            alert('Error deleting margin. Please try again.');
+                                ) : (
+                                  <span>{saleInPct}%{!existingMargin && <span className="text-gray-400 ml-1">(default)</span>}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-xs text-gray-700">
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    step="1"
+                                    min="0"
+                                    max="200"
+                                    value={editingMsrpPctSaleOut}
+                                    onChange={(e) => setEditingMsrpPctSaleOut(e.target.value)}
+                                    className="w-20 py-1 text-xs"
+                                    placeholder="65"
+                                  />
+                                ) : (
+                                  <span>{saleOutPct}%{!existingMargin && <span className="text-gray-400 ml-1">(default)</span>}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  {isEditing ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          const marginPct = parseFloat(editingMarginPercentage);
+                                          const msrpPct = parseFloat(editingMsrpPctSaleOut);
+                                          
+                                          if (isNaN(marginPct) || marginPct < 0 || marginPct > 100) {
+                                            alert('MSRP % Sale-In must be between 0 and 100');
+                                            return;
                                           }
-                                        }
-                                      }}
-                                      className="p-1 text-red-600 hover:text-red-700"
-                                      title="Delete"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
+                                          
+                                          if (isNaN(msrpPct) || msrpPct < 0 || msrpPct > 200) {
+                                            alert('MSRP % Sale Out must be between 0 and 200');
+                                            return;
+                                          }
+                                          
+                                          try {
+                                            await upsertMargin(category.id, marginPct / 100, msrpPct / 100);
+                                            setEditingMarginId(null);
+                                            setEditingMarginCategoryId(null);
+                                            setEditingMarginPercentage('');
+                                            setEditingMsrpPctSaleOut('');
+                                          } catch (err) {
+                                            console.error('Error saving margin:', err);
+                                            alert('Error saving margin. Check console for details.');
+                                          }
+                                        }}
+                                        className="p-1.5 hover:bg-green-50 rounded transition-colors text-green-600"
+                                        title="Save"
+                                      >
+                                        <Check className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingMarginId(null);
+                                          setEditingMarginCategoryId(null);
+                                          setEditingMarginPercentage('');
+                                          setEditingMsrpPctSaleOut('');
+                                        }}
+                                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                        title="Cancel"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingMarginId(existingMargin?.id || null);
+                                          setEditingMarginCategoryId(existingMargin ? null : category.id);
+                                          const marginFromDb = (existingMargin as any)?.msrp_pct_sale_in || (existingMargin as any)?.default_margin_pct || (settings?.minimum_margin_pct ?? 0.35);
+                                          const msrpFromDb = (existingMargin as any)?.msrp_pct_sale_out ?? (settings?.default_msrp_pct_sale_out ?? 0.65);
+                                          setEditingMarginPercentage(Math.round(marginFromDb * 100).toString());
+                                          setEditingMsrpPctSaleOut(Math.round(msrpFromDb * 100).toString());
+                                        }}
+                                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                        title={existingMargin ? 'Edit' : 'Add'}
+                                      >
+                                        {existingMargin ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                      </button>
+                                      {existingMargin && (
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            if (confirm('Are you sure you want to delete this margin?')) {
+                                              try {
+                                                await deleteMargin(existingMargin.id);
+                                              } catch (err) {
+                                                console.error('Error deleting margin:', err);
+                                                alert('Error deleting margin. Please try again.');
+                                              }
+                                            }
+                                          }}
+                                          className="p-1.5 hover:bg-red-50 rounded transition-colors text-red-600"
+                                          title="Delete"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      )}
+                                    </>
                                   )}
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
             </div>
           )}
         </div>
-      </div>
-
-      {/* Info Note */}
-      <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <p className="text-xs text-blue-800">
-          <strong>Note:</strong> These percentages are defaults only. Once a quote line is created, 
-          labor, shipping, and import tax costs are stored and frozen. They are recalculated only if the user 
-          explicitly clicks "Reset" on a quote line, or if the quote line is manually edited.
-        </p>
       </div>
     </div>
   );

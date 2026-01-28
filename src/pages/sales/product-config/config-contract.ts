@@ -89,3 +89,116 @@ export function normalizeConfig(config: Partial<UnifiedProductConfig>): UnifiedP
   };
 }
 
+/**
+ * Normalize ProductConfigurator config for QuoteLines and QuoteLineComponents persistence
+ * 
+ * RULES:
+ * 1. Uses ONLY snake_case keys for persistence
+ * 2. Converts cassette_shape → cassette boolean + cassette_shape
+ * 3. Normalizes side_channel + bottom_channel → side_channel_type
+ * 4. Extracts hardware options (hardware_color, drive_type, tube_type, etc.)
+ * 
+ * @param rawConfig - Raw config from ProductConfigurator
+ * @returns Normalized config with snake_case keys and proper boolean conversion
+ */
+export function normalizeConfiguratorConfig(rawConfig: any): {
+  // Fields for QuoteLines
+  quoteLine: {
+    product_type_id: string | null;
+    bom_template_id: string | null;
+    width_m: number | null;
+    height_m: number | null;
+    quantity: number;
+    collection_name: string | null;
+    variant_name: string | null;
+    fabric_catalog_item_id: string | null;
+    // Snapshot fields (for reference)
+    operating_system_variant: string | null;
+    tube_type: string | null;
+    drive_type: string | null;
+    bottom_rail_type: string | null;
+    cassette: boolean;
+    cassette_shape: string | null;
+    side_channel: boolean;
+    side_channel_type: string | null;
+    hardware_color: string | null;
+  };
+  // Options for QuoteLineComponents(kind='option')
+  options: {
+    hardware_color?: string;
+    drive_type?: string;
+    cassette?: { cassette: boolean; cassette_shape?: string };
+    side_channel?: { side_channel: boolean; side_channel_type?: string; bottom_channel?: boolean };
+    tube_type?: string;
+    operating_system_variant?: string;
+    bottom_rail_type?: string;
+  };
+} {
+  // 1. Convert cassette_shape to cassette boolean
+  const cassette_shape = rawConfig.cassette_shape || rawConfig.cassetteShape || null;
+  const cassette = cassette_shape !== null && cassette_shape !== 'none';
+  
+  // 2. Normalize side_channel + bottom_channel
+  const side_channel = rawConfig.side_channel === true;
+  const bottom_channel = rawConfig.bottom_channel === true;
+  
+  // 3. Determine side_channel_type
+  let side_channel_type: string | null = null;
+  if (side_channel) {
+    if (bottom_channel) {
+      side_channel_type = 'side_and_bottom';
+    } else {
+      side_channel_type = 'side_only';
+    }
+  }
+  
+  // 4. Extract hardware_color (from multiple possible sources)
+  const hardware_color = rawConfig.hardware_color || rawConfig.hardwareColor || rawConfig.operatingSystemColor || null;
+  
+  // 5. Extract drive_type
+  const drive_type = rawConfig.drive_type || rawConfig.operation_type || null;
+  
+  // 6. Extract tube_type
+  const tube_type = rawConfig.tube_type || null;
+  
+  // 7. Extract operating_system_variant
+  const operating_system_variant = rawConfig.operating_system_variant || null;
+  
+  // 8. Extract bottom_rail_type
+  const bottom_rail_type = rawConfig.bottom_rail_type || rawConfig.bottom_bar_finish || null;
+  
+  // 9. Extract fabric variant
+  const fabric_catalog_item_id = rawConfig.fabric_catalog_item_id || rawConfig.variantId || rawConfig.fabric_variant_id || null;
+  
+  return {
+    quoteLine: {
+      product_type_id: rawConfig.product_type_id || rawConfig.productTypeId || null,
+      bom_template_id: rawConfig.bom_template_id || null,
+      width_m: rawConfig.width_m || (rawConfig.width_mm ? rawConfig.width_mm / 1000 : null),
+      height_m: rawConfig.height_m || (rawConfig.height_mm ? rawConfig.height_mm / 1000 : null),
+      quantity: rawConfig.quantity || 1,
+      collection_name: rawConfig.collection_name || rawConfig.collectionName || null,
+      variant_name: rawConfig.variant_name || rawConfig.variantName || null,
+      fabric_catalog_item_id,
+      // Snapshot fields
+      operating_system_variant,
+      tube_type,
+      drive_type,
+      bottom_rail_type,
+      cassette,
+      cassette_shape,
+      side_channel,
+      side_channel_type,
+      hardware_color,
+    },
+    options: {
+      ...(hardware_color ? { hardware_color } : {}),
+      ...(drive_type ? { drive_type } : {}),
+      ...(cassette || cassette_shape !== 'none' ? { cassette: { cassette, cassette_shape: cassette_shape || undefined } } : {}),
+      ...(side_channel ? { side_channel: { side_channel, side_channel_type: side_channel_type || undefined, bottom_channel } } : {}),
+      ...(tube_type ? { tube_type } : {}),
+      ...(operating_system_variant ? { operating_system_variant } : {}),
+      ...(bottom_rail_type ? { bottom_rail_type } : {}),
+    },
+  };
+}

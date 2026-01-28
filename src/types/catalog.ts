@@ -2,23 +2,20 @@
  * Catalog and Quotes module types
  */
 
-// ENUM types matching PostgreSQL ENUMs
+// ENUM types matching PostgreSQL ENUMs - NEW SCHEMA
 export type MeasureBasis =
   | 'unit'
-  | 'linear_m'
-  | 'area'
-  | 'fabric';
+  | 'linear'  // NEW: 'linear' (not 'linear_m')
+  | 'area';
 
 export type FabricPricingMode = 
   | 'per_linear_m'
   | 'per_sqm';
 
 export type CatalogItemType =
-  | 'component'
-  | 'fabric'
-  | 'linear'
-  | 'service'
-  | 'accessory';
+  | 'roll'            // Roll goods (fabrics, films, vinyls) - can have is_fabric
+  | 'component'       // Components (pieces, each)
+  | 'linear_component'; // Linear components (measured by length, default UOM: 'm')
 
 export type QuoteStatus = 
   | 'draft'
@@ -28,44 +25,50 @@ export type QuoteStatus =
   | 'cancelled';
 
 // CatalogItems interface
-// Based on actual database schema
+// Based on NEW database schema
 export interface CatalogItem {
   id: string;
   organization_id: string;
   sku: string;
-  name: string; // Mapped from item_name for compatibility
-  item_name?: string | null;  // Actual column from database
+  name: string; // NEW SCHEMA: 'name' field (required)
+  item_name?: string | null;  // Legacy: kept for backward compatibility
   description?: string | null;
-  manufacturer_id?: string | null; // Actual column
-  item_category_id?: string | null; // Actual column
-  item_type: CatalogItemType;
-  measure_basis: MeasureBasis;
-  uom: string;
-  is_fabric: boolean;
-  roll_width_m?: number | null;
-  fabric_pricing_mode?: FabricPricingMode | null;
+  manufacturer_id?: string | null;
+  category_id?: string | null; // NEW: FK to CatalogCategories.id
+  item_category_id?: string | null; // Legacy: kept for backward compatibility
+  measure_basis: MeasureBasis; // Required: 'unit' | 'linear' | 'area'
+  unit_of_measure: string; // Required: 'unit_of_measure'
+  uom?: string; // Legacy: kept for backward compatibility (mapped from unit_of_measure)
+  is_fabric: boolean; // Required: determines variant_name vs color usage
+  // Fields when is_fabric=true
+  roll_type?: 'fabric' | 'window_film' | 'vinyl' | 'mesh' | 'paper' | 'other' | null; // DB enum: public.roll_type
+  collection_name?: string | null; // Only when is_fabric=true
+  variant_name?: string | null;  // Used ONLY when is_fabric=true (stores color/variant label)
+  roll_width?: number | null; // 'roll_width' numeric
+  roll_width_m?: number | null; // Legacy: kept for backward compatibility
+  fabric_pricing_mode?: FabricPricingMode | null; // Only when is_fabric=true
+  // Fields when is_fabric=false
+  color?: string | null; // Used ONLY when is_fabric=false
+  // ✅ FIX: item_role field for component role identification
+  item_role?: string | null; // Component role (e.g., 'bottom_bar', 'bracket', 'drive', 'motor', etc.)
   // Pricing fields
-  cost_exw?: number | null; // Base cost (EXW = Ex Works) - actual column name
-  default_margin_pct?: number | null; // Default margin percentage for MSRP calculation (interpreted as margin-on-sale, NOT markup)
+  cost_exw?: number | null; // Base cost (EXW = Ex Works) - numeric
+  default_margin_pct?: number | null; // Default margin percentage for MSRP calculation
   msrp?: number | null; // Manufacturer's Suggested Retail Price
-  msrp_manual?: boolean | null; // If true, MSRP was manually edited and should not be auto-recalculated
   // Legacy pricing fields (for backward compatibility)
-  cost_price: number; // Mapped from cost_exw
-  unit_price: number; // Default 0 (doesn't exist in table)
-  active: boolean;
+  cost_price?: number; // Legacy: mapped from cost_exw
+  unit_price?: number; // Legacy: default 0
+  is_active: boolean; // NEW SCHEMA: 'is_active'
+  active?: boolean; // Legacy: kept for backward compatibility
   discontinued: boolean;
-  collection_id?: string | null; // Deprecated - kept for compatibility, use collection_name instead
-  collection_name?: string | null; // Text field - collection name stored directly (no FK)
-  variant_id?: string | null; // UUID - may exist in some records
-  variant_name?: string | null;  // Text field for variant (actual column)
-  deleted: boolean;
-  archived: boolean;
+  image_url?: string | null; // Image URL from Supabase Storage or external URL
+  deleted?: boolean; // Optional for backward compatibility
+  archived?: boolean; // Optional for backward compatibility
   created_at: string;
   updated_at?: string | null;
-  image_url?: string | null; // Image URL from Supabase Storage or external URL
-  metadata: Record<string, any>; // Default empty (doesn't exist in table)
-  created_by?: string | null; // Default null (doesn't exist in table)
-  updated_by?: string | null; // Default null (doesn't exist in table)
+  metadata?: Record<string, any>; // Optional metadata
+  created_by?: string | null;
+  updated_by?: string | null;
 }
 
 // CatalogItem with collection relation (for queries with JOIN)
@@ -159,8 +162,6 @@ export interface QuoteLine {
   fabric_drop?: string | null;
   // PRICING SNAPSHOTS (Source of Truth - captured at time of quote creation)
   list_unit_price_snapshot?: number | null; // MSRP list price (precio de lista público) - BEFORE discounts
-  unit_price_snapshot?: number | null; // Net unit price (precio neto) - AFTER tier discounts applied
-  line_total?: number | null; // Net total = unit_price_snapshot * computed_qty
   // Snapshots (captured at time of quote creation)
   measure_basis_snapshot: MeasureBasis;
   roll_width_m_snapshot?: number | null;
@@ -264,8 +265,8 @@ export interface BOMTemplate {
   code?: string | null; // Unique template code within organization (e.g., ROLLER_MANUAL_BASIC_WHITE)
   name?: string | null;
   description?: string | null;
+  hardware_color?: string | null; // Hardware color (White, Black, Silver, Bronze, etc.) to differentiate templates. NULL means template applies to all colors.
   metadata?: Record<string, any> | null; // Template metadata: { drive, cassette, hardware_color, system, notes }
-  active: boolean;
   deleted: boolean;
   archived: boolean;
   created_at: string;

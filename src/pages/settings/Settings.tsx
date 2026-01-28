@@ -151,20 +151,8 @@ export default function Settings() {
           )}
 
           {/* Settings Content */}
-          <div className="flex-1 p-8 overflow-auto">
-            <div className="max-w-6xl">
-              <div className="mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  {settingsTabs.find(tab => tab.id === activeTab)?.label}
-                </h2>
-                <p className="text-sm text-gray-600">
-                  {activeTab === 'members' && 'Manage team members, roles, and permissions.'}
-                  {activeTab === 'billing' && 'Manage billing and subscription settings.'}
-                  {activeTab === 'integrations' && 'Configure integrations with external services.'}
-                </p>
-              </div>
+          <div className="flex-1 overflow-auto">
               {renderTabContent()}
-            </div>
           </div>
         </div>
       </div>

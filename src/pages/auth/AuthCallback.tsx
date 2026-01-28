@@ -1,287 +1,245 @@
-import React, { useEffect, useState } from 'react';
-import { router } from '../../lib/router';
-import { supabase } from '../../lib/supabase/client';
-import { AlertCircle, Box } from 'lucide-react';
+import { useEffect, useRef } from "react";
+import { supabase } from "../../lib/supabase/client";
+import { useAuthStore } from "../../stores/auth-store";
+import { router } from "../../lib/router";
 
-/**
- * AuthCallback - Handles OAuth callbacks, password recovery tokens, and Magic Links from Supabase
- * 
- * This component processes the URL hash/fragment that Supabase sends after:
- * - Password reset email link click (type=recovery) → redirects to /set-password
- * - Magic Link click (no type) → redirects to /set-password for new user password setup
- * - Signup confirmation (type=signup) → redirects to /set-password for new user password setup
- * - OAuth provider redirects → processes and redirects to dashboard
- * - Invite confirmation (type=invite) → processes and redirects to dashboard
- */
-export default function AuthCallback() {
-  const [isProcessing, setIsProcessing] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function safeNext(raw: string | null) {
+  if (!raw) return "/dashboard";
+
+  try {
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      const u = new URL(raw);
+      return u.pathname + u.search + u.hash;
+    }
+  } catch {}
+
+  if (!raw.startsWith("/")) return "/dashboard";
+  return raw;
+}
+
+function parseHashParams() {
+  const hash = window.location.hash || "";
+  return new URLSearchParams(hash.replace(/^#/, ""));
+}
+
+function normalizeEmail(e: string | null) {
+  return (e ?? "").toString().trim().toLowerCase();
+}
+
+export default function AuthCallbackPage() {
+  const didRun = useRef(false);
 
   useEffect(() => {
-    const processCallback = async () => {
+    // ✅ Prevent double execution in React StrictMode (dev)
+    if (didRun.current) return;
+    didRun.current = true;
+
+    let cancelled = false;
+
+    (async () => {
       try {
-        // Get hash parameters from URL (Supabase sends tokens in the hash)
-        const hash = window.location.hash.substring(1);
-        const hashParams = new URLSearchParams(hash);
-        const accessToken = hashParams.get('access_token');
-        const type = hashParams.get('type');
-        const errorParam = hashParams.get('error');
-        const errorDescription = hashParams.get('error_description');
+        console.log("[AuthCallback] url:", window.location.href);
+        console.log("[AuthCallback] search:", window.location.search);
+        console.log("[AuthCallback] hash:", window.location.hash);
 
-        // Also check query params (sometimes Supabase sends them there)
-        const queryParams = new URLSearchParams(window.location.search);
-        const queryType = queryParams.get('type');
-        const queryToken = queryParams.get('access_token');
+        const url = new URL(window.location.href);
 
-        console.log('🔐 AuthCallback: Processing callback...', { 
-          hash: hash.substring(0, 100) + '...',
-          hasAccessToken: !!accessToken,
-          hasQueryToken: !!queryToken,
-          type: type || queryType,
-          error: errorParam,
-          fullHash: hash
-        });
+        // ✅ next + email (para detectar mismatch)
+        const next = safeNext(url.searchParams.get("next"));
+        const inviteEmail = normalizeEmail(url.searchParams.get("email")); // viene en tu magiclink redirect_to
 
-        // Use query params if hash params are not available
-        const finalAccessToken = accessToken || queryToken;
-        const finalType = type || queryType;
+        // ✅ Tu ruta real de login (evita /login 404)
+        const loginUrl = `/login?next=${encodeURIComponent(next)}`;
 
-        // Handle OAuth/API errors
-        if (errorParam) {
-          console.error('❌ Auth error in callback:', errorParam, errorDescription);
-          setError(errorDescription || errorParam || 'Authentication failed');
-          setIsProcessing(false);
-          setTimeout(() => {
-            router.navigate('/login', true);
-          }, 3000);
-          return;
-        }
+        // =====================================================
+        // 0) Si YA hay sesión, validar mismatch con email del link
+        // =====================================================
+        {
+          const current = await supabase.auth.getSession();
+          const currentEmail = normalizeEmail(current.data.session?.user?.email ?? null);
 
-        // If no token in URL at all, check if there's already a session
-        if (!finalAccessToken) {
-          console.log('⚠️ No access token found in URL, checking for existing session...');
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (session?.user) {
-            console.log('✅ Existing session found, redirecting to set-password...');
-            window.history.replaceState(null, '', '/set-password');
-            router.navigate('/set-password', true);
-            return;
-          }
-          
-          console.log('❌ No session found, redirecting to login...');
-          window.history.replaceState(null, '', '/login');
-          router.navigate('/login', true);
-          return;
-        }
+          if (inviteEmail && currentEmail && inviteEmail !== currentEmail) {
+            console.warn("[AuthCallback] invite mismatch", { inviteEmail, currentEmail });
 
-        // We have a token - wait for Supabase to process it and create session
-        console.log('⏳ Token found in URL, waiting for Supabase to process...');
-        
-        // Give Supabase a moment to detect and process the hash
-        // The client has detectSessionInUrl: true, but it needs a render cycle
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        let sessionFound = false;
-        let authListener: any = null;
+            // Guardar el link actual para reabrirlo luego
+            sessionStorage.setItem("pending_invite_url", window.location.href);
 
-        // Listen for auth state changes
-        const { data: listenerData } = supabase.auth.onAuthStateChange((event, session) => {
-          console.log('🔔 Auth state changed:', event, session ? 'has session' : 'no session');
-          if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-            sessionFound = true;
-            console.log('✅ Session created via auth state change!');
-          }
-        });
-        authListener = listenerData;
-
-        // Wait for Supabase to process the hash (up to 6 seconds with retries)
-        let session: any = null;
-        for (let i = 0; i < 12; i++) {
-          // Check session first
-          const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
-          
-          if (sessionError) {
-            console.error(`❌ Error getting session (attempt ${i + 1}):`, sessionError.message);
-            // Only fail if it's a critical error
-            if (sessionError.message.includes('JWT') || sessionError.message.includes('invalid')) {
-              break;
+            // Mandar al login con reason
+            if (!cancelled) {
+              router.navigate(
+                `${loginUrl}&reason=invite_mismatch&email=${encodeURIComponent(inviteEmail)}`,
+                true
+              );
             }
-          } else if (currentSession?.user) {
-            session = currentSession;
-            sessionFound = true;
-            console.log('✅ Session found!', {
-              userId: session.user.id,
-              email: session.user.email,
-              type: finalType,
-              attempt: i + 1
+            return;
+          }
+        }
+
+        // =====================================================
+        // 1) PKCE flow (OAuth / email link con ?code=)
+        // =====================================================
+        const code = url.searchParams.get("code");
+        if (code) {
+          console.log("[AuthCallback] PKCE code detected");
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+          if (error) {
+            console.error("[AuthCallback] exchangeCodeForSession error:", error);
+            if (!cancelled) router.navigate(loginUrl, true);
+            return;
+          }
+        } else {
+          // =====================================================
+          // 2) Magiclink / Invite flow (tokens en URL hash)
+          // =====================================================
+          const hash = window.location.hash;
+          const hp = parseHashParams();
+          const accessToken = hp.get("access_token");
+          const refreshToken = hp.get("refresh_token");
+          const type = hp.get("type"); // invite | magiclink | recovery
+
+          console.log("[AuthCallback] hash type:", type);
+          console.log("[AuthCallback] has access_token:", !!accessToken);
+          console.log("[AuthCallback] full hash:", hash);
+
+          if (accessToken) {
+            console.log("[AuthCallback] Setting session from hash tokens...");
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken || "",
             });
-            break;
-          }
 
-          if (i < 11) {
-            console.log(`⏳ Waiting for session... (attempt ${i + 1}/12)`);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            if (error || !data.session) {
+              console.error("[AuthCallback] setSession from hash failed:", error);
+              if (!cancelled) router.navigate(loginUrl, true);
+              return;
+            }
+
+            console.log("[AuthCallback] ✅ Session set from hash");
+            // ✅ Remove hash para que no se reprocesa al refresh
+            window.history.replaceState({}, document.title, url.pathname + url.search);
+          } else if (hash) {
+            // Si hay hash pero no access_token, puede que Supabase aún no lo haya procesado
+            // Esperar un poco y verificar si detectSessionInUrl lo procesó
+            console.log("[AuthCallback] Hash present but no access_token, waiting for Supabase to process...");
+            await new Promise((r) => setTimeout(r, 1000));
+          } else {
+            console.log("[AuthCallback] No code and no hash tokens, checking existing session");
           }
         }
 
-        // Clean up listener
-        if (authListener?.subscription) {
-          authListener.subscription.unsubscribe();
+        // =====================================================
+        // 3) Confirmar sesión (con retry - detectSessionInUrl puede procesar el hash automáticamente)
+        // =====================================================
+        // Esperar un poco para que detectSessionInUrl procese el hash si está presente
+        if (window.location.hash) {
+          console.log("[AuthCallback] Hash detected, waiting for detectSessionInUrl to process...");
+          await new Promise((r) => setTimeout(r, 800));
         }
 
-        // Handle based on type and session
-        if (!sessionFound || !session) {
-          console.error('❌ Failed to create session after processing token');
-          setError('No se pudo crear la sesión. El link puede haber expirado. Por favor solicita un nuevo magic link.');
-          setIsProcessing(false);
-          setTimeout(() => {
-            router.navigate('/login', true);
-          }, 4000);
+        let sessionRes = await supabase.auth.getSession();
+
+        // Si no hay sesión, esperar un poco más
+        if (!sessionRes.data.session) {
+          console.log("[AuthCallback] No session on first check, retrying...");
+          await new Promise((r) => setTimeout(r, 500));
+          sessionRes = await supabase.auth.getSession();
+        }
+
+        // Último intento
+        if (!sessionRes.data.session) {
+          console.log("[AuthCallback] No session on second check, final retry...");
+          await new Promise((r) => setTimeout(r, 500));
+          sessionRes = await supabase.auth.getSession();
+        }
+
+        if (sessionRes.error) {
+          console.error("[AuthCallback] getSession error:", sessionRes.error);
+          if (!cancelled) router.navigate(loginUrl, true);
           return;
         }
 
-        // Session established - now check membership and password status using get_auth_context()
-        console.log('✅ Session established, checking membership and password status...', {
-          userId: session.user.id,
-          email: session.user.email,
-          type: finalType || 'magic-link',
+        if (!sessionRes.data.session) {
+          console.warn("[AuthCallback] No session after callback");
+          if (!cancelled) router.navigate(loginUrl, true);
+          return;
+        }
+
+        console.log("[AuthCallback] ✅ session user:", sessionRes.data.session.user.email);
+
+        // =====================================================
+        // 4) Sync app auth store
+        // =====================================================
+        await useAuthStore.getState().syncSession();
+        const store = useAuthStore.getState();
+
+        console.log("[AuthCallback] store after sync:", {
+          isAuthenticated: store.isAuthenticated,
+          userEmail: store.user?.email,
         });
 
-        // Call get_auth_context() RPC to check membership and password requirement
-        const { data: authContext, error: contextError } = await supabase.rpc('get_auth_context');
+        if (!store.isAuthenticated) {
+          await new Promise((r) => setTimeout(r, 150));
+          await useAuthStore.getState().syncSession();
+        }
 
-        if (contextError) {
-          console.error('❌ Error calling get_auth_context:', contextError);
-          setError('Failed to verify membership. Please contact support.');
-          setIsProcessing(false);
-          setTimeout(() => {
-            router.navigate('/login', true);
-          }, 3000);
+        // =====================================================
+        // 4.5) Si había pending_invite_url, reabrirlo ya logueado
+        // (esto ayuda cuando antes te mandó a login por mismatch)
+        // =====================================================
+        const pendingInvite = sessionStorage.getItem("pending_invite_url");
+        if (pendingInvite) {
+          sessionStorage.removeItem("pending_invite_url");
+          console.log("[AuthCallback] reopening pending invite url:", pendingInvite);
+          window.location.href = pendingInvite; // full reload
           return;
         }
 
-        if (!authContext || authContext.length === 0) {
-          console.error('❌ No auth context returned');
-          setError('Unable to verify membership. Please contact support.');
-          setIsProcessing(false);
-          setTimeout(() => {
-            router.navigate('/login', true);
-          }, 3000);
-          return;
-        }
-
-        const context = authContext[0];
-        console.log('📋 Auth context:', context);
-
-        // Check if user has membership (access_allowed)
-        if (!context.access_allowed) {
-          console.log('❌ User has no active membership');
-          window.history.replaceState(null, '', '/access-denied');
-          router.navigate('/access-denied', true);
-          return;
-        }
-
-        // Check if password needs to be set
-        if (context.needs_password) {
-          console.log('🔐 Password not set, redirecting to set-password...');
-          window.history.replaceState(null, '', '/set-password');
-          router.navigate('/set-password', true);
-          return;
-        }
-
-        // User has membership and password is set - redirect to destination
-        const finalQueryParams = new URLSearchParams(window.location.search);
-        const nextParam = finalQueryParams.get('next') || '/dashboard';
-        console.log('✅ Access granted, redirecting to:', nextParam);
-        window.history.replaceState(null, '', nextParam);
-        router.navigate(nextParam, true);
-        return;
-
-        // Invite - redirect to dashboard
-        if (finalType === 'invite') {
-          console.log('✅ Invite accepted, redirecting to dashboard...');
-          window.history.replaceState(null, '', '/dashboard');
-          router.navigate('/dashboard', true);
-          return;
-        }
-
-        // Handle invite confirmation - redirect to dashboard (invited users may already have password set)
-        if (finalAccessToken && finalType === 'invite') {
-          console.log('🔐 Processing invite confirmation...', { type });
+        // =====================================================
+        // 4.7) Forzar /set-password si debe cambiar password
+        // (tu flujo temp password)
+        // =====================================================
+        try {
+          const { data: mustChangeData, error: mustChangeErr } =
+            await supabase.rpc("get_must_change_password");
           
-          // Wait a moment for Supabase to process the token
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Verify session was created
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          
-          if (sessionError) {
-            console.error('❌ Error getting session:', sessionError);
-            setError('Failed to process authentication. Please try logging in manually.');
-            setIsProcessing(false);
-            setTimeout(() => {
-              router.navigate('/login', true);
-            }, 3000);
+          if (!mustChangeErr && mustChangeData) {
+            const result = Array.isArray(mustChangeData) ? mustChangeData[0] : mustChangeData;
+            if (result?.must_change_password === true) {
+              console.log("[AuthCallback] must_change_password=true -> /set-password");
+              if (!cancelled) router.navigate("/set-password", true);
             return;
           }
-
-          if (session?.user) {
-            console.log('✅ Invite accepted, redirecting to dashboard...');
-            
-            // Note: link_my_org_invites() is handled by useAuthSession hook when SIGNED_IN event fires
-            // No need to call it here to avoid duplicate calls
-            
-            window.history.replaceState(null, '', '/dashboard');
-            router.navigate('/dashboard', true);
-            return;
           }
+        } catch (e) {
+          console.warn("[AuthCallback] could not check must_change_password:", e);
+          // seguimos normal si falla
         }
 
-        // No token or unknown type - redirect to login
-        console.log('⚠️ No valid token or unknown type, redirecting to login...', {
-          hasToken: !!finalAccessToken,
-          type: finalType
-        });
-        window.history.replaceState(null, '', '/login');
-        router.navigate('/login', true);
-      } catch (err: any) {
-        console.error('❌ Error processing auth callback:', err);
-        setError(err.message || 'An error occurred while processing authentication');
-        setIsProcessing(false);
-        setTimeout(() => {
-          router.navigate('/login', true);
-        }, 3000);
+        // =====================================================
+        // 5) Redirect final
+        // =====================================================
+        console.log("[AuthCallback] redirect ->", next);
+        if (!cancelled) router.navigate(next, true);
+      } catch (e) {
+        console.error("[AuthCallback] unexpected error:", e);
+        if (!cancelled) {
+          router.navigate(`/login?next=${encodeURIComponent("/dashboard")}`, true);
+        }
       }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-
-    processCallback();
   }, []);
-
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-white p-8">
-        <div className="w-full max-w-md">
-          <div className="bg-white border border-gray-200 rounded-lg py-6 px-6 shadow-card">
-            <div className="mb-6 text-center">
-              <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-semibold text-foreground mb-2">Authentication Error</h2>
-              <p className="text-muted-foreground mb-4">{error}</p>
-              <p className="text-sm text-muted-foreground">Redirecting to login...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
-      <div className="text-center">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-        <p className="text-sm text-muted-foreground">Processing authentication...</p>
+      <div className="w-full max-w-md border border-gray-200 rounded-lg p-6 shadow-card">
+        <h1 className="text-lg font-semibold mb-2">Autenticando…</h1>
+        <p className="text-sm text-muted-foreground">Procesando autenticación…</p>
       </div>
     </div>
   );
 }
-

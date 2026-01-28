@@ -314,8 +314,8 @@ export default function OrderList() {
 
     // Sort orders - default: most recent first (created_at DESC)
     return filtered.sort((a, b) => {
-      let aValue: any = a[sortBy];
-      let bValue: any = b[sortBy];
+      let aValue: any = sortBy === 'created_at' ? a.createdAt : (sortBy === 'sale_order_no' ? a.saleOrderNo : (sortBy === 'customer_name' ? a.customerName : a[sortBy as keyof OrderListItem]));
+      let bValue: any = sortBy === 'created_at' ? b.createdAt : (sortBy === 'sale_order_no' ? b.saleOrderNo : (sortBy === 'customer_name' ? b.customerName : b[sortBy as keyof OrderListItem]));
 
       if (sortBy === 'created_at') {
         aValue = new Date(a.createdAt);
@@ -392,23 +392,23 @@ export default function OrderList() {
         .eq('deleted', false);
 
       if (biError && import.meta.env.DEV) {
-        console.error('❌ Error checking BomInstances:', biError);
+        console.error('❌ Error checking BOMInstances:', biError);
       }
 
       const bomInstanceIds = bomInstances?.map(bi => bi.id) || [];
 
-      // Get BomInstanceLines count
+      // Get BOMInstanceLines count
       let bomLinesCount = 0;
       if (bomInstanceIds.length > 0) {
         const { count, error: bilError } = await supabase
-          .from('BomInstanceLines')
+          .from('BOMInstanceLines')
           .select('id', { count: 'exact', head: true })
           .in('bom_instance_id', bomInstanceIds)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
         if (bilError && import.meta.env.DEV) {
-          console.error('❌ Error checking BomInstanceLines:', bilError);
+          console.error('❌ Error checking BOMInstanceLines:', bilError);
         } else {
           bomLinesCount = count || 0;
         }
@@ -558,7 +558,7 @@ export default function OrderList() {
       }
 
       // STEP 4: Verify BOM materials exist (either already existed or were just generated)
-      // The trigger will create BomInstances and BomInstanceLines, but we should verify
+      // The trigger will create BOMInstances and BOMInstanceLines, but we should verify
       // that at least QuoteLineComponents exist before proceeding
       
       // First, generate the manufacturing order number using RPC
@@ -655,7 +655,7 @@ export default function OrderList() {
           let finalBomLinesCount = 0;
           if (bomInstanceIds.length > 0) {
             const { count: finalCount } = await supabase
-              .from('BomInstanceLines')
+              .from('BOMInstanceLines')
               .select('id', { count: 'exact', head: true })
               .in('bom_instance_id', bomInstanceIds)
               .eq('organization_id', activeOrganizationId)

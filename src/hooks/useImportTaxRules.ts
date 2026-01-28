@@ -35,7 +35,6 @@ export function useImportTaxRules() {
           .from('ImportTaxRules')
           .select('*')
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
           .order('created_at', { ascending: true });
 
         if (queryError) {
@@ -67,30 +66,38 @@ export function useImportTaxRulesCRUD() {
   const { rules, loading, error, refetch } = useImportTaxRules();
   const { activeOrganizationId } = useOrganizationContext();
 
-  const createRule = async (
-    data: Omit<ImportTaxRule, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>
-  ) => {
+  const createRule = async (data: any) => {
     if (!activeOrganizationId) {
       throw new Error('No organization selected');
     }
 
+    console.log('🔧 useImportTaxRules.createRule called with:', data);
+
+    // Use upsert to avoid duplicates
     const { data: result, error: err } = await supabase
       .from('ImportTaxRules')
-      .insert({
-        ...data,
-        organization_id: activeOrganizationId,
-      })
+      .upsert(
+        {
+          ...data,
+          organization_id: activeOrganizationId,
+        },
+        {
+          onConflict: 'organization_id,category_id',
+          ignoreDuplicates: false,
+        }
+      )
       .select()
-      .single();
+      .maybeSingle();
 
     if (err) {
-      if (import.meta.env.DEV) {
-        console.error('Error creating ImportTaxRule:', err.message);
-      }
+      console.error('❌ Error in upsert ImportTaxRule:', err);
       throw err;
     }
 
+    console.log('✅ Upsert result:', result);
+    console.log('🔄 Calling refetch...');
     await refetch();
+    console.log('✅ Refetch completed');
     return result;
   };
 

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 
-export type BOMQtyType = 'fixed' | 'per_width' | 'per_area' | 'by_option';
+export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'by_option';
 export type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | string;
 export type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
 
@@ -10,15 +10,17 @@ export interface BOMComponent {
   id: string;
   organization_id: string;
   parent_item_id?: string | null; // Deprecated: use bom_template_id instead
+  parent_component_id?: string | null;
   bom_template_id?: string | null; // New: FK to BOMTemplates
+  slot_id?: string | null; // Override scope: BOMTemplateSlots.id
+  component_scope?: 'template' | 'bom' | null;
   component_item_id?: string | null; // Can be null for auto-select components (fabric, etc.)
   component_role?: string | null; // Role of component (fabric, tube, bracket, etc.)
   component_sub_role?: string | null; // Optional sub-role for granularity (e.g., hardware: fastener, end_cap, adapter)
   auto_select?: boolean; // Whether component is auto-selected by rules
-  qty_per_unit: number;
   uom: string;
   is_required: boolean;
-  sequence_order: number;
+  sort_order: number;
   metadata?: Record<string, any> | null;
   deleted: boolean;
   archived: boolean;
@@ -104,11 +106,21 @@ export function useBOMComponents(bomTemplateId: string | null) {
         // Fetch BOMComponents separately to avoid join issues
         const { data: bomComponentsData, error: fetchError } = await supabase
           .from('BOMComponents')
-          .select('*')
+          .select(`
+            *,
+            component_item:component_item_id (
+              id,
+              sku,
+              name
+            )
+          `)
           .eq('bom_template_id', bomTemplateId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
-          .order('sequence_order', { ascending: true });
+          .eq('archived', false)
+          .order('parent_component_id', { ascending: true })
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true });
 
         if (fetchError) {
         // ✅ FIX: Don't retry on 404/400 errors
@@ -122,8 +134,15 @@ export function useBOMComponents(bomTemplateId: string | null) {
           setLoading(false);
           return;
         }
-          console.error('❌ Error fetching BOM components:', fetchError);
-          throw fetchError;
+          // ✅ FIX: Formatear error para evitar "[circular]"
+          const errorDetails = { 
+            message: fetchError.message, 
+            code: fetchError.code,
+            details: fetchError.details 
+          };
+          console.error('❌ Error fetching BOM components:', errorDetails);
+          // ✅ FIX: Throw Error message, not the entire object (prevents [circular])
+          throw new Error(fetchError.message || 'Error fetching BOM components');
         }
 
         console.log('📦 Fetched BOM components from DB:', bomComponentsData?.length || 0, 'components');
@@ -206,7 +225,13 @@ export function useBOMComponents(bomTemplateId: string | null) {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading BOM components';
         setError(errorMessage);
-        console.error('❌ Error fetching BOM components:', err);
+        // ✅ FIX: Formatear error para evitar "[circular]"
+        const errorDetails = err instanceof Error 
+          ? { message: err.message, name: err.name, stack: err.stack }
+          : typeof err === 'object' && err !== null
+          ? { message: (err as any).message || String(err), code: (err as any).code, details: (err as any).details }
+          : String(err);
+        console.error('❌ Error fetching BOM components:', errorDetails);
       } finally {
         setLoading(false);
       }
@@ -251,13 +276,20 @@ export function useCalculateBOMPrice() {
       });
 
       if (error) {
-        throw error;
+        // ✅ FIX: Throw Error message, not the entire object (prevents [circular])
+        throw new Error(error.message || 'Error calculating BOM price');
       }
 
       return (data || []) as BOMPriceCalculation[];
     } catch (err) {
       if (import.meta.env.DEV) {
-        console.error('Error calculating BOM price:', err);
+        // ✅ FIX: Formatear error para evitar "[circular]"
+        const errorDetails = err instanceof Error 
+          ? { message: err.message, name: err.name }
+          : typeof err === 'object' && err !== null
+          ? { message: (err as any).message || String(err), code: (err as any).code, details: (err as any).details }
+          : String(err);
+        console.error('Error calculating BOM price:', errorDetails);
       }
       throw err;
     } finally {
@@ -299,9 +331,10 @@ export function useBOMCRUD() {
     }
 
     // ✅ MVP: Validación de campos requeridos
-    if (!componentData.component_item_id) {
-      throw new Error('component_item_id is required');
-    }
+    // ✅ FIX: component_item_id puede ser null para componentes auto-select (fabric, etc.)
+    // if (!componentData.component_item_id) {
+    //   throw new Error('component_item_id is required');
+    // }
     if (!componentData.component_role) {
       throw new Error('component_role is required');
     }
@@ -322,8 +355,8 @@ export function useBOMCRUD() {
         ...componentData,
         organization_id: orgIdToUse,
         auto_select: false, // MVP: siempre false
-        // MVP: Si qty_type no es fixed, qty_value debe ser null
-        qty_value: componentData.qty_type === 'fixed' ? componentData.qty_value : null,
+        // BOMComponents.qty_value is NOT NULL in DB (use 1 as safe default)
+        qty_value: componentData.qty_value || 1,
         deleted: false,
         archived: false,
       };
@@ -341,8 +374,16 @@ export function useBOMCRUD() {
 
       if (error) {
         // ✅ MVP: Logging de errores visible
-        console.error('[useBOM] SAVE BOM COMPONENT error:', error);
-        throw error;
+        // ✅ FIX: Formatear error para evitar "[circular]"
+        const errorDetails = { 
+          message: error.message, 
+          code: error.code,
+          details: error.details,
+          hint: error.hint 
+        };
+        console.error('[useBOM] SAVE BOM COMPONENT error:', errorDetails);
+        // ✅ FIX: Throw Error message, not the entire object (prevents [circular])
+        throw new Error(error.message || 'Error saving BOM component');
       }
 
       if (import.meta.env.DEV) {
@@ -358,8 +399,17 @@ export function useBOMCRUD() {
   const updateComponent = async (id: string, updates: Partial<BOMComponent>) => {
     setIsUpdating(true);
     try {
-      // ✅ Get organization ID from localStorage fallback (hook can't be called here)
-      const orgIdToUse = localStorage.getItem('activeOrganizationId');
+      // ✅ Prefer activeOrganizationId, fallback to localStorage
+      let orgIdToUse = activeOrganizationId;
+      if (!orgIdToUse) {
+        const storedOrgId = localStorage.getItem('activeOrganizationId');
+        if (storedOrgId) {
+          orgIdToUse = storedOrgId;
+          if (import.meta.env.DEV) {
+            console.warn('[useBOM] Using organizationId from localStorage as fallback (update):', storedOrgId);
+          }
+        }
+      }
 
       if (!orgIdToUse) {
         throw new Error('Organization ID is required to update component');
@@ -369,8 +419,6 @@ export function useBOMCRUD() {
       const payload = {
         ...updates,
         auto_select: false, // MVP: siempre false
-        // MVP: Si qty_type no es fixed, qty_value debe ser null
-        ...(updates.qty_type && updates.qty_type !== 'fixed' ? { qty_value: null } : {}),
       };
 
       // ✅ MVP: Logging para debugging
@@ -389,8 +437,16 @@ export function useBOMCRUD() {
 
       if (error) {
         // ✅ MVP: Logging de errores visible
-        console.error('[useBOM] UPDATE BOM COMPONENT error:', error);
-        throw error;
+        // ✅ FIX: Formatear error para evitar "[circular]"
+        const errorDetails = { 
+          message: error.message, 
+          code: error.code,
+          details: error.details,
+          hint: error.hint 
+        };
+        console.error('[useBOM] UPDATE BOM COMPONENT error:', errorDetails);
+        // ✅ FIX: Throw Error message, not the entire object (prevents [circular])
+        throw new Error(error.message || 'Error updating BOM component');
       }
 
       if (import.meta.env.DEV) {
@@ -412,7 +468,8 @@ export function useBOMCRUD() {
         .eq('id', id);
 
       if (error) {
-        throw error;
+        // ✅ FIX: Throw Error message, not the entire object (prevents [circular])
+        throw new Error(error.message || 'Error deleting component');
       }
     } finally {
       setIsDeleting(false);

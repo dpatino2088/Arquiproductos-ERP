@@ -6,9 +6,10 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className = '', error, ...props }, ref) => {
-    const baseClasses = 'w-full px-2.5 py-1.5 text-xs border rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0';
-    const normalClasses = 'border-gray-200 bg-white focus:ring-primary/20 focus:border-primary/50';
-    const errorClasses = 'border-red-300 bg-red-50 focus:ring-red-500/20 focus:border-red-500';
+    // Estilo underline: solo línea gris inferior pegada al field; sin bordes laterales/superior
+    const baseClasses = 'w-full px-0 py-1.5 pb-1 text-xs bg-transparent rounded-none transition-colors focus:outline-none border-0 border-b';
+    const normalClasses = 'border-gray-300 focus:border-[var(--primary-brand-hex)] focus:ring-0';
+    const errorClasses = 'border-red-500 bg-red-50/50 focus:border-red-500 focus:ring-0';
     
     const inputClasses = `${baseClasses} ${error ? errorClasses : normalClasses} ${className}`;
 

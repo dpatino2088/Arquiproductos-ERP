@@ -98,7 +98,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
 
       const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
 
-      // Get ALL BomInstances for these SaleOrderLines (not just one)
+      // Get ALL BOMInstances for these SaleOrderLines (not just one)
       // Following the same pattern as useManufacturingMaterials
       // ✅ FIX: Order by generated_at DESC, then created_at DESC to get the most recent BOM
       const { data: bomInstances, error: bomError } = await supabase
@@ -118,7 +118,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         return;
       }
 
-      // ✅ FIX: Filter to only the most recent BomInstance per SaleOrderLine
+      // ✅ FIX: Filter to only the most recent BOMInstance per SaleOrderLine
       // Since SQL already orders DESC, we just take the first match per sales_order_line_id
       const bomInstancesByLine = new Map<string, typeof bomInstances[0]>();
 
@@ -136,7 +136,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
 
       const uniqueBomInstances = Array.from(bomInstancesByLine.values());
 
-      // ✅ FIX: Get the MOST RECENT BomInstance from all unique instances
+      // ✅ FIX: Get the MOST RECENT BOMInstance from all unique instances
       // Use generated_at ?? created_at for comparison
       const mostRecentBomInstance = uniqueBomInstances.sort((a, b) => {
         const dateA = new Date(a.generated_at || a.created_at || 0).getTime();
@@ -192,15 +192,20 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         throw new Error('No BOM instances found');
       }
 
+      const firstBomInstance = bomInstances[0];
+      if (!firstBomInstance) {
+        throw new Error('No BOM instance data available');
+      }
+
       const bomInstanceData: BOMInstanceData = {
         bom_instance_id: bomInstanceId,
-        organization_id: bomInstances[0].organization_id,
-        sales_order_id: bomLines && bomLines.length > 0 ? bomLines[0].sales_order_id : null,
-        bom_template_id: bomInstances[0].bom_template_id,
-        bom_created_at: bomInstances[0].created_at,
-        labor_cost: Number(bomInstances[0].labor_cost) || 0,
-        total_cost_with_labor: Number(bomInstances[0].total_cost_with_labor) || 0,
-        total_msrp_sale_out_with_labor: Number(bomInstances[0].total_msrp_sale_out_with_labor) || 0,
+        organization_id: firstBomInstance.organization_id,
+        sales_order_id: bomLines && bomLines.length > 0 ? bomLines[0]?.sales_order_id ?? null : null,
+        bom_template_id: firstBomInstance.bom_template_id,
+        bom_created_at: firstBomInstance.created_at,
+        labor_cost: Number(firstBomInstance.labor_cost) || 0,
+        total_cost_with_labor: Number(firstBomInstance.total_cost_with_labor) || 0,
+        total_msrp_sale_out_with_labor: Number(firstBomInstance.total_msrp_sale_out_with_labor) || 0,
         lines,
         total_lines: lines.length,
         unique_items: uniqueItems,

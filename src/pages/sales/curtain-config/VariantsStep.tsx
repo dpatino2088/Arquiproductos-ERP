@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
@@ -9,8 +9,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
+import Input from '../../../components/ui/Input';
 import { useManufacturers, useCatalogItemById } from '../../../hooks/useCatalog';
 import { useFabricCollections, useFabricVariants } from '../../../hooks/useFabricCatalog';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { supabase } from '../../../lib/supabase/client';
+import { Image as ImageIcon, Search, X } from 'lucide-react';
 
 interface VariantsStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -18,89 +22,253 @@ interface VariantsStepProps {
 }
 
 export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
+  const { activeOrganizationId } = useOrganizationContext();
+
   // Get productTypeId from config (set by ProductStep)
-  const productTypeId = (config as any).productTypeId;
-  const collectionName = (config as any).collectionName || '';
-  const variantId = (config as any).variantId || (config as any).fabric_catalog_item_id;
+  const productTypeId = (config as any).productTypeId || (config as any).product_type_id;
+  const collectionName = (config as any).collectionName || (config as any).collection_name || '';
+  const manufacturerId = (config as any).manufacturerId || (config as any).manufacturer_id;
+  const manufacturerName = (config as any).manufacturerName || (config as any).manufacturer_name;
+  const variantId =
+    (config as any).variantId ||
+    (config as any).fabric_catalog_item_id ||
+    (config as any).fabric_variant_id;
 
-  // Debug log in DEV
-  if (import.meta.env.DEV) {
-    console.log('VariantsStep render', {
-      productTypeId,
-      collectionName,
-      variantId,
-      fullConfig: config,
-    });
-  }
+  // MSRP Sale Out from CatalogItemsMSRP (per-org)
+  const [msrpSaleOut, setMsrpSaleOut] = useState<number | null>(null);
 
-  // Fetch collections and variants
+  // Search state for manufacturers
+  const [manufacturerSearch, setManufacturerSearch] = useState('');
+  const [showManufacturerDropdown, setShowManufacturerDropdown] = useState(false);
+  const manufacturerInputRef = useRef<HTMLInputElement>(null);
+  const manufacturerDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Search state for collections
+  const [collectionSearch, setCollectionSearch] = useState('');
+  const [showCollectionDropdown, setShowCollectionDropdown] = useState(false);
+  const collectionInputRef = useRef<HTMLInputElement>(null);
+  const collectionDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Manufacturers that have roll items for this product type
+  const [manufacturerIdsWithRollForProductType, setManufacturerIdsWithRollForProductType] = useState<Set<string>>(new Set());
+  const [manufacturerIdsLoaded, setManufacturerIdsLoaded] = useState(false);
+
+  // Sync manufacturerSearch with manufacturerName
+  useEffect(() => {
+    if (manufacturerName && !manufacturerSearch) {
+      setManufacturerSearch(manufacturerName);
+    }
+  }, [manufacturerName]);
+
+  // Sync collectionSearch with collectionName
+  useEffect(() => {
+    if (collectionName && !collectionSearch) {
+      setCollectionSearch(collectionName);
+    }
+  }, [collectionName]);
+
+  // Fetch manufacturer IDs that have roll items for this product type
+  useEffect(() => {
+    if (!activeOrganizationId || !productTypeId) {
+      setManufacturerIdsLoaded(true);
+      setManufacturerIdsWithRollForProductType(new Set());
+      return;
+    }
+    let mounted = true;
+    setManufacturerIdsLoaded(false);
+    (async () => {
+      // Query CatalogItems with CatalogItemProductTypes join to get manufacturers for this product type
+      const { data, error } = await supabase
+        .from('CatalogItems')
+        .select(`
+          manufacturer_id,
+          CatalogItemProductTypes!inner(product_type_id, organization_id)
+        `)
+        .eq('organization_id', activeOrganizationId)
+        .eq('is_active', true)
+        .eq('is_roll', true)
+        .eq('CatalogItemProductTypes.product_type_id', productTypeId)
+        .eq('CatalogItemProductTypes.organization_id', activeOrganizationId)
+        .not('manufacturer_id', 'is', null);
+      if (!mounted) return;
+      if (error) {
+        console.error('[VariantsStep] Error fetching manufacturers for product type:', error);
+        setManufacturerIdsLoaded(true);
+        return;
+      }
+      const manufacturerIdArray: string[] = (data || [])
+        .map((r: { manufacturer_id?: string | null }) => r.manufacturer_id)
+        .filter((x: string | null | undefined): x is string => Boolean(x));
+      const manufacturerIds = new Set<string>(manufacturerIdArray);
+      setManufacturerIdsWithRollForProductType(manufacturerIds);
+      setManufacturerIdsLoaded(true);
+    })();
+    return () => { mounted = false; };
+  }, [activeOrganizationId, productTypeId]);
+
+  // Load MSRP Sale Out from CatalogItemsMSRP when variant and org are set
+  useEffect(() => {
+    if (!variantId || !activeOrganizationId) {
+      setMsrpSaleOut(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('CatalogItemsMSRP')
+        .select('msrp_sale_out')
+        .eq('catalog_item_id', variantId)
+        .eq('organization_id', activeOrganizationId)
+        .maybeSingle();
+      if (!cancelled && data?.msrp_sale_out != null && !isNaN(Number(data.msrp_sale_out))) {
+        setMsrpSaleOut(Number(data.msrp_sale_out));
+      } else if (!cancelled) {
+        setMsrpSaleOut(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [variantId, activeOrganizationId]);
+
+  // Fetch collections and variants (with optional manufacturer filter)
   const {
     collections,
     loading: loadingCollections,
     error: collectionsError,
-  } = useFabricCollections(productTypeId);
+  } = useFabricCollections(productTypeId, manufacturerId || undefined);
 
   const {
     variants,
     loading: loadingVariants,
     error: variantsError,
-  } = useFabricVariants(productTypeId, collectionName || undefined);
+  } = useFabricVariants(productTypeId, collectionName || undefined, manufacturerId || undefined);
 
-  const { manufacturers } = useManufacturers();
+  const { manufacturers, loading: loadingManufacturers } = useManufacturers();
+
+  // Filter manufacturers to only those with roll items for this product type
+  const manufacturersForDropdown = useMemo(() => {
+    if (!manufacturers) return [];
+    if (!manufacturerIdsLoaded) return manufacturers; // Show all while loading
+    return manufacturers.filter(m => manufacturerIdsWithRollForProductType.has(m.id));
+  }, [manufacturers, manufacturerIdsLoaded, manufacturerIdsWithRollForProductType]);
+
+  // Filter manufacturers by search
+  const filteredManufacturers = useMemo(() => {
+    if (!manufacturerSearch.trim()) return manufacturersForDropdown;
+    const searchLower = manufacturerSearch.toLowerCase();
+    return manufacturersForDropdown.filter(m => 
+      (m.name || '').toLowerCase().includes(searchLower) ||
+      (m.code || '').toLowerCase().includes(searchLower)
+    );
+  }, [manufacturersForDropdown, manufacturerSearch]);
+
+  // Debug log in DEV (after variants is declared)
+  if (import.meta.env.DEV) {
+    console.log('VariantsStep render', {
+      productTypeId,
+      collectionName,
+      variantId,
+      variantsCount: variants.length,
+      loadingVariants,
+      variantsError,
+      fullConfig: config,
+    });
+  }
 
   // Fetch selected variant details
   const { item: selectedCatalogItem, loading: loadingSelectedItem } =
     useCatalogItemById(variantId);
 
-  // Get manufacturer name
+  // Get manufacturer name from variant or from selectedCatalogItem
   const selectedManufacturerName = useMemo(() => {
-    if (!selectedCatalogItem?.manufacturer_id) return '—';
-    const mfg = manufacturers.find((m) => m.id === selectedCatalogItem.manufacturer_id);
-    return mfg?.name || '—';
-  }, [selectedCatalogItem?.manufacturer_id, manufacturers]);
+    const selectedVariant = variants.find(v => v.id === variantId);
+    if (selectedVariant?.manufacturer) return selectedVariant.manufacturer;
+    if (selectedVariant?.manufacturer_id) {
+      const mfg = manufacturers.find((m) => m.id === selectedVariant.manufacturer_id);
+      return mfg?.name || '—';
+    }
+    return '—';
+  }, [variantId, variants, manufacturers]);
 
-  // Extract fabric specs (columnas directas con fallback a metadata)
+  // Extract fabric specs from variants (only what exists in CatalogItems)
   const fabricSpecs = useMemo(() => {
-    if (!selectedCatalogItem) return null;
-
-    const metadata = selectedCatalogItem.metadata || {};
-    
-    // Openness: columna directa o metadata
-    const openness = selectedCatalogItem.openness || metadata?.openness || metadata?.apertura || null;
-    
-    // Weight GSM: columna directa o metadata
-    const weightGsm = selectedCatalogItem.weight_gsm || metadata?.weight_gsm || metadata?.gramaje || null;
-    
-    // Composition: columna directa o metadata
-    const composition = selectedCatalogItem.composition || metadata?.composition || null;
-    
-    // Stock status
-    const stockStatus = selectedCatalogItem.stock_status || null;
+    const selectedVariant = variants.find(v => v.id === variantId);
+    if (!selectedVariant) return null;
 
     return {
       manufacturer: selectedManufacturerName,
-      rollWidth: selectedCatalogItem.roll_width_m ? `${selectedCatalogItem.roll_width_m}m` : '—',
-      openness: openness || '—',
-      weightGsm: weightGsm ? `${weightGsm} g/m²` : '—',
-      canRotate: selectedCatalogItem.can_rotate ? 'Yes' : 'No',
-      canHeatseal: selectedCatalogItem.can_heatseal ? 'Yes' : 'No',
-      composition: composition || '—',
-      stockStatus: stockStatus === 'stock' ? 'In Stock' : 
-                   stockStatus === 'por_pedido' ? 'On Order' : 
-                   stockStatus === 'descontinuado' ? 'Discontinued' : '—',
+      rollWidth: selectedVariant.roll_width ? `${selectedVariant.roll_width}m` : '—',
+      color: selectedVariant.color || '—',
+      description: selectedVariant.description || '—',
     };
-  }, [selectedCatalogItem, selectedManufacturerName]);
+  }, [variantId, variants, selectedManufacturerName]);
 
-  const fabricRotation = (config as any).fabric_rotation || false;
-  const fabricHeatseal = (config as any).fabric_heatseal || false;
-  const canRotate = selectedCatalogItem?.can_rotate || false;
-  const canHeatseal = selectedCatalogItem?.can_heatseal || false;
-  const heatsealPricePerMeter = selectedCatalogItem?.heatseal_price_per_meter || null;
+  // Filter collections based on search
+  const filteredCollections = useMemo(() => {
+    if (!collectionSearch.trim()) return collections;
+    const searchLower = collectionSearch.toLowerCase();
+    return collections.filter(name => 
+      name.toLowerCase().includes(searchLower)
+    );
+  }, [collections, collectionSearch]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      // Manufacturer dropdown
+      if (
+        manufacturerDropdownRef.current &&
+        !manufacturerDropdownRef.current.contains(event.target as Node) &&
+        manufacturerInputRef.current &&
+        !manufacturerInputRef.current.contains(event.target as Node)
+      ) {
+        setShowManufacturerDropdown(false);
+      }
+      // Collection dropdown
+      if (
+        collectionDropdownRef.current &&
+        !collectionDropdownRef.current.contains(event.target as Node) &&
+        collectionInputRef.current &&
+        !collectionInputRef.current.contains(event.target as Node)
+      ) {
+        setShowCollectionDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Handlers
+  const handleManufacturerChange = (id: string, name: string) => {
+    setManufacturerSearch(name || '');
+    setShowManufacturerDropdown(false);
+    // When manufacturer changes, clear collection and variant
+    setCollectionSearch('');
+    onUpdate({
+      manufacturerId: id || undefined,
+      manufacturer_id: id || undefined,
+      manufacturerName: name || undefined,
+      manufacturer_name: name || undefined,
+      collectionName: undefined,
+      collection_name: undefined,
+      collectionId: undefined,
+      variantId: undefined,
+      fabric_catalog_item_id: undefined,
+      variantName: undefined,
+      variant_name: undefined,
+    } as any);
+  };
+
+  const handleManufacturerSearchChange = (value: string) => {
+    setManufacturerSearch(value);
+    setShowManufacturerDropdown(true);
+  };
+
   const handleCollectionChange = (name: string) => {
+    setCollectionSearch(name);
+    setShowCollectionDropdown(false);
     onUpdate({
       collectionName: name,
+      collection_name: name,
       collectionId: `collection-${name
         .toLowerCase()
         .replace(/\s+/g, '-')
@@ -108,14 +276,20 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
       variantId: undefined,
       fabric_catalog_item_id: undefined,
       variantName: undefined,
+      variant_name: undefined,
     } as any);
+  };
+
+  const handleCollectionSearchChange = (value: string) => {
+    setCollectionSearch(value);
+    setShowCollectionDropdown(true);
   };
 
   const handleVariantChange = (variantIdValue: string) => {
     const selectedVariantItem = variants.find((item) => item.id === variantIdValue);
     const variantName =
       selectedVariantItem?.variant_name ||
-      selectedVariantItem?.item_name ||
+      (selectedVariantItem as any)?.item_name ||
       selectedVariantItem?.sku ||
       undefined;
 
@@ -123,7 +297,9 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
       variantId: variantIdValue,
       fabric_catalog_item_id: variantIdValue,
       variantName,
+      variant_name: variantName,
       collectionName,
+      collection_name: collectionName,
     } as any);
   };
 
@@ -150,92 +326,258 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
         <div>
           <Label className="text-sm font-medium mb-4 block">COLLECTION | VARIANTS</Label>
 
-          {/* Collection Dropdown */}
-          <div className="mb-4">
+          {/* Collections Error Display */}
+          {collectionsError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+              Error loading collections: {String(collectionsError)}
+            </div>
+          )}
+
+          {/* Manufacturer Dropdown with Search */}
+          <div className="mb-6 relative">
+            <Label htmlFor="manufacturer" className="text-xs mb-1">
+              Manufacturer
+            </Label>
+            <div className="relative">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  ref={manufacturerInputRef}
+                  id="manufacturer"
+                  type="text"
+                  value={manufacturerSearch || manufacturerName || ''}
+                  onChange={(e) => handleManufacturerSearchChange(e.target.value)}
+                  onFocus={() => setShowManufacturerDropdown(true)}
+                  placeholder={loadingManufacturers ? 'Loading...' : 'Search or select manufacturer'}
+                  className="pl-8"
+                  disabled={loadingManufacturers}
+                />
+              </div>
+              
+              {/* Dropdown for filtered manufacturers */}
+              {showManufacturerDropdown && !loadingManufacturers && (
+                <div
+                  ref={manufacturerDropdownRef}
+                  className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto"
+                >
+                  {/* "All manufacturers" option */}
+                  <button
+                    type="button"
+                    onClick={() => handleManufacturerChange('', '')}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
+                      !manufacturerId ? 'bg-primary/10 font-medium' : ''
+                    }`}
+                  >
+                    All manufacturers
+                  </button>
+                  {filteredManufacturers.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-gray-500">
+                      {manufacturerSearch ? 'No manufacturers found' : 'No manufacturers available'}
+                    </div>
+                  ) : (
+                    filteredManufacturers.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => handleManufacturerChange(m.id, m.name)}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
+                          m.id === manufacturerId ? 'bg-primary/10 font-medium' : ''
+                        }`}
+                      >
+                        {m.name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Collection Dropdown with Search */}
+          <div className="mb-6 relative">
             <Label htmlFor="collection" className="text-xs mb-1">
               Collection
             </Label>
-            <SelectShadcn value={collectionName} onValueChange={handleCollectionChange}>
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={loadingCollections ? 'Loading...' : 'Select collection'}
+            <div className="relative">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  ref={collectionInputRef}
+                  id="collection"
+                  type="text"
+                  value={collectionSearch || collectionName || ''}
+                  onChange={(e) => handleCollectionSearchChange(e.target.value)}
+                  onFocus={() => setShowCollectionDropdown(true)}
+                  placeholder={loadingCollections ? 'Loading...' : 'Search or select collection'}
+                  className="pl-8"
+                  disabled={loadingCollections}
                 />
-              </SelectTrigger>
-              <SelectContent>
-                {loadingCollections ? (
-                  <SelectItem value="loading" disabled>
-                    Loading collections...
-                  </SelectItem>
-                ) : collectionsError ? (
-                  <SelectItem value="error" disabled>
-                    Error: {String(collectionsError)}
-                  </SelectItem>
-                ) : collections.length === 0 ? (
-                  <SelectItem value="no-collections" disabled>
-                    No fabric collections found for this product type
-                  </SelectItem>
-                ) : (
-                  collections.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </SelectShadcn>
-          </div>
-
-          {/* Variant Grid */}
-          <div className="mb-4">
-            <Label className="text-xs mb-1 block">Variants</Label>
-            {!collectionName ? (
-              <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
-                <p className="text-sm">Please select a collection to view variants</p>
               </div>
-            ) : loadingVariants ? (
-              <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
-                <p className="text-sm">Loading variants...</p>
-              </div>
-            ) : variantsError ? (
-              <div className="text-center text-red-500 py-8 border border-gray-200 rounded-lg">
-                <p className="text-sm font-medium">Error loading variants</p>
-                <p className="text-xs mt-1">{String(variantsError)}</p>
-              </div>
-            ) : variants.length === 0 ? (
-              <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
-                <p className="text-sm">No variants available for this collection</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-4 gap-6">
-                {variants.map((variant) => {
-                  // Check if this variant is selected
-                  const isSelected = variantId === variant.id;
-                  
-                  return (
-                    <div key={variant.id} className="flex flex-col items-center">
-                      <button
-                        onClick={() => handleVariantChange(variant.id)}
-                        className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                          isSelected
-                            ? 'border-2 border-gray-400 bg-gray-600'
-                            : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                        }`}
-                        style={{ padding: '2px' }}
-                      >
-                        <div
-                          className="w-full h-full rounded overflow-hidden border border-gray-200 bg-gray-100"
-                          style={{ width: '95%', height: '95%' }}
-                        ></div>
-                      </button>
-                      <p className="text-xs text-gray-700 mt-2 text-center">
-                        {variant.variant_name || variant.item_name || variant.sku || 'Unknown'}
-                      </p>
+              
+              {/* Dropdown for filtered collections */}
+              {showCollectionDropdown && !loadingCollections && !collectionsError && (
+                <div
+                  ref={collectionDropdownRef}
+                  className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto"
+                >
+                  {filteredCollections.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-gray-500">
+                      {collectionSearch ? 'No collections found' : 'No collections available'}
                     </div>
-                  );
-                })}
-              </div>
+                  ) : (
+                    filteredCollections.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => handleCollectionChange(name)}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
+                          name === collectionName ? 'bg-primary/10 font-medium' : ''
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            
+            {collectionsError && (
+              <p className="mt-1 text-xs text-red-600">
+                {String(collectionsError)}
+              </p>
             )}
           </div>
+
+          {/* Variants Grid - Show when collection is selected */}
+          {collectionName && (
+            <div className="mb-4">
+              <Label className="text-xs mb-3 block">Variants</Label>
+              
+              {/* Debug info in DEV */}
+              {import.meta.env.DEV && (
+                <div className="mb-2 text-xs text-gray-500">
+                  Collection: "{collectionName}" | Variants: {variants.length} | Loading: {loadingVariants ? 'Yes' : 'No'} | Error: {variantsError ? String(variantsError) : 'None'} | Selected: {variantId || 'None'}
+                </div>
+              )}
+              
+              {loadingVariants ? (
+                <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
+                  <p className="text-sm">Loading variants...</p>
+                </div>
+              ) : variantsError ? (
+                <div className="text-center text-red-500 py-8 border border-red-200 rounded-lg">
+                  <p className="text-sm font-medium">Error loading variants</p>
+                  <p className="text-xs mt-1">{String(variantsError)}</p>
+                </div>
+              ) : variants.length === 0 ? (
+                <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
+                  <p className="text-sm">No variants available for this collection</p>
+                  {import.meta.env.DEV && collectionName && (
+                    <p className="text-xs mt-1 text-gray-400">
+                      Collection: "{collectionName}" | ProductTypeId: {productTypeId}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {/* If variant is selected, show only that variant. Otherwise show all */}
+                  {(variantId 
+                    ? variants.filter(v => v.id === variantId)
+                    : variants
+                  ).map((variant) => {
+                    // Check if this variant is selected
+                    const isSelected = variantId === variant.id;
+                    
+                    return (
+                      <div
+                        key={variant.id}
+                        onClick={() => handleVariantChange(variant.id)}
+                        className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                          isSelected
+                            ? 'border-2 border-primary shadow-lg'
+                            : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                        }`}
+                      >
+                        {/* X to deselect */}
+                        {isSelected && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onUpdate({
+                                variantId: undefined,
+                                fabric_catalog_item_id: undefined,
+                                fabric_variant_id: undefined,
+                                variantName: undefined,
+                                variant_name: undefined,
+                              } as any);
+                            }}
+                            className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                            title="Remove selection"
+                          >
+                            <X className="w-4 h-4 text-gray-600" />
+                          </button>
+                        )}
+                        {/* Image */}
+                        <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                          {(variant as any).image_url ? (
+                            <img
+                              src={(variant as any).image_url}
+                              alt={variant.variant_name || variant.sku || 'Variant'}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <ImageIcon className="w-16 h-16 text-gray-300" />
+                          )}
+                        </div>
+                        
+                        {/* Card Content */}
+                        <div className="p-4">
+                          {/* Variant Name */}
+                          <h3 className={`font-semibold text-sm mb-2 truncate ${
+                            isSelected ? 'text-primary' : 'text-gray-900'
+                          }`} title={variant.variant_name || variant.sku || 'Unknown'}>
+                            {variant.variant_name || (variant as any).item_name || variant.sku || 'Unknown'}
+                          </h3>
+                          
+                          {/* SKU */}
+                          {variant.sku && (
+                            <div className="mb-2">
+                              <p className="text-xs text-gray-500 mb-0.5">SKU</p>
+                              <p className="text-sm text-gray-700 font-mono truncate" title={variant.sku}>
+                                {variant.sku}
+                              </p>
+                            </div>
+                          )}
+                          
+                          {/* Roll Width */}
+                          {(variant as any).roll_width && (
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Roll Width</p>
+                              <p className="text-sm text-gray-700">
+                                {Number((variant as any).roll_width).toFixed(2)} m
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Show message when no collection selected */}
+          {!collectionName && !loadingCollections && collections.length > 0 && (
+            <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
+              <p className="text-sm">Please select a collection to view variants</p>
+            </div>
+          )}
         </div>
 
         {/* Fabric Spec Details */}
@@ -255,83 +597,25 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                     <span className="text-gray-600">Roll Width:</span>
                     <span className="ml-2 font-medium">{fabricSpecs.rollWidth}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Openness:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.openness}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Gramaje (GSM):</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.weightGsm}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Can Rotate:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.canRotate}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Can Heat Seal:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.canHeatseal}</span>
-                  </div>
-                  {fabricSpecs.composition !== '—' && (
-                    <div className="col-span-2">
-                      <span className="text-gray-600">Composition:</span>
-                      <span className="ml-2 font-medium">{fabricSpecs.composition}</span>
+                  {fabricSpecs.color !== '—' && (
+                    <div>
+                      <span className="text-gray-600">Color:</span>
+                      <span className="ml-2 font-medium">{fabricSpecs.color}</span>
                     </div>
                   )}
-                  <div>
-                    <span className="text-gray-600">Stock Status:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.stockStatus}</span>
-                  </div>
-                </div>
-
-                {canRotate && (
-                  <div className="border-t border-gray-200 pt-4 mt-4">
-                    <Label className="text-xs font-medium mb-3 block">
-                      Fabric Configuration Options
-                    </Label>
-                    <div className="mb-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const checked = !fabricRotation;
-                          onUpdate({
-                            fabric_rotation: checked,
-                            fabric_heatseal: checked ? fabricHeatseal : false,
-                          } as any);
-                        }}
-                        className={`w-full px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-                          fabricRotation
-                            ? 'bg-gray-800 text-white hover:bg-gray-700'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
-                        }`}
-                      >
-                        Rotate Fabric (Optimize width/height)
-                      </button>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Rotate the fabric to optimize material usage based on dimensions
-                      </p>
+                  {msrpSaleOut != null && !isNaN(msrpSaleOut) && (
+                    <div>
+                      <span className="text-gray-600">MSRP Sale Out:</span>
+                      <span className="ml-2 font-medium">${Number(msrpSaleOut).toFixed(2)}</span>
                     </div>
-                    {canHeatseal && fabricRotation && (
-                      <div className="mb-3">
-                        <button
-                          type="button"
-                          onClick={() => onUpdate({ fabric_heatseal: !fabricHeatseal } as any)}
-                          className={`w-full px-3 py-2 rounded-lg text-xs font-medium transition-all text-left ${
-                            fabricHeatseal
-                              ? 'bg-gray-800 text-white hover:bg-gray-700'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
-                          }`}
-                        >
-                          Apply Heat Seal
-                        </button>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {heatsealPricePerMeter
-                            ? `Heat seal price: $${heatsealPricePerMeter.toFixed(2)} per meter`
-                            : 'Heat seal price will be determined by organization settings'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  )}
+                  {fabricSpecs.description !== '—' && (
+                    <div className="col-span-2">
+                      <span className="text-gray-600">Description:</span>
+                      <span className="ml-2 font-medium">{fabricSpecs.description}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

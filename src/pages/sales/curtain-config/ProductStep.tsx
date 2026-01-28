@@ -5,6 +5,8 @@ import Label from '../../../components/ui/Label';
 import { useProductTypes } from '../../../hooks/useProductTypes';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/SelectShadcn';
 import { useBOMTemplates } from '../../../hooks/useBOMTemplates';
+import { Image as ImageIcon } from 'lucide-react';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
 
 interface ProductStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -104,6 +106,10 @@ const PRODUCT_UI_METADATA: Record<string, {
 export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   // Load ProductTypes from database
   const { productTypes, loading: loadingProductTypes } = useProductTypes();
+  const { role } = useOrganizationContext();
+  
+  // ✅ DEBUG MODE: Solo mostrar selector de BOM Template en modo debug o para superadmin/admin
+  const showTemplatePicker = import.meta.env.DEV && (role === 'superadmin' || role === 'admin');
   
   // FASE 1: Support both productTypeId (legacy) and product_type_id (unified contract)
   const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
@@ -235,12 +241,12 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
       console.log('[ProductStep] ProductType deselected');
     }
     
-    onUpdate({ 
+    onUpdate({
       productType: undefined,
       product_type_id: null,
       productTypeId: undefined,
       bom_template_id: null,
-    });
+    } as any);
   };
   
   // Show loading state
@@ -275,7 +281,7 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
         
-        <div className="grid grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {productCards.map((product) => {
             if (!product) return null;
             
@@ -285,58 +291,66 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                               config.productType === product.uiCode;
             
             return (
-              <div key={product.id} className="flex flex-col items-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isSelected) {
-                      handleProductTypeDeselect();
-                    } else {
-                      handleProductTypeSelect(product.id, product.uiCode);
-                    }
-                  }}
-                  className={`w-full aspect-square rounded-lg transition-all relative flex items-center justify-center ${
-                    isSelected
-                      ? 'border-2 border-gray-400 bg-gray-600'
-                      : 'border border-gray-200 bg-gray-100 hover:border-gray-300 hover:shadow-sm'
-                  }`}
-                  style={{ padding: '2px' }}
-                >
-                  {/* Contenido del card - 5% más chico que el card (95% del tamaño) respetando padding de 2px */}
-                  <div className="rounded overflow-hidden border border-gray-200 bg-gray-100 w-full h-full" style={{ width: '95%', height: '95%' }}>
-                    {/* TODO: Add image from Supabase storage */}
-                  </div>
-                </button>
+              <div
+                key={product.id}
+                onClick={() => {
+                  if (isSelected) {
+                    handleProductTypeDeselect();
+                  } else {
+                    handleProductTypeSelect(product.id, product.uiCode);
+                  }
+                }}
+                className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                  isSelected
+                    ? 'border-2 border-primary shadow-lg'
+                    : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                }`}
+              >
+                {/* Image */}
+                <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                  {/* TODO: Add image from Supabase storage */}
+                  <ImageIcon className="w-16 h-16 text-gray-300" />
+                </div>
                 
-                {/* Nombre abajo del card - usa name de la DB */}
-                <span className={`text-sm font-semibold block mt-2 text-gray-900`}>
-                  {product.name}
-                </span>
+                {/* Card Content */}
+                <div className="p-4">
+                  {/* Product Name */}
+                  <h3 className={`font-semibold text-sm truncate text-center ${
+                    isSelected ? 'text-primary' : 'text-gray-900'
+                  }`} title={product.name}>
+                    {product.name}
+                  </h3>
+                </div>
               </div>
             );
           })}
         </div>
         
-        {/* BOM Template Selection - Only show if product type is selected and there are templates */}
-        {productTypeId && bomTemplates.length > 0 && (
-          <div className="mt-6">
-            <Label className="text-sm font-medium mb-2 block">BOM TEMPLATE</Label>
+        {/* BOM Template Selection - SOLO en modo DEBUG para admin/superadmin */}
+        {showTemplatePicker && productTypeId && bomTemplates.length > 0 && (
+          <div className="mt-6 p-3 bg-yellow-50 border border-yellow-200 rounded">
+            <Label className="text-sm font-medium mb-2 block text-yellow-800">
+              🔧 DEBUG: BOM TEMPLATE (Admin Only)
+            </Label>
+            <p className="text-xs text-yellow-700 mb-2">
+              ⚠️ Solo visible en modo desarrollo. En producción, el template se resuelve automáticamente.
+            </p>
             {bomTemplates.length === 1 ? (
-              <p className="text-xs text-gray-500">
-                {bomTemplates[0].name} (auto-selected)
+              <p className="text-xs text-yellow-600">
+                {bomTemplates[0]?.name || 'BOM Template'} (auto-selected)
               </p>
             ) : (
               <SelectShadcn
                 value={(config as any).bom_template_id || ''}
                 onValueChange={(value) => {
                   if (import.meta.env.DEV) {
-                    console.log('[ProductStep] BOM Template selected', { bomTemplateId: value, productTypeId });
+                    console.log('[ProductStep] DEBUG: BOM Template manually selected', { bomTemplateId: value, productTypeId });
                   }
                   onUpdate({ bom_template_id: value || null } as any);
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select BOM template" />
+                  <SelectValue placeholder="Select BOM template (DEBUG)" />
                 </SelectTrigger>
                 <SelectContent>
                   {bomTemplates.map((template) => (

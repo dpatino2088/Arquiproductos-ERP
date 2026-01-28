@@ -104,7 +104,7 @@ const NavigationItem = memo(({
         style={{ width: '18px', height: '18px', flexShrink: 0 }}
         aria-hidden="true"
       >
-      <item.icon style={{ width: '18px', height: '18px' }} />
+      <item.icon style={{ width: '18px', height: '18px', color: textStyles.color }} />
     </div>
     <span 
       className="absolute left-12 transition-opacity duration-300 whitespace-nowrap"
@@ -135,7 +135,7 @@ function Layout({ children }: LayoutProps) {
   const { currentCompany, availableCompanies, canSwitchCompany, switchCompany, isLoading } = useCompany();
   const { clearCompanies } = useCompanyStore();
   const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
-  const [currentRoute, setCurrentRoute] = useState('/');
+  const [currentRoute, setCurrentRoute] = useState(() => router.getCurrentRoute() || '/');
   const { tabs: submoduleTabs, breadcrumbs, clearSubmoduleNav } = useSubmoduleNav();
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
   const { isMember, isSuperAdmin, role: currentRole } = useCurrentOrgRole();
@@ -173,6 +173,15 @@ function Layout({ children }: LayoutProps) {
 
   // Check if we're in Settings pages - if so, hide the main sidebar
   const isSettingsRoute = currentRoute.includes('/settings');
+  
+  // Debug: Log sidebar visibility status
+  if (import.meta.env.DEV) {
+    console.log('[Layout] Sidebar visibility:', {
+      currentRoute,
+      isSettingsRoute,
+      shouldShowSidebar: !isSettingsRoute
+    });
+  }
 
   // Helper functions to get/set last visited route for a module
   const getLastRouteForModule = useCallback((modulePath: string): string | null => {
@@ -972,9 +981,9 @@ function Layout({ children }: LayoutProps) {
                           height: '100%',
                           minWidth: '140px',
                           width: 'auto',
-                                                     color: tab.isActive ? 'var(--primary-brand-hex)' : 'var(--graphite-black-hex)',
+                          color: '#1c1f26',
                           borderColor: 'var(--gray-250)',
-                          borderBottom: tab.isActive ? '2px solid var(--primary-brand-hex)' : 'none'
+                          borderBottom: tab.isActive ? '2px solid var(--tab-active-underline)' : 'none'
                         }}
                         role="tab"
                         aria-selected={tab.isActive}
@@ -1016,7 +1025,7 @@ function Layout({ children }: LayoutProps) {
           style={{
             marginLeft: isSettingsRoute ? '0px' : mainMarginLeft,
             paddingTop: isSettingsRoute ? '0px' : mainPaddingTop,
-            padding: isSettingsRoute ? '0' : `${mainPaddingTop} 1.5rem 1.5rem`,
+            padding: isSettingsRoute ? '0 1.5rem 1.5rem' : `${mainPaddingTop} 1.5rem 1.5rem`,
             backgroundColor: isSettingsRoute ? 'transparent' : 'var(--gray-200)'
           }}
           role="main"

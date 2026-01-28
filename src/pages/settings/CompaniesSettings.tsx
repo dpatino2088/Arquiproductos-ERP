@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCompanies, type Company, type CreateCompanyInput, type UpdateCompanyInput } from '../../hooks/useCompanies';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
@@ -6,7 +6,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
-import { Building, Plus, X, Edit, Trash2, Mail, Phone, RotateCw, Archive } from 'lucide-react';
+import { Building, Plus, X, Edit, Trash2, Mail, Phone, RotateCw, Archive, Search, Filter, List, Grid3X3 } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -63,6 +63,10 @@ export default function CompaniesSettings() {
   
   const { companies, isLoading, error, fetchCompanies, createCompany, updateCompany, archiveCompany } = useCompanies();
   
+  // Search and view state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   
   // Companies list state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -74,6 +78,17 @@ export default function CompaniesSettings() {
     company_email: '',
     status: 'active' as 'active' | 'disabled' | 'archived',
   });
+
+  // Filter companies by search term
+  const filteredCompanies = useMemo(() => {
+    if (!searchTerm) return companies;
+    const search = searchTerm.toLowerCase();
+    return companies.filter(company => 
+      (company.company_name?.toLowerCase() || '').includes(search) ||
+      (company.company_email?.toLowerCase() || '').includes(search) ||
+      (company.company_no?.toLowerCase() || '').includes(search)
+    );
+  }, [companies, searchTerm]);
 
 
   // Handle add company
@@ -305,59 +320,127 @@ export default function CompaniesSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Companies List Section */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Companies</h2>
-            <p className="text-xs text-gray-500 mt-1">
-              Manage companies in your organization ({companies.length} total)
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+    <div className="py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Companies</h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+            Manage companies in your organization ({filteredCompanies.length} total)
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {canManageCompanies && !roleLoading && (
             <button
-              onClick={() => fetchCompanies()}
-              className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 flex items-center gap-1"
-              title="Refresh"
+              onClick={openAddModal}
+              className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
-              <RotateCw className="w-3 h-3" />
-              Refresh
+              <Plus className="w-4 h-4 inline mr-1" />
+              Add Company
             </button>
-            {canManageCompanies && !roleLoading && (
+          )}
+        </div>
+      </div>
+
+      {/* Search and Filters */}
+      <div className="mb-4">
+        <div className={`bg-white border border-gray-200 py-6 px-6 ${
+          showFilters ? 'rounded-t-lg' : 'rounded-lg'
+        }`}>
+          <div className="flex items-center justify-between gap-3">
+            {/* Search Bar */}
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search companies by name, email, number..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search companies"
+              />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {/* Filters Button */}
               <button
-                onClick={openAddModal}
-                className="px-3 py-1.5 bg-primary text-white rounded text-sm hover:opacity-90 flex items-center gap-1"
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                  showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
               >
-                <Plus className="w-3 h-3" />
-                Add Company
+                <Filter style={{ width: '14px', height: '14px' }} />
+                Filters
               </button>
-            )}
+
+              {/* View Mode Toggle */}
+              <div className="flex border border-gray-200 rounded overflow-hidden">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`p-1.5 transition-colors ${
+                    viewMode === 'table'
+                      ? 'bg-gray-300 text-black'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                  aria-label="Switch to list view"
+                  title="Switch to list view"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-gray-300 text-black'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                  aria-label="Switch to grid view"
+                  title="Switch to grid view"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        {isLoading ? (
-          <div className="text-center py-8">
-            <div className="text-sm text-gray-500">Loading companies...</div>
+        {/* Advanced Filters (placeholder for future) */}
+        {showFilters && (
+          <div className="bg-white border-l border-r border-b border-gray-200 rounded-b-lg py-6 px-6">
+            <p className="text-sm text-gray-500">Additional filters will be available here.</p>
           </div>
-        ) : error ? (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p className="text-sm text-red-800">Error loading companies: {error}</p>
-          </div>
-        ) : companies.length === 0 ? (
-          <div className="text-center py-12">
-            <Building className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600 mb-2">No companies found</p>
-            <p className="text-sm text-gray-500">
-              {canManageCompanies 
-                ? 'Start by adding companies to your organization'
-                : 'Companies will appear here once they are created.'}
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+
+          {isLoading ? (
+            <div className="text-center py-12 px-6">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+              <p className="text-sm text-gray-600">Loading companies...</p>
+            </div>
+          ) : error ? (
+            <div className="py-6 px-6">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-sm text-red-800">Error loading companies: {error}</p>
+              </div>
+            </div>
+          ) : companies.length === 0 ? (
+            <div className="text-center py-12 px-6">
+              <Building className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600 mb-2">No companies found</p>
+              <p className="text-sm text-gray-500">
+                {canManageCompanies 
+                  ? 'Start by adding companies to your organization'
+                  : 'Companies will appear here once they are created.'}
+              </p>
+            </div>
+          ) : (
             <table className="w-full">
-              <thead className="bg-gray-100 border-b border-gray-200">
+              <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Company Number</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Company</th>
@@ -370,7 +453,7 @@ export default function CompaniesSettings() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {companies.map((company) => (
+                {filteredCompanies.map((company) => (
                   <tr key={company.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap font-mono">
                       {company.company_no || '-'}
@@ -422,8 +505,8 @@ export default function CompaniesSettings() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Add/Edit Company Modal */}

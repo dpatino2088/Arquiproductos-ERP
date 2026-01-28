@@ -286,7 +286,7 @@ export default function NewPassword() {
         </div>
 
         {/* Right Side - Brand Background */}
-        <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#172554' }}>
+        <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#1f4456' }}>
           <div className="max-w-md text-center text-white">
             <div className="mb-8">
               <div className="w-20 h-20 bg-green-500/20 backdrop-blur-sm rounded-2xl mx-auto mb-6 flex items-center justify-center">
@@ -447,7 +447,7 @@ export default function NewPassword() {
       </div>
 
       {/* Right Side - Brand Background */}
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#172554' }}>
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#1f4456' }}>
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center">

@@ -5,6 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <title>Adaptio</title>
+    <!-- ✅ CRITICAL: Override console methods BEFORE any scripts load -->
+    <script>
+      (function() {
+        function safeString(x) {
+          try {
+            if (x instanceof Error) return x.stack || x.message || 'Error';
+            const t = typeof x;
+            if (t === 'string') return x;
+            if (t === 'number' || t === 'boolean') return String(x);
+            if (x === null) return 'null';
+            if (x === undefined) return 'undefined';
+            if (t === 'function') return '[Function: ' + (x.name || 'anonymous') + ']';
+            if (t === 'symbol') return x.toString();
+            try {
+              return JSON.stringify(x, null, 2);
+            } catch {
+              return '[Object]';
+            }
+          } catch {
+            return '[Failed]';
+          }
+        }
+
+        const orig = {
+          error: console.error,
+          warn: console.warn,
+          log: console.log,
+          info: console.info,
+          debug: console.debug
+        };
+
+        console.error = function() {
+          const args = Array.from(arguments).map(safeString);
+          orig.error.apply(console, args);
+        };
+
+        console.warn = function() {
+          const args = Array.from(arguments).map(safeString);
+          orig.warn.apply(console, args);
+        };
+
+        console.log = function() {
+          const args = Array.from(arguments).map(safeString);
+          orig.log.apply(console, args);
+        };
+
+        console.info = function() {
+          const args = Array.from(arguments).map(safeString);
+          orig.info.apply(console, args);
+        };
+
+        console.debug = function() {
+          const args = Array.from(arguments).map(safeString);
+          orig.debug.apply(console, args);
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Mail, Shield, User, X, Copy } from 'lucide-react';
+import { Plus, Mail, Shield, User, X, Copy, Edit } from 'lucide-react';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { useAuthStore } from '../../stores/auth-store';
@@ -9,6 +9,7 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 interface OrganizationUser {
   id: string;
   role: 'owner' | 'admin' | 'member' | 'viewer';
+  status: 'invited' | 'active' | 'disabled';
   created_at: string;
   user_id: string;
   email?: string;
@@ -32,6 +33,8 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
   const [isInviting, setIsInviting] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<OrganizationUser | null>(null);
   
   // Invite form state
   const [inviteEmail, setInviteEmail] = useState('');
@@ -137,10 +140,10 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
       });
 
       if (!response.ok) {
-        // Fallback: use direct query (without emails)
+        // Fallback: use direct query (without emails) - include status
         const { data, error } = await supabase
           .from('OrganizationUsers')
-          .select('id, role, created_at, user_id')
+          .select('id, role, status, created_at, user_id, user_email')
           .eq('organization_id', organizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
@@ -156,7 +159,12 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
         }
       } else {
         const result = await response.json();
-        setUsers(result.users || []);
+        // Ensure status is included in response, default to 'active' if missing
+        const usersWithStatus = (result.users || []).map((u: any) => ({
+          ...u,
+          status: u.status || 'active'
+        }));
+        setUsers(usersWithStatus);
       }
     } catch (err: any) {
       // Only log errors in development, don't spam console in production
@@ -252,20 +260,20 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
           
           // Check for permission errors (403)
           if (response.status === 403) {
-            errorMessage = 'No tienes permisos para invitar usuarios. Solo owners y admins pueden invitar usuarios.';
+            errorMessage = 'You do not have permission to invite users. Only owners and admins can invite users.';
           } else if (response.status === 409) {
-            errorMessage = errorData.error || 'El usuario ya es miembro de esta organización';
+            errorMessage = errorData.error || 'User is already a member of this organization';
           }
         } catch {
           // If JSON parsing fails, use status-based messages
           if (response.status === 403) {
-            errorMessage = 'No tienes permisos para invitar usuarios. Solo owners y admins pueden invitar usuarios.';
+            errorMessage = 'You do not have permission to invite users. Only owners and admins can invite users.';
           } else if (response.status === 404) {
-            errorMessage = 'El endpoint de invitación no está disponible. Por favor, verifica la configuración.';
+            errorMessage = 'Invitation endpoint is not available. Please check the configuration.';
           } else if (response.status === 0 || response.status === 500) {
-            errorMessage = 'Error de conexión con el servidor. Por favor, verifica tu conexión a internet.';
+            errorMessage = 'Connection error with the server. Please check your internet connection.';
           } else {
-            errorMessage = `Error al invitar usuario (${response.status})`;
+            errorMessage = `Failed to invite user (${response.status})`;
           }
         }
         
@@ -370,6 +378,84 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
     }
   };
 
+  const getStatusBadge = (status: string) => {
+    const normalizedStatus = (status || 'active').toLowerCase();
+    const statusColors: Record<string, { bg: string; text: string; border: string; label: string }> = {
+      invited: { 
+        bg: 'bg-yellow-50', 
+        text: 'text-yellow-700', 
+        border: 'border border-yellow-200',
+        label: 'Invited'
+      },
+      active: { 
+        bg: 'bg-green-50', 
+        text: 'text-green-700', 
+        border: 'border border-green-200',
+        label: 'Active'
+      },
+      disabled: { 
+        bg: 'bg-gray-50', 
+        text: 'text-gray-700', 
+        border: 'border border-gray-200',
+        label: 'Disabled'
+      }
+    };
+
+    const colors = statusColors[normalizedStatus] || statusColors.active;
+
+    return (
+      <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${colors.bg} ${colors.text} ${colors.border}`}>
+        {colors.label}
+      </span>
+    );
+  };
+
+  const handleEdit = (orgUser: OrganizationUser) => {
+    setEditingUser(orgUser);
+    setShowEditModal(true);
+  };
+
+  const handleUpdateStatus = async (userId: string, newStatus: 'invited' | 'active' | 'disabled') => {
+    if (!organizationId || !user?.id) return;
+
+    const hasPermission = await canInvite();
+    if (!hasPermission) {
+      addNotification({
+        type: 'error',
+        title: 'Permission Denied',
+        message: 'Only owners and admins can update user status',
+      });
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('OrganizationUsers')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('organization_id', organizationId)
+        .eq('user_id', userId)
+        .eq('deleted', false);
+
+      if (error) throw error;
+
+      addNotification({
+        type: 'success',
+        title: 'Status Updated',
+        message: 'User status has been updated successfully',
+      });
+
+      await loadUsers();
+    } catch (err: any) {
+      console.error('Error updating status:', err);
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to update user status',
+      });
+      throw err; // Re-throw so caller knows it failed
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -379,7 +465,7 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
   }
 
   return (
-    <div className="p-6">
+    <div className="py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-semibold text-foreground">Organization Users</h2>
@@ -404,52 +490,58 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                 User
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                 Role
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                Status
+              </th>
+              <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                 Joined
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="divide-y divide-gray-200">
             {users.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-sm text-muted-foreground">
-                  No users found. Invite your first user to get started.
+                <td colSpan={5} className="py-12 px-6 text-center">
+                  <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 mb-2">No users found</p>
+                  <p className="text-sm text-gray-500">
+                    Invite your first user to get started.
+                  </p>
                 </td>
               </tr>
             ) : (
               users.map((orgUser) => (
-                <tr key={orgUser.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
+                <tr key={orgUser.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                  <td className="py-4 px-6 whitespace-nowrap">
+                    <div className="flex items-center gap-3">
                       <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
                         <User className="w-4 h-4 text-gray-600" />
                       </div>
-                      <div className="ml-3">
-                        <div className="text-sm font-medium text-foreground">
+                      <span className="font-medium text-gray-900 text-sm">
                           {orgUser.email || orgUser.user_id.substring(0, 8) + '...'}
-                        </div>
-                      </div>
+                      </span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="py-4 px-6 whitespace-nowrap">
                     <select
                       value={orgUser.role}
                       onChange={(e) => handleUpdateRole(orgUser.user_id, e.target.value as any)}
                       className={`text-xs font-medium px-2 py-1 rounded ${getRoleBadgeColor(orgUser.role)} border-0`}
-                      disabled={orgUser.user_id === user?.id} // Can't change own role
+                      disabled={orgUser.user_id === user?.id || !canManageUsers} // Can't change own role
                     >
                       <option value="owner">Owner</option>
                       <option value="admin">Admin</option>
@@ -457,17 +549,29 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
                       <option value="viewer">Viewer</option>
                     </select>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                  <td className="py-4 px-6 whitespace-nowrap">
+                    {getStatusBadge(orgUser.status)}
+                  </td>
+                  <td className="py-4 px-6 whitespace-nowrap text-sm text-gray-700">
                     {new Date(orgUser.created_at).toLocaleDateString()}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {/* Actions can be added here */}
+                  <td className="py-4 px-6 whitespace-nowrap">
+                    {canManageUsers && orgUser.user_id !== user?.id && (
+                      <button
+                        onClick={() => handleEdit(orgUser)}
+                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                        title="Edit user"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Invite Modal */}
@@ -565,6 +669,126 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
                 ) : (
                   'Invite'
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditModal && editingUser && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowEditModal(false);
+              setEditingUser(null);
+            }
+          }}
+        >
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-foreground">Edit Organization User</h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingUser(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={editingUser.email || editingUser.user_id.substring(0, 8) + '...'}
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-gray-50 text-gray-500 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Role
+                </label>
+                <select
+                  value={editingUser.role}
+                  onChange={(e) => {
+                    setEditingUser({ ...editingUser, role: e.target.value as any });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                >
+                  <option value="owner">Owner</option>
+                  <option value="admin">Admin</option>
+                  <option value="member">Member</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Status
+                </label>
+                <select
+                  value={editingUser.status}
+                  onChange={(e) => {
+                    setEditingUser({ ...editingUser, status: e.target.value as any });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                >
+                  <option value="invited">Invited</option>
+                  <option value="active">Active</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Invited: User needs to set password. Active: User can access. Disabled: User cannot access.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingUser(null);
+                }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm text-foreground hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!editingUser) return;
+                  
+                  try {
+                    // Update role if changed
+                    if (editingUser.role) {
+                      await handleUpdateRole(editingUser.user_id, editingUser.role);
+                    }
+                    
+                    // Update status if changed
+                    if (editingUser.status) {
+                      await handleUpdateStatus(editingUser.user_id, editingUser.status);
+                    }
+                    
+                    // Close modal only if both updates succeeded
+                    setShowEditModal(false);
+                    setEditingUser(null);
+                  } catch (err) {
+                    // Error notifications already handled in update functions
+                    console.error('Error updating user:', err);
+                  }
+                }}
+                className="flex-1 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors text-sm"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                Update User
               </button>
             </div>
           </div>
