@@ -15,10 +15,8 @@ import {
   upsertBomLines,
   deleteBomInstance,
   deleteBomInstanceLine,
-  type BOMInstance,
-  type BOMInstanceLine,
 } from '../lib/bom/bomInstance';
-import type { GetOrCreateBomInstanceParams, UpsertBomLineParams, UpsertBomLinesParams } from '../types/bom';
+import type { BOMInstance, BOMInstanceLine, GetOrCreateBomInstanceParams, UpsertBomLineParams, UpsertBomLinesParams } from '../types/bom';
 
 /**
  * Hook para obtener o crear BOMInstance para un QuoteLine

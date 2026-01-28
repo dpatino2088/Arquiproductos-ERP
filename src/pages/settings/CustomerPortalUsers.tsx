@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useCompanyPortalUsers } from '../../hooks/useCompanyPortalUsers';
+import { useCompanyPortalUsers, type CompanyPortalUser } from '../../hooks/useCompanyPortalUsers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -41,7 +41,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
     suspended: { bg: 'bg-red-50', text: 'text-red-700' },
   };
 
-  const colors = statusColors[status.toLowerCase()] || statusColors.inactive;
+  const colors = statusColors[status.toLowerCase()] ?? statusColors.inactive;
 
   return (
     <span className={`px-2 py-1 rounded-full text-xs font-medium ${colors.bg} ${colors.text}`}>
@@ -1241,21 +1241,21 @@ export default function CompanyPortalUsers() {
                   </td>
                 </tr>
               ) : (
-                users.map((user: PortalUser) => (
+                users.map((user: CompanyPortalUser) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     {/* User Name (ALWAYS from user) */}
                     <td className="py-4 px-6 text-gray-900 text-sm">
-                      {user.user_name || '—'}
+                      {(user as { user_name?: string }).user_name ?? user.portal_user_name ?? '—'}
                     </td>
                     
                     {/* User Email (ALWAYS from user) */}
                     <td className="py-4 px-6 text-gray-700 text-sm">
-                      {(user as any).portal_user_email ?? user.user_email ?? '—'}
+                      {user.portal_user_email ?? (user as { user_email?: string }).user_email ?? '—'}
                     </td>
                     
                     {/* Contact Name (OPTIONAL - nullable) */}
                     <td className="py-4 px-6 text-gray-600 text-sm">
-                      {user.contact_name ?? '—'}
+                      {(user as { contact_name?: string }).contact_name ?? '—'}
                     </td>
                     
                     {/* Contact Email (OPTIONAL - nullable) */}

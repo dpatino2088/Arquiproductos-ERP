@@ -133,16 +133,22 @@ export default function RollerBOMConfigurator({
   const handleNext = useCallback(() => {
     if (canGoNext) {
       const nextIndex = currentStepIndex + 1;
-      setCurrentStep(STEPS[nextIndex].id);
-      setError(null);
+      const step = STEPS[nextIndex];
+      if (step) {
+        setCurrentStep(step.id);
+        setError(null);
+      }
     }
   }, [canGoNext, currentStepIndex]);
 
   const handlePrev = useCallback(() => {
     if (canGoPrev) {
       const prevIndex = currentStepIndex - 1;
-      setCurrentStep(STEPS[prevIndex].id);
-      setError(null);
+      const step = STEPS[prevIndex];
+      if (step) {
+        setCurrentStep(step.id);
+        setError(null);
+      }
     }
   }, [canGoPrev, currentStepIndex]);
 

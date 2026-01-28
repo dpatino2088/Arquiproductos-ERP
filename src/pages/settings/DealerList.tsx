@@ -334,7 +334,7 @@ export default function DealerList() {
         variant={dialogState.variant}
         confirmText={dialogState.confirmText}
         cancelText={dialogState.cancelText}
-        loading={dialogState.loading}
+        isLoading={dialogState.isLoading}
       />
     </div>
   );

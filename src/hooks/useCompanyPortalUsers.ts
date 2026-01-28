@@ -20,7 +20,9 @@ export interface CompanyPortalUser {
   deleted: boolean;
   created_at?: string;
   updated_at?: string;
-  // Opcional: legacyRaw para debug si existen genéricas
+  /** Raw DB columns (when select returns role/status instead of portal_user_*) */
+  role?: string | null;
+  status?: string | null;
   legacy?: {
     email?: string;
     status?: string;

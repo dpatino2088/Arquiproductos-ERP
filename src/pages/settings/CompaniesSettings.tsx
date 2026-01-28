@@ -50,7 +50,8 @@ function StatusBadge({ status, deleted = false }: StatusBadgeProps) {
     }
   };
 
-  const colors = statusColors[normalizedStatus] ?? statusColors.disabled;
+  const defaultColors = { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border border-gray-200', label: 'Unknown' };
+  const colors = statusColors[normalizedStatus] ?? statusColors.disabled ?? defaultColors;
 
   return (
     <span className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
@@ -125,7 +126,7 @@ export default function CompaniesSettings() {
       const input: CreateCompanyInput = {
         company_name: formData.company_name.trim(),
         company_email: formData.company_email.trim() || undefined,
-        status: finalStatus === 'archived' ? 'active' : finalStatus, // Cannot create as archived
+        status: finalStatus, // finalStatus is already 'active' | 'disabled' (archived mapped to active above)
       };
 
       if (import.meta.env.DEV) {
@@ -621,7 +622,7 @@ export default function CompaniesSettings() {
         variant={dialogState.variant}
         confirmText={dialogState.confirmText}
         cancelText={dialogState.cancelText}
-        isLoading={dialogState.loading}
+        isLoading={dialogState.isLoading}
       />
     </div>
   );

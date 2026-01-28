@@ -41,7 +41,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
     }
   };
 
-  const colors = statusColors[normalizedStatus] || statusColors.disabled;
+  const colors = statusColors[normalizedStatus] ?? statusColors.disabled;
 
   return (
     <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${colors.bg} ${colors.text} ${colors.border}`}>
@@ -429,7 +429,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       setUser_email(user.portal_user_email || '');
       setCompany_id(user.company_id || '');
       // Load role directly from user - normalize to handle legacy values
-      const currentRole = user.portal_user_role || 'member';
+      const currentRole = (user.portal_user_role ?? (user as { role?: string }).role) || 'member';
       // Normalize the role to handle any legacy values (e.g., 'manager' -> 'member_manager')
       // But preserve the exact value if it's already valid
       const validRoles: CompanyPortalRole[] = ['member_manager', 'member'];
@@ -439,7 +439,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
         : normalizeRole(currentRole);
       setRole(normalizedRole);
       // Portal users only use 'active' or 'disabled' status
-      const currentStatus = user.portal_user_status?.toLowerCase().trim() || 'active';
+      const currentStatus = (user.portal_user_status ?? (user as { status?: string }).status)?.toString().toLowerCase().trim() || 'active';
       // Normalize legacy 'invited'/'draft' to 'active'
       const normalizedStatus = currentStatus === 'invited' || currentStatus === 'draft' ? 'active' : currentStatus;
       const validStatuses = ['active', 'disabled'];
@@ -600,7 +600,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       // If we got data back from the UPDATE, verify it matches what we sent
       if (updateData) {
         // Check role from returned data (may be 'role' or 'portal_user_role' depending on DB schema)
-        const returnedRole = updateData.role || updateData.portal_user_role;
+        const returnedRole = (updateData as { role?: string; portal_user_role?: string }).role || (updateData as { portal_user_role?: string }).portal_user_role;
         if (returnedRole !== finalRole) {
           console.warn('[EditPortalUserModal] ⚠️ WARNING: Role mismatch in returned data!', {
             expected: finalRole,
@@ -631,7 +631,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
           if (import.meta.env.DEV) {
             console.warn('[EditPortalUserModal] Could not verify update (RLS might prevent read):', {
               error: verifyError,
-              code: verifyError.code,
+              code: (verifyError as { code?: string }).code,
               message: verifyError.message,
               details: verifyError.details,
               hint: verifyError.hint,
@@ -1301,7 +1301,7 @@ export default function CompanyPortalUsers() {
                             border: 'border border-blue-200',
                           },
                         };
-                        const colors = roleColors[role] || roleColors.member;
+                        const colors = roleColors[role] ?? roleColors.member;
                         return (
                           <span className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
                             {getRoleLabel(role)}
@@ -1312,7 +1312,7 @@ export default function CompanyPortalUsers() {
                     
                     {/* Status */}
                     <td className="py-4 px-6 whitespace-nowrap">
-                      <StatusBadge status={user.portal_user_status || 'disabled'} />
+                      <StatusBadge status={user.portal_user_status ?? (user as { status?: string }).status ?? 'disabled'} />
                     </td>
                     
                     {/* Date Added */}

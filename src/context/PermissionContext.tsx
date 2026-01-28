@@ -80,7 +80,9 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
           return;
         }
 
-        const allPermCodes = new Set((allPermissions || []).map(p => p.code).filter(Boolean));
+        const allPermCodes = new Set(
+          (allPermissions || []).map((p: { code: string }) => p.code).filter((c): c is string => Boolean(c))
+        );
         setPermissions(allPermCodes);
 
         if (import.meta.env.DEV) {
@@ -130,7 +132,7 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
       }
 
       const permissionSet = new Set(
-        (userPermissions || []).map(p => p.permission_code).filter(Boolean)
+        (userPermissions || []).map((p: { permission_code: string }) => p.permission_code).filter((c): c is string => Boolean(c))
       );
 
       setPermissions(permissionSet);

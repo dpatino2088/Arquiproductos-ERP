@@ -11,6 +11,22 @@ export interface BOMHealthStatus {
   is_healthy: boolean;
 }
 
+export interface BOMInstanceDataLine {
+  bom_line_id: string;
+  catalog_item_id: string;
+  resolved_sku: string | null;
+  part_role: string | null;
+  qty: number;
+  uom: string;
+  category_code: string | null;
+  source: string;
+  parent_part_id: string | null;
+  unit_cost_exw: number;
+  total_cost_exw: number;
+  unit_msrp_sale_out: number;
+  total_msrp_sale_out: number;
+}
+
 export interface BOMInstanceData {
   bom_instance_id: string;
   organization_id: string;
@@ -21,21 +37,7 @@ export interface BOMInstanceData {
   total_cost_with_labor: number;
   total_msrp_sale_out_with_labor: number;
   // Lines data
-  lines: Array<{
-    bom_line_id: string;
-    catalog_item_id: string;
-    resolved_sku: string | null;
-    part_role: string | null;
-    qty: number;
-    uom: string;
-    category_code: string | null;
-    source: string;
-    parent_part_id: string | null;
-    unit_cost_exw: number;
-    total_cost_exw: number;
-    unit_msrp_sale_out: number;
-    total_msrp_sale_out: number;
-  }>;
+  lines: BOMInstanceDataLine[];
   // Summary stats
   total_lines: number;
   unique_items: number;
@@ -96,7 +98,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         return;
       }
 
-      const saleOrderLineIds = saleOrderLines.map(sol => sol.id);
+      const saleOrderLineIds = saleOrderLines.map((sol: { id: string }) => sol.id);
 
       // Get ALL BOMInstances for these SaleOrderLines (not just one)
       // Following the same pattern as useManufacturingMaterials
@@ -163,7 +165,8 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       if (linesError) throw linesError;
 
       // Step 3: Build BOM Instance Data
-      const lines = (bomLines || []).map(line => ({
+      type FlatRow = { bom_line_id: string; catalog_item_id: string; resolved_sku: string | null; part_role: string | null; qty: number; uom: string; category_code: string | null; source: string; parent_part_id: string | null; unit_cost_exw: number; total_cost_exw: number; unit_msrp_sale_out: number; total_msrp_sale_out: number; sales_order_id?: string | null };
+      const lines: BOMInstanceDataLine[] = (bomLines || []).map((line: FlatRow) => ({
         bom_line_id: line.bom_line_id,
         catalog_item_id: line.catalog_item_id,
         resolved_sku: line.resolved_sku,
@@ -180,13 +183,13 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       }));
 
       // Calculate summary stats from lines
-      const uniqueItems = new Set(lines.map(l => l.catalog_item_id)).size;
-      const bomComponentLines = lines.filter(l => l.source === 'bom_component').length;
-      const quoteLineComponentLines = lines.filter(l => l.source === 'quote_line_component').length;
-      const assemblyChildLines = lines.filter(l => l.source === 'assembly_child').length;
-      const totalQty = lines.reduce((sum, l) => sum + l.qty, 0);
-      const totalCostExw = lines.reduce((sum, l) => sum + l.total_cost_exw, 0);
-      const totalMsrpSaleOut = lines.reduce((sum, l) => sum + l.total_msrp_sale_out, 0);
+      const uniqueItems = new Set(lines.map((l: BOMInstanceDataLine) => l.catalog_item_id)).size;
+      const bomComponentLines = lines.filter((l: BOMInstanceDataLine) => l.source === 'bom_component').length;
+      const quoteLineComponentLines = lines.filter((l: BOMInstanceDataLine) => l.source === 'quote_line_component').length;
+      const assemblyChildLines = lines.filter((l: BOMInstanceDataLine) => l.source === 'assembly_child').length;
+      const totalQty = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.qty, 0);
+      const totalCostExw = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.total_cost_exw, 0);
+      const totalMsrpSaleOut = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.total_msrp_sale_out, 0);
 
       if (!bomInstances || bomInstances.length === 0) {
         throw new Error('No BOM instances found');
@@ -221,12 +224,12 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       
       // Orphan Assembly Children
       const orphanChildren = lines.filter(
-        l => l.source === 'assembly_child' && !l.parent_part_id
+        (l: BOMInstanceDataLine) => l.source === 'assembly_child' && !l.parent_part_id
       ).length;
 
       // Duplicate Items (same catalog_item_id + same parent_part_id in same BOM)
       const duplicateMap = new Map<string, number>();
-      lines.forEach(line => {
+      lines.forEach((line: BOMInstanceDataLine) => {
         const key = `${line.catalog_item_id}_${line.parent_part_id || 'null'}_${line.part_role || 'null'}_${line.uom}`;
         duplicateMap.set(key, (duplicateMap.get(key) || 0) + 1);
       });
@@ -234,13 +237,13 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
 
       // Missing Qty/UOM
       const missingQtyUom = lines.filter(
-        l => !l.qty || !l.uom || l.uom.trim() === ''
+        (l: BOMInstanceDataLine) => !l.qty || !l.uom || l.uom.trim() === ''
       ).length;
 
       // Missing Parent (assembly_child where parent doesn't exist in same BOM)
-      const catalogItemIds = new Set(lines.map(l => l.catalog_item_id));
+      const catalogItemIds = new Set(lines.map((l: BOMInstanceDataLine) => l.catalog_item_id));
       const missingParent = lines.filter(
-        l => l.source === 'assembly_child' 
+        (l: BOMInstanceDataLine) => l.source === 'assembly_child' 
           && l.parent_part_id 
           && !catalogItemIds.has(l.parent_part_id)
       ).length;

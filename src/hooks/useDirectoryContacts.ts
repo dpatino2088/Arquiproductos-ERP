@@ -241,7 +241,9 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
           if (retryError) {
             throw retryError;
           }
-          return retryData || [];
+          const retryRows = (retryData || []) as unknown as Array<{ id?: string }>;
+          const withIdRetry = retryRows.filter((item): item is { id: string } => item != null && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string');
+          return Array.from(new Map(withIdRetry.map((item) => [item.id, item])).values());
         }
       }
       throw err;
@@ -334,7 +336,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false);
 
-      const companyIds = (orgCompanies || []).map(c => c.id);
+      const companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
 
       // Usar safeSelectContacts que maneja company_id y organization_id
       const data = await safeSelectContacts(activeOrganizationId, companyIds);
