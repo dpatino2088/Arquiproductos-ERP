@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { router } from '../../lib/router';
@@ -16,6 +16,13 @@ import ImageUpload from '../../components/ui/ImageUpload';
 import { syncCatalogItemProductTypes } from '../../lib/catalog-item-helpers';
 import { useProductTypes } from '../../hooks/useProductTypes';
 import { useOnVisibilityChange } from '../../lib/app-persistence';
+import { Info } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../../components/ui/Tooltip';
+import { CatalogItemSupplyTab } from '../../components/catalog/CatalogItemSupplyTab';
+import { CatalogItemRollSpecsSection } from '../../components/catalog/CatalogItemRollSpecsSection';
+import { normalizeRateToSystem, toMeters, toSquareMetersFromArea } from '../../lib/uom-conversions';
+// UOM conversions handled by backend trigger (trg_catalogitems_write_conversions)
+// Frontend only displays conversions from CatalogItemConversions table
 
 /**
  * ============================================================================
@@ -25,9 +32,10 @@ import { useOnVisibilityChange } from '../../lib/app-persistence';
  * 
  * CatalogItems columns (REAL):
  * - id, organization_id, name, sku, unit_of_measure, description, category_id
- * - image_url, measure_basis, is_fabric, collection_name, variant_name
- * - roll_width, fabric_pricing_mode, color, is_active
- * - cost_exw, is_roll, roll_type
+ * - image_url, measure_basis, collection_name, variant_name
+ * - roll_width, roll_pricing_mode, color, is_active
+ * - cost_exw (ALWAYS per unit/ea), is_roll, roll_type
+ * - purchase_unit (each/pack/set/box/case), units_per_purchase_unit
  * - created_at, updated_at
  * 
  * Note: manufacturer, manufacturer_id exist in DB but NOT used in this form (legacy)
@@ -45,23 +53,25 @@ import { useOnVisibilityChange } from '../../lib/app-persistence';
 const catalogItemSchema = z.object({
   // Required fields
   sku: z.string().min(1, 'SKU is required'),
-  name: z.string().min(1, 'Name is required'),
+  name: z.string().optional(), // For rolls, auto-generated from collection + variant
   unit_of_measure: z.string().min(1, 'Unit of measure is required'),
   measure_basis: z.enum(['unit', 'linear', 'area']),
   
   // Optional fields
   description: z.string().optional().nullable(),
   category_id: z.string().uuid().optional().nullable(),
-  image_url: z.string().url().optional().nullable().or(z.literal('')),
+  image_url: z.string().optional().nullable(),
   
-  // Roll/Fabric fields
-  is_fabric: z.boolean(),
+  // Roll fields
   is_roll: z.boolean(),
   roll_type: z.enum(['fabric', 'window_film', 'vinyl', 'mesh', 'paper', 'other']).optional().nullable(),
   collection_name: z.string().optional().nullable(),
   variant_name: z.string().optional().nullable(),
-  roll_width: z.number().optional().nullable(),
-  fabric_pricing_mode: z.enum(['per_linear_m', 'per_sqm']).optional().nullable(),
+  roll_width_value: z.number().min(0).optional().nullable(),
+  roll_width_uom: z.enum(['m', 'yd', 'ft', 'in']).optional().nullable(),
+  roll_length_value: z.number().min(0).optional().nullable(),
+  roll_length_uom: z.enum(['m', 'yd', 'ft', 'in']).optional().nullable(),
+  roll_pricing_mode: z.enum(['per_linear_meter', 'per_square_meter', 'per_unit']).optional().nullable(),
   
   // Component fields
   color: z.string().optional().nullable(),
@@ -69,17 +79,29 @@ const catalogItemSchema = z.object({
   // Pricing
   cost_exw: z.number().min(0).optional().nullable(),
   
+  // Purchase unit (for inventory/procurement)
+  purchase_unit: z.enum(['each', 'pack', 'set', 'box', 'case']),
+  units_per_purchase_unit: z.number().min(1),
+  
   // Status
   is_active: z.boolean(),
 }).refine((data) => {
-  // If is_roll=true, collection_name and variant_name are required
-  if (data.is_roll && !data.collection_name) return false;
+  // If NOT roll, name is required
+  if (!data.is_roll && (!data.name || data.name.trim() === '')) return false;
+  return true;
+}, {
+  message: 'Name is required for non-roll items',
+  path: ['name'],
+}).refine((data) => {
+  // If is_roll=true, collection_name is required
+  if (data.is_roll && (!data.collection_name || data.collection_name.trim() === '')) return false;
   return true;
 }, {
   message: 'Collection name is required for roll items',
   path: ['collection_name'],
 }).refine((data) => {
-  if (data.is_roll && !data.variant_name) return false;
+  // If is_roll=true, variant_name is required  
+  if (data.is_roll && (!data.variant_name || data.variant_name.trim() === '')) return false;
   return true;
 }, {
   message: 'Variant name (color) is required for roll items',
@@ -91,9 +113,55 @@ const catalogItemSchema = z.object({
 }, {
   message: 'Roll type is required for roll items',
   path: ['roll_type'],
+}).refine((data) => {
+  // If is_roll=true, roll_width_value is required
+  if (data.is_roll && (data.roll_width_value == null || data.roll_width_value <= 0)) return false;
+  return true;
+}, {
+  message: 'Roll width is required for roll items',
+  path: ['roll_width_value'],
+}).refine((data) => {
+  // If is_roll=true, roll_length_value is required
+  if (data.is_roll && (data.roll_length_value == null || data.roll_length_value <= 0)) return false;
+  return true;
+}, {
+  message: 'Roll length is required for roll items',
+  path: ['roll_length_value'],
 });
 
 type CatalogItemFormValues = z.infer<typeof catalogItemSchema>;
+
+// Normalize number inputs (valueAsNumber yields NaN when empty) before Zod validation
+const catalogItemResolver: Resolver<CatalogItemFormValues> = async (values, context, options) => {
+  // Shallow copy and normalize
+  const normalized = { ...values };
+  
+  // Normalize cost_exw: NaN → null
+  if (typeof normalized.cost_exw === 'number' && Number.isNaN(normalized.cost_exw)) {
+    normalized.cost_exw = null;
+  }
+  
+  // Normalize roll dimensions: NaN → null
+  if (typeof normalized.roll_width_value === 'number' && Number.isNaN(normalized.roll_width_value)) {
+    normalized.roll_width_value = null;
+  }
+  if (typeof normalized.roll_length_value === 'number' && Number.isNaN(normalized.roll_length_value)) {
+    normalized.roll_length_value = null;
+  }
+  
+  // Normalize units_per_purchase_unit: NaN/null/undefined/< 1 → 1
+  const upu = normalized.units_per_purchase_unit;
+  if (upu == null || (typeof upu === 'number' && (Number.isNaN(upu) || upu < 1))) {
+    normalized.units_per_purchase_unit = 1;
+  }
+  
+  // Ensure purchase_unit has a valid value
+  if (!normalized.purchase_unit || !['each', 'pack', 'set', 'box', 'case'].includes(normalized.purchase_unit)) {
+    normalized.purchase_unit = 'each';
+  }
+  
+  return zodResolver(catalogItemSchema)(normalized, context, options);
+};
 
 export default function CatalogItemNew() {
   const { activeOrganizationId } = useOrganizationContext();
@@ -133,21 +201,103 @@ export default function CatalogItemNew() {
   // Form state
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'profile' | 'rates'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'rates' | 'supply'>(() => {
+    // Restore active tab from navigation state if available
+    const state = window.history.state;
+    const t = state?.activeTab;
+    return t === 'profile' || t === 'rates' || t === 'supply' ? t : 'profile';
+  });
+  const shouldCloseAfterSaveRef = useRef(false);
   
   // CatalogItemsMSRP: read-only for Rates tab (computed in backend; UI only displays)
   const [msrpRow, setMsrpRow] = useState<{
-    msrp_sale_in: number;
-    msrp_sale_out: number;
+    dealer_price: number;
+    msrp: number;
     total_cost: number;
     shipping_cost: number;
     import_tax_cost: number;
-    minimum_margin_pct: number;   // col. CatalogItemsMSRP — % sale-in (equiv. msrp_pct_sale_in)
-    msrp_pct_sale_out: number;    // col. CatalogItemsMSRP
+    minimum_margin_pct: number;
+    msrp_pct_sale_out: number;
   } | null>(null);
   const [msrpLoading, setMsrpLoading] = useState(false);
   
+  // Conversions state (from CatalogItemConversions table)
+  const [conversions, setConversions] = useState<{
+    cost_exw_per_m: number | null;
+    cost_exw_per_m2: number | null;
+    cost_exw_per_ea: number | null;
+    computed_at: string | null;
+  } | null>(null);
+  const [conversionsLoading, setConversionsLoading] = useState(false);
+  
+  // Normalized dimensions (from DB after trigger calculation)
+  const [rollDimensions, setRollDimensions] = useState<{
+    roll_width_m: number | null;
+    roll_length_m: number | null;
+  }>({ roll_width_m: null, roll_length_m: null });
+  
   const isReadOnly = !canEdit && !roleLoading;
+  
+  // Helper: Load conversions from CatalogItemConversions
+  const loadConversions = async () => {
+    if (!itemId || !activeOrganizationId) {
+      setConversions(null);
+      return;
+    }
+    
+    setConversionsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('CatalogItemConversions')
+        .select('cost_exw_per_m, cost_exw_per_m2, cost_exw_per_ea, computed_at')
+        .eq('catalog_item_id', itemId)
+        .eq('organization_id', activeOrganizationId)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('Error loading conversions:', error);
+        setConversions(null);
+      } else if (data) {
+        setConversions(data);
+      } else {
+        setConversions(null);
+      }
+    } catch (err) {
+      console.error('Error loading conversions:', err);
+      setConversions(null);
+    } finally {
+      setConversionsLoading(false);
+    }
+  };
+  
+  // Helper: Reload conversions with retry (for after save)
+  const reloadConversionsWithRetry = async () => {
+    if (!itemId || !activeOrganizationId) return;
+    
+    for (let i = 0; i < 5; i++) {
+      try {
+      const { data, error } = await supabase
+        .from('CatalogItemConversions')
+        .select('cost_exw_per_m, cost_exw_per_m2, cost_exw_per_ea, computed_at')
+        .eq('catalog_item_id', itemId)
+        .eq('organization_id', activeOrganizationId)
+        .maybeSingle();
+        
+        if (!error && data?.computed_at) {
+          setConversions(data);
+          return;
+        }
+      } catch (err) {
+        console.error('Retry error loading conversions:', err);
+      }
+      
+      // Wait 250ms before retry
+      await new Promise(r => setTimeout(r, 250));
+    }
+    
+    // After all retries, do final load attempt
+    await loadConversions();
+  };
   
   // React Hook Form
   const {
@@ -158,7 +308,7 @@ export default function CatalogItemNew() {
     watch,
     reset,
   } = useForm<CatalogItemFormValues>({
-    resolver: zodResolver(catalogItemSchema),
+    resolver: catalogItemResolver,
     defaultValues: {
       sku: '',
       name: '',
@@ -167,102 +317,181 @@ export default function CatalogItemNew() {
       measure_basis: 'unit',
       category_id: null,
       image_url: null,
-      is_fabric: false,
       is_roll: false,
       roll_type: null,
       collection_name: null,
       variant_name: null,
-      roll_width: null,
-      fabric_pricing_mode: null,
+      roll_width_value: null,
+      roll_width_uom: 'm',
+      roll_length_value: null,
+      roll_length_uom: 'm',
+      roll_pricing_mode: null,
       color: null,
       cost_exw: null,
+      purchase_unit: 'each',
+      units_per_purchase_unit: 1,
       is_active: true,
     },
   });
 
-  // Draft persistence (keeps unsaved changes on reload)
-  const draftKey = itemId ? `catalogItemDraft:${itemId}` : 'catalogItemDraft:new';
-  const draftTimerRef = useRef<number | null>(null);
-  
   // ✅ FIX: SessionStorage persistence for editing (survives tab changes)
   const sessionKey = itemId ? `catalogItemEdit:${itemId}` : null;
   const sessionTimerRef = useRef<number | null>(null);
   const draftHydratedRef = useRef(false); // Prevent saving empty draft before hydration
 
+  // New Item must ALWAYS start blank (no draft hydration)
   useEffect(() => {
-    // ✅ Only apply draft on NEW items (not when editing)
     if (itemId) return;
 
-    const raw = window.localStorage.getItem(draftKey);
-    if (!raw) {
-      // If new item and no draft, reset to defaults
-      reset({
-        sku: '',
-        name: '',
-        description: '',
-        unit_of_measure: 'ea',
-        measure_basis: 'unit',
-        category_id: null,
-        image_url: null,
-        is_fabric: false,
-        is_roll: false,
-        roll_type: null,
-        collection_name: null,
-        variant_name: null,
-        roll_width: null,
-        fabric_pricing_mode: null,
-        color: null,
-        cost_exw: null,
-        is_active: true,
-      });
-      setSelectedProductTypeIds([]);
-      return;
-    }
+    // Clear any stale draft that might exist from prior attempts
+    window.localStorage.removeItem('catalogItemDraft:new');
 
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed?.values) {
-        reset({ ...parsed.values });
-      }
-      if (Array.isArray(parsed?.productTypeIds)) {
-        setSelectedProductTypeIds(parsed.productTypeIds);
-      }
-    } catch {
-      // Ignore corrupted draft
-    }
-  }, [draftKey, itemId, reset]);
-
-  useEffect(() => {
-    // ✅ Only persist drafts for NEW items (avoid overriding edits)
-    if (itemId) return;
-
-    const subscription = watch((values) => {
-      if (draftTimerRef.current) {
-        window.clearTimeout(draftTimerRef.current);
-      }
-      draftTimerRef.current = window.setTimeout(() => {
-        const payload = {
-          values,
-          productTypeIds: selectedProductTypeIds,
-          savedAt: new Date().toISOString(),
-        };
-        window.localStorage.setItem(draftKey, JSON.stringify(payload));
-      }, 300);
+    reset({
+      sku: '',
+      name: '',
+      description: '',
+      unit_of_measure: 'ea',
+      measure_basis: 'unit',
+      category_id: null,
+      image_url: null,
+      is_roll: false,
+      roll_type: null,
+      collection_name: null,
+      variant_name: null,
+      roll_width_value: null,
+      roll_width_uom: 'm',
+      roll_length_value: null,
+      roll_length_uom: 'm',
+      roll_pricing_mode: null,
+      color: null,
+      cost_exw: null,
+      purchase_unit: 'each',
+      units_per_purchase_unit: 1,
+      is_active: true,
     });
-
-    return () => {
-      subscription.unsubscribe();
-      if (draftTimerRef.current) {
-        window.clearTimeout(draftTimerRef.current);
-      }
-    };
-  }, [watch, draftKey, selectedProductTypeIds, itemId]);
+    setSelectedProductTypeIds([]);
+  }, [itemId, reset]);
   
   // Watch values
-  const isRoll = watch('is_roll');
+  const isRoll = !!watch('is_roll');
+  const unitOfMeasure = watch('unit_of_measure');
+  const rollWidthUom = watch('roll_width_uom');
+  const rollLengthUom = watch('roll_length_uom');
   const rollType = watch('roll_type');
   const measureBasis = watch('measure_basis');
   const categoryId = watch('category_id');
+  const costExw = watch('cost_exw');
+  const pricingMode = watch('roll_pricing_mode');
+  
+  // Calculate MSRP normalization (factor to convert base unit prices to display unit)
+  const { msrpFactor, msrpUnitLabel } = useMemo(() => {
+    const costExwNum = Number(costExw) || 0;
+    let factor = 1;
+    let unitLabel = unitOfMeasure ? `/${unitOfMeasure}` : '';
+    
+    if (costExwNum > 0 && conversions) {
+      if (pricingMode === 'per_linear_meter' && conversions.cost_exw_per_m != null) {
+        factor = conversions.cost_exw_per_m / costExwNum;
+        unitLabel = '/m';
+      } else if (pricingMode === 'per_square_meter' && conversions.cost_exw_per_m2 != null) {
+        factor = conversions.cost_exw_per_m2 / costExwNum;
+        unitLabel = '/m²';
+      } else if (pricingMode === 'per_unit' && conversions.cost_exw_per_ea != null) {
+        factor = conversions.cost_exw_per_ea / costExwNum;
+        unitLabel = '/ea';
+      } else if (!pricingMode && measureBasis === 'linear' && conversions.cost_exw_per_m != null) {
+        factor = conversions.cost_exw_per_m / costExwNum;
+        unitLabel = '/m';
+      } else if (!pricingMode && measureBasis === 'area' && conversions.cost_exw_per_m2 != null) {
+        factor = conversions.cost_exw_per_m2 / costExwNum;
+        unitLabel = '/m²';
+      }
+    }
+    
+    return { msrpFactor: factor, msrpUnitLabel: unitLabel };
+  }, [costExw, pricingMode, measureBasis, unitOfMeasure, conversions]);
+
+  // Display conversions: ALWAYS compute live from form inputs when possible.
+  // Rationale: DB conversions can be stale until user clicks Save. This must reflect Cost EXW normalized in meters.
+  const costExwNum = Number(costExw) || 0;
+
+  const rollWidthValue = watch('roll_width_value');
+  const rollLengthValue = watch('roll_length_value');
+
+  const rollWidthM =
+    rollWidthValue != null && rollWidthUom
+      ? toMeters(Number(rollWidthValue), rollWidthUom)
+      : rollDimensions.roll_width_m;
+
+  const rollLengthM =
+    rollLengthValue != null && rollLengthUom
+      ? toMeters(Number(rollLengthValue), rollLengthUom)
+      : rollDimensions.roll_length_m;
+
+  const unitLower = (unitOfMeasure || '').toLowerCase().trim();
+  const isAreaUom =
+    unitLower === 'm2' ||
+    unitLower === 'sqm' ||
+    unitLower === 'ft2' ||
+    unitLower === 'sqft' ||
+    unitLower === 'yd2' ||
+    unitLower === 'sqyd' ||
+    unitLower === 'in2' ||
+    unitLower === 'cm2' ||
+    unitLower === 'mm2';
+
+  const normalizedCostExwPerM = useMemo(() => {
+    if (costExwNum <= 0 || !unitOfMeasure) return conversions?.cost_exw_per_m ?? null;
+
+    // If input is an area price (e.g. $/m², $/yd²), convert to $/m by multiplying by roll width.
+    if (isAreaUom) {
+      if (rollWidthM == null || rollWidthM <= 0) return null;
+      const perM2 = normalizeRateToSystem(costExwNum, unitOfMeasure, 'm2');
+      return perM2 * rollWidthM;
+    }
+
+    // If priced per roll, convert to $/m by dividing by roll length (when available)
+    if (unitLower === 'roll') {
+      if (rollLengthM == null || rollLengthM <= 0) return null;
+      return costExwNum / rollLengthM;
+    }
+
+    // Default: treat as linear or unit and normalize directly to $/m
+    return normalizeRateToSystem(costExwNum, unitOfMeasure, 'm');
+  }, [costExwNum, unitOfMeasure, isAreaUom, rollWidthM, rollLengthM, unitLower, conversions?.cost_exw_per_m]);
+
+  const normalizedCostExwPerM2 = useMemo(() => {
+    if (costExwNum <= 0 || !unitOfMeasure) {
+      return conversions?.cost_exw_per_m2 ?? (normalizedCostExwPerM != null && rollWidthM != null && rollWidthM > 0 ? normalizedCostExwPerM / rollWidthM : null);
+    }
+
+    // If input is already area-based, normalize directly to $/m²
+    if (isAreaUom) {
+      return normalizeRateToSystem(costExwNum, unitOfMeasure, 'm2');
+    }
+
+    // Otherwise derive from $/m ÷ width
+    if (normalizedCostExwPerM != null && rollWidthM != null && rollWidthM > 0) {
+      return normalizedCostExwPerM / rollWidthM;
+    }
+    return conversions?.cost_exw_per_m2 ?? null;
+  }, [costExwNum, unitOfMeasure, isAreaUom, normalizedCostExwPerM, rollWidthM, conversions?.cost_exw_per_m2]);
+
+  const normalizedCostExwPerEa =
+    conversions?.cost_exw_per_ea ??
+    (costExwNum > 0 &&
+    unitOfMeasure &&
+    ['ea', 'each', 'pcs', 'pc', 'unit', 'piece'].includes(unitLower)
+      ? costExwNum
+      : null);
+
+  // Cost per Full Roll: always Cost EXW normalized to meters × roll length (meters)
+  const fullRollCost = useMemo(() => {
+    if (!isRoll) return null;
+    if (normalizedCostExwPerM == null) return null;
+    if (rollLengthM == null || rollLengthM <= 0) return null;
+    return normalizedCostExwPerM * rollLengthM;
+  }, [isRoll, normalizedCostExwPerM, rollLengthM]);
   
   // Load item data when editing
   useEffect(() => {
@@ -288,18 +517,89 @@ export default function CatalogItemNew() {
           return;
         }
         
+        // Load normalized dimensions for display
+        setRollDimensions({
+          roll_width_m: data.roll_width_m ? Number(data.roll_width_m) : null,
+          roll_length_m: data.roll_length_m ? Number(data.roll_length_m) : null,
+        });
+        
         // ✅ FIX: Check sessionStorage first (user may have unsaved changes from tab switch)
         const sessionData = sessionKey ? window.sessionStorage.getItem(sessionKey) : null;
         let formValues: CatalogItemFormValues;
+        
+        const dbValues: CatalogItemFormValues = {
+          sku: data.sku || '',
+          name: data.name || '',
+          description: data.description || '',
+          unit_of_measure: data.unit_of_measure || 'ea',
+          measure_basis: data.measure_basis || 'unit',
+          category_id: data.category_id || null,
+          image_url: data.image_url || null,
+          is_roll: data.is_roll || false,
+          roll_type: data.roll_type || null,
+          collection_name: data.collection_name || null,
+          variant_name: data.variant_name || null,
+          // Prefer explicit value/uom; fallback to normalized meters if legacy rows lack value/uom
+          roll_width_value:
+            data.roll_width_value != null
+              ? Number(data.roll_width_value)
+              : (data.roll_width_m != null ? Number(data.roll_width_m) : null),
+          roll_width_uom: data.roll_width_uom || (data.roll_width_value == null && data.roll_width_m != null ? 'm' : 'm'),
+          roll_length_value:
+            data.roll_length_value != null
+              ? Number(data.roll_length_value)
+              : (data.roll_length_m != null ? Number(data.roll_length_m) : null),
+          roll_length_uom: data.roll_length_uom || (data.roll_length_value == null && data.roll_length_m != null ? 'm' : 'm'),
+          roll_pricing_mode: data.roll_pricing_mode || null,
+          color: data.color || null,
+          cost_exw: data.cost_exw ? Number(data.cost_exw) : null,
+          purchase_unit: (data.purchase_unit && ['each', 'pack', 'set', 'box', 'case'].includes(data.purchase_unit)) ? data.purchase_unit : 'each',
+          units_per_purchase_unit: (data.units_per_purchase_unit && Number(data.units_per_purchase_unit) >= 1) ? Number(data.units_per_purchase_unit) : 1,
+          is_active: data.is_active !== undefined ? data.is_active : true,
+        };
         
         if (sessionData) {
           try {
             const parsed = JSON.parse(sessionData);
             if (parsed?.values) {
-              formValues = parsed.values;
+              formValues = { ...dbValues, ...parsed.values };
               if (Array.isArray(parsed?.productTypeIds)) {
                 setSelectedProductTypeIds(parsed.productTypeIds);
               }
+              
+              // If roll fields are missing in session but exist in DB, restore them
+              const isRollItem = !!(formValues.is_roll || dbValues.is_roll);
+              if (isRollItem) {
+                if (!formValues.collection_name && dbValues.collection_name) {
+                  formValues.collection_name = dbValues.collection_name;
+                }
+                if (!formValues.variant_name && dbValues.variant_name) {
+                  formValues.variant_name = dbValues.variant_name;
+                }
+                if (!formValues.roll_type && dbValues.roll_type) {
+                  formValues.roll_type = dbValues.roll_type;
+                }
+                if (!formValues.roll_pricing_mode && dbValues.roll_pricing_mode) {
+                  formValues.roll_pricing_mode = dbValues.roll_pricing_mode;
+                }
+                if (!formValues.unit_of_measure && dbValues.unit_of_measure) {
+                  formValues.unit_of_measure = dbValues.unit_of_measure;
+                }
+                // Restore roll dimensions
+                if (formValues.roll_width_value == null && dbValues.roll_width_value != null) {
+                  formValues.roll_width_value = dbValues.roll_width_value;
+                }
+                if (!formValues.roll_width_uom && dbValues.roll_width_uom) {
+                  formValues.roll_width_uom = dbValues.roll_width_uom;
+                }
+                if (formValues.roll_length_value == null && dbValues.roll_length_value != null) {
+                  formValues.roll_length_value = dbValues.roll_length_value;
+                }
+                if (!formValues.roll_length_uom && dbValues.roll_length_uom) {
+                  formValues.roll_length_uom = dbValues.roll_length_uom;
+                }
+              }
+              
               draftHydratedRef.current = true;
               if (import.meta.env.DEV) {
                 console.log('✅ Restored form state from sessionStorage');
@@ -312,47 +612,24 @@ export default function CatalogItemNew() {
             if (import.meta.env.DEV) {
               console.warn('⚠️ Invalid sessionStorage data, using database values');
             }
-            formValues = {
-              sku: data.sku || '',
-              name: data.name || '',
-              description: data.description || '',
-              unit_of_measure: data.unit_of_measure || 'ea',
-              measure_basis: data.measure_basis || 'unit',
-              category_id: data.category_id || null,
-              image_url: data.image_url || null,
-              is_fabric: data.is_fabric || false,
-              is_roll: data.is_roll || false,
-              roll_type: data.roll_type || null,
-              collection_name: data.collection_name || null,
-              variant_name: data.variant_name || null,
-              roll_width: data.roll_width ? Number(data.roll_width) : null,
-            fabric_pricing_mode: data.fabric_pricing_mode || null,
-            color: data.color || null,
-            cost_exw: data.cost_exw ? Number(data.cost_exw) : null,
-            is_active: data.is_active !== undefined ? data.is_active : true,
-            };
+            formValues = dbValues;
           }
         } else {
           // No session data, use database values
-          formValues = {
-            sku: data.sku || '',
-            name: data.name || '',
-            description: data.description || '',
-            unit_of_measure: data.unit_of_measure || 'ea',
-            measure_basis: data.measure_basis || 'unit',
-            category_id: data.category_id || null,
-            image_url: data.image_url || null,
-            is_fabric: data.is_fabric || false,
-            is_roll: data.is_roll || false,
-            roll_type: data.roll_type || null,
-            collection_name: data.collection_name || null,
-            variant_name: data.variant_name || null,
-            roll_width: data.roll_width ? Number(data.roll_width) : null,
-            fabric_pricing_mode: data.fabric_pricing_mode || null,
-            color: data.color || null,
-            cost_exw: data.cost_exw ? Number(data.cost_exw) : null,
-            is_active: data.is_active !== undefined ? data.is_active : true,
-          };
+          formValues = dbValues;
+        }
+        
+        // If roll data exists but is_roll is false (stale session/legacy), force roll mode
+        const hasRollData = !!(
+          formValues.roll_type ||
+          formValues.collection_name ||
+          formValues.variant_name ||
+          formValues.roll_width_value ||
+          formValues.roll_length_value ||
+          formValues.roll_pricing_mode
+        );
+        if (hasRollData && !formValues.is_roll) {
+          formValues.is_roll = true;
         }
         
         // Set form values (single reset for reliability)
@@ -373,7 +650,7 @@ export default function CatalogItemNew() {
     }
     
     loadItem();
-  }, [itemId, activeOrganizationId, setValue, draftKey, sessionKey, reset]);
+  }, [itemId, activeOrganizationId, setValue, sessionKey, reset]);
   
   // ✅ FIX: Persist form state to sessionStorage when editing (survives tab changes)
   useEffect(() => {
@@ -403,6 +680,22 @@ export default function CatalogItemNew() {
       }
     };
   }, [watch, sessionKey, selectedProductTypeIds, itemId]);
+  
+  // Keep unit_of_measure in sync for roll items (hidden field)
+  useEffect(() => {
+    if (!isRoll) return;
+    const linearUoms = ['m', 'yd', 'ft'];
+    const preferred = rollLengthUom || rollWidthUom || 'm';
+    
+    if (linearUoms.includes(preferred) && unitOfMeasure !== preferred) {
+      setValue('unit_of_measure', preferred);
+      return;
+    }
+    
+    if (!linearUoms.includes(unitOfMeasure || '')) {
+      setValue('unit_of_measure', 'm');
+    }
+  }, [isRoll, rollLengthUom, rollWidthUom, unitOfMeasure, setValue]);
   
   // ✅ FIX: Restore state when tab becomes visible again
   useOnVisibilityChange(() => {
@@ -468,7 +761,7 @@ export default function CatalogItemNew() {
       try {
         const { data, error } = await supabase
           .from('CatalogItemsMSRP')
-          .select('msrp_sale_in, msrp_sale_out, total_cost, shipping_cost, import_tax_cost, minimum_margin_pct, msrp_pct_sale_out')
+          .select('dealer_price, msrp, total_cost, shipping_cost, import_tax_cost, minimum_margin_pct, msrp_pct_sale_out')
           .eq('catalog_item_id', itemId)
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
@@ -476,8 +769,8 @@ export default function CatalogItemNew() {
         if (error) throw error;
         if (isMounted && data) {
           setMsrpRow({
-            msrp_sale_in: Number(data.msrp_sale_in ?? 0),
-            msrp_sale_out: Number(data.msrp_sale_out ?? 0),
+            dealer_price: Number(data.dealer_price ?? 0),
+            msrp: Number(data.msrp ?? 0),
             total_cost: Number(data.total_cost ?? 0),
             shipping_cost: Number(data.shipping_cost ?? 0),
             import_tax_cost: Number(data.import_tax_cost ?? 0),
@@ -496,10 +789,10 @@ export default function CatalogItemNew() {
     return () => { isMounted = false; };
   }, [itemId, activeOrganizationId]);
   
-  // Auto-update is_fabric when is_roll changes (is_fabric mirrors is_roll for compatibility)
+  // Load CatalogItemConversions when itemId changes
   useEffect(() => {
-    setValue('is_fabric', watch('is_roll'));
-  }, [watch('is_roll'), setValue]);
+    loadConversions();
+  }, [itemId, activeOrganizationId]);
   
   // Handle form submission
   const onSubmit = async (values: CatalogItemFormValues) => {
@@ -512,28 +805,49 @@ export default function CatalogItemNew() {
       return;
     }
     
+    // Capture intent at submit start so navigation is correct even after async work
+    const closeAfterSave = shouldCloseAfterSaveRef.current;
+    
     setIsSaving(true);
     setSaveError(null);
     
     try {
+      const resolveRollUnitOfMeasure = (vals: CatalogItemFormValues): string => {
+        const candidate = vals.roll_length_uom || vals.roll_width_uom || 'm';
+        return ['m', 'yd', 'ft'].includes(candidate) ? candidate : 'm';
+      };
+      
+      const resolvedUnitOfMeasure = values.is_roll
+        ? resolveRollUnitOfMeasure(values)
+        : values.unit_of_measure;
+      
       // Prepare payload - ONLY fields that exist in CatalogItems
+      // For rolls: name = collection + variant (user doesn't edit name directly)
+      const name = values.is_roll 
+        ? `${values.collection_name || ''} ${values.variant_name || ''}`.trim() 
+        : (values.name || '').trim();
+      
       const payload: any = {
         sku: values.sku.trim(),
-        name: values.name.trim(),
+        name: name || values.sku.trim(), // Fallback to SKU if name is empty
         description: values.description?.trim() || null,
-        unit_of_measure: values.unit_of_measure,
+        unit_of_measure: resolvedUnitOfMeasure,
         measure_basis: values.measure_basis,
         category_id: values.category_id || null,
         image_url: values.image_url?.trim() || null,
-        is_fabric: values.is_fabric,
         is_roll: values.is_roll,
         roll_type: values.is_roll ? values.roll_type : null,
         collection_name: values.is_roll ? (values.collection_name?.trim() || null) : null,
         variant_name: values.is_roll ? (values.variant_name?.trim() || null) : null,
-        roll_width: values.is_roll && values.roll_width ? Number(values.roll_width) : null,
-        fabric_pricing_mode: values.is_roll && values.roll_type === 'fabric' ? values.fabric_pricing_mode : null,
+        roll_width_value: values.is_roll && values.roll_width_value != null && values.roll_width_value > 0 ? Number(values.roll_width_value) : null,
+        roll_width_uom: values.is_roll && values.roll_width_value != null && values.roll_width_value > 0 ? values.roll_width_uom : null,
+        roll_length_value: values.is_roll && values.roll_length_value != null && values.roll_length_value > 0 ? Number(values.roll_length_value) : null,
+        roll_length_uom: values.is_roll && values.roll_length_value != null && values.roll_length_value > 0 ? values.roll_length_uom : null,
+        roll_pricing_mode: values.is_roll ? values.roll_pricing_mode : null,
         color: !values.is_roll ? (values.color?.trim() || null) : null,
         cost_exw: values.cost_exw != null ? Number(values.cost_exw) : null,
+        purchase_unit: values.purchase_unit,
+        units_per_purchase_unit: values.units_per_purchase_unit ? Number(values.units_per_purchase_unit) : 1,
         is_active: values.is_active,
       };
       
@@ -593,13 +907,47 @@ export default function CatalogItemNew() {
         message: itemId ? 'Item updated successfully' : 'Item created successfully',
       });
       
-      if (!itemId && finalItemId) {
-        // Navigate to edit mode for new items
-        router.navigate(`/catalog/items/edit/${finalItemId}`);
-        return;
+      // Reload conversions and normalized dimensions (triggers may take a moment) — don't block navigation on failure
+      if (finalItemId) {
+        try {
+          await reloadConversionsWithRetry();
+          
+          // Reload normalized dimensions with retry
+          for (let i = 0; i < 5; i++) {
+            const { data: reloadedData, error } = await supabase
+              .from('CatalogItems')
+              .select('roll_width_m, roll_length_m')
+              .eq('id', finalItemId)
+              .eq('organization_id', activeOrganizationId)
+              .maybeSingle();
+            
+            if (!error && reloadedData) {
+              setRollDimensions({
+                roll_width_m: reloadedData.roll_width_m ? Number(reloadedData.roll_width_m) : null,
+                roll_length_m: reloadedData.roll_length_m ? Number(reloadedData.roll_length_m) : null,
+              });
+              break;
+            }
+            
+            // Wait 250ms before retry
+            await new Promise(r => setTimeout(r, 250));
+          }
+        } catch (_) {
+          // Non-blocking; conversions will refresh on next visit
+        }
       }
       
-      router.navigate('/catalog/items');
+      // Navigate based on user action (use intent captured at submit start)
+      shouldCloseAfterSaveRef.current = false;
+      if (closeAfterSave) {
+        router.navigate('/catalog/items');
+      } else if (!itemId && finalItemId) {
+        // For new items, navigate to edit mode preserving active tab
+        const newPath = `/catalog/items/edit/${finalItemId}`;
+        window.history.pushState({ activeTab }, '', newPath);
+        router.navigate(newPath);
+      }
+      // If Save (not close) on existing item, stay on current page with same tab
       
     } catch (err: any) {
       console.error('❌ Error saving item:', err);
@@ -649,20 +997,64 @@ export default function CatalogItemNew() {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Close Button */}
           <button
             type="button"
             onClick={() => router.navigate('/catalog/items')}
-            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50"
+            disabled={isSaving}
+            className="px-4 py-1.5 rounded border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-50"
           >
-            Cancel
+            Close
           </button>
+          
+          {/* Save Button (stay on page) */}
           <button
             type="button"
-            onClick={handleSubmit(onSubmit)}
+            onClick={() => {
+              shouldCloseAfterSaveRef.current = false;
+              handleSubmit(onSubmit, (fieldErrors) => {
+                // Log each field error safely (avoid circular refs)
+                const errorSummary = Object.entries(fieldErrors).map(([field, error]: [string, any]) => ({
+                  field,
+                  message: error?.message || error?.type || 'Invalid',
+                }));
+                console.error('❌ Validation errors:', errorSummary);
+                useUIStore.getState().addNotification({
+                  type: 'error',
+                  title: 'Validation Failed',
+                  message: `Errors in: ${errorSummary.map(e => e.field).join(', ')}`,
+                });
+              })();
+            }}
             disabled={isSaving || isReadOnly}
-            className="px-3 py-1.5 rounded bg-primary text-white text-sm hover:bg-primary/90 disabled:opacity-50"
+            className="px-4 py-1.5 rounded border border-primary bg-white text-primary text-sm hover:bg-primary/10 disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save'}
+          </button>
+          
+          {/* Save and Close Button */}
+          <button
+            type="button"
+            onClick={() => {
+              shouldCloseAfterSaveRef.current = true;
+              handleSubmit(onSubmit, (fieldErrors) => {
+                // Log each field error safely (avoid circular refs)
+                const errorSummary = Object.entries(fieldErrors).map(([field, error]: [string, any]) => ({
+                  field,
+                  message: error?.message || error?.type || 'Invalid',
+                }));
+                console.error('❌ Validation errors:', errorSummary);
+                useUIStore.getState().addNotification({
+                  type: 'error',
+                  title: 'Validation Failed',
+                  message: `Errors in: ${errorSummary.map(e => e.field).join(', ')}`,
+                });
+              })();
+            }}
+            disabled={isSaving || isReadOnly}
+            className="px-4 py-1.5 rounded bg-primary text-white text-sm hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isSaving ? 'Saving...' : 'Save & Close'}
           </button>
         </div>
       </div>
@@ -696,56 +1088,187 @@ export default function CatalogItemNew() {
           >
             Rates
           </button>
+          <button
+            onClick={() => setActiveTab('supply')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'supply'
+                ? 'border-[var(--tab-active-underline)] text-[var(--tab-active-underline)]'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Supply
+          </button>
         </nav>
       </div>
       
       {/* Profile Tab */}
       {activeTab === 'profile' && (
         <div className="grid grid-cols-12 gap-4">
-          {/* SKU, Name */}
-          <div className="col-span-4">
+          {/* SKU + Roll Item Checkbox */}
+          <div className="col-span-3">
             <Label htmlFor="sku" className="text-xs" required>SKU</Label>
             <Input
               id="sku"
               {...register('sku')}
-              className="py-1 text-xs"
+              className="py-1 text-xs w-full"
               error={errors.sku?.message}
               disabled={isReadOnly}
             />
           </div>
           
-          <div className="col-span-8">
-            <Label htmlFor="name" className="text-xs" required>Name</Label>
-            <Input
-              id="name"
-              {...register('name')}
-              className="py-1 text-xs"
-              error={errors.name?.message}
-              disabled={isReadOnly}
-            />
+          <div className="col-span-9 flex items-end justify-between">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                {...register('is_roll')}
+                className="w-4 h-4 rounded border-gray-300"
+                disabled={isReadOnly}
+                onChange={(e) => {
+                  register('is_roll').onChange(e);
+                  // Auto-configure for rolls
+                  if (e.target.checked) {
+                    setValue('measure_basis', 'linear');
+                    if (!watch('unit_of_measure') || watch('unit_of_measure') === 'ea') {
+                      setValue('unit_of_measure', 'm');
+                    }
+                  } else {
+                    // When unchecking, switch to regular item mode but preserve roll data (hidden)
+                    // User may toggle back - don't lose their work
+                    setValue('measure_basis', 'unit');
+                    setValue('unit_of_measure', 'ea');
+                  }
+                }}
+              />
+              <span className="text-sm font-medium text-gray-700">Roll Item</span>
+              <span className="text-gray-400 ml-1" title="Roll = material en rollo. Se precio por largo (m, yd, ft) y/o por área (m², yd²)">
+                <Info className="w-4 h-4 inline" />
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                {...register('is_active')}
+                className="h-4 w-4"
+                disabled={isReadOnly}
+                onChange={(e) => {
+                  if (!e.target.checked) {
+                    const confirmed = window.confirm('Deactivate this item?');
+                    if (!confirmed) {
+                      setValue('is_active', true);
+                      return;
+                    }
+                  }
+                  register('is_active').onChange(e);
+                }}
+              />
+              <span className="text-xs font-medium">Active</span>
+            </label>
           </div>
           
-          {/* Description */}
-          <div className="col-span-12">
-            <Label htmlFor="description" className="text-xs">Description</Label>
-            <textarea
-              id="description"
-              {...register('description')}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs"
-              rows={3}
-              disabled={isReadOnly}
-            />
-          </div>
+          {/* Name - ONLY for non-roll items */}
+          {!isRoll && (
+            <>
+              <div className="col-span-3">
+                <Label htmlFor="name" className="text-xs" required>Name</Label>
+                <Input
+                  id="name"
+                  {...register('name')}
+                  className="py-1 text-xs w-full"
+                  error={errors.name?.message}
+                  disabled={isReadOnly}
+                />
+              </div>
+              
+              <div className="col-span-3">
+                <Label htmlFor="color" className="text-xs">Color</Label>
+                <Input
+                  id="color"
+                  {...register('color')}
+                  className="py-1 text-xs w-full"
+                  disabled={isReadOnly}
+                />
+              </div>
+              
+              <div className="col-span-6" />
+            </>
+          )}
+
+          {/* Description - non-roll (match Roll Item layout) */}
+          {!isRoll && (
+            <>
+              <div className="col-span-6">
+                <Label htmlFor="description" className="text-xs">Description</Label>
+                <textarea
+                  id="description"
+                  {...register('description')}
+                  className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs"
+                  rows={3}
+                  disabled={isReadOnly}
+                />
+              </div>
+              <div className="col-span-6" />
+            </>
+          )}
           
-          {/* Category */}
-          <div className="col-span-6">
+          {/* Collection + Variant - ONLY for roll items */}
+          {isRoll && (
+            <>
+              <div className="col-span-3">
+                <Label htmlFor="collection_name" className="text-xs" required>Collection Name</Label>
+                <Input
+                  id="collection_name"
+                  {...register('collection_name')}
+                  className="py-1 text-xs w-full"
+                  placeholder="e.g., Sunbrella, Dickson, Serge Ferrari"
+                  error={errors.collection_name?.message}
+                  disabled={isReadOnly}
+                />
+              </div>
+              
+              <div className="col-span-3">
+                <Label htmlFor="variant_name" className="text-xs" required>Variant Name (Color)</Label>
+                <Input
+                  id="variant_name"
+                  {...register('variant_name')}
+                  className="py-1 text-xs w-full"
+                  placeholder="e.g., White 118.11'', Beige Natural"
+                  error={errors.variant_name?.message}
+                  disabled={isReadOnly}
+                />
+              </div>
+
+              {/* Keep the right side empty so these align with Category / Roll Type columns */}
+              <div className="col-span-6" />
+            </>
+          )}
+
+          {/* Description - move ABOVE Category row for rolls (ends at Roll Type right edge) */}
+          {isRoll && (
+            <>
+              <div className="col-span-6">
+                <Label htmlFor="description" className="text-xs">Description</Label>
+                <textarea
+                  id="description"
+                  {...register('description')}
+                  className="w-full border border-gray-300 rounded px-3 py-1.5 text-xs"
+                  rows={3}
+                  disabled={isReadOnly}
+                />
+              </div>
+              <div className="col-span-6" />
+            </>
+          )}
+          
+          {/* Category - Always visible */}
+          <div className="col-span-3">
             <Label htmlFor="category_id" className="text-xs">Category</Label>
             <SelectShadcn
               value={watch('category_id') || '__none__'}
               onValueChange={(value) => setValue('category_id', value === '__none__' ? null : value)}
               disabled={isReadOnly || catalogCategoriesLoading}
             >
-              <SelectTrigger className="h-auto py-1 text-xs">
+              <SelectTrigger className="h-auto py-1 text-xs w-1/2">
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
@@ -758,6 +1281,224 @@ export default function CatalogItemNew() {
               </SelectContent>
             </SelectShadcn>
           </div>
+
+          {/* Unit of Measure + Measure Basis (non-roll) - keep row alignment like Roll Item */}
+          {!isRoll && (
+            <>
+              <div className="col-span-3">
+                <Label htmlFor="unit_of_measure" className="text-xs" required>Unit of Measure</Label>
+                <SelectShadcn
+                  value={watch('unit_of_measure')}
+                  onValueChange={(value) => setValue('unit_of_measure', value)}
+                  disabled={isReadOnly}
+                >
+                  <SelectTrigger className="h-auto py-1 text-xs w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getUomOptions().map((uom) => (
+                      <SelectItem key={uom} value={uom}>{uom === 'roll' ? 'Roll' : uom}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+              
+              <div className="col-span-3">
+                <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
+                <SelectShadcn
+                  value={watch('measure_basis')}
+                  onValueChange={(value) => setValue('measure_basis', value as 'unit' | 'linear' | 'area')}
+                  disabled={isReadOnly}
+                >
+                  <SelectTrigger className="h-auto py-1 text-xs w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unit">Unit (each)</SelectItem>
+                    <SelectItem value="linear">Linear (length)</SelectItem>
+                    <SelectItem value="area">Area (m²)</SelectItem>
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+
+              <div className="col-span-3" />
+            </>
+          )}
+          
+          {/* Roll Type - Only for rolls */}
+          {isRoll && (
+            <div className="col-span-3">
+              <Label htmlFor="roll_type" className="text-xs" required>Roll Type</Label>
+              <SelectShadcn
+                value={watch('roll_type') || ''}
+                onValueChange={(value) => setValue('roll_type', value as any)}
+                disabled={isReadOnly}
+              >
+                <SelectTrigger className="h-auto py-1 text-xs w-full">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fabric">Fabric</SelectItem>
+                  <SelectItem value="window_film">Window Film</SelectItem>
+                  <SelectItem value="vinyl">Vinyl</SelectItem>
+                  <SelectItem value="mesh">Mesh</SelectItem>
+                  <SelectItem value="paper">Paper</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </SelectShadcn>
+              {errors.roll_type && <p className="text-xs text-red-600 mt-1">{errors.roll_type.message}</p>}
+            </div>
+          )}
+          
+          {/* Roll Pricing Mode - Only for rolls */}
+          {isRoll && (
+            <div className="col-span-3">
+              <Label htmlFor="roll_pricing_mode" className="text-xs">Roll Pricing Mode</Label>
+              <SelectShadcn
+                value={watch('roll_pricing_mode') || ''}
+                onValueChange={(value) => setValue('roll_pricing_mode', value as any)}
+                disabled={isReadOnly}
+              >
+                <SelectTrigger className="h-auto py-1 text-xs w-full">
+                  <SelectValue placeholder="Select mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="per_linear_meter">Per Linear Meter ($/m)</SelectItem>
+                  <SelectItem value="per_square_meter">Per Square Meter ($/m²)</SelectItem>
+                  <SelectItem value="per_unit">Per Unit ($/roll)</SelectItem>
+                </SelectContent>
+              </SelectShadcn>
+              {errors.roll_pricing_mode && (
+                <p className="text-xs text-red-600 mt-1">{errors.roll_pricing_mode.message}</p>
+              )}
+            </div>
+          )}
+
+          {/* Measure Basis - Only for rolls (end of Category row) */}
+              {isRoll && (
+            <div className="col-span-3">
+              <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
+              <SelectShadcn
+                value={watch('measure_basis')}
+                onValueChange={(value) => setValue('measure_basis', value as 'unit' | 'linear' | 'area')}
+                disabled={isReadOnly}
+              >
+                <SelectTrigger className="h-auto py-1 text-xs w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unit">Unit (each)</SelectItem>
+                  <SelectItem value="linear">Linear (length)</SelectItem>
+                  <SelectItem value="area">Area (m²)</SelectItem>
+                </SelectContent>
+              </SelectShadcn>
+            </div>
+          )}
+          
+          {/* Roll Width | Roll Length - New row right after Category */}
+          {isRoll ? (
+            <>
+              <div className="col-span-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="roll_width_value" className="text-xs" required>Roll Width</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="roll_width_value"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        {...register('roll_width_value', { valueAsNumber: true })}
+                        className="py-1 text-xs w-40"
+                        placeholder="e.g., 1.37 or 60"
+                        disabled={isReadOnly}
+                      />
+                      <SelectShadcn
+                        value={watch('roll_width_uom') || 'm'}
+                        onValueChange={(value) => setValue('roll_width_uom', value as any)}
+                        disabled={isReadOnly}
+                      >
+                        <SelectTrigger className="h-auto py-1 text-xs w-6">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="m">m</SelectItem>
+                          <SelectItem value="yd">yd</SelectItem>
+                          <SelectItem value="ft">ft</SelectItem>
+                          <SelectItem value="in">in</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                    {errors.roll_width_value && (
+                      <p className="text-xs text-red-600 mt-1">{errors.roll_width_value.message}</p>
+                    )}
+                    {rollDimensions.roll_width_m != null && (
+                      <p className="text-xs text-gray-500 mt-1">= {rollDimensions.roll_width_m.toFixed(2)} m</p>
+                    )}
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="roll_length_value" className="text-xs" required>Roll Length</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="roll_length_value"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        {...register('roll_length_value', { valueAsNumber: true })}
+                        className="py-1 text-xs w-40"
+                        placeholder="e.g., 30 or 100"
+                        disabled={isReadOnly}
+                      />
+                      <SelectShadcn
+                        value={watch('roll_length_uom') || 'm'}
+                        onValueChange={(value) => setValue('roll_length_uom', value as any)}
+                        disabled={isReadOnly}
+                      >
+                        <SelectTrigger className="h-auto py-1 text-xs w-6">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="m">m</SelectItem>
+                          <SelectItem value="yd">yd</SelectItem>
+                          <SelectItem value="ft">ft</SelectItem>
+                          <SelectItem value="in">in</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                    {errors.roll_length_value && (
+                      <p className="text-xs text-red-600 mt-1">{errors.roll_length_value.message}</p>
+                    )}
+                    {rollDimensions.roll_length_m != null && (
+                      <p className="text-xs text-gray-500 mt-1">= {rollDimensions.roll_length_m.toFixed(2)} m</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="col-span-6" />
+            </>
+          ) : null}
+
+          {/* Specs - ONLY for roll items (below Roll Width/Length row) */}
+          {isRoll && (
+            <>
+              <div className="col-span-6 mt-2 pt-4 border-t border-gray-200">
+                {!itemId || !activeOrganizationId ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                    <p className="text-xs text-amber-800">Save the item first to edit specs.</p>
+                  </div>
+                ) : (
+                  <CatalogItemRollSpecsSection
+                    catalogItemId={itemId}
+                    organizationId={activeOrganizationId}
+                    readOnly={isReadOnly}
+                  />
+                )}
+              </div>
+              <div className="col-span-6 mt-2 pt-4 border-t border-gray-200" />
+            </>
+          )}
           
           {/* Product Types */}
           <div className="col-span-12">
@@ -792,172 +1533,52 @@ export default function CatalogItemNew() {
             )}
           </div>
           
-          {/* Measure Basis & UOM */}
-          <div className="col-span-4">
-            <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
-            <SelectShadcn
-              value={watch('measure_basis')}
-              onValueChange={(value) => setValue('measure_basis', value as 'unit' | 'linear' | 'area')}
-              disabled={isReadOnly}
-            >
-              <SelectTrigger className="h-auto py-1 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unit">Unit (each)</SelectItem>
-                <SelectItem value="linear">Linear (length)</SelectItem>
-                <SelectItem value="area">Area (m²)</SelectItem>
-              </SelectContent>
-            </SelectShadcn>
-          </div>
-          
-          <div className="col-span-4">
-            <Label htmlFor="unit_of_measure" className="text-xs" required>Unit of Measure</Label>
-            <SelectShadcn
-              value={watch('unit_of_measure')}
-              onValueChange={(value) => setValue('unit_of_measure', value)}
-              disabled={isReadOnly}
-            >
-              <SelectTrigger className="h-auto py-1 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {getUomOptions().map((uom) => (
-                  <SelectItem key={uom} value={uom}>{uom === 'roll' ? 'Roll' : uom}</SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-          </div>
-          
-          {/* Roll Item & Active Status — Always "Roll" (never "Rail"). Roll = material en rollo. */}
-          <div className="col-span-6">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                {...register('is_roll')}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setValue('is_roll', next);
-                  if (next) {
-                    setValue('measure_basis', 'linear');
-                    setValue('unit_of_measure', 'm');
-                  } else {
-                    setValue('measure_basis', 'unit');
-                    setValue('unit_of_measure', 'ea');
-                  }
-                }}
-                className="h-4 w-4"
-                disabled={isReadOnly}
-              />
-              <span className="text-xs font-medium">Roll Item (fabric, film, vinyl, etc.)</span>
-            </label>
-            <p className="text-xs text-gray-500 mt-1 ml-6">Roll = material en rollo. Se mide por largo (m, yd, ft) o por rollo.</p>
-          </div>
-          
-          <div className="col-span-6">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                {...register('is_active')}
-                className="h-4 w-4"
-                disabled={isReadOnly}
-              />
-              <span className="text-xs font-medium">Active</span>
-            </label>
-            <p className="text-xs text-gray-500 mt-1 ml-6">Uncheck to disable this item</p>
-          </div>
-          
-          {/* Roll Fields (when is_roll=true) */}
-          {isRoll && (
+          {/* Purchase Unit Fields (for unit items only - procurement/inventory) */}
+          {watch('measure_basis') === 'unit' && !isRoll && (
             <>
-              <div className="col-span-4">
-                <Label htmlFor="roll_type" className="text-xs" required>Roll Type</Label>
+              <div className="col-span-3">
+                <Label htmlFor="purchase_unit" className="text-xs">Purchase Unit</Label>
                 <SelectShadcn
-                  value={watch('roll_type') || ''}
-                  onValueChange={(value) => setValue('roll_type', value as any)}
+                  value={watch('purchase_unit') || 'each'}
+                  onValueChange={(value) => setValue('purchase_unit', value as any)}
                   disabled={isReadOnly}
                 >
-                  <SelectTrigger className="h-auto py-1 text-xs">
-                    <SelectValue placeholder="Select type" />
+                  <SelectTrigger className="h-auto py-1 text-xs w-full">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="fabric">Fabric</SelectItem>
-                    <SelectItem value="window_film">Window Film</SelectItem>
-                    <SelectItem value="vinyl">Vinyl</SelectItem>
-                    <SelectItem value="mesh">Mesh</SelectItem>
-                    <SelectItem value="paper">Paper</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem value="each">Each</SelectItem>
+                    <SelectItem value="pack">Pack</SelectItem>
+                    <SelectItem value="set">Set</SelectItem>
+                    <SelectItem value="box">Box</SelectItem>
+                    <SelectItem value="case">Case</SelectItem>
                   </SelectContent>
                 </SelectShadcn>
-                {errors.roll_type && <p className="text-xs text-red-600 mt-1">{errors.roll_type.message}</p>}
+                <p className="text-xs text-gray-500 mt-1">How you purchase from supplier</p>
               </div>
               
-              <div className="col-span-4">
-                <Label htmlFor="collection_name" className="text-xs" required>Collection Name</Label>
+              <div className="col-span-3">
+                <Label htmlFor="units_per_purchase_unit" className="text-xs">Units per Purchase</Label>
                 <Input
-                  id="collection_name"
-                  {...register('collection_name')}
-                  className="py-1 text-xs"
-                  error={errors.collection_name?.message}
-                  disabled={isReadOnly}
-                />
-              </div>
-              
-              <div className="col-span-4">
-                <Label htmlFor="variant_name" className="text-xs" required>Variant Name (Color)</Label>
-                <Input
-                  id="variant_name"
-                  {...register('variant_name')}
-                  className="py-1 text-xs"
-                  error={errors.variant_name?.message}
-                  disabled={isReadOnly}
-                />
-              </div>
-              
-              <div className="col-span-4">
-                <Label htmlFor="roll_width" className="text-xs">Roll Width (m)</Label>
-                <Input
-                  id="roll_width"
+                  id="units_per_purchase_unit"
                   type="number"
-                  step="0.01"
-                  {...register('roll_width', { valueAsNumber: true })}
-                  className="py-1 text-xs"
+                  step="1"
+                  min="1"
+                  {...register('units_per_purchase_unit', { valueAsNumber: true })}
+                  className="py-1 text-xs w-full"
                   disabled={isReadOnly}
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  {watch('purchase_unit') === 'pack' && 'Units per pack (e.g., 12)'}
+                  {watch('purchase_unit') === 'set' && 'Units per set (e.g., 6)'}
+                  {watch('purchase_unit') === 'box' && 'Units per box (e.g., 24)'}
+                  {watch('purchase_unit') === 'case' && 'Units per case (e.g., 100)'}
+                  {watch('purchase_unit') === 'each' && 'Always 1 for each'}
+                </p>
               </div>
               
-              {rollType === 'fabric' && (
-                <div className="col-span-4">
-                  <Label htmlFor="fabric_pricing_mode" className="text-xs">Fabric Pricing Mode</Label>
-                  <SelectShadcn
-                    value={watch('fabric_pricing_mode') || ''}
-                    onValueChange={(value) => setValue('fabric_pricing_mode', value as any)}
-                    disabled={isReadOnly}
-                  >
-                    <SelectTrigger className="h-auto py-1 text-xs">
-                      <SelectValue placeholder="Select mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="per_linear_m">Per Linear Meter</SelectItem>
-                      <SelectItem value="per_sqm">Per Square Meter</SelectItem>
-                    </SelectContent>
-                  </SelectShadcn>
-                </div>
-              )}
+              <div className="col-span-6" />
             </>
-          )}
-          
-          {/* Color (when is_roll=false) */}
-          {!isRoll && (
-            <div className="col-span-4">
-              <Label htmlFor="color" className="text-xs">Color</Label>
-              <Input
-                id="color"
-                {...register('color')}
-                className="py-1 text-xs"
-                disabled={isReadOnly}
-              />
-            </div>
           )}
           
           {/* Image */}
@@ -974,30 +1595,183 @@ export default function CatalogItemNew() {
       
       {/* Rates Tab */}
       {activeTab === 'rates' && (
-        <div className="grid grid-cols-12 gap-4">
-          {/* Base Cost */}
+        <div className="grid grid-cols-12 gap-6">
+          {/* Header */}
           <div className="col-span-12">
-            <h3 className="text-sm font-semibold mb-3">Base Cost</h3>
+            <h3 className="text-sm font-semibold">Pricing & Rates</h3>
           </div>
           
-          <div className="col-span-3">
-            <Label htmlFor="cost_exw" className="text-xs">Cost EXW</Label>
-            <Input
-              id="cost_exw"
-              type="number"
-              step="0.01"
-              {...register('cost_exw', { valueAsNumber: true })}
-              className="py-1 text-xs"
-              error={errors.cost_exw?.message}
-              disabled={isReadOnly}
-              placeholder="0.00"
-            />
-            <p className="text-xs text-gray-500 mt-1">Ex Works base cost. MSRP is computed in the backend (triggers + msrp_compute_for_item).</p>
+          {/* BASE PRICE (Left) - Editable */}
+          <div className="col-span-12 lg:col-span-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 h-full">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">Base Price (Editable)</h4>
+              
+              <div className="space-y-3">
+                {/* Cost EXW Input */}
+                <div>
+                  <Label htmlFor="cost_exw_rate" className="text-xs">Cost EXW (per unit)</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-sm text-gray-600">$</span>
+                    <Input
+                      id="cost_exw_rate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      {...register('cost_exw', { valueAsNumber: true })}
+                      className="flex-1 text-sm"
+                      placeholder="0.00"
+                      disabled={isReadOnly}
+                    />
+                  </div>
+                </div>
+                
+                {/* Current Value Display */}
+                {watch('cost_exw') && watch('unit_of_measure') && (
+                  <div className="space-y-2">
+                    <div className="bg-white border border-gray-300 rounded px-3 py-2">
+                      <p className="text-xs text-gray-600">Price per Unit:</p>
+                      <p className="text-lg font-semibold text-gray-900">
+                        ${Number(watch('cost_exw')).toFixed(2)}/{watch('unit_of_measure') || 'ea'}
+                      </p>
+                    </div>
+                    
+                    {/* Show price per pack/set/box if applicable */}
+                    {watch('purchase_unit') && watch('purchase_unit') !== 'each' && watch('units_per_purchase_unit') && Number(watch('units_per_purchase_unit')) > 1 && (
+                      <div className="bg-blue-50 border border-blue-300 rounded px-3 py-2">
+                        <p className="text-xs text-blue-700">Price per {watch('purchase_unit')}:</p>
+                        <p className="text-xl font-bold text-blue-900">
+                          ${(Number(watch('cost_exw')) * Number(watch('units_per_purchase_unit'))).toFixed(2)}/{watch('purchase_unit')}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {Number(watch('units_per_purchase_unit'))} units × ${Number(watch('cost_exw')).toFixed(2)}/ea
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Roll Dimensions (for rolls only) */}
+                {watch('is_roll') && (
+                  <div className="mt-4 pt-4 border-t border-blue-300">
+                    <h5 className="text-xs font-semibold text-gray-700 mb-2">Roll Dimensions</h5>
+                    <div className="grid grid-cols-2 gap-3">
+                      {rollDimensions.roll_width_m != null && (
+                        <div className="bg-white border border-gray-300 rounded px-3 py-2">
+                          <p className="text-xs text-gray-600">Roll Width:</p>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {rollDimensions.roll_width_m.toFixed(2)} m
+                          </p>
+                        </div>
+                      )}
+                      {rollDimensions.roll_length_m != null && (
+                        <div className="bg-white border border-gray-300 rounded px-3 py-2">
+                          <p className="text-xs text-gray-600">Roll Length:</p>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {rollDimensions.roll_length_m.toFixed(2)} m
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           
-          {/* MSRP: read-only from CatalogItemsMSRP. No client-side calculation. */}
+          {/* CONVERSIONS (Right) - Read-only - Only for rolls and linear/area items */}
+          {(watch('is_roll') || watch('measure_basis') === 'linear' || watch('measure_basis') === 'area') && (
+            <div className="col-span-12 lg:col-span-6">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 h-full">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Conversions (Read-only)</h4>
+                
+                {conversionsLoading ? (
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full"></div>
+                    <p className="text-xs text-gray-500">Loading conversions...</p>
+                  </div>
+                ) : !itemId ? (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                    <p className="text-xs text-amber-800">
+                      💾 Save the item first to see conversions.
+                    </p>
+                  </div>
+                ) : !conversions ? (
+                <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                  <p className="text-xs text-amber-800">
+                    ⏳ No conversions available yet.
+                  </p>
+                  <p className="text-xs text-gray-700 mt-1">
+                    Make sure <strong>cost_exw</strong> and <strong>unit_of_measure</strong> are set, then save.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Per Linear Meter (for rolls and linear items) */}
+                  {normalizedCostExwPerM != null && (
+                    <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                      <p className="text-xs text-gray-700">Per Linear Meter:</p>
+                      <p className="text-lg font-semibold text-gray-900">
+                        ${normalizedCostExwPerM.toFixed(2)}/m
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Per Square Meter (for rolls with width, or area items) */}
+                  {(watch('is_roll') || watch('measure_basis') === 'area') && normalizedCostExwPerM2 != null && (
+                    <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                      <p className="text-xs text-gray-700">Per Square Meter:</p>
+                      <p className="text-lg font-semibold text-gray-900">
+                        ${normalizedCostExwPerM2.toFixed(2)}/m²
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Warning if roll without roll_width */}
+                  {watch('is_roll') && normalizedCostExwPerM2 == null && normalizedCostExwPerM != null && (
+                    <div className="bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                      <p className="text-xs text-amber-700">
+                        Set <strong>Roll Width</strong> in Profile tab to calculate $/m²
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Cost per Full Roll - using normalized values */}
+                  {watch('is_roll') && (
+                    fullRollCost != null ? (
+                      <div className="bg-blue-50 border border-blue-300 rounded px-3 py-2">
+                        <p className="text-xs text-gray-700">Cost per Full Roll:</p>
+                        <p className="text-xl font-bold text-gray-900">
+                          ${fullRollCost.toFixed(2)}/roll
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {rollLengthM != null && normalizedCostExwPerM != null
+                            ? `${rollLengthM.toFixed(2)} m × $${normalizedCostExwPerM.toFixed(2)}/m`
+                            : ''}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                        <p className="text-xs text-amber-700">Cost per Full Roll:</p>
+                        <p className="text-sm text-amber-800">
+                          💾 Save to calculate full roll cost
+                        </p>
+                      </div>
+                    )
+                  )}
+                  
+                  <p className="text-xs text-gray-400 pt-2 border-t border-gray-200">
+                    Last calculated: {new Date(conversions.computed_at || '').toLocaleString()}
+                  </p>
+                </div>
+              )}
+              </div>
+            </div>
+          )}
+          
+          
+          {/* MSRP: read-only from CatalogItemsMSRP — normalized by roll_pricing_mode (per m, per m², or per ea) */}
           <div className="col-span-12 mt-6">
-            <h3 className="text-sm font-semibold mb-3">MSRP (from CatalogItemsMSRP)</h3>
+            <h3 className="text-sm font-semibold mb-3">MSRP</h3>
             {!itemId ? (
               <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-3">
                 Save the item first to see MSRP. Values are computed in the backend when cost and category are set.
@@ -1023,28 +1797,28 @@ export default function CatalogItemNew() {
                     <p className="text-xs text-gray-500 mt-1">From category</p>
                   </div>
                 </div>
-                {/* Bar: Shipping Cost | Import Tax | Total Cost | MSRP Sale In | MSRP Sale Out */}
+                {/* Bar: Shipping Cost | Import Tax | Total Cost | Dealer Price | MSRP — normalized */}
                 <div className="bg-blue-50 border border-blue-200 rounded p-4">
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
                     <div>
                       <p className="font-medium text-gray-700">Shipping Cost</p>
-                      <p className="text-lg font-semibold">${msrpRow.shipping_cost.toFixed(2)}</p>
+                      <p className="text-lg font-semibold">${(msrpRow.shipping_cost * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
                     </div>
                     <div>
                       <p className="font-medium text-gray-700">Import Tax</p>
-                      <p className="text-lg font-semibold">${msrpRow.import_tax_cost.toFixed(2)}</p>
+                      <p className="text-lg font-semibold">${(msrpRow.import_tax_cost * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
                     </div>
                     <div>
                       <p className="font-medium text-gray-700">Total Cost</p>
-                      <p className="text-lg font-semibold">${msrpRow.total_cost.toFixed(2)}</p>
+                      <p className="text-lg font-semibold">${(msrpRow.total_cost * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-gray-700">MSRP Sale In</p>
-                      <p className="text-lg font-semibold text-green-600">${msrpRow.msrp_sale_in.toFixed(2)}</p>
+                      <p className="font-medium text-gray-700">Dealer Price</p>
+                      <p className="text-lg font-semibold text-green-600">${(msrpRow.dealer_price * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
                     </div>
                     <div>
-                      <p className="font-medium text-gray-700">MSRP Sale Out</p>
-                      <p className="text-lg font-semibold text-primary">${msrpRow.msrp_sale_out.toFixed(2)}</p>
+                      <p className="font-medium text-gray-700">MSRP (Retail)</p>
+                      <p className="text-lg font-semibold text-primary">${(msrpRow.msrp * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
                     </div>
                   </div>
                 </div>
@@ -1055,32 +1829,31 @@ export default function CatalogItemNew() {
               </p>
             )}
           </div>
-          
-          {/* Category margin % (reference only; no final values) */}
-          {categoryId && !categoryMarginsLoading && categoryMargins.length > 0 && (
-            <div className="col-span-12">
-              <h3 className="text-sm font-semibold mb-2">Category margin % (reference only)</h3>
-              <p className="text-xs text-gray-500 mb-2">CategoryMargins only defines percentages; final MSRP is computed in the backend.</p>
-              {(() => {
-                const m = categoryMargins.find((x: any) => x.category_id === categoryId);
-                if (!m) return <p className="text-xs text-gray-500">No margin defined for this category.</p>;
-                return (
-                  <div className="flex gap-4 text-xs">
-                    <span>Minimum Margin (sale in): {Math.round(((m as any).msrp_pct_sale_in ?? (m as any).default_margin_pct ?? 0) * 100)}%</span>
-                    <span>MSRP % Sale Out: {Math.round(((m as any).msrp_pct_sale_out ?? 0) * 100)}%</span>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-          
-          {/* Info */}
-          <div className="col-span-12 mt-6">
-            <div className="bg-blue-50 border border-blue-200 rounded p-4">
-              <p className="text-xs text-gray-700">
-                <strong>ℹ️ MSRP:</strong> Values come only from <strong>CatalogItemsMSRP</strong>. The backend (triggers + <code>msrp_compute_for_item</code>) does the calculation. <strong>CategoryMargins</strong> only defines percentages; to change them: <strong>Settings → Cost Engine → Category Margins</strong>.
-              </p>
-            </div>
+        </div>
+      )}
+
+      {/* Supply Tab (Edit only) */}
+      {activeTab === 'supply' && (
+        <div className="grid grid-cols-12 gap-6">
+          <div className="col-span-12">
+            <h3 className="text-sm font-semibold">Supply</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Edit supply/lead time data stored in <code>CatalogItemSupply</code>.
+            </p>
+          </div>
+
+          <div className="col-span-12">
+            {!itemId || !activeOrganizationId ? (
+              <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                <p className="text-xs text-amber-800">Save the item first to edit supply info.</p>
+              </div>
+            ) : (
+              <CatalogItemSupplyTab
+                catalogItemId={itemId}
+                organizationId={activeOrganizationId}
+                readOnly={isReadOnly}
+              />
+            )}
           </div>
         </div>
       )}

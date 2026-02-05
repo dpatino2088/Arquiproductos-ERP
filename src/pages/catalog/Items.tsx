@@ -43,6 +43,7 @@ interface Item {
   is_fabric?: boolean;
   unit_price?: number;
   msrp?: number;
+  msrpUnitLabel?: string;
   updated_at?: string;
   active?: boolean;
   discontinued?: boolean;
@@ -87,7 +88,6 @@ export default function Items() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-
   // Format date to DD/MM/YY format
   const formatDate = (dateString?: string | null): string => {
     if (!dateString) return 'N/A';
@@ -125,13 +125,62 @@ export default function Items() {
         ? (categoryMap.get(item.category_id) || 'Not specified')
         : (item.metadata?.category || 'Not specified');
       
-      // Get MSRP: use the value from CatalogItem (which already has msrp_sale_out from CatalogItemsMSRP)
+      // Get MSRP: use the value from CatalogItem (which already has msrp from CatalogItemsMSRP)
       // Accept any numeric value (including 0, though 0 will display as $0.00)
       let msrpValue: number | undefined = undefined;
       if (item.msrp != null && item.msrp !== undefined) {
         const numValue = typeof item.msrp === 'number' ? item.msrp : Number(item.msrp);
         if (!isNaN(numValue)) {
           msrpValue = numValue;
+        }
+      }
+
+      // Normalize MSRP for display (list should show normalized unit, not raw yd/ft)
+      const rawUom = (item.unit_of_measure || item.uom || 'ea').toString();
+      const rawUomLower = rawUom.toLowerCase();
+      const pricingMode = ((item as any).roll_pricing_mode || null) as string | null;
+      const widthM = (() => {
+        const v = (item as any).roll_width_m ?? (item as any).roll_width ?? null;
+        const n = v != null ? Number(v) : null;
+        return n != null && !isNaN(n) ? n : null;
+      })();
+      const toPerMeter = (price: number, uom: string): number | null => {
+        const u = (uom || '').toLowerCase();
+        if (u === 'm' || u === 'meter' || u === 'meters') return price;
+        if (u === 'yd' || u === 'yard' || u === 'yards') return price / 0.9144;
+        if (u === 'ft' || u === 'foot' || u === 'feet') return price / 0.3048;
+        return null;
+      };
+      let msrpDisplay = msrpValue;
+      let msrpUnitLabel = '';
+      if (msrpValue != null) {
+        // Default to showing per meter for linear rolls/items
+        const perM = toPerMeter(msrpValue, rawUomLower);
+        if (pricingMode === 'per_square_meter' || item.measure_basis === 'area') {
+          if (perM != null && widthM != null && widthM > 0) {
+            msrpDisplay = perM / widthM;
+            msrpUnitLabel = '/m²';
+          } else if (perM != null) {
+            msrpDisplay = perM;
+            msrpUnitLabel = '/m';
+          } else {
+            msrpDisplay = msrpValue;
+            msrpUnitLabel = `/${rawUomLower}`;
+          }
+        } else if (pricingMode === 'per_linear_meter' || item.measure_basis === 'linear') {
+          if (perM != null) {
+            msrpDisplay = perM;
+            msrpUnitLabel = '/m';
+          } else {
+            msrpDisplay = msrpValue;
+            msrpUnitLabel = `/${rawUomLower}`;
+          }
+        } else {
+          // Unit items (or per_unit pricing) show MSRP per ea
+          msrpDisplay = msrpValue;
+          // Normalize unit label: pack/set/box/case → ea
+          const isPackType = ['pack', 'set', 'box', 'case', 'bag', 'piece', 'pcs', 'pc'].includes(rawUomLower);
+          msrpUnitLabel = isPackType ? '/ea' : `/${rawUomLower}`;
         }
       }
       
@@ -154,8 +203,9 @@ export default function Items() {
         uom: item.uom || item.unit_of_measure || 'N/A',
         is_fabric: item.is_fabric || false,
         unit_price: item.unit_price || 0,
-        // Keep msrp even if 0, so it can be displayed correctly
-        msrp: msrpValue !== undefined ? msrpValue : 0, // Default a 0 si no está disponible
+        // MSRP displayed normalized (per m or per m² when applicable)
+        msrp: msrpDisplay !== undefined ? msrpDisplay : 0,
+        msrpUnitLabel,
         updated_at: (item as any).updated_at || item.created_at || undefined,
         active: activeStatus, // ✅ Siempre definido antes de renderizar
         discontinued: item.discontinued || false,
@@ -863,31 +913,30 @@ export default function Items() {
                       {sortBy === 'itemName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('category')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      className="flex items-center gap-1 hover:text-gray-700 mx-auto"
                     >
                       Category
                       {sortBy === 'category' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('measure_basis')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      className="flex items-center gap-1 hover:text-gray-700 mx-auto"
                     >
                       Measure Basis
                       {sortBy === 'measure_basis' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">UOM</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">MSRP</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Last Updated</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">MSRP</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Last Updated</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('active')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      className="flex items-center gap-1 hover:text-gray-700 mx-auto"
                     >
                       Status
                       {sortBy === 'active' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
@@ -899,7 +948,7 @@ export default function Items() {
               <tbody className="divide-y divide-gray-200">
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 px-6 text-center">
+                    <td colSpan={9} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                           <Search className="w-6 h-6 text-gray-400" />
@@ -957,26 +1006,23 @@ export default function Items() {
                       <td className="py-3 px-4 text-gray-700 text-xs">
                         {item.itemName || 'N/A'}
                       </td>
-                      <td className="py-3 px-4 text-gray-700 text-xs">
+                      <td className="py-3 px-4 text-center text-gray-700 text-xs">
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
                           {item.category || 'N/A'}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-gray-700 text-xs">
+                      <td className="py-3 px-4 text-center text-gray-700 text-xs">
                         {item.measure_basis || 'N/A'}
                       </td>
-                      <td className="py-3 px-4 text-gray-700 text-xs">
-                        {item.uom || 'N/A'}
-                      </td>
-                      <td className="py-3 px-4 text-gray-700 text-xs">
+                      <td className="py-3 px-4 text-center text-gray-700 text-xs">
                         {item.msrp != null && item.msrp !== undefined && !isNaN(item.msrp)
-                          ? `$${item.msrp.toFixed(2)}`
+                          ? `$${item.msrp.toFixed(2)}${item.msrpUnitLabel || ''}`
                           : '$0.00'}
                       </td>
-                      <td className="py-3 px-4 text-gray-700 text-xs">
+                      <td className="py-3 px-4 text-center text-gray-700 text-xs">
                         {item.updated_at ? formatDate(item.updated_at) : 'N/A'}
                       </td>
-                      <td className="py-3 px-4 text-gray-700 text-xs">
+                      <td className="py-3 px-4 text-center text-gray-700 text-xs">
                         {/* ✅ OPTIMIZACIÓN: Asegurar que active esté definido antes de renderizar */}
                         {item.active !== undefined && item.active !== null ? (
                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${

@@ -68,16 +68,55 @@ export interface CreateConfiguredProductPreviewParams {
   quote_id?: string | null;
 }
 
+// BOM Preview Snapshot types (stored in ConfiguredProducts.bom_preview_snapshot)
+export interface BOMSnapshotItem {
+  id: string;
+  kind: 'roll' | 'parent' | 'child' | 'accessory' | 'labor' | 'other';
+  role: string;
+  level: number;
+  selected: boolean;
+  catalog_item_id: string | null;
+  sku: string | null;
+  name: string | null;
+  qty: number;
+  uom: string;
+  unit_price: number;
+  line_total: number;
+  children?: BOMSnapshotItem[];
+  meta?: Record<string, any>;
+}
+
+export interface BOMPreviewSnapshot {
+  version: string;
+  product_type_id: string;
+  bom_template_id: string | null;
+  price_basis: 'msrp' | 'dealer';
+  currency: string;
+  totals: {
+    roll_msrp_total: number;
+    bom_total: number;
+    accessories_total: number;
+    labor_pct: number;
+    labor_amount: number;
+    total_msrp: number;
+    roll_total_cost: number;
+    bom_total_cost: number;
+  };
+  items: BOMSnapshotItem[];
+}
+
 export interface CreateConfiguredProductPreviewResult {
   configured_product_id: string;
   bom_instance_id: string;
   bom_template_id: string;
-    totals: {
-      roll_msrp_total: number;
-      bom_total: number;
-      roll_plus_bom_total: number;
-      labor_pct: number;
-      accessories_total: number;
-      total_msrp: number;
-    };
+  totals: {
+    roll_msrp_total: number;
+    bom_total: number;
+    roll_plus_bom_total: number;
+    labor_pct: number;
+    accessories_total: number;
+    total_msrp: number;
+  };
+  // NEW: BOM Preview Snapshot for UI breakdown display
+  bom_preview_snapshot?: BOMPreviewSnapshot | null;
 }

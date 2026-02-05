@@ -91,20 +91,68 @@ export function useProgressiveTemplateFilter(
 
       try {
         // Step 1: Get all active templates for ProductType
-        let templatesQuery = supabase
-          .from('BOMTemplates')
-          .select('id, name, hardware_color')
-          .eq('organization_id', activeOrganizationId)
-          .eq('product_type_id', productTypeId)
-          .eq('is_active', true)
-          .eq('archived', false);
+        // ✅ FIX: Primero buscar templates con color exacto, solo fallback a NULL si no hay
+        let templates: Array<{ id: string; name: string; hardware_color: string | null }> = [];
+        let templatesError: any = null;
 
-        // Filter by color if provided
         if (normalizedColor) {
-          templatesQuery = templatesQuery.or(`hardware_color.eq.${normalizedColor},hardware_color.is.null`);
-        }
+          // Primero: buscar templates con el color EXACTO
+          const { data: exactColorTemplates, error: exactError } = await supabase
+            .from('BOMTemplates')
+            .select('id, name, hardware_color')
+            .eq('organization_id', activeOrganizationId)
+            .eq('product_type_id', productTypeId)
+            .eq('is_active', true)
+            .eq('archived', false)
+            .eq('hardware_color', normalizedColor);
 
-        const { data: templates, error: templatesError } = await templatesQuery;
+          if (exactError) {
+            templatesError = exactError;
+          } else if (exactColorTemplates && exactColorTemplates.length > 0) {
+            // Hay templates con color exacto → usar solo esos
+            templates = exactColorTemplates;
+            if (import.meta.env.DEV) {
+              console.debug('[Progressive] Found templates with exact color match:', {
+                color: normalizedColor,
+                count: templates.length,
+              });
+            }
+          } else {
+            // No hay templates con color exacto → fallback a templates sin color (NULL)
+            const { data: nullColorTemplates, error: nullError } = await supabase
+              .from('BOMTemplates')
+              .select('id, name, hardware_color')
+              .eq('organization_id', activeOrganizationId)
+              .eq('product_type_id', productTypeId)
+              .eq('is_active', true)
+              .eq('archived', false)
+              .is('hardware_color', null);
+
+            if (nullError) {
+              templatesError = nullError;
+            } else {
+              templates = nullColorTemplates || [];
+              if (import.meta.env.DEV) {
+                console.warn('[Progressive] No exact color match, using NULL color templates as fallback:', {
+                  requestedColor: normalizedColor,
+                  count: templates.length,
+                });
+              }
+            }
+          }
+        } else {
+          // Sin color especificado → obtener todos los templates
+          const { data: allTemplates, error: allError } = await supabase
+            .from('BOMTemplates')
+            .select('id, name, hardware_color')
+            .eq('organization_id', activeOrganizationId)
+            .eq('product_type_id', productTypeId)
+            .eq('is_active', true)
+            .eq('archived', false);
+
+          templatesError = allError;
+          templates = allTemplates || [];
+        }
 
         if (templatesError) {
           throw new Error(templatesError.message);
@@ -404,20 +452,52 @@ export function useBOMTemplateOptionsSimple(
             console.debug('[BOM] Using pre-filtered templates:', templateIds.length);
           }
         } else {
-          // Buscar templates por ProductType + Color
-          let templatesQuery = supabase
-            .from('BOMTemplates')
-            .select('id')
-            .eq('organization_id', activeOrganizationId)
-            .eq('product_type_id', productTypeId)
-            .eq('is_active', true)
-            .eq('archived', false);
+          // Buscar templates por ProductType + Color (match exacto primero)
+          let templates: Array<{ id: string }> = [];
+          let templatesError: any = null;
 
           if (requiresColor && normalizedColor) {
-            templatesQuery = templatesQuery.or(`hardware_color.eq.${normalizedColor},hardware_color.is.null`);
-          }
+            const { data: exactTemplates, error: exactError } = await supabase
+              .from('BOMTemplates')
+              .select('id')
+              .eq('organization_id', activeOrganizationId)
+              .eq('product_type_id', productTypeId)
+              .eq('is_active', true)
+              .eq('archived', false)
+              .eq('hardware_color', normalizedColor);
 
-          const { data: templates, error: templatesError } = await templatesQuery;
+            if (exactError) {
+              templatesError = exactError;
+            } else if (exactTemplates && exactTemplates.length > 0) {
+              templates = exactTemplates;
+            } else {
+              const { data: nullColorTemplates, error: nullError } = await supabase
+                .from('BOMTemplates')
+                .select('id')
+                .eq('organization_id', activeOrganizationId)
+                .eq('product_type_id', productTypeId)
+                .eq('is_active', true)
+                .eq('archived', false)
+                .is('hardware_color', null);
+
+              if (nullError) {
+                templatesError = nullError;
+              } else {
+                templates = nullColorTemplates || [];
+              }
+            }
+          } else {
+            const { data: allTemplates, error: allError } = await supabase
+              .from('BOMTemplates')
+              .select('id')
+              .eq('organization_id', activeOrganizationId)
+              .eq('product_type_id', productTypeId)
+              .eq('is_active', true)
+              .eq('archived', false);
+
+            templatesError = allError;
+            templates = allTemplates || [];
+          }
 
           if (templatesError) {
             throw new Error(templatesError.message);
@@ -624,19 +704,51 @@ export function useBOMTemplateAllRoleOptions(
         if (filteredTemplateIds && filteredTemplateIds.length > 0) {
           templateIds = filteredTemplateIds;
         } else {
-          let templatesQuery = supabase
-            .from('BOMTemplates')
-            .select('id')
-            .eq('organization_id', activeOrganizationId)
-            .eq('product_type_id', productTypeId)
-            .eq('is_active', true)
-            .eq('archived', false);
+          let templates: Array<{ id: string }> = [];
+          let templatesError: any = null;
 
           if (!allNonColor && normalizedColor) {
-            templatesQuery = templatesQuery.or(`hardware_color.eq.${normalizedColor},hardware_color.is.null`);
-          }
+            const { data: exactTemplates, error: exactError } = await supabase
+              .from('BOMTemplates')
+              .select('id')
+              .eq('organization_id', activeOrganizationId)
+              .eq('product_type_id', productTypeId)
+              .eq('is_active', true)
+              .eq('archived', false)
+              .eq('hardware_color', normalizedColor);
 
-          const { data: templates, error: templatesError } = await templatesQuery;
+            if (exactError) {
+              templatesError = exactError;
+            } else if (exactTemplates && exactTemplates.length > 0) {
+              templates = exactTemplates;
+            } else {
+              const { data: nullColorTemplates, error: nullError } = await supabase
+                .from('BOMTemplates')
+                .select('id')
+                .eq('organization_id', activeOrganizationId)
+                .eq('product_type_id', productTypeId)
+                .eq('is_active', true)
+                .eq('archived', false)
+                .is('hardware_color', null);
+
+              if (nullError) {
+                templatesError = nullError;
+              } else {
+                templates = nullColorTemplates || [];
+              }
+            }
+          } else {
+            const { data: allTemplates, error: allError } = await supabase
+              .from('BOMTemplates')
+              .select('id')
+              .eq('organization_id', activeOrganizationId)
+              .eq('product_type_id', productTypeId)
+              .eq('is_active', true)
+              .eq('archived', false);
+
+            templatesError = allError;
+            templates = allTemplates || [];
+          }
 
           if (templatesError) {
             throw new Error(templatesError.message);

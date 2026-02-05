@@ -194,7 +194,8 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         .select('id, name, code, product_type_id, hardware_color')
         .in('id', uniquePreFiltered!)
         .eq('is_active', true)
-        .eq('archived', false);
+        .eq('archived', false)
+        .eq('deleted', false);
 
       if (preFilteredError) {
         console.error('[matchBOMTemplate] Error fetching pre-filtered templates:', safeErr(preFilteredError));
@@ -209,18 +210,15 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
 
     // Si no hay pre-filtrados o no se encontraron, buscar por product_type
     if (templates.length === 0) {
-      // DUMP: BOMTemplates tiene is_active, archived. NO tiene deleted.
+      // DUMP v7: BOMTemplates tiene is_active, archived, deleted, hardware_color.
       let templatesQuery = supabase
         .from('BOMTemplates')
         .select('id, name, code, product_type_id, hardware_color')
         .eq('organization_id', organization_id)
         .eq('product_type_id', product_type_id)
         .eq('is_active', true)
-        .eq('archived', false);
-
-      if (normalizedColor) {
-        templatesQuery = templatesQuery.or(`hardware_color.eq.${normalizedColor},hardware_color.is.null`);
-      }
+        .eq('archived', false)
+        .eq('deleted', false);
 
       const { data: templatesRaw, error: templatesError } = await templatesQuery;
 
@@ -249,42 +247,44 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         };
       }
 
-      // Si hay color elegido: preferir templates con hardware_color exacto
-      const exact = normalizedColor
-        ? templatesRaw.filter((t: any) => (t as any).hardware_color === normalizedColor)
-        : [];
-      templates = exact.length > 0 ? exact : templatesRaw;
+      // If hardware_color was provided, prefer exact match (case-insensitive), else keep all.
+      if (normalizedColor) {
+        const exact = templatesRaw.filter((t: any) => normalizeColor((t as any).hardware_color) === normalizedColor);
+        templates = exact.length > 0 ? exact : templatesRaw;
+      } else {
+        templates = templatesRaw;
+      }
     }
 
     if (import.meta.env.DEV) {
       console.log('[matchBOMTemplate] Base templates found:', templates.length);
     }
 
-    // PASO 2: Obtener todos los COMPONENTES PADRES de estos templates
+    // PASO 2: Obtener slots (BOMTemplateSlots) de estos templates
+    // IMPORTANT: En schema v7, el matching se basa en BOMTemplateSlots (no BOMComponents).
     const templateIds = templates.map(t => t.id);
     
-    const { data: allComponents, error: componentsError } = await supabase
-      .from('BOMComponents')
-      .select('bom_template_id, component_role, component_item_id')
+    const { data: allSlots, error: slotsError } = await supabase
+      .from('BOMTemplateSlots')
+      .select('bom_template_id, item_role, catalog_item_id')
       .eq('organization_id', organization_id)
       .in('bom_template_id', templateIds)
-      .is('parent_component_id', null) // Solo PADRES
       .eq('deleted', false)
       .eq('archived', false);
 
-    if (componentsError) {
-      console.error('[matchBOMTemplate] Error fetching components:', safeErr(componentsError));
+    if (slotsError) {
+      console.error('[matchBOMTemplate] Error fetching template slots:', safeErr(slotsError));
       return {
         template_id: null,
         template_name: null,
         matched: false,
-        warning: `Error fetching components: ${componentsError.message}`,
+        warning: `Error fetching template slots: ${slotsError.message}`,
       };
     }
 
-    // PASO 3: Obtener SKUs de CatalogItems para los componentes
+    // PASO 3: Obtener SKUs de CatalogItems para los slots
     const catalogItemIds = [...new Set(
-      (allComponents || []).map((c: { component_item_id?: string }) => c.component_item_id).filter(Boolean)
+      (allSlots || []).map((s: { catalog_item_id?: string }) => s.catalog_item_id).filter(Boolean)
     )] as string[];
 
     let catalogSkuMap = new Map<string, string>();
@@ -303,16 +303,16 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       });
     }
 
-    // PASO 4: Agrupar componentes por template
+    // PASO 4: Agrupar slots por template
     const componentsByTemplate = new Map<string, Array<{
       role: string;
       sku: string | null;
     }>>();
 
-    (allComponents || []).forEach((comp: { bom_template_id: string; component_role?: string; component_item_id?: string }) => {
-      const templateId = comp.bom_template_id;
-      const role = (comp.component_role || '').toLowerCase().trim();
-      const sku = comp.component_item_id ? catalogSkuMap.get(comp.component_item_id) || null : null;
+    (allSlots || []).forEach((slot: { bom_template_id: string; item_role?: string; catalog_item_id?: string }) => {
+      const templateId = slot.bom_template_id;
+      const role = (slot.item_role || '').toLowerCase().trim();
+      const sku = slot.catalog_item_id ? catalogSkuMap.get(slot.catalog_item_id) || null : null;
 
       if (!componentsByTemplate.has(templateId)) {
         componentsByTemplate.set(templateId, []);
@@ -379,15 +379,14 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       const hasMotor = hasAnySlotRole('motor');
       const hasDrive = hasAnySlotRole('drive');
       
-      // ✅ CRÍTICO: Verificar que NO tenga el rol opuesto (exclusión mutual)
-      // Un template de motor NO debe tener drive, y viceversa
-      let hasCorrectOperationType = false;
-      
       if (operation_type === 'motor') {
-        if (hasMotor && !hasDrive) {
+        // In DB matcher, exclusivity is evaluated against the selected opposite SKU.
+        // If drive_sku is not provided, do not reject templates just for having a 'drive' slot.
+        const hasConflictingDriveSku = normalizedDriveSku ? hasSkuForRole('drive', normalizedDriveSku) : false;
+
+        if (hasMotor && !hasConflictingDriveSku) {
           score += 10; // ✅ AUMENTADO: Dar MUCHO peso a operation_type correcto
-          matchedCriteria.push('operation_type:motor (exclusive)');
-          hasCorrectOperationType = true;
+          matchedCriteria.push('operation_type:motor');
           
           // Verificar motor_sku si está definido
           if (normalizedMotorSku) {
@@ -400,14 +399,15 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
             }
           }
         } else {
-          unmatchedCriteria.push(`operation_type expected:motor (exclusive) hasMotor:${hasMotor} hasDrive:${hasDrive}`);
-          if (hasDrive) score -= 50; // ✅ AUMENTADO: Penalizar FUERTEMENTE si tiene drive cuando esperamos motor
+          unmatchedCriteria.push(`operation_type expected:motor hasMotor:${hasMotor} conflictingDriveSku:${hasConflictingDriveSku}`);
+          if (hasConflictingDriveSku) score -= 50;
         }
       } else if (operation_type === 'manual') {
-        if (hasDrive && !hasMotor) {
+        const hasConflictingMotorSku = normalizedMotorSku ? hasSkuForRole('motor', normalizedMotorSku) : false;
+
+        if (hasDrive && !hasConflictingMotorSku) {
           score += 10; // ✅ AUMENTADO: Dar MUCHO peso a operation_type correcto
-          matchedCriteria.push('operation_type:manual (exclusive)');
-          hasCorrectOperationType = true;
+          matchedCriteria.push('operation_type:manual');
           
           // Verificar drive_sku si está definido
           if (normalizedDriveSku) {
@@ -420,8 +420,8 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
             }
           }
         } else {
-          unmatchedCriteria.push(`operation_type expected:manual (exclusive) hasMotor:${hasMotor} hasDrive:${hasDrive}`);
-          if (hasMotor) score -= 50; // ✅ AUMENTADO: Penalizar FUERTEMENTE si tiene motor cuando esperamos manual
+          unmatchedCriteria.push(`operation_type expected:manual hasDrive:${hasDrive} conflictingMotorSku:${hasConflictingMotorSku}`);
+          if (hasConflictingMotorSku) score -= 50;
         }
       }
 

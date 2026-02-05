@@ -116,12 +116,12 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     (async () => {
       const { data } = await supabase
         .from('CatalogItemsMSRP')
-        .select('msrp_sale_out')
+        .select('msrp')
         .eq('catalog_item_id', variantId)
         .eq('organization_id', activeOrganizationId)
         .maybeSingle();
-      if (!cancelled && data?.msrp_sale_out != null && !isNaN(Number(data.msrp_sale_out))) {
-        setMsrpSaleOut(Number(data.msrp_sale_out));
+      if (!cancelled && data?.msrp != null && !isNaN(Number(data.msrp))) {
+        setMsrpSaleOut(Number(data.msrp));
       } else if (!cancelled) {
         setMsrpSaleOut(null);
       }

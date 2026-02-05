@@ -1,13 +1,15 @@
 /**
- * Create QuoteLine from ConfiguredProduct
+ * @deprecated DEPRECATED - Use commitConfiguredProductToQuoteLine instead
  * 
+ * This file is kept for backward compatibility but should NOT be used.
+ * The new flow uses:
+ * - commit_configured_product_to_quote_line RPC
+ * - ConfiguredProducts.bom_preview_snapshot as source of truth
+ * - No BOMInstances are created
+ * 
+ * Original description:
  * Servicio para crear QuoteLine con snapshots completos desde ConfiguredProduct.
  * Implementa el flujo: ConfiguredProduct (vivo) -> QuoteLine (snapshot congelado)
- * 
- * CONTRATO DE SNAPSHOT:
- * - QuoteLines es SNAPSHOT: no cambia cuando cambia CatalogItems o CatalogItemsMSRP
- * - Solo se recalcula con acción explícita "Reprice" o creando nuevo QuoteLine
- * - ConfiguredProducts sí se recalcula en cada cambio del configurador
  */
 
 import { supabase } from '../supabase/client';
@@ -157,14 +159,20 @@ export async function createQuoteLineFromConfiguredProduct(
 
   // 8. Preparar datos para QuoteLine
   // ✅ Filtrar campos no válidos que puedan causar errores de schema cache
-  // Excluir 'metadata' si viene en otherFields (puede no estar en schema cache aún)
-  const { metadata: _, ...filteredOtherFields } = otherFields;
+  // Excluir 'metadata' y 'fabricItemId' (no existe en QuoteLines)
+  const { metadata: _, fabricItemId: __, ...filteredOtherFields } = otherFields;
   
   // ✅ Obtener medidas y otros datos desde ConfiguredProduct (si existe) o desde otherFields
   const productTypeId = configuredProduct?.product_type_id || (otherFields as any).product_type_id;
   const widthMm = configuredProduct?.width_mm || (otherFields as any).width_mm;
   const heightMm = configuredProduct?.height_mm || (otherFields as any).height_mm;
   
+  const rollCatalogItemId =
+    configuredProduct?.roll_catalog_item_id ||
+    (otherFields as any).catalog_item_id ||
+    (otherFields as any).fabricItemId ||
+    null;
+
   const quoteLineData: any = {
     organization_id: organizationId,
     quote_id: quoteId,
@@ -173,6 +181,8 @@ export async function createQuoteLineFromConfiguredProduct(
     width_m: widthMm ? Number(widthMm) / 1000 : null,
     height_m: heightMm ? Number(heightMm) / 1000 : null,
     discount_pct: discountPct,
+    // Roll / fabric item (QuoteLines usa catalog_item_id)
+    ...(rollCatalogItemId ? { catalog_item_id: rollCatalogItemId } : {}),
     // ✅ CRITICAL: Guardar bom_template_id en QuoteLines
     ...(bom_template_id ? { bom_template_id } : {}),
     // Snapshots iniciales (se actualizarán después de crear BOMInstance)
@@ -430,27 +440,7 @@ export async function createQuoteLineFromConfiguredProduct(
     }
   }
 
-  // 11. Opcional: Actualizar ConfiguredProducts.quote_line_id si la columna existe
-  // (No fallar si la columna no existe)
-  try {
-    const { error: updateError } = await supabase
-      .from('ConfiguredProducts')
-      .update({ quote_line_id: newQuoteLine.id })
-      .eq('id', configuredProductId)
-      .eq('organization_id', organizationId);
-
-    if (updateError && import.meta.env.DEV) {
-      // Si la columna no existe, esto es esperado
-      if (!updateError.message?.includes('column') && !updateError.message?.includes('does not exist')) {
-        console.warn('[createQuoteLineFromConfiguredProduct] Error updating quote_line_id:', updateError);
-      }
-    }
-  } catch (err) {
-    // Ignorar errores al actualizar quote_line_id (columna puede no existir)
-    if (import.meta.env.DEV) {
-      console.debug('[createQuoteLineFromConfiguredProduct] Could not update quote_line_id (expected if column does not exist)');
-    }
-  }
+  // quote_line_id ya no existe en ConfiguredProducts; la relación es QuoteLines.configured_product_id -> ConfiguredProducts
 
   if (import.meta.env.DEV) {
     console.log('[createQuoteLineFromConfiguredProduct] Success:', {

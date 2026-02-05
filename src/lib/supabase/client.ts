@@ -23,6 +23,19 @@ const getSupabaseConfig = () => {
 
 const { url: supabaseUrl, key: supabaseAnonKey } = getSupabaseConfig();
 
+// ✅ Cooldown on login page: after first auth failure, block further auth requests to avoid flooding Supabase
+const LOGIN_AUTH_COOLDOWN_MS = 60_000; // 1 minute
+let loginPageAuthBlockUntil = 0;
+
+function isOnLoginPage(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.startsWith("/login");
+}
+
+function isSupabaseAuthUrl(url: string): boolean {
+  return url.includes("/auth/v1/") || url.includes("/auth/v1");
+}
+
 // ✅ Telemetry/agent-log blocker (CSP safe)
 if (typeof window !== "undefined") {
   const originalFetch = window.fetch;
@@ -60,8 +73,17 @@ if (typeof window !== "undefined") {
 
       if (!isSupabaseRequest) return originalFetch(...args);
 
+      // ✅ On login page: block auth requests during cooldown to avoid flooding Supabase
+      if (isOnLoginPage() && isSupabaseAuthUrl(reqUrl) && Date.now() < loginPageAuthBlockUntil) {
+        if (import.meta.env.DEV) {
+          console.warn("[Supabase] Auth request blocked on login page (cooldown) to avoid flooding.");
+        }
+        return Promise.reject(new Error("Failed to fetch"));
+      }
+
       const start = Date.now();
     try {
+      // Solo pasamos la petición al fetch nativo; no modificamos args. Si falla, es red/CORS/URL.
       const res = await originalFetch(...args);
 
         // Track only server errors (500+)
@@ -85,6 +107,14 @@ if (typeof window !== "undefined") {
 
       return res;
     } catch (err: any) {
+        // On login page, one auth failure => cooldown so we stop sending more requests
+        if (isOnLoginPage() && isSupabaseAuthUrl(reqUrl)) {
+          loginPageAuthBlockUntil = Date.now() + LOGIN_AUTH_COOLDOWN_MS;
+          if (import.meta.env.DEV) {
+            console.warn("[Supabase] Auth failed on login page; blocking further auth requests for 1 minute.");
+          }
+        }
+
         logger.error(
           "Supabase request failed",
           err instanceof Error ? err : undefined,
@@ -156,21 +186,14 @@ export const getUserProfile = async (userId: string | null | undefined) => {
 
     return data ?? null;
   } catch (e) {
-    // ✅ Log warning pero retorna null (no bloquees la app)
-    // ✅ Solo primitivos en errorDetails para evitar "[circular]" al serializar
-    const err = e as { message?: string; code?: string; name?: string; stack?: string; details?: unknown };
-    const errorDetails =
+    // ✅ Log only a safe string to avoid "[circular]" in console
+    const msg =
       e instanceof Error
-        ? { message: e.message, name: e.name, ...(import.meta.env.DEV && e.stack ? { stack: e.stack } : {}) }
-        : typeof e === "object" && e !== null
-        ? {
-            message: (err.message && String(err.message)) || String(e),
-            code: err.code != null ? String(err.code) : undefined,
-            details: err.details != null ? (typeof err.details === "object" ? "[object]" : String(err.details).slice(0, 120)) : undefined,
-          }
-        : { message: String(e) };
-
-    logger.warn("Error getting user profile", errorDetails);
+        ? e.message
+        : typeof e === "object" && e !== null && "message" in e
+        ? String((e as { message?: unknown }).message)
+        : String(e);
+    logger.warn(`Error getting user profile: ${msg.slice(0, 200)}`);
     return null;
   }
 };

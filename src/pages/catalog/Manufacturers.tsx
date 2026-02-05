@@ -27,37 +27,8 @@ export default function Manufacturers() {
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
-  const [manufacturerIdsWithItems, setManufacturerIdsWithItems] = useState<Set<string>>(new Set());
-  const [manufacturerIdsLoaded, setManufacturerIdsLoaded] = useState(false);
-
-  // Solo manufacturers que tienen al menos un ítem con is_roll=true
-  useEffect(() => {
-    if (!activeOrganizationId) {
-      setManufacturerIdsLoaded(true);
-      return;
-    }
-    let mounted = true;
-    setManufacturerIdsLoaded(false);
-    (async () => {
-      const { data } = await supabase
-        .from('CatalogItems')
-        .select('manufacturer_id')
-        .eq('organization_id', activeOrganizationId)
-        .eq('is_active', true)
-        .eq('is_roll', true)
-        .not('manufacturer_id', 'is', null);
-      if (!mounted) return;
-      setManufacturerIdsWithItems(new Set((data || []).map((r: { manufacturer_id?: string | null }) => r.manufacturer_id).filter((x: string | null | undefined): x is string => Boolean(x))));
-      setManufacturerIdsLoaded(true);
-    })();
-    return () => { mounted = false; };
-  }, [activeOrganizationId]);
-
-  // Base: solo manufacturers con al menos un ítem is_roll=true (si ya cargamos; si no, mostramos todos mientras carga)
-  const manufacturersToShow = useMemo(() => {
-    if (!manufacturerIdsLoaded) return manufacturers;
-    return manufacturers.filter(m => manufacturerIdsWithItems.has(m.id));
-  }, [manufacturers, manufacturerIdsWithItems, manufacturerIdsLoaded]);
+  // Show all manufacturers (no filter by is_roll)
+  const manufacturersToShow = manufacturers;
 
   // Register sub-tabs for Manufacturers (only manufacturers now)
   useEffect(() => {

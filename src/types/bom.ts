@@ -35,8 +35,8 @@ export interface BOMInstanceLine {
   // NOTA: Las siguientes columnas NO existen en el schema real:
   // - category_code (se obtiene de CatalogItems)
   // - resolved_sku (se obtiene de CatalogItems)
-  // - unit_msrp_sale_out (se obtiene de CatalogItems)
-  // - total_msrp_sale_out (se calcula)
+  // - unit_msrp (se obtiene de CatalogItemsMSRP)
+  // - total_msrp (se calcula)
   // - description (se obtiene de CatalogItems)
   // - calc_notes (no existe)
 }

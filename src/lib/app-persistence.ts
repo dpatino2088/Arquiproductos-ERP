@@ -4,6 +4,8 @@
  * Handles visibility changes and state persistence across tabs
  */
 
+import React from 'react';
+
 type VisibilityChangeHandler = () => void;
 
 class AppPersistence {
@@ -74,5 +76,3 @@ export function useOnVisibilityChange(callback: () => void) {
     return appPersistence.onVisibilityChange(callback);
   }, [callback]);
 }
-
-import React from 'react';

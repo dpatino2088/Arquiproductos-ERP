@@ -127,12 +127,12 @@ export function useQuotes(companyId?: string | null) {
         // Obtener QuoteLines por separado
         // Note: QuoteLines does NOT have a 'deleted' column in the schema
         const quoteIds = quotesData.map((q: any) => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; line_total: number }>>();
+        let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
         
         if (quoteIds.length > 0) {
           const { data: linesData } = await supabase
             .from('QuoteLines')
-            .select('id, quote_id, line_total')
+            .select('id, quote_id, msrp, roll_msrp_snapshot, bom_msrp_snapshot')
             .in('quote_id', quoteIds);
 
           if (linesData) {
@@ -142,7 +142,9 @@ export function useQuotes(companyId?: string | null) {
               }
               quoteLinesMap.get(line.quote_id)!.push({
                 id: line.id,
-                line_total: line.line_total
+                msrp: Number(line.msrp ?? 0),
+                roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
+                bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
               });
             });
           }
@@ -280,12 +282,12 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
         // Obtener QuoteLines
         // Note: QuoteLines does NOT have a 'deleted' column in the schema
         const quoteIds = quotesData.map((q: any) => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; line_total: number }>>();
+        let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
         
         if (quoteIds.length > 0) {
           const { data: linesData } = await supabase
             .from('QuoteLines')
-            .select('id, quote_id, line_total')
+            .select('id, quote_id, msrp, roll_msrp_snapshot, bom_msrp_snapshot')
             .in('quote_id', quoteIds);
 
           if (linesData) {
@@ -295,7 +297,9 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
               }
               quoteLinesMap.get(line.quote_id)!.push({
                 id: line.id,
-                line_total: line.line_total
+                msrp: Number(line.msrp ?? 0),
+                roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
+                bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
               });
             });
           }
@@ -436,121 +440,85 @@ export function useQuoteLines(quoteId: string | null) {
           }
         }
 
-        // 2. Obtener QuoteLineComponents (fabric, accessories, y opciones como drive_type, area, position)
-        const { data: componentsData } = await supabase
-          .from('QuoteLineComponents')
-          .select('id, quote_line_id, catalog_item_id, component_role, kind, source, qty, payload')
-          .in('quote_line_id', lineIds)
-          .eq('organization_id', activeOrganizationId)
-          .or('deleted.is.false,deleted.is.null');
-
-        // Separar fabric, accessories, y opciones
-        const fabricComponents = (componentsData || []).filter(
-          (comp: any) => comp.kind === 'selection' && comp.component_role === 'fabric'
-        );
-        const accessoryComponents = (componentsData || []).filter(
-          (comp: any) => comp.source === 'accessory' || comp.component_role === 'accessory'
-        );
-        const optionComponents = (componentsData || []).filter(
-          (comp: any) => comp.kind === 'option'
-        );
-
-        // 3. Obtener CatalogItems para fabric y accessories
-        const fabricItemIds = fabricComponents.map((f: any) => f.catalog_item_id).filter(Boolean);
-        const accessoryItemIds = accessoryComponents.map((a: any) => a.catalog_item_id).filter(Boolean);
-        const allCatalogItemIds = [...new Set([...fabricItemIds, ...accessoryItemIds])];
-
-        let catalogItemsMap = new Map<string, any>();
-        if (allCatalogItemIds.length > 0) {
-          const { data: catalogItemsData } = await supabase
-            .from('CatalogItems')
-            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, metadata')
-            .in('id', allCatalogItemIds)
-            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
-            .eq('is_active', true);
-
-          if (catalogItemsData) {
-            catalogItemsMap = new Map(
-              catalogItemsData.map((item: any) => [item.id, item])
-            );
-          }
-        }
-
-        // 4. Organizar componentes por quote_line_id
+        // 2. ✅ QuoteLineComponents ya no se usa (tabla eliminada). Datos desde QuoteLines + ConfiguredProducts
         const componentsByLineId = new Map<string, { fabric: any[]; accessories: any[] }>();
         lineIds.forEach((lineId: string) => {
           componentsByLineId.set(lineId, { fabric: [], accessories: [] });
         });
 
-        fabricComponents.forEach((comp: any) => {
-          const lineComponents = componentsByLineId.get(comp.quote_line_id);
-          if (lineComponents) {
-            lineComponents.fabric.push({
-              ...comp,
-              CatalogItems: comp.catalog_item_id ? catalogItemsMap.get(comp.catalog_item_id) || null : null
-            });
-          }
-        });
-
-        accessoryComponents.forEach((comp: any) => {
-          const lineComponents = componentsByLineId.get(comp.quote_line_id);
-          if (lineComponents) {
-            lineComponents.accessories.push({
-              ...comp,
-              CatalogItems: comp.catalog_item_id ? catalogItemsMap.get(comp.catalog_item_id) || null : null
-            });
-          }
-        });
-
-        // 4.5. Extraer datos de opciones (drive_type, area, position, etc.)
+        // Opciones (area, position, drive_type) desde columnas directas de QuoteLines
         const optionsByLineId = new Map<string, Record<string, any>>();
-        lineIds.forEach((lineId: string) => {
-          optionsByLineId.set(lineId, {});
-        });
-
-        optionComponents.forEach((comp: any) => {
-          const lineOptions = optionsByLineId.get(comp.quote_line_id) || {};
-          const payload = comp.payload || {};
-          
-          // Extraer valores del payload según component_role
-          if (comp.component_role === 'drive_type' && payload.drive_type) {
-            lineOptions.drive_type = payload.drive_type;
-          } else if (comp.component_role === 'area' && payload.area) {
-            lineOptions.area = payload.area;
-          } else if (comp.component_role === 'position' && payload.position) {
-            lineOptions.position = payload.position;
-          }
-          
-          // Copiar otros campos del payload directamente
-          Object.keys(payload).forEach(key => {
-            if (!lineOptions[key]) {
-              lineOptions[key] = payload[key];
-            }
+        data.forEach((line: any) => {
+          optionsByLineId.set(line.id, {
+            area: line.area ?? undefined,
+            position: line.position ?? undefined,
+            drive_type: line.drive_type ?? undefined,
           });
-          
-          optionsByLineId.set(comp.quote_line_id, lineOptions);
         });
 
-        // 4.6. Obtener ConfiguredProducts para líneas que tienen configured_product_id en metadata
+        // CatalogItems solo para catalog_item_id de cada línea (fabric/roll)
+        const catalogItemIdsFromLines = [...new Set(data.map((l: any) => l.catalog_item_id).filter(Boolean))];
+        let catalogItemsMap = new Map<string, any>();
+        if (catalogItemIdsFromLines.length > 0) {
+          const { data: catalogItemsData } = await supabase
+            .from('CatalogItems')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, metadata')
+            .in('id', catalogItemIdsFromLines)
+            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
+            .eq('is_active', true);
+          if (catalogItemsData) {
+            catalogItemsMap = new Map(catalogItemsData.map((item: any) => [item.id, item]));
+          }
+        }
+
+        // Fabric: una entrada por línea que tenga catalog_item_id (roll)
+        data.forEach((line: any) => {
+          if (line.catalog_item_id) {
+            const lineComponents = componentsByLineId.get(line.id);
+            if (lineComponents) {
+              lineComponents.fabric.push({
+                quote_line_id: line.id,
+                catalog_item_id: line.catalog_item_id,
+                component_role: 'fabric',
+                kind: 'selection',
+                CatalogItems: catalogItemsMap.get(line.catalog_item_id) || null,
+              });
+            }
+          }
+        });
+
+        // 4.6. ✅ SNAPSHOT SOURCE OF TRUTH: Obtener ConfiguredProducts con bom_preview_snapshot
+        // Usar configured_product_id directamente de QuoteLine (no de metadata)
         const configuredProductIds = new Set<string>();
         data.forEach((line: any) => {
-          if (line.metadata?.configured_product_id) {
-            configuredProductIds.add(line.metadata.configured_product_id);
+          // ✅ Priorizar configured_product_id directo, fallback a metadata
+          const cpId = line.configured_product_id || line.metadata?.configured_product_id;
+          if (cpId) {
+            configuredProductIds.add(cpId);
           }
         });
 
-        let configuredProductsMap = new Map<string, { roll_plus_bom_total: number }>();
+        interface ConfiguredProductData {
+          roll_plus_bom_total: number;
+          total_msrp: number;
+          bom_preview_snapshot: any;
+        }
+        let configuredProductsMap = new Map<string, ConfiguredProductData>();
         if (configuredProductIds.size > 0) {
           const { data: cpData } = await supabase
             .from('ConfiguredProducts')
-            .select('id, roll_plus_bom_total')
+            .select('id, roll_plus_bom_total, total_msrp, bom_preview_snapshot')
             .in('id', Array.from(configuredProductIds))
             .eq('organization_id', activeOrganizationId)
             .or('deleted.is.false,deleted.is.null');
 
           if (cpData) {
             configuredProductsMap = new Map(
-              cpData.map((cp: any) => [cp.id, { roll_plus_bom_total: cp.roll_plus_bom_total || 0 }])
+              cpData.map((cp: any) => [cp.id, {
+                roll_plus_bom_total: cp.roll_plus_bom_total || 0,
+                total_msrp: cp.total_msrp || 0,
+                bom_preview_snapshot: cp.bom_preview_snapshot || null,
+              }])
             );
           }
         }
@@ -562,12 +530,41 @@ export function useQuoteLines(quoteId: string | null) {
           const fabricItem = fabric?.CatalogItems || null;
           const options = optionsByLineId.get(line.id) || {};
           
-          // ✅ SNAPSHOT: QuoteLines es snapshot congelado, siempre usar valores de QuoteLines
-          // NO recalcular desde ConfiguredProducts (que es vivo y puede cambiar)
+          // ✅ SNAPSHOT SOURCE OF TRUTH: Prioridad para precios:
+          // 1. bom_preview_snapshot.totals.total_msrp (ConfiguredProduct snapshot)
+          // 2. QuoteLines.msrp (snapshot guardado)
+          // 3. Suma de snapshots individuales (fallback)
+          const cpId = line.configured_product_id || line.metadata?.configured_product_id;
+          const configuredProduct = cpId ? configuredProductsMap.get(cpId) : null;
+          const snapshot = configuredProduct?.bom_preview_snapshot;
+          const snapshotTotals = snapshot?.version === '1' ? snapshot?.totals : null;
+          
+          // ✅ MSRP: prioridad snapshot → ConfiguredProduct → QuoteLine → snapshots
+          let finalMsrp = line.msrp || 0;
+          if (snapshotTotals?.total_msrp && snapshotTotals.total_msrp > 0) {
+            finalMsrp = snapshotTotals.total_msrp;
+          } else if (snapshotTotals && (finalMsrp === 0 || !finalMsrp)) {
+            // Snapshot existe pero total_msrp es 0 o no persistido: calcular desde totals (igual que el breakdown)
+            const fromTotals =
+              (Number(snapshotTotals.roll_msrp_total) || 0) +
+              (Number(snapshotTotals.bom_total) || 0) +
+              (Number(snapshotTotals.labor_amount) || 0) +
+              (Number(snapshotTotals.accessories_total) || 0);
+            if (fromTotals > 0) finalMsrp = fromTotals;
+          }
+          if ((!finalMsrp || finalMsrp === 0) && configuredProduct?.total_msrp && configuredProduct.total_msrp > 0) {
+            finalMsrp = configuredProduct.total_msrp;
+          } else if ((!finalMsrp || finalMsrp === 0) && configuredProduct?.roll_plus_bom_total && configuredProduct.roll_plus_bom_total > 0) {
+            finalMsrp = configuredProduct.roll_plus_bom_total;
+          }
+          if (!finalMsrp || finalMsrp === 0) {
+            finalMsrp = (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
+          }
+          
           const enriched = {
             ...line,
-            // Usar snapshots de QuoteLines (roll_msrp_snapshot + bom_msrp_snapshot) o msrp total
-            msrp: line.msrp || ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0)),
+            // ✅ MSRP desde snapshot (fuente de verdad)
+            msrp: finalMsrp,
             // Usar snapshots de costos si están disponibles
             total_cost: line.total_cost || ((line.roll_cost_snapshot || 0) + (line.bom_cost_snapshot || 0)),
             // Datos de QuoteLines (si existen)
@@ -579,9 +576,28 @@ export function useQuoteLines(quoteId: string | null) {
             collection_name: line.collection_name || fabricItem?.collection_name || null,
             variant_name: line.variant_name || fabricItem?.variant_name || null,
             Accessories: components.accessories,
-            CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null
+            CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null,
+            // ✅ NEW: Incluir datos del ConfiguredProduct para debug/UI
+            ConfiguredProduct: configuredProduct || null,
+            bom_preview_snapshot: snapshot || null,
           };
 
+        // ✅ DEBUG: Log snapshot source para verificar prioridad de precios
+        if (import.meta.env.DEV) {
+          console.log('[useQuoteLines] Pricing source:', {
+            id: line.id,
+            configured_product_id: cpId,
+            hasConfiguredProduct: !!configuredProduct,
+            snapshotVersion: snapshot?.version,
+            snapshotTotalMsrp: snapshotTotals?.total_msrp,
+            cpTotalMsrp: configuredProduct?.total_msrp,
+            lineMsrp: line.msrp,
+            lineRollSnapshot: line.roll_msrp_snapshot,
+            lineBomSnapshot: line.bom_msrp_snapshot,
+            finalMsrp: finalMsrp,
+          });
+        }
+        
         // ✅ OPTIMIZED: Solo log en DEV si hay menos de 10 líneas para evitar spam
         if (import.meta.env.DEV && data.length <= 10) {
           console.log('[useQuoteLines] Enriched line:', {

@@ -13,7 +13,7 @@
  * - El matching de template se hace AL FINAL con matchBOMTemplate()
  */
 
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
@@ -21,6 +21,8 @@ import { useBOMTemplateQuestions } from '../../../hooks/useBOMTemplateQuestions'
 import { useBOMTemplateOptionsSimple, RoleOption } from '../../../hooks/useBOMTemplateOptionsSimple';
 import { Image as ImageIcon, X } from 'lucide-react';
 import { supabase } from '../../../lib/supabase/client';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { useUIStore } from '../../../stores/ui-store';
 
 interface OperatingSystemStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -33,15 +35,17 @@ export default function OperatingSystemStep({
   config,
   onUpdate,
 }: OperatingSystemStepProps) {
+  const { activeOrganizationId } = useOrganizationContext();
   const bomTemplateId = (config as any).bom_template_id;
   const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
   
   // ✅ Templates filtrados desde HardwareStep
   const hardwareFilteredTemplates = (config as any)._hardware_filtered_templates as string[] | undefined;
   
-  // ✅ NUEVO: Guardar los templates BASE del Hardware step (antes de cualquier selección de Motor/Drive)
-  // Esto evita que al seleccionar Motor, los templates de Manual desaparezcan
-  const baseTemplatesRef = useRef<string[] | null>(null);
+  // ✅ Templates BASE del Hardware step (persistidos en config para sobrevivir al volver/desmontar)
+  // Si no hay selección de operación, _hardware_filtered_templates ES la base.
+  // Si ya hay selección, la base se guardó en _operating_system_base_templates al entrar sin selección.
+  const operatingSystemBaseFromConfig = (config as any)._operating_system_base_templates as string[] | undefined;
   
   // Get BOM template questions to determine what to show
   const questions = useBOMTemplateQuestions(bomTemplateId);
@@ -56,36 +60,28 @@ export default function OperatingSystemStep({
   const tubeItemId = (config as any).tube_item_id || undefined;
   
   // ✅ CRÍTICO: Determinar si ya hay CUALQUIER selección de operación
-  // Incluir operationType para que cuando el usuario clickea Manual/Motor,
-  // los templates base NO se sobreescriban
   const hasAnyOperationSelection = !!(operationType || motorItemId || driveItemId);
   
-  // ✅ Capturar templates base en MONTAJE INICIAL o cuando no hay selección
-  // Si ya hay selección pero no tenemos base capturado, intentar recuperar de HardwareStep
+  // ✅ Persistir en config la base del Operating System (solo cuando no hay selección)
+  // Así al volver al step o cambiar Manual↔Motor seguimos teniendo la base correcta
   useEffect(() => {
-    // Capturar solo si NO tenemos base capturado O si no hay selección
-    if (hardwareFilteredTemplates && hardwareFilteredTemplates.length > 0) {
-      if (!hasAnyOperationSelection) {
-        // Sin selección: capturar como templates puros del Hardware step
-        baseTemplatesRef.current = [...hardwareFilteredTemplates];
-        if (import.meta.env.DEV) {
-          console.debug('[OperatingSystemStep] Captured base templates (no selection):', hardwareFilteredTemplates.length);
-        }
-      } else if (!baseTemplatesRef.current || baseTemplatesRef.current.length === 0) {
-        // Con selección pero sin base: usar los actuales como fallback inicial
-        // Esto puede pasar al volver a este step después de navegar
-        baseTemplatesRef.current = [...hardwareFilteredTemplates];
-        if (import.meta.env.DEV) {
-          console.debug('[OperatingSystemStep] Captured base templates (fallback on mount):', hardwareFilteredTemplates.length);
-        }
+    if (!hardwareFilteredTemplates || hardwareFilteredTemplates.length === 0) return;
+    if (hasAnyOperationSelection) return;
+    const currentBase = operatingSystemBaseFromConfig;
+    const newBase = [...new Set(hardwareFilteredTemplates)].sort();
+    const same = currentBase && currentBase.length === newBase.length
+      && newBase.every((id, i) => id === currentBase[i]);
+    if (!same) {
+      onUpdate({ _operating_system_base_templates: newBase } as any);
+      if (import.meta.env.DEV) {
+        console.debug('[OperatingSystemStep] Saved _operating_system_base_templates:', newBase.length);
       }
     }
   }, [hardwareFilteredTemplates, hasAnyOperationSelection]);
   
-  // ✅ Los templates base para calcular opciones de Manual y Motor
-  // Usa los capturados, o si no hay, usa los actuales
-  const baseTemplatesForOptions = baseTemplatesRef.current && baseTemplatesRef.current.length > 0
-    ? baseTemplatesRef.current
+  // ✅ Base para opciones Manual/Motor: la guardada en config (entrada del step) o la actual
+  const baseTemplatesForOptions = (operatingSystemBaseFromConfig && operatingSystemBaseFromConfig.length > 0)
+    ? operatingSystemBaseFromConfig
     : hardwareFilteredTemplates;
 
   const uniq = (ids: string[] | null | undefined): string[] | null => {
@@ -101,8 +97,93 @@ export default function OperatingSystemStep({
     return a.filter(t => s.has(t)).length;
   };
 
+  const notifyError = (message: string) => {
+    useUIStore.getState().addNotification({
+      type: 'error',
+      title: 'BOM Selection',
+      message,
+    });
+  };
+
+  // ✅ ConfiguredProduct-based flow: selections are local until "Add to Quote".
+  // Only require an organization context (quote_line_id is not needed anymore).
+  const selectionDisabled = !activeOrganizationId;
+
+  const ensurePersistable = (): boolean => {
+    if (!activeOrganizationId) {
+      notifyError('Organization not ready. Please select an organization before configuring products.');
+      return false;
+    }
+    return true;
+  };
+
+  const persistSelection = async (componentRole: string, catalogItemId: string) => {
+    if (!ensurePersistable()) return false;
+    // No-op (ConfiguredProduct snapshot will be created at completion).
+    return true;
+  };
+
+  const removeSelection = async (componentRole: string) => {
+    if (!ensurePersistable()) return false;
+    // No-op (ConfiguredProduct snapshot will be created at completion).
+    return true;
+  };
+
   // ✅ FILTRADO PROGRESIVO: Usar templates filtrados de Hardware step
   const canLoadOptions = !!productTypeId;
+
+  // ✅ State para templates de fallback cuando hardwareFilteredTemplates está vacío
+  const [loadedFallbackTemplates, setLoadedFallbackTemplates] = useState<string[] | null>(null);
+
+  // ✅ Cargar templates de fallback cuando hardwareFilteredTemplates está vacío
+  useEffect(() => {
+    if (!canLoadOptions || !activeOrganizationId || !productTypeId) {
+      setLoadedFallbackTemplates(null);
+      return;
+    }
+
+    // Solo cargar fallback si no hay templates filtrados del Hardware step
+    if (hardwareFilteredTemplates && hardwareFilteredTemplates.length > 0) {
+      setLoadedFallbackTemplates(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadFallback = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('BOMTemplates')
+          .select('id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('product_type_id', productTypeId)
+          .eq('is_active', true)
+          .eq('archived', false);
+
+        if (error) throw error;
+
+        if (!cancelled) {
+          const templateIds = (data || []).map((t: { id: string }) => t.id);
+          setLoadedFallbackTemplates(templateIds.length > 0 ? templateIds : null);
+          if (import.meta.env.DEV) {
+            console.debug('[OperatingSystemStep] Loaded fallback templates:', templateIds.length);
+          }
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          console.warn('[OperatingSystemStep] Failed to load fallback templates', e?.message || e);
+          setLoadedFallbackTemplates(null);
+        }
+      }
+    };
+
+    loadFallback();
+    return () => {
+      cancelled = true;
+    };
+  }, [canLoadOptions, activeOrganizationId, productTypeId, hardwareFilteredTemplates]);
+
+  // ✅ effectiveBaseTemplates: usa baseTemplatesForOptions o loadedFallbackTemplates como fallback
+  const effectiveBaseTemplates = useMemo(() => baseTemplatesForOptions || loadedFallbackTemplates || null, [baseTemplatesForOptions, loadedFallbackTemplates]);
 
   // ✅ NUEVO: Separar templates por operación para evitar opciones “fantasma”
   // Regla: motor/tube NO filtran por color, PERO manual vs motor debe separar templates:
@@ -117,9 +198,8 @@ export default function OperatingSystemStep({
       setMotorTemplateIds(null);
       return;
     }
-    // ✅ Usar baseTemplatesForOptions en lugar de hardwareFilteredTemplates
-    // Esto asegura que aunque Motor esté seleccionado, Manual todavía muestre sus opciones
-    if (!baseTemplatesForOptions || baseTemplatesForOptions.length === 0) {
+    // ✅ MEJORADO: Usar effectiveBaseTemplates
+    if (!effectiveBaseTemplates || effectiveBaseTemplates.length === 0) {
       setManualTemplateIds(null);
       setMotorTemplateIds(null);
       return;
@@ -131,7 +211,7 @@ export default function OperatingSystemStep({
         const { data, error } = await supabase
           .from('BOMComponents')
           .select('bom_template_id, component_role')
-          .in('bom_template_id', baseTemplatesForOptions)
+          .in('bom_template_id', effectiveBaseTemplates)
           .is('parent_component_id', null)
           .eq('deleted', false)
           .eq('archived', false);
@@ -150,8 +230,8 @@ export default function OperatingSystemStep({
 
         // ✅ SIMPLIFICADO: Templates que tienen el rol correspondiente
         // NO excluir templates que tienen ambos roles - dejar que el matching final decida
-        const manualIds = baseTemplatesForOptions.filter(tid => hasDrive.has(tid));
-        const motorIds = baseTemplatesForOptions.filter(tid => hasMotor.has(tid));
+        const manualIds = effectiveBaseTemplates.filter((tid: string) => hasDrive.has(tid));
+        const motorIds = effectiveBaseTemplates.filter((tid: string) => hasMotor.has(tid));
         
         if (import.meta.env.DEV) {
           console.debug('[OperatingSystemStep] Role presence:', {
@@ -167,7 +247,7 @@ export default function OperatingSystemStep({
           setMotorTemplateIds(motorIds);
           if (import.meta.env.DEV) {
             console.debug('[OperatingSystemStep] operation template split', {
-              base: baseTemplatesForOptions.length,
+              effectiveBase: effectiveBaseTemplates.length,
               manualIds: manualIds.length,
               motorIds: motorIds.length,
             });
@@ -189,17 +269,17 @@ export default function OperatingSystemStep({
     return () => {
       cancelled = true;
     };
-  }, [canLoadOptions, baseTemplatesForOptions?.join(',')]); // ✅ Dependencia correcta
+  }, [canLoadOptions, effectiveBaseTemplates?.join(',')]); // ✅ Dependencia correcta
 
   const templatesForManual = useMemo(() => {
-    // ✅ si split no aplica, usar base templates (no los filtrados actuales)
-    return manualTemplateIds && manualTemplateIds.length > 0 ? manualTemplateIds : baseTemplatesForOptions;
-  }, [manualTemplateIds, baseTemplatesForOptions]);
+    // ✅ si split no aplica, usar effective base (incluye fallback)
+    return manualTemplateIds && manualTemplateIds.length > 0 ? manualTemplateIds : effectiveBaseTemplates;
+  }, [manualTemplateIds, effectiveBaseTemplates]);
 
   const templatesForMotor = useMemo(() => {
-    // ✅ si split no aplica, usar base templates (no los filtrados actuales)
-    return motorTemplateIds && motorTemplateIds.length > 0 ? motorTemplateIds : baseTemplatesForOptions;
-  }, [motorTemplateIds, baseTemplatesForOptions]);
+    // ✅ si split no aplica, usar effective base (incluye fallback)
+    return motorTemplateIds && motorTemplateIds.length > 0 ? motorTemplateIds : effectiveBaseTemplates;
+  }, [motorTemplateIds, effectiveBaseTemplates]);
   
   // ✅ Motor: desde templates filtrados (motor NO depende de color)
   const { options: motorOptions, loading: loadingMotor, error: motorError } = useBOMTemplateOptionsSimple(
@@ -222,18 +302,18 @@ export default function OperatingSystemStep({
   const selectedDrive = driveOptions.find(opt => opt.id === driveItemId);
   
   const templatesAfterOperation = useMemo(() => {
-    // ✅ Usar baseTemplatesForOptions como fallback cuando no hay operationType
+    // ✅ Usar effectiveBaseTemplates como fallback cuando no hay operationType
     const base =
       operationType === 'motor'
         ? (templatesForMotor || null)
         : operationType === 'manual'
         ? (templatesForManual || null)
-        : (baseTemplatesForOptions || null);
+        : (effectiveBaseTemplates || null);
     
     if (operationType === 'motor' && selectedMotor?.templateIds) {
       if (base) {
         const set = new Set(selectedMotor.templateIds);
-        return base.filter(tid => set.has(tid));
+        return base.filter((tid: string) => set.has(tid));
       }
       return selectedMotor.templateIds;
     }
@@ -241,13 +321,13 @@ export default function OperatingSystemStep({
     if (operationType === 'manual' && selectedDrive?.templateIds) {
       if (base) {
         const set = new Set(selectedDrive.templateIds);
-        return base.filter(tid => set.has(tid));
+        return base.filter((tid: string) => set.has(tid));
       }
       return selectedDrive.templateIds;
     }
     
     return base;
-  }, [operationType, selectedMotor, selectedDrive, baseTemplatesForOptions, templatesForMotor, templatesForManual]);
+  }, [operationType, selectedMotor, selectedDrive, effectiveBaseTemplates, templatesForMotor, templatesForManual]);
   
   // ✅ Tube: desde templates filtrados por motor/drive (tube NO depende de color)
   const { options: tubeOptions, loading: loadingTube, error: tubeError } = useBOMTemplateOptionsSimple(
@@ -279,12 +359,12 @@ export default function OperatingSystemStep({
       const deduped = [...new Set(finalFilteredTemplates)];
       const newValue = JSON.stringify([...deduped].sort());
       const oldValue = currentSaved ? JSON.stringify(currentSaved.sort()) : '';
-      
+
       if (newValue !== oldValue) {
         onUpdate({
           _hardware_filtered_templates: deduped,
         } as any);
-        
+
         if (import.meta.env.DEV) {
           console.debug('[OperatingSystemStep] Updated filtered templates:', deduped.length);
         }
@@ -339,7 +419,8 @@ export default function OperatingSystemStep({
     }
   };
 
-  const handleOperatingSystemChange = (value: 'manual' | 'motor') => {
+  const handleOperatingSystemChange = async (value: 'manual' | 'motor') => {
+    if (!ensurePersistable()) return;
     // ✅ REMOVIDO: guardrail que bloqueaba el cambio
     // El usuario debe poder cambiar libremente entre Manual y Motor
     // Si no hay opciones, verá el mensaje "No options available"
@@ -352,18 +433,24 @@ export default function OperatingSystemStep({
     
     // Clear selections when switching
     if (value === 'motor') {
+      const okDrive = await removeSelection('drive');
+      const okTube = await removeSelection('tube');
+      if (!okDrive || !okTube) return;
       updates.manual_drive = undefined;
       updates.drive_item_id = undefined;
       updates.drive_sku = null;
-      // ✅ Resetear a templates de Motor (usando baseTemplatesForOptions como origen)
-      updates._hardware_filtered_templates = uniq(templatesForMotor) ?? uniq(baseTemplatesForOptions) ?? null;
+      // ✅ Resetear a templates de Motor (usando effectiveBaseTemplates como origen)
+      updates._hardware_filtered_templates = uniq(templatesForMotor) ?? uniq(effectiveBaseTemplates) ?? null;
     } else {
+      const okMotor = await removeSelection('motor');
+      const okTube = await removeSelection('tube');
+      if (!okMotor || !okTube) return;
       updates.motor_family = undefined;
       updates.motor_item_id = undefined;
       updates.motor_sku = null;
       updates.remote_control = undefined;
-      // ✅ Resetear a templates de Manual (usando baseTemplatesForOptions como origen)
-      updates._hardware_filtered_templates = uniq(templatesForManual) ?? uniq(baseTemplatesForOptions) ?? null;
+      // ✅ Resetear a templates de Manual (usando effectiveBaseTemplates como origen)
+      updates._hardware_filtered_templates = uniq(templatesForManual) ?? uniq(effectiveBaseTemplates) ?? null;
     }
     
     // Clear tube when switching operation type
@@ -375,22 +462,28 @@ export default function OperatingSystemStep({
       console.debug('[OperatingSystemStep] Switching to:', value, {
         templatesForMotor: templatesForMotor?.length,
         templatesForManual: templatesForManual?.length,
-        baseTemplatesForOptions: baseTemplatesForOptions?.length,
+        effectiveBaseTemplates: effectiveBaseTemplates?.length,
       });
     }
     
     onUpdate(updates);
   };
 
-  const handleMotorSelect = (item: RoleOption) => {
+  const handleMotorSelect = async (item: RoleOption) => {
     const isVirtual = String(item.id).startsWith('sku:');
+    if (isVirtual) {
+      notifyError('Invalid motor selection (virtual SKU).');
+      return;
+    }
+    const ok = await persistSelection('motor', String(item.id));
+    if (!ok) return;
     
     // ✅ Calcular templates filtrados usando templatesForMotor
     let newFilteredTemplates = item.templateIds || [];
-    const motorBase = templatesForMotor || baseTemplatesForOptions;
+    const motorBase = templatesForMotor || effectiveBaseTemplates;
     if (motorBase && motorBase.length > 0 && newFilteredTemplates.length > 0) {
       const set = new Set(newFilteredTemplates);
-      newFilteredTemplates = motorBase.filter(tid => set.has(tid));
+      newFilteredTemplates = motorBase.filter((tid: string) => set.has(tid));
     }
     newFilteredTemplates = uniq(newFilteredTemplates) || [];
     
@@ -412,20 +505,26 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
-      // ✅ Guardar templates filtrados
-      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForMotor) ?? uniq(baseTemplatesForOptions) ?? null,
+      // ✅ Guardar templates filtrados con fallback a effectiveBaseTemplates
+      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForMotor) ?? uniq(effectiveBaseTemplates) ?? null,
     } as any);
   };
 
-  const handleDriveSelect = (item: RoleOption) => {
+  const handleDriveSelect = async (item: RoleOption) => {
     const isVirtual = String(item.id).startsWith('sku:');
+    if (isVirtual) {
+      notifyError('Invalid drive selection (virtual SKU).');
+      return;
+    }
+    const ok = await persistSelection('drive', String(item.id));
+    if (!ok) return;
     
     // ✅ Calcular templates filtrados usando templatesForManual
     let newFilteredTemplates = item.templateIds || [];
-    const manualBase = templatesForManual || baseTemplatesForOptions;
+    const manualBase = templatesForManual || effectiveBaseTemplates;
     if (manualBase && manualBase.length > 0 && newFilteredTemplates.length > 0) {
       const set = new Set(newFilteredTemplates);
-      newFilteredTemplates = manualBase.filter(tid => set.has(tid));
+      newFilteredTemplates = manualBase.filter((tid: string) => set.has(tid));
     }
     newFilteredTemplates = uniq(newFilteredTemplates) || [];
     
@@ -448,13 +547,19 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
-      // ✅ Guardar templates filtrados
-      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForManual) ?? uniq(baseTemplatesForOptions) ?? null,
+      // ✅ Guardar templates filtrados con fallback a effectiveBaseTemplates
+      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForManual) ?? uniq(effectiveBaseTemplates) ?? null,
     } as any);
   };
 
-  const handleTubeSelect = (item: RoleOption) => {
+  const handleTubeSelect = async (item: RoleOption) => {
     const isVirtual = String(item.id).startsWith('sku:');
+    if (isVirtual) {
+      notifyError('Invalid tube selection (virtual SKU).');
+      return;
+    }
+    const ok = await persistSelection('tube', String(item.id));
+    if (!ok) return;
     
     // ✅ Calcular templates finales después de seleccionar tube
     let finalTemplates = templatesAfterOperation;
@@ -476,7 +581,13 @@ export default function OperatingSystemStep({
     } as any);
   };
 
-  const clearOperationType = () => {
+  const clearOperationType = async () => {
+    if (!ensurePersistable()) return;
+    const okMotor = await removeSelection('motor');
+    const okDrive = await removeSelection('drive');
+    const okTube = await removeSelection('tube');
+    if (!okMotor || !okDrive || !okTube) return;
+    
     onUpdate({
       operation_type: undefined,
       drive_type: undefined,
@@ -491,8 +602,8 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
-      // ✅ Usar baseTemplatesForOptions para restaurar al estado original
-      _hardware_filtered_templates: uniq(baseTemplatesForOptions) ?? null,
+      // ✅ Usar effectiveBaseTemplates para restaurar al estado original
+      _hardware_filtered_templates: uniq(effectiveBaseTemplates) ?? null,
     } as any);
   };
 
@@ -504,6 +615,14 @@ export default function OperatingSystemStep({
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-8">
+        {selectionDisabled && (
+          <div className="bg-amber-50 border border-amber-200 rounded p-3">
+            <p className="text-xs text-amber-800">
+              Save the quote first to enable BOM selections.
+            </p>
+          </div>
+        )}
+        <div className={selectionDisabled ? 'pointer-events-none opacity-50' : ''}>
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Operating System</h3>
           <p className="text-sm text-gray-600">
@@ -529,20 +648,24 @@ export default function OperatingSystemStep({
                 return (
                   <div
                     key={option.value}
-                    onClick={() => handleOperatingSystemChange(option.value)}
+                    onClick={async () => {
+                      if (selectionDisabled) return;
+                      await handleOperatingSystemChange(option.value);
+                    }}
                     className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                       isSelected
                         ? 'border-2 border-primary shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                    }`}
+                    } ${selectionDisabled ? 'opacity-50' : ''}`}
                   >
                     {/* X to deselect */}
                     {isSelected && (
                       <button
                         type="button"
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
-                          clearOperationType();
+                          if (selectionDisabled) return;
+                          await clearOperationType();
                         }}
                         className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
                         title="Remove selection"
@@ -596,19 +719,26 @@ export default function OperatingSystemStep({
                   return (
                     <div
                       key={item.id}
-                      onClick={() => handleMotorSelect(item)}
+                      onClick={async () => {
+                        if (selectionDisabled) return;
+                        await handleMotorSelect(item);
+                      }}
                       className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-2 border-primary shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                      }`}
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
                       {/* X to deselect */}
                       {isSelected && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
+                            if (selectionDisabled) return;
+                            const okMotor = await removeSelection('motor');
+                            const okTube = await removeSelection('tube');
+                            if (!okMotor || !okTube) return;
                             onUpdate({
                               motor_item_id: undefined,
                               motor_sku: null,
@@ -617,8 +747,8 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
-                              // ✅ Volver a templatesForMotor (no afecta opciones de Manual)
-                              _hardware_filtered_templates: uniq(templatesForMotor as any) ?? uniq(baseTemplatesForOptions) ?? null,
+                              // ✅ Volver a templatesForMotor (no afecta opciones de Manual) con fallback
+                              _hardware_filtered_templates: uniq(templatesForMotor as any) ?? uniq(effectiveBaseTemplates) ?? null,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
@@ -679,19 +809,26 @@ export default function OperatingSystemStep({
                   return (
                     <div
                       key={item.id}
-                      onClick={() => handleDriveSelect(item)}
+                      onClick={async () => {
+                        if (selectionDisabled) return;
+                        await handleDriveSelect(item);
+                      }}
                       className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-2 border-primary shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                      }`}
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
                       {/* X to deselect */}
                       {isSelected && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
+                            if (selectionDisabled) return;
+                            const okDrive = await removeSelection('drive');
+                            const okTube = await removeSelection('tube');
+                            if (!okDrive || !okTube) return;
                             onUpdate({
                               drive_item_id: undefined,
                               drive_sku: null,
@@ -699,8 +836,8 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
-                              // ✅ Volver a templatesForManual (no afecta opciones de Motor)
-                              _hardware_filtered_templates: uniq(templatesForManual as any) ?? uniq(baseTemplatesForOptions) ?? null,
+                              // ✅ Volver a templatesForManual (no afecta opciones de Motor) con fallback
+                              _hardware_filtered_templates: uniq(templatesForManual as any) ?? uniq(effectiveBaseTemplates) ?? null,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
@@ -761,36 +898,42 @@ export default function OperatingSystemStep({
                   return (
                     <div
                       key={item.id}
-                      onClick={() => handleTubeSelect(item)}
+                      onClick={async () => {
+                        if (selectionDisabled) return;
+                        await handleTubeSelect(item);
+                      }}
                       className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-2 border-primary shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                      }`}
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
                       {/* X to deselect */}
                       {isSelected && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
+                            if (selectionDisabled) return;
+                            const okTube = await removeSelection('tube');
+                            if (!okTube) return;
                             // ✅ Volver al estado antes de seleccionar tube
                             // templatesAfterOperation ya tiene en cuenta motor/drive seleccionado
                             const targetTemplates = operationType === 'motor'
                               ? (selectedMotor?.templateIds ? 
-                                  (templatesForMotor || []).filter(tid => new Set(selectedMotor.templateIds).has(tid)) 
+                                  (templatesForMotor || []).filter((tid: string) => new Set(selectedMotor.templateIds).has(tid)) 
                                   : templatesForMotor)
                               : operationType === 'manual'
                               ? (selectedDrive?.templateIds ?
-                                  (templatesForManual || []).filter(tid => new Set(selectedDrive.templateIds).has(tid))
+                                  (templatesForManual || []).filter((tid: string) => new Set(selectedDrive.templateIds).has(tid))
                                   : templatesForManual)
-                              : baseTemplatesForOptions;
+                              : effectiveBaseTemplates;
                             
                             onUpdate({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
-                              _hardware_filtered_templates: uniq(targetTemplates as any) ?? uniq(baseTemplatesForOptions) ?? null,
+                              _hardware_filtered_templates: uniq(targetTemplates as any) ?? uniq(effectiveBaseTemplates) ?? null,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
@@ -852,6 +995,7 @@ export default function OperatingSystemStep({
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

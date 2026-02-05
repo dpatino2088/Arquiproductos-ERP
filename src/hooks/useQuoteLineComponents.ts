@@ -39,9 +39,11 @@ export function useQuoteLineComponents(quoteLineId: string | null) {
           .order('created_at', { ascending: true });
 
         if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('Error fetching QuoteLineComponents:', queryError.message);
+          if (queryError.message?.includes('does not exist') || queryError.code === '42P01') {
+            setComponents([]);
+            return;
           }
+          if (import.meta.env.DEV) console.error('Error fetching QuoteLineComponents:', queryError.message);
           throw queryError;
         }
 

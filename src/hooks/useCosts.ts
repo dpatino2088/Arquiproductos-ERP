@@ -39,13 +39,23 @@ export function useQuoteLineCosts(quoteLineId: string | null) {
           .maybeSingle();
 
         if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('Error fetching QuoteLineCosts:', queryError.message);
+          if (queryError.code === '42P01' || (queryError.message || '').includes('does not exist')) {
+            // Tabla QuoteLineCosts eliminada; costos vienen de ConfiguredProduct/QuoteLines.
+            const { data: line } = await supabase
+              .from('QuoteLines')
+              .select('total_cost, roll_cost_snapshot, bom_cost_snapshot')
+              .eq('id', quoteLineId)
+              .maybeSingle();
+            const total = (line?.total_cost ?? (Number(line?.roll_cost_snapshot ?? 0) + Number(line?.bom_cost_snapshot ?? 0))) || null;
+            setCosts(total != null ? { id: quoteLineId, quote_line_id: quoteLineId, total_cost: total } as QuoteLineCosts : null);
+            setError(null);
+          } else {
+            if (import.meta.env.DEV) console.error('Error fetching QuoteLineCosts:', queryError.message);
+            throw queryError;
           }
-          throw queryError;
+        } else {
+          setCosts(data || null);
         }
-
-        setCosts(data || null);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading quote line costs';
         if (import.meta.env.DEV) {
@@ -95,13 +105,16 @@ export function useQuoteLineCostsByQuote(quoteId: string | null) {
           .order('created_at', { ascending: true });
 
         if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('Error fetching QuoteLineCosts by quote:', queryError.message);
+          if (queryError.code === '42P01' || (queryError.message || '').includes('does not exist')) {
+            setCosts([]);
+            setError(null);
+          } else {
+            if (import.meta.env.DEV) console.error('Error fetching QuoteLineCosts by quote:', queryError.message);
+            throw queryError;
           }
-          throw queryError;
+        } else {
+          setCosts(data || []);
         }
-
-        setCosts(data || []);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading quote line costs';
         if (import.meta.env.DEV) {

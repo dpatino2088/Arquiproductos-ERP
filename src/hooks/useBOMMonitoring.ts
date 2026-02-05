@@ -23,8 +23,8 @@ export interface BOMInstanceDataLine {
   parent_part_id: string | null;
   unit_cost_exw: number;
   total_cost_exw: number;
-  unit_msrp_sale_out: number;
-  total_msrp_sale_out: number;
+  unit_msrp: number;
+  total_msrp: number;
 }
 
 export interface BOMInstanceData {
@@ -35,7 +35,7 @@ export interface BOMInstanceData {
   bom_created_at: string;
   labor_cost: number;
   total_cost_with_labor: number;
-  total_msrp_sale_out_with_labor: number;
+  total_msrp_with_labor: number;
   // Lines data
   lines: BOMInstanceDataLine[];
   // Summary stats
@@ -46,7 +46,7 @@ export interface BOMInstanceData {
   assembly_child_lines: number;
   total_qty: number;
   total_cost_exw: number;
-  total_msrp_sale_out: number;
+  total_msrp: number;
 }
 
 export interface UseBOMMonitoringResult {
@@ -105,7 +105,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       // ✅ FIX: Order by generated_at DESC, then created_at DESC to get the most recent BOM
       const { data: bomInstances, error: bomError } = await supabase
         .from('vw_bom_instances_safe')
-        .select('id, organization_id, sales_order_line_id_safe, labor_cost, total_cost_with_labor, total_msrp_sale_out_with_labor, created_at, generated_at, bom_template_id')
+        .select('id, organization_id, sales_order_line_id_safe, labor_cost, total_cost_with_labor, total_msrp_with_labor, created_at, generated_at, bom_template_id')
         .in('sales_order_line_id_safe', saleOrderLineIds)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
@@ -165,7 +165,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       if (linesError) throw linesError;
 
       // Step 3: Build BOM Instance Data
-      type FlatRow = { bom_line_id: string; catalog_item_id: string; resolved_sku: string | null; part_role: string | null; qty: number; uom: string; category_code: string | null; source: string; parent_part_id: string | null; unit_cost_exw: number; total_cost_exw: number; unit_msrp_sale_out: number; total_msrp_sale_out: number; sales_order_id?: string | null };
+      type FlatRow = { bom_line_id: string; catalog_item_id: string; resolved_sku: string | null; part_role: string | null; qty: number; uom: string; category_code: string | null; source: string; parent_part_id: string | null; unit_cost_exw: number; total_cost_exw: number; unit_msrp: number; total_msrp: number; sales_order_id?: string | null };
       const lines: BOMInstanceDataLine[] = (bomLines || []).map((line: FlatRow) => ({
         bom_line_id: line.bom_line_id,
         catalog_item_id: line.catalog_item_id,
@@ -178,8 +178,8 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         parent_part_id: line.parent_part_id,
         unit_cost_exw: Number(line.unit_cost_exw) || 0,
         total_cost_exw: Number(line.total_cost_exw) || 0,
-        unit_msrp_sale_out: Number(line.unit_msrp_sale_out) || 0,
-        total_msrp_sale_out: Number(line.total_msrp_sale_out) || 0,
+        unit_msrp: Number(line.unit_msrp) || 0,
+        total_msrp: Number(line.total_msrp) || 0,
       }));
 
       // Calculate summary stats from lines
@@ -189,7 +189,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       const assemblyChildLines = lines.filter((l: BOMInstanceDataLine) => l.source === 'assembly_child').length;
       const totalQty = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.qty, 0);
       const totalCostExw = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.total_cost_exw, 0);
-      const totalMsrpSaleOut = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.total_msrp_sale_out, 0);
+      const totalMsrpSaleOut = lines.reduce((sum: number, l: BOMInstanceDataLine) => sum + l.total_msrp, 0);
 
       if (!bomInstances || bomInstances.length === 0) {
         throw new Error('No BOM instances found');
@@ -205,7 +205,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         bom_created_at: firstBomInstance.created_at,
         labor_cost: Number(firstBomInstance.labor_cost) || 0,
         total_cost_with_labor: Number(firstBomInstance.total_cost_with_labor) || 0,
-        total_msrp_sale_out_with_labor: Number(firstBomInstance.total_msrp_sale_out_with_labor) || 0,
+        total_msrp_with_labor: Number(firstBomInstance.total_msrp_with_labor) || 0,
         lines,
         total_lines: lines.length,
         unique_items: uniqueItems,
@@ -214,7 +214,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
         assembly_child_lines: assemblyChildLines,
         total_qty: totalQty,
         total_cost_exw: totalCostExw,
-        total_msrp_sale_out: totalMsrpSaleOut,
+        total_msrp: totalMsrpSaleOut,
       };
 
       setBomInstance(bomInstanceData);

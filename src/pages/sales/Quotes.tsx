@@ -115,7 +115,8 @@ export default function Quotes() {
           ? supabase.from('DirectoryContacts').select('id, first_name, last_name').in('id', contactIds)
           : Promise.resolve({ data: [] }),
         // Quote Lines (para calcular totales)
-        supabase.from('QuoteLines').select('quote_id, line_total').in('quote_id', quoteIds)
+        // v7 schema does NOT have line_total; use msrp snapshot (line total) instead.
+        supabase.from('QuoteLines').select('quote_id, msrp, roll_msrp_snapshot, bom_msrp_snapshot').in('quote_id', quoteIds)
       ]);
 
       // 4. Crear mapas para búsqueda rápida
@@ -131,9 +132,10 @@ export default function Quotes() {
       });
 
       const totalsMap = new Map<string, number>();
-      linesRes.data?.forEach((l: { quote_id: string; line_total?: number }) => {
+      linesRes.data?.forEach((l: { quote_id: string; msrp?: number; roll_msrp_snapshot?: number; bom_msrp_snapshot?: number }) => {
         const current = totalsMap.get(l.quote_id) || 0;
-        totalsMap.set(l.quote_id, current + (l.line_total || 0));
+        const lineTotal = Number(l.msrp ?? ((l.roll_msrp_snapshot || 0) + (l.bom_msrp_snapshot || 0)));
+        totalsMap.set(l.quote_id, current + lineTotal);
       });
 
       // 5. Enriquecer quotes

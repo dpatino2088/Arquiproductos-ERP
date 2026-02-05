@@ -25,6 +25,9 @@ import Label from '../../../components/ui/Label';
 import { useBOMTemplateOptionsSimple, filterTemplatesByComponent, RoleOption } from '../../../hooks/useBOMTemplateOptionsSimple';
 import { Image as ImageIcon, X } from 'lucide-react';
 import { RoleSelection, toRoleSelection } from '../../../lib/bom/selection';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { useUIStore } from '../../../stores/ui-store';
+import { supabase } from '../../../lib/supabase/client';
 
 interface HardwareStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -45,6 +48,7 @@ const HARDWARE_COLOR_OPTIONS = [
 ];
 
 export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: HardwareStepProps) {
+  const { activeOrganizationId } = useOrganizationContext();
   const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
   
   const productType = (config as any).productType || (config as any).product_type || '';
@@ -54,6 +58,43 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   const showHardwareColor = true;
   const showCassette = true;
   const showSideChannel = isRollerShade;
+  
+  // ✅ Helper: Cargar templates base para un color específico
+  const loadTemplatesForColor = async (color: string): Promise<string[]> => {
+    if (!activeOrganizationId || !productTypeId) return [];
+    
+    const normalizedColor = color.trim().charAt(0).toUpperCase() + color.trim().slice(1).toLowerCase();
+    
+    const { data: templates, error } = await supabase
+      .from('BOMTemplates')
+      .select('id')
+      .eq('organization_id', activeOrganizationId)
+      .eq('product_type_id', productTypeId)
+      .eq('hardware_color', normalizedColor)
+      .eq('is_active', true)
+      .eq('archived', false);
+    
+    if (error) {
+      console.error('[HardwareStep] Error loading templates for color:', error);
+      return [];
+    }
+    
+    if (!templates || templates.length === 0) {
+      // Fallback: templates sin color (NULL)
+      const { data: nullTemplates } = await supabase
+        .from('BOMTemplates')
+        .select('id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('product_type_id', productTypeId)
+        .is('hardware_color', null)
+        .eq('is_active', true)
+        .eq('archived', false);
+      
+      return (nullTemplates || []).map((t: { id: string }) => t.id);
+    }
+    
+    return templates.map((t: { id: string }) => t.id);
+  };
   
   // Get current selections (CAPITALIZED)
   const currentHardwareColor = (config as any).hardwareColor || (config as any).hardware_color || (config as any).operatingSystemColor || null;
@@ -80,9 +121,54 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     const u = Array.from(new Set(ids.filter(Boolean)));
     return u.length > 0 ? u : null;
   };
-  
+
+  /** Returns template IDs that do NOT have the given role (in-memory: exclude IDs present in templatesWithRole set). */
+  const filterTemplatesWithoutRole = (
+    candidateIds: string[] | null | undefined,
+    templatesWithRole: Set<string>
+  ): string[] | null => {
+    if (!candidateIds || candidateIds.length === 0) return null;
+    if (templatesWithRole.size === 0) return [...candidateIds];
+    const out = candidateIds.filter(tid => !templatesWithRole.has(tid));
+    return out.length > 0 ? out : null;
+  };
+
+  const notifyError = (message: string) => {
+    useUIStore.getState().addNotification({
+      type: 'error',
+      title: 'BOM Selection',
+      message,
+    });
+  };
+
+  // ✅ ConfiguredProduct-based flow: selections are local until "Add to Quote".
+  // Only require an organization context (quote_line_id is not needed anymore).
+  const selectionDisabled = !activeOrganizationId;
+
+  const ensurePersistable = (): boolean => {
+    if (!activeOrganizationId) {
+      notifyError('Organization not ready. Please select an organization before configuring products.');
+      return false;
+    }
+    return true;
+  };
+
+  const persistSelection = async (componentRole: string, catalogItemId: string) => {
+    if (!ensurePersistable()) return false;
+    // No-op (ConfiguredProduct snapshot will be created at completion).
+    return true;
+  };
+
+  const removeSelection = async (componentRole: string) => {
+    if (!ensurePersistable()) return false;
+    // No-op (ConfiguredProduct snapshot will be created at completion).
+    return true;
+  };
+
   // ✅ Helpers UI para manejar selecciones
-  const setHeadboxNone = () => {
+  const setHeadboxNone = async () => {
+    const ok = await removeSelection('headbox');
+    if (!ok) return;
     onUpdate({
       headbox_item_id: null,
       headbox_sku: null,
@@ -91,16 +177,27 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     } as any);
   };
   
-  const clearHeadboxSelection = () => {
+  /** X button: leave headbox UNSET (null), do NOT set NONE */
+  const clearHeadboxSelection = async () => {
+    const ok = await removeSelection('headbox');
+    if (!ok) return;
     onUpdate({
-      headbox_item_id: undefined,
-      headbox_sku: '',
+      headbox_item_id: null,
+      headbox_sku: null,
       cassette: false,
       cassette_shape: 'none',
     } as any);
   };
   
-  const setHeadboxSelected = (item: RoleOption) => {
+  const setHeadboxSelected = async (item: RoleOption) => {
+    const id = String(item.id);
+    const isVirtual = id.startsWith('sku:');
+    if (isVirtual) {
+      notifyError('Invalid headbox selection (virtual SKU).');
+      return;
+    }
+    const ok = await persistSelection('headbox', id);
+    if (!ok) return;
     // ✅ Calcular templates filtrados: intersección con los actuales
     let newFilteredTemplates = item.templateIds || [];
     const currentFiltered = (config as any)._hardware_filtered_templates as string[] | undefined;
@@ -164,20 +261,35 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     templatesAfterBottomBar
   );
   
-  // ✅ Calcular templates filtrados por headbox seleccionado
-  const selectedHeadbox = headboxOptions.find(
-    opt => opt.id === (config as any).headbox_item_id
-  );
+  // ✅ Tri-state: UNSET (null/undefined) | NONE ('NONE') | SELECTED (uuid)
+  const headboxItemId = (config as any).headbox_item_id;
+  const selectedHeadbox = headboxOptions.find(opt => opt.id === headboxItemId);
+  
+  const templatesWithHeadbox = useMemo(() => {
+    const allTemplateIds = new Set<string>();
+    headboxOptions.forEach(opt => {
+      if (opt.templateIds) {
+        opt.templateIds.forEach(tid => allTemplateIds.add(tid));
+      }
+    });
+    return allTemplateIds;
+  }, [headboxOptions]);
+  
   const templatesAfterHeadbox = useMemo(() => {
-    if (!selectedHeadbox || !selectedHeadbox.templateIds) {
-      return templatesAfterBottomBar;
-    }
-    if (templatesAfterBottomBar) {
+    const prev = templatesAfterBottomBar;
+    if (!prev) return null;
+    // SELECTED (uuid): filtrar a templates que tienen ese SKU
+    if (typeof headboxItemId === 'string' && headboxItemId !== 'NONE' && selectedHeadbox?.templateIds) {
       const set = new Set(selectedHeadbox.templateIds);
-      return templatesAfterBottomBar.filter(tid => set.has(tid));
+      return prev.filter(tid => set.has(tid));
     }
-    return selectedHeadbox.templateIds;
-  }, [selectedHeadbox, templatesAfterBottomBar]);
+    // NONE (explícito): solo templates que NO tienen headbox
+    if (headboxItemId === 'NONE') {
+      return filterTemplatesWithoutRole(prev, templatesWithHeadbox) ?? prev;
+    }
+    // UNSET (null/undefined): NO filtrar por headbox
+    return prev;
+  }, [headboxItemId, selectedHeadbox, templatesAfterBottomBar, templatesWithHeadbox]);
   
   // ✅ Side Channel: desde templates filtrados
   const { options: sideChannelOptions, loading: loadingSideChannel } = useBOMTemplateOptionsSimple(
@@ -187,20 +299,31 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     templatesAfterHeadbox
   );
   
-  // ✅ Calcular templates filtrados por side_channel seleccionado
-  const selectedSideChannel = sideChannelOptions.find(
-    opt => opt.id === (config as any).side_channel_item_id
-  );
+  const sideChannelItemId = (config as any).side_channel_item_id;
+  const selectedSideChannel = sideChannelOptions.find(opt => opt.id === sideChannelItemId);
+  
+  const templatesWithSideChannel = useMemo(() => {
+    const allTemplateIds = new Set<string>();
+    sideChannelOptions.forEach(opt => {
+      if (opt.templateIds) {
+        opt.templateIds.forEach(tid => allTemplateIds.add(tid));
+      }
+    });
+    return allTemplateIds;
+  }, [sideChannelOptions]);
+  
   const templatesAfterSideChannel = useMemo(() => {
-    if (!selectedSideChannel || !selectedSideChannel.templateIds) {
-      return templatesAfterHeadbox;
-    }
-    if (templatesAfterHeadbox) {
+    const prev = templatesAfterHeadbox;
+    if (!prev) return null;
+    if (typeof sideChannelItemId === 'string' && sideChannelItemId !== 'NONE' && selectedSideChannel?.templateIds) {
       const set = new Set(selectedSideChannel.templateIds);
-      return templatesAfterHeadbox.filter(tid => set.has(tid));
+      return prev.filter(tid => set.has(tid));
     }
-    return selectedSideChannel.templateIds;
-  }, [selectedSideChannel, templatesAfterHeadbox]);
+    if (sideChannelItemId === 'NONE') {
+      return filterTemplatesWithoutRole(prev, templatesWithSideChannel) ?? prev;
+    }
+    return prev;
+  }, [sideChannelItemId, selectedSideChannel, templatesAfterHeadbox, templatesWithSideChannel]);
   
   // ✅ Bottom Channel: desde templates filtrados
   const { options: bottomChannelOptions, loading: loadingBottomChannel } = useBOMTemplateOptionsSimple(
@@ -210,20 +333,31 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     templatesAfterSideChannel
   );
   
-  // ✅ Calcular templates finales para pasar al siguiente step
-  const selectedBottomChannel = bottomChannelOptions.find(
-    opt => opt.id === (config as any).bottom_channel_item_id
-  );
+  const bottomChannelItemId = (config as any).bottom_channel_item_id;
+  const selectedBottomChannel = bottomChannelOptions.find(opt => opt.id === bottomChannelItemId);
+  
+  const templatesWithBottomChannel = useMemo(() => {
+    const allTemplateIds = new Set<string>();
+    bottomChannelOptions.forEach(opt => {
+      if (opt.templateIds) {
+        opt.templateIds.forEach(tid => allTemplateIds.add(tid));
+      }
+    });
+    return allTemplateIds;
+  }, [bottomChannelOptions]);
+  
   const finalFilteredTemplates = useMemo(() => {
-    if (!selectedBottomChannel || !selectedBottomChannel.templateIds) {
-      return templatesAfterSideChannel;
-    }
-    if (templatesAfterSideChannel) {
+    const prev = templatesAfterSideChannel;
+    if (!prev) return null;
+    if (typeof bottomChannelItemId === 'string' && bottomChannelItemId !== 'NONE' && selectedBottomChannel?.templateIds) {
       const set = new Set(selectedBottomChannel.templateIds);
-      return templatesAfterSideChannel.filter(tid => set.has(tid));
+      return prev.filter(tid => set.has(tid));
     }
-    return selectedBottomChannel.templateIds;
-  }, [selectedBottomChannel, templatesAfterSideChannel]);
+    if (bottomChannelItemId === 'NONE') {
+      return filterTemplatesWithoutRole(prev, templatesWithBottomChannel) ?? prev;
+    }
+    return prev;
+  }, [bottomChannelItemId, selectedBottomChannel, templatesAfterSideChannel, templatesWithBottomChannel]);
   
   // ✅ Guardar templates filtrados en config para el siguiente step
   useEffect(() => {
@@ -241,17 +375,19 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     }
   }, [finalFilteredTemplates]);
   
-  // ✅ DEBUG: Log de opciones cargadas
+  // ✅ DEBUG: Tri-state y conteos (solo dev)
   if (import.meta.env.DEV && hasHardwareColor && !loadingBottomBar) {
+    const headboxState = headboxItemId == null ? 'UNSET' : headboxItemId === 'NONE' ? 'NONE' : 'SELECTED';
+    const sideChannelState = sideChannelItemId == null ? 'UNSET' : sideChannelItemId === 'NONE' ? 'NONE' : 'SELECTED';
+    const bottomChannelState = bottomChannelItemId == null ? 'UNSET' : bottomChannelItemId === 'NONE' ? 'NONE' : 'SELECTED';
     console.debug("[HardwareStep] Progressive filtering", {
       productTypeId,
       hardwareColor: currentHardwareColor,
       bottomBarCount: bottomBarOptions.length,
       templatesAfterBottomBar: templatesAfterBottomBar?.length ?? 'all',
-      headboxCount: headboxOptions.length,
-      templatesAfterHeadbox: templatesAfterHeadbox?.length ?? 'all',
-      sideChannelCount: sideChannelOptions.length,
-      bottomChannelCount: bottomChannelOptions.length,
+      headbox: { state: headboxState, count: headboxOptions.length, before: templatesAfterBottomBar?.length, after: templatesAfterHeadbox?.length },
+      sideChannel: { state: sideChannelState, count: sideChannelOptions.length, before: templatesAfterHeadbox?.length, after: templatesAfterSideChannel?.length },
+      bottomChannel: { state: bottomChannelState, count: bottomChannelOptions.length, before: templatesAfterSideChannel?.length, after: finalFilteredTemplates?.length },
       finalFilteredTemplates: finalFilteredTemplates?.length ?? 'all',
     });
   }
@@ -274,6 +410,14 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+        {selectionDisabled && (
+          <div className="bg-amber-50 border border-amber-200 rounded p-3">
+            <p className="text-xs text-amber-800">
+              Save the quote first to enable BOM selections.
+            </p>
+          </div>
+        )}
+        <div className={selectionDisabled ? 'pointer-events-none opacity-50' : ''}>
         {/* Hardware Color */}
         {showHardwareColor && (
           <div>
@@ -289,8 +433,26 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                 return (
                   <div
                     key={option.id}
-                    onClick={() => {
+                    onClick={async () => {
+                      if (selectionDisabled) return;
+                      const okBottomBar = await removeSelection('bottom_bar');
+                      const okHeadbox = await removeSelection('headbox');
+                      const okSide = await removeSelection('side_channel');
+                      const okBottomChannel = await removeSelection('bottom_channel');
+                      if (!okBottomBar || !okHeadbox || !okSide || !okBottomChannel) return;
+                      
+                      // ✅ FIX: Cargar templates base para el nuevo color ANTES de actualizar
+                      const baseTemplates = await loadTemplatesForColor(option.id);
+                      
+                      if (import.meta.env.DEV) {
+                        console.debug('[HardwareStep] Color changed, loaded base templates:', {
+                          color: option.id,
+                          templateCount: baseTemplates.length,
+                        });
+                      }
+                      
                       // ✅ Limpiar selecciones de componentes cuando cambia el color
+                      // PERO mantener templates base válidos (NO null)
                       onUpdate({ 
                         hardwareColor: option.id,
                         hardware_color: option.id,
@@ -304,21 +466,31 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         side_channel_sku: null,
                         bottom_channel_item_id: null,
                         bottom_channel_sku: null,
-                        _hardware_filtered_templates: null,
+                        // ✅ FIX: Mantener templates base del nuevo color (NO null)
+                        _hardware_filtered_templates: baseTemplates.length > 0 ? baseTemplates : null,
                       } as any);
                     }}
                     className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                       isSelected
                         ? 'border-2 border-primary shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                    }`}
+                    } ${selectionDisabled ? 'opacity-50 pointer-events-none cursor-not-allowed' : ''}`}
                   >
                     {/* X to deselect */}
                     {isSelected && (
                       <button
                         type="button"
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
+                          if (selectionDisabled) return;
+                          const okBottomBar = await removeSelection('bottom_bar');
+                          const okHeadbox = await removeSelection('headbox');
+                          const okSide = await removeSelection('side_channel');
+                          const okBottomChannel = await removeSelection('bottom_channel');
+                          if (!okBottomBar || !okHeadbox || !okSide || !okBottomChannel) return;
+                          
+                          // ✅ Al deseleccionar color, limpiar todo pero NO poner templates en null
+                          // Dejar templates undefined para que steps siguientes carguen desde ProductType
                           onUpdate({
                             hardwareColor: undefined,
                             hardware_color: undefined,
@@ -331,10 +503,11 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             side_channel_sku: null,
                             bottom_channel_item_id: null,
                             bottom_channel_sku: null,
-                            _hardware_filtered_templates: null,
+                            // ✅ undefined (no null) para que siguiente step cargue templates
+                            _hardware_filtered_templates: undefined,
                           } as any);
                         }}
-                        className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                        className={`absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10 ${selectionDisabled ? 'pointer-events-none' : ''}`}
                         title="Remove selection"
                       >
                         <X className="w-4 h-4 text-gray-600" />
@@ -379,13 +552,18 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                       isSelected
                         ? 'border-2 border-primary shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                    }`}
+                    } ${selectionDisabled ? 'opacity-50' : ''}`}
                   >
                     {isSelected && (
                       <button
                         type="button"
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
+                          const okBottomBar = await removeSelection('bottom_bar');
+                          const okHeadbox = await removeSelection('headbox');
+                          const okSide = await removeSelection('side_channel');
+                          const okBottomChannel = await removeSelection('bottom_channel');
+                          if (!okBottomBar || !okHeadbox || !okSide || !okBottomChannel) return;
                           onUpdate({
                             bottom_bar_item_id: null,
                             bottom_bar_sku: null,
@@ -406,10 +584,18 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                       </button>
                     )}
                     <div
-                      onClick={() => {
+                      onClick={async () => {
+                        if (selectionDisabled) return;
                         const sku = (item.sku || "").trim();
                         const id = String(item.id);
                         const isVirtual = id.startsWith('sku:');
+                        if (isVirtual) {
+                          notifyError('Invalid bottom bar selection (virtual SKU).');
+                          return;
+                        }
+                        if (!ensurePersistable()) return;
+                        const ok = await persistSelection('bottom_bar', id);
+                        if (!ok) return;
                         
                         // ✅ Guardar templates filtrados inmediatamente (dedupe)
                         const newFilteredTemplates = uniq(item.templateIds) || [];
@@ -495,8 +681,52 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
             <Label className="text-sm font-medium mb-4 block">HEADBOX / CASSETTE</Label>
             {loadingHeadbox ? (
               <div className="text-sm text-gray-500 mt-2">Loading headbox options...</div>
-            ) : headboxOptions.length > 0 ? (
+            ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {/* None card: explicit "No Headbox" → filters to templates WITHOUT headbox */}
+                <div
+                  className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
+                    (config as any).headbox_item_id === 'NONE'
+                      ? 'border-2 border-primary shadow-lg'
+                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                  } ${selectionDisabled ? 'opacity-50' : ''}`}
+                >
+                  {(config as any).headbox_item_id === 'NONE' && (
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await clearHeadboxSelection();
+                      }}
+                      className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                      title="Clear (UNSET)"
+                    >
+                      <X className="w-4 h-4 text-gray-600" />
+                    </button>
+                  )}
+                  <div
+                    onClick={() => {
+                      if (selectionDisabled) return;
+                      onUpdate({
+                        headbox_item_id: 'NONE',
+                        headbox_sku: null,
+                        cassette: false,
+                        cassette_shape: 'none',
+                      } as any);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                      <ImageIcon className="w-12 h-12 text-gray-400" />
+                    </div>
+                    <div className="p-4">
+                      <h3 className={`font-semibold text-sm ${(config as any).headbox_item_id === 'NONE' ? 'text-primary' : 'text-gray-900'}`}>
+                        No Headbox / None
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">None</p>
+                    </div>
+                  </div>
+                </div>
                 {headboxOptions.map((item) => {
                   const isSelected = (config as any).headbox_item_id === item.id;
                   return (
@@ -506,14 +736,14 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         isSelected
                           ? 'border-2 border-primary shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                      }`}
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
                       {isSelected && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
-                            clearHeadboxSelection();
+                            await clearHeadboxSelection();
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
                           title="Remove selection"
@@ -522,7 +752,11 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         </button>
                       )}
                       <div
-                        onClick={() => setHeadboxSelected(item)}
+                        onClick={async () => {
+                          if (selectionDisabled) return;
+                          if (!ensurePersistable()) return;
+                          await setHeadboxSelected(item);
+                        }}
                         className="cursor-pointer"
                       >
                         <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
@@ -552,8 +786,6 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                   );
                 })}
               </div>
-            ) : (
-              <div className="text-sm text-gray-500">No headbox options available for current selection.</div>
             )}
           </div>
         )}
@@ -564,8 +796,55 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
             <Label className="text-sm font-medium mb-4 block">SIDE CHANNEL ITEMS</Label>
             {loadingSideChannel ? (
               <div className="text-sm text-gray-500 mt-2">Loading side channel options...</div>
-            ) : sideChannelOptions.length > 0 ? (
+            ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {/* None card: explicit "No Side Channel" */}
+                <div
+                  className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
+                    (config as any).side_channel_item_id === 'NONE'
+                      ? 'border-2 border-primary shadow-lg'
+                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                  } ${selectionDisabled ? 'opacity-50' : ''}`}
+                >
+                  {(config as any).side_channel_item_id === 'NONE' && (
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        onUpdate({
+                          side_channel_item_id: null,
+                          side_channel_sku: null,
+                          side_channel: false,
+                        } as any);
+                      }}
+                      className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                      title="Clear (UNSET)"
+                    >
+                      <X className="w-4 h-4 text-gray-600" />
+                    </button>
+                  )}
+                  <div
+                    onClick={() => {
+                      if (selectionDisabled) return;
+                      onUpdate({
+                        side_channel_item_id: 'NONE',
+                        side_channel_sku: null,
+                        side_channel: false,
+                      } as any);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                      <ImageIcon className="w-12 h-12 text-gray-400" />
+                    </div>
+                    <div className="p-4">
+                      <h3 className={`font-semibold text-sm ${(config as any).side_channel_item_id === 'NONE' ? 'text-primary' : 'text-gray-900'}`}>
+                        No Side Channel / None
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">None</p>
+                    </div>
+                  </div>
+                </div>
                 {sideChannelOptions.map((item) => {
                   const isSelected = (config as any).side_channel_item_id === item.id;
                   return (
@@ -575,29 +854,37 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         isSelected
                           ? 'border-2 border-primary shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                      }`}
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
                       {isSelected && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
                             onUpdate({
                               side_channel_item_id: null,
                               side_channel_sku: null,
                               side_channel: false,
-                              // ✅ Revertir templates al estado antes de side_channel
-                              _hardware_filtered_templates: uniq(templatesAfterHeadbox as any) ?? null,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
-                          title="Remove selection"
+                          title="Clear (UNSET)"
                         >
                           <X className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
                       <div
-                        onClick={() => {
+                        onClick={async () => {
+                          if (selectionDisabled) return;
+                          const id = String(item.id);
+                          const isVirtual = id.startsWith('sku:');
+                          if (isVirtual) {
+                            notifyError('Invalid side channel selection (virtual SKU).');
+                            return;
+                          }
+                          if (!ensurePersistable()) return;
+                          const ok = await persistSelection('side_channel', id);
+                          if (!ok) return;
                           // ✅ Calcular templates filtrados
                           let newFilteredTemplates = item.templateIds || [];
                           const currentFiltered = (config as any)._hardware_filtered_templates as string[] | undefined;
@@ -638,8 +925,6 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                   );
                 })}
               </div>
-            ) : (
-              <div className="text-sm text-gray-500">No side channel options available for current selection.</div>
             )}
           </div>
         )}
@@ -650,8 +935,55 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
             <Label className="text-sm font-medium mb-4 block">ADD BOTTOM CHANNEL</Label>
             {loadingBottomChannel ? (
               <div className="text-sm text-gray-500 mt-2">Loading bottom channel options...</div>
-            ) : bottomChannelOptions.length > 0 ? (
+            ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {/* None card: explicit "No Bottom Channel" */}
+                <div
+                  className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
+                    (config as any).bottom_channel_item_id === 'NONE'
+                      ? 'border-2 border-primary shadow-lg'
+                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                  } ${selectionDisabled ? 'opacity-50' : ''}`}
+                >
+                  {(config as any).bottom_channel_item_id === 'NONE' && (
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        onUpdate({
+                          bottom_channel_item_id: null,
+                          bottom_channel_sku: null,
+                          bottom_channel: false,
+                        } as any);
+                      }}
+                      className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                      title="Clear (UNSET)"
+                    >
+                      <X className="w-4 h-4 text-gray-600" />
+                    </button>
+                  )}
+                  <div
+                    onClick={() => {
+                      if (selectionDisabled) return;
+                      onUpdate({
+                        bottom_channel_item_id: 'NONE',
+                        bottom_channel_sku: null,
+                        bottom_channel: false,
+                      } as any);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                      <ImageIcon className="w-12 h-12 text-gray-400" />
+                    </div>
+                    <div className="p-4">
+                      <h3 className={`font-semibold text-sm ${(config as any).bottom_channel_item_id === 'NONE' ? 'text-primary' : 'text-gray-900'}`}>
+                        No Bottom Channel / None
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">None</p>
+                    </div>
+                  </div>
+                </div>
                 {bottomChannelOptions.map((item) => {
                   const isSelected = (config as any).bottom_channel_item_id === item.id;
                   return (
@@ -661,29 +993,37 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         isSelected
                           ? 'border-2 border-primary shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                      }`}
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
                       {isSelected && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
                             onUpdate({
                               bottom_channel_item_id: null,
                               bottom_channel_sku: null,
                               bottom_channel: false,
-                              // ✅ Revertir templates al estado antes de bottom_channel
-                              _hardware_filtered_templates: uniq(templatesAfterSideChannel as any) ?? null,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
-                          title="Remove selection"
+                          title="Clear (UNSET)"
                         >
                           <X className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
                       <div
-                        onClick={() => {
+                        onClick={async () => {
+                          if (selectionDisabled) return;
+                          const id = String(item.id);
+                          const isVirtual = id.startsWith('sku:');
+                          if (isVirtual) {
+                            notifyError('Invalid bottom channel selection (virtual SKU).');
+                            return;
+                          }
+                          if (!ensurePersistable()) return;
+                          const ok = await persistSelection('bottom_channel', id);
+                          if (!ok) return;
                           // ✅ Calcular templates filtrados
                           let newFilteredTemplates = item.templateIds || [];
                           const currentFiltered = (config as any)._hardware_filtered_templates as string[] | undefined;
@@ -724,8 +1064,6 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                   );
                 })}
               </div>
-            ) : (
-              <div className="text-sm text-gray-500">No bottom channel options available for current selection.</div>
             )}
           </div>
         )}
@@ -738,6 +1076,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
             </p>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

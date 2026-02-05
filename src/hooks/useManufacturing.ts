@@ -56,8 +56,8 @@ export interface ManufacturingMaterial {
   total_qty: number;
   unit_cost_exw?: number;
   total_cost_exw: number;
-  unit_msrp_sale_out?: number;
-  total_msrp_sale_out?: number;
+  unit_msrp?: number;
+  total_msrp?: number;
   cut_length_mm?: number | null;
   cut_width_mm?: number | null;
   cut_height_mm?: number | null;
@@ -511,8 +511,8 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             total_qty: Number(line.qty) || 0,
             unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
             total_cost_exw: Number(line.total_cost_exw) || 0,
-            unit_msrp_sale_out: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
-            total_msrp_sale_out: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
+            unit_msrp: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
+            total_msrp: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
             cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
             cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
             cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,

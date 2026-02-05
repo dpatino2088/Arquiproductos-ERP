@@ -29,6 +29,9 @@ export default function Login() {
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [sendingOtp, setSendingOtp] = useState(false);
+  const [connectionTest, setConnectionTest] = useState<{ status: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }>({ status: 'idle' });
+  // Evitar más intentos tras error de conexión (no saturar Supabase)
+  const [connectionErrorLock, setConnectionErrorLock] = useState(false);
 
   const params = new URLSearchParams(window.location.search);
   const reason = params.get("reason");
@@ -116,16 +119,51 @@ export default function Login() {
           .catch(() => {});
       }
     } catch (error: any) {
-      const msg =
-        error?.message ||
-        (error?.toString?.().includes("Failed to fetch")
-          ? "No se pudo conectar con Supabase (red/CORS/proyecto dormido)."
-          : "Failed to sign in");
+      const raw = error?.message || error?.toString?.() || "";
+      const isFailedToFetch =
+        raw === "Failed to fetch" || String(raw).toLowerCase().includes("failed to fetch");
+      const isNetworkLike =
+        isFailedToFetch ||
+        /network|fetch|connection|cors|refused/i.test(raw);
+
+      if (isNetworkLike) setConnectionErrorLock(true);
+
+      if (import.meta.env.DEV) {
+        const url = import.meta.env.VITE_SUPABASE_URL || "";
+        const masked = url ? `${url.slice(0, 12)}...${url.slice(-8)}` : "NO DEFINIDA";
+        console.warn("[Login] Error:", raw, { supabaseUrl: masked, code: error?.code });
+      }
+
+      const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:5173";
+      const msg = isNetworkLike
+        ? `No se pudo conectar con Supabase. Si tienes internet y el proyecto está activo, revisa: 1) CORS en Supabase (Settings > API > allowed origins: ${origin}), 2) VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en .env.local (reinicia Vite tras cambiar). 3) Consola del navegador (F12) para el error exacto.`
+        : raw || "Error al iniciar sesión";
 
       setLoginError(msg);
       setError(msg);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /** Prueba si el navegador puede conectar a Supabase (diagnóstico). */
+  const handleTestConnection = async () => {
+    const url = import.meta.env.VITE_SUPABASE_URL;
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !key || url.includes("placeholder")) {
+      setConnectionTest({ status: 'fail', message: 'Faltan VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY en .env.local' });
+      return;
+    }
+    setConnectionTest({ status: 'testing' });
+    try {
+      const res = await fetch(`${url.replace(/\/$/, '')}/rest/v1/`, {
+        method: 'HEAD',
+        headers: { apikey: key, Accept: 'application/json' },
+      });
+      setConnectionTest({ status: 'ok', message: `Conexión OK (${res.status}). El fallo puede ser solo en Auth: revisa email/contraseña o configuración de Auth en Supabase.` });
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setConnectionTest({ status: 'fail', message: msg || 'Error desconocido' });
     }
   };
 
@@ -333,12 +371,14 @@ export default function Login() {
 
               <button
                 type="submit"
-                disabled={isLoading || otpSent}
+                disabled={isLoading || otpSent || connectionErrorLock}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: "var(--primary-brand-hex)" }}
               >
                 {isLoading ? (
                   <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                ) : connectionErrorLock ? (
+                  "Conexión fallida — recarga la página para reintentar"
                 ) : (
                   <>
                     Sign In
@@ -346,6 +386,23 @@ export default function Login() {
                   </>
                 )}
               </button>
+
+              <div className="mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={connectionTest.status === 'testing'}
+                  className="text-xs text-muted-foreground hover:text-foreground underline disabled:opacity-50"
+                >
+                  {connectionTest.status === 'testing' ? 'Probando...' : 'Probar conexión a Supabase'}
+                </button>
+                {connectionTest.status === 'ok' && connectionTest.message && (
+                  <p className="mt-2 text-xs text-green-700">{connectionTest.message}</p>
+                )}
+                {connectionTest.status === 'fail' && connectionTest.message && (
+                  <p className="mt-2 text-xs text-red-700">{connectionTest.message}</p>
+                )}
+              </div>
             </form>
 
             {otpSent ? (

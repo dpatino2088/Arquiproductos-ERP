@@ -242,7 +242,7 @@ export default function BOMMonitoringDashboard({ saleOrderId, currency = 'USD' }
               <div>
                 <div className="text-xs text-gray-600 mb-1">Total MSRP (with Labor)</div>
                 <div className="text-sm font-medium text-blue-700">
-                  {formatCurrency(bomInstance.total_msrp_sale_out_with_labor, currency)}
+                  {formatCurrency(bomInstance.total_msrp_with_labor, currency)}
                 </div>
               </div>
             </div>
@@ -281,7 +281,7 @@ export default function BOMMonitoringDashboard({ saleOrderId, currency = 'USD' }
               <span className="text-sm font-medium text-gray-900">Total Value</span>
             </div>
             <div className="text-2xl font-bold text-purple-700">
-              {formatCurrency(bomInstance.total_msrp_sale_out_with_labor, currency)}
+              {formatCurrency(bomInstance.total_msrp_with_labor, currency)}
             </div>
             <p className="text-xs text-gray-600 mt-1">MSRP with labor</p>
           </div>

@@ -22,6 +22,7 @@ export interface Panel {
 export interface BaseProductConfig {
   productType: ProductType;
   productTypeId?: string; // UUID from ProductTypes table - set by ProductStep
+  quote_line_id?: string; // Existing QuoteLine when editing
   area?: string;
   position: number | string;
   quantity?: number;

@@ -4,9 +4,11 @@
  * Helper function to create ConfiguredProduct + BOM preview before QuoteLine creation.
  * Uses RPC function create_configured_product_and_bom_preview for atomic operation.
  * 
- * ✅ NUEVA ARQUITECTURA (Matching al final):
- * El bom_template_id ahora viene pre-resuelto en config_snapshot desde el frontend
- * usando matchBOMTemplate() - ya no se hace matching interno en el RPC.
+ * ✅ NUEVA ARQUITECTURA (ConfiguredProduct como source-of-truth):
+ * - El configurador crea/actualiza un ConfiguredProduct con config_snapshot completo.
+ * - El bom_template_id se resuelve de forma estricta con la función del dump:
+ *   public.select_best_bom_template_v2_strict(p_org, p_product_type, p_config)
+ * - Luego el QuoteLine se genera/finaliza desde ConfiguredProduct (snapshot).
  */
 
 import { supabase } from '../supabase/client';
@@ -19,11 +21,288 @@ function isMissingColumnError(error: any): boolean {
   return code === '42703' || /column .* does not exist/i.test(message);
 }
 
+function normalizeOperationType(value: unknown): 'motor' | 'manual' | null {
+  const v = String(value ?? '').toLowerCase().trim();
+  if (v === 'motor' || v === 'motorized') return 'motor';
+  if (v === 'manual') return 'manual';
+  return null;
+}
+
+async function resolveBomTemplateIdStrict(args: {
+  organization_id: string;
+  product_type_id: string;
+  config_snapshot: any;
+}): Promise<string> {
+  const { organization_id, product_type_id, config_snapshot } = args;
+
+  const op = normalizeOperationType(
+    config_snapshot?.operating_type ??
+      config_snapshot?.operation_type ??
+      config_snapshot?.drive_type ??
+      config_snapshot?.operatingSystem ??
+      null
+  );
+
+  const bottom_bar_id = config_snapshot?.bottom_bar_item_id ?? null;
+  const tube_id = config_snapshot?.tube_item_id ?? null;
+  const drive_id = config_snapshot?.drive_item_id ?? null;
+  const motor_id = config_snapshot?.motor_item_id ?? null;
+
+  // DB strict matcher expects keys: tube_id, bottom_bar_id, and XOR drive_id/motor_id.
+  const p_config: any = {
+    tube_id,
+    bottom_bar_id,
+    // Optional extra discriminators (if DB matcher uses them)
+    headbox_id: config_snapshot?.headbox_item_id ?? null,
+    side_channel_id: config_snapshot?.side_channel_item_id ?? null,
+    bottom_channel_id: config_snapshot?.bottom_channel_item_id ?? null,
+    hardware_color: config_snapshot?.hardware_color ?? null,
+  };
+
+  // Decide XOR explicitly.
+  if (op === 'motor') {
+    p_config.motor_id = motor_id;
+  } else if (op === 'manual') {
+    p_config.drive_id = drive_id;
+  } else {
+    // Fallback to presence (keeps strict XOR enforced by the DB function).
+    if (motor_id) p_config.motor_id = motor_id;
+    else p_config.drive_id = drive_id;
+  }
+
+  const { data, error } = await supabase.rpc('select_best_bom_template_v2_strict', {
+    p_org: organization_id,
+    p_product_type: product_type_id,
+    p_config,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to resolve BOMTemplate (strict)');
+  }
+  if (!data) {
+    throw new Error('Failed to resolve BOMTemplate (strict): RPC returned no template id');
+  }
+  return String(data);
+}
+
+async function resolveBomTemplateIdFrontendStrict(args: {
+  organization_id: string;
+  product_type_id: string;
+  config_snapshot: any;
+}): Promise<string> {
+  const { organization_id, product_type_id, config_snapshot } = args;
+
+  const op = normalizeOperationType(
+    config_snapshot?.operating_type ??
+      config_snapshot?.operation_type ??
+      config_snapshot?.drive_type ??
+      config_snapshot?.operatingSystem ??
+      null
+  );
+
+  const selections = new Map<string, string>();
+  const setIf = (role: string, value: any) => {
+    const v = typeof value === 'string' ? value : value ? String(value) : '';
+    const id = v.trim();
+    if (id) selections.set(role, id);
+  };
+
+  // ✅ Required (aligned with v2_strict)
+  setIf('bottom_bar', config_snapshot?.bottom_bar_item_id);
+  setIf('tube', config_snapshot?.tube_item_id);
+  setIf('motor', config_snapshot?.motor_item_id);
+  setIf('drive', config_snapshot?.drive_item_id);
+  // ✅ Optional discriminators (only if user selected them)
+  setIf('headbox', config_snapshot?.headbox_item_id);
+  setIf('side_channel', config_snapshot?.side_channel_item_id);
+  setIf('bottom_channel', config_snapshot?.bottom_channel_item_id);
+
+  // Enforce strict required fields (same spirit as v2_strict)
+  if (!selections.get('tube')) throw new Error('Missing tube_item_id in config');
+  if (!selections.get('bottom_bar')) throw new Error('Missing bottom_bar_item_id in config');
+
+  const hasMotor = selections.has('motor');
+  const hasDrive = selections.has('drive');
+  if (hasMotor && hasDrive) {
+    throw new Error('Config cannot contain both motor_item_id and drive_item_id');
+  }
+  if (!hasMotor && !hasDrive) {
+    throw new Error('Config must contain motor_item_id OR drive_item_id');
+  }
+  if (op === 'motor' && !hasMotor) throw new Error('Operating type is motor but motor_item_id is missing');
+  if (op === 'manual' && !hasDrive) throw new Error('Operating type is manual but drive_item_id is missing');
+
+  // Enforce XOR based on operation type (ignore stale fields if any exist in snapshot)
+  if (op === 'motor') selections.delete('drive');
+  if (op === 'manual') selections.delete('motor');
+
+  const normalizedColor = (() => {
+    const c = config_snapshot?.hardware_color ?? config_snapshot?.hardwareColor ?? config_snapshot?.operatingSystemColor ?? null;
+    if (!c) return null;
+    const s = String(c).trim();
+    if (!s) return null;
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  })();
+
+  // Load templates (be resilient to schema differences)
+  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null }> = [];
+  {
+    const candidateIdsRaw = config_snapshot?.candidate_template_ids;
+    const candidateIds =
+      Array.isArray(candidateIdsRaw) ? candidateIdsRaw.filter((x: any) => typeof x === 'string' && x.trim().length > 0) : [];
+
+    const base = supabase
+      .from('BOMTemplates')
+      .select('id, archived, deleted, is_active, hardware_color')
+      .eq('product_type_id', product_type_id)
+      // ✅ support global templates (organization_id NULL)
+      .or(`organization_id.eq.${organization_id},organization_id.is.null`);
+
+    const { data, error } = candidateIds.length > 0 ? await base.in('id', candidateIds) : await base;
+    if (error) {
+      if (!isMissingColumnError(error)) throw new Error(error.message || 'Failed to load BOMTemplates');
+      // Retry without is_active/hardware_color if those columns don't exist
+      const { data: data2, error: error2 } = await supabase
+        .from('BOMTemplates')
+        .select('id, archived, deleted')
+        .eq('product_type_id', product_type_id)
+        .or(`organization_id.eq.${organization_id},organization_id.is.null`);
+      if (error2) throw new Error(error2.message || 'Failed to load BOMTemplates');
+      const narrowed = candidateIds.length > 0 ? (data2 as any)?.filter((t: any) => candidateIds.includes(t.id)) : data2;
+      templates = (narrowed as any) || [];
+    } else {
+      templates = (data as any) || [];
+    }
+  }
+
+  // ✅ FIX: Filtrar por hardware_color correctamente
+  // Paso 1: Filtrar templates activos
+  const activeTemplates = templates.filter((t) => {
+    if ((t as any).deleted === true) return false;
+    if ((t as any).archived === true) return false;
+    if ((t as any).is_active === false) return false;
+    return true;
+  });
+
+  if (activeTemplates.length === 0) {
+    throw new Error('No active BOMTemplates found for this product type');
+  }
+
+  // Paso 2: Si el usuario seleccionó un color, filtrar por color
+  let colorFilteredTemplates = activeTemplates;
+  if (normalizedColor) {
+    // Primero: buscar templates con el color exacto
+    const exactColorMatches = activeTemplates.filter((t) => {
+      const tColor = (t as any).hardware_color;
+      if (!tColor) return false; // NULL no es match exacto
+      return String(tColor).toLowerCase() === normalizedColor.toLowerCase();
+    });
+
+    if (exactColorMatches.length > 0) {
+      // Hay templates con el color exacto - usar solo esos
+      colorFilteredTemplates = exactColorMatches;
+      if (import.meta.env.DEV) {
+        console.debug('[resolveBomTemplateIdFrontendStrict] Found templates with exact color match:', {
+          color: normalizedColor,
+          count: exactColorMatches.length,
+          templateIds: exactColorMatches.map(t => t.id),
+        });
+      }
+    } else {
+      // No hay templates con el color exacto - fallback a templates sin color (NULL)
+      const nullColorTemplates = activeTemplates.filter((t) => !(t as any).hardware_color);
+      if (nullColorTemplates.length > 0) {
+        colorFilteredTemplates = nullColorTemplates;
+        if (import.meta.env.DEV) {
+          console.warn('[resolveBomTemplateIdFrontendStrict] No exact color match, using templates without color:', {
+            requestedColor: normalizedColor,
+            count: nullColorTemplates.length,
+          });
+        }
+      } else {
+        // No hay templates con el color ni sin color - error
+        throw new Error(`No BOMTemplate found with hardware_color '${normalizedColor}' for this product type`);
+      }
+    }
+  }
+
+  const templateIds = colorFilteredTemplates.map((t) => String(t.id)).filter(Boolean);
+
+  if (templateIds.length === 0) {
+    throw new Error('No BOMTemplates found for this product type (after color filter)');
+  }
+
+  // Load parent components for templates
+  const { data: comps, error: compsErr } = await supabase
+    .from('BOMComponents')
+    .select('bom_template_id, component_role, component_item_id, parent_component_id')
+    // ✅ support global components (organization_id NULL) when templates are global
+    .or(`organization_id.eq.${organization_id},organization_id.is.null`)
+    .in('bom_template_id', templateIds)
+    .eq('deleted', false)
+    .eq('archived', false)
+    .is('parent_component_id', null);
+
+  if (compsErr) throw new Error(compsErr.message || 'Failed to load BOMComponents');
+
+  const consideredRoles = new Set([
+    // required
+    'bottom_bar',
+    'tube',
+    'motor',
+    'drive',
+    // optional (only if user selected)
+    'headbox',
+    'side_channel',
+    'bottom_channel',
+  ]);
+
+  const byTemplate = new Map<string, Map<string, Set<string>>>();
+  (comps || []).forEach((c: any) => {
+    const tid = String(c.bom_template_id || '').trim();
+    const role = String(c.component_role || '').toLowerCase().trim();
+    const itemId = c.component_item_id ? String(c.component_item_id).trim() : '';
+    if (!tid || !role || !itemId) return;
+    if (!consideredRoles.has(role)) return;
+    if (!byTemplate.has(tid)) byTemplate.set(tid, new Map());
+    const roleMap = byTemplate.get(tid)!;
+    if (!roleMap.has(role)) roleMap.set(role, new Set());
+    roleMap.get(role)!.add(itemId);
+  });
+
+  const matches: string[] = [];
+  for (const tid of templateIds) {
+    const roleMap = byTemplate.get(tid) || new Map<string, Set<string>>();
+
+    // Require exact role->item matches for all selections we have
+    let ok = true;
+    for (const [role, selectedItemId] of selections.entries()) {
+      if (!consideredRoles.has(role)) continue;
+      const candidates = roleMap.get(role);
+      if (!candidates || !candidates.has(selectedItemId)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+
+    matches.push(tid);
+  }
+
+  if (matches.length === 0) {
+    throw new Error('No BOMTemplate match found (frontend fallback)');
+  }
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous BOMTemplate match (frontend fallback): ${matches.length} templates`);
+  }
+  return matches[0];
+}
+
 /**
  * Create ConfiguredProduct with BOM preview
  * 
  * This function:
- * 1. Uses pre-resolved bom_template_id from config_snapshot (matched by frontend)
+ * 1. Resolves bom_template_id strictly (DB) when missing
  * 2. Creates ConfiguredProduct with full config snapshot
  * 3. Generates BOMInstance and BOMInstanceLines
  * 4. Calculates totals (roll_msrp_total, bom_total, roll_plus_bom_total, etc.)
@@ -49,8 +328,30 @@ export async function createConfiguredProductPreview(
     throw new Error('config_snapshot is required and must be an object');
   }
 
-  // ✅ NUEVA ARQUITECTURA: El bom_template_id viene pre-resuelto desde matchBOMTemplate()
-  const preResolvedTemplateId = config_snapshot.bom_template_id || null;
+  // ✅ NUEVA ARQUITECTURA: ConfiguredProduct es la base.
+  // Resolver template de forma estricta desde config_snapshot si no viene.
+  let preResolvedTemplateId = config_snapshot.bom_template_id || null;
+  if (!preResolvedTemplateId) {
+    // Try DB strict matcher first; if it fails due to schema mismatch, fallback to frontend matcher.
+    try {
+      preResolvedTemplateId = await resolveBomTemplateIdStrict({
+        organization_id,
+        product_type_id,
+        config_snapshot,
+      });
+    } catch (e: any) {
+      const msg = String(e?.message || e || '');
+      if (import.meta.env.DEV) {
+        console.warn('[createConfiguredProductPreview] DB strict matcher failed, falling back to frontend matcher:', msg);
+      }
+      preResolvedTemplateId = await resolveBomTemplateIdFrontendStrict({
+        organization_id,
+        product_type_id,
+        config_snapshot,
+      });
+    }
+    (config_snapshot as any).bom_template_id = preResolvedTemplateId; // keep consistent
+  }
   
   if (import.meta.env.DEV) {
     console.log('[createConfiguredProductPreview] Using pre-resolved template:', {
@@ -76,6 +377,8 @@ export async function createConfiguredProductPreview(
 
     if (error) {
       console.error('[createConfiguredProductPreview] RPC error:', error);
+      // IMPORTANT: The DB function may re-run its own matching logic and fail due to schema drift.
+      // We already resolved bom_template_id strictly; fallback to direct ConfiguredProducts insert.
       throw error;
     }
 
@@ -100,23 +403,26 @@ export async function createConfiguredProductPreview(
       bom_instance_id: data.bom_instance_id,
       bom_template_id: data.bom_template_id,
       totals: data.totals,
+      // ✅ NEW: Include bom_preview_snapshot for UI breakdown display
+      bom_preview_snapshot: data.bom_preview_snapshot || null,
     };
   } catch (err: any) {
-    // ✅ FALLBACK: Si el RPC falla por columna faltante (schema mismatch), crear ConfiguredProduct directo.
-    if (!isMissingColumnError(err)) {
-      throw new Error(err?.message || 'Failed to create configured product preview');
-    }
+    // ✅ FALLBACK: si la RPC falla (schema drift, matching interno, etc), crear ConfiguredProduct directo.
+    // Esto mantiene `ConfiguredProducts` como source-of-truth aunque la RPC esté desalineada.
 
     if (!preResolvedTemplateId) {
       // Sin template no podemos crear ConfiguredProduct (NOT NULL)
-      throw new Error(`Preview RPC failed due to schema mismatch, and bom_template_id is missing in config_snapshot. Original error: ${err?.message || 'Unknown error'}`);
+      throw new Error(
+        `Preview RPC failed and bom_template_id is missing in config_snapshot. Original error: ${err?.message || 'Unknown error'}`
+      );
     }
 
     if (import.meta.env.DEV) {
-      console.warn('[createConfiguredProductPreview] Falling back to direct ConfiguredProducts insert due to schema mismatch:', {
+      console.warn('[createConfiguredProductPreview] Falling back to direct ConfiguredProducts insert:', {
         code: err?.code,
         message: err?.message,
         bom_template_id: preResolvedTemplateId,
+        isMissingColumn: isMissingColumnError(err),
       });
     }
 
@@ -132,18 +438,19 @@ export async function createConfiguredProductPreview(
     if (rollId) {
       const { data: rollItem } = await supabase
         .from('CatalogItems')
-        .select('sku, collection_name, variant_name, roll_width, is_fabric')
+        .select('sku, collection_name, variant_name, roll_width, roll_width_m, is_roll, roll_type')
         .eq('id', rollId)
         .maybeSingle();
 
-      if (rollItem && rollItem.is_fabric) {
+      if (rollItem && rollItem.is_roll && rollItem.roll_type === 'fabric') {
         roll_sku = rollItem.sku ?? null;
         roll_collection_name = rollItem.collection_name ?? null;
         roll_variant_name = rollItem.variant_name ?? null;
-        roll_width = rollItem.roll_width ?? null;
+        roll_width = (rollItem.roll_width_m ?? rollItem.roll_width) ?? null;
       }
     }
 
+    // ✅ Solo columnas que existen: componentes y operating_type están en config_snapshot (JSON)
     const insertPayload: any = {
       organization_id,
       quote_id: quote_id || null,
@@ -154,32 +461,16 @@ export async function createConfiguredProductPreview(
       quantity,
       hardware_color: config_snapshot.hardware_color ?? null,
       config_snapshot,
-      // Mirror key selections for downstream usage
       roll_catalog_item_id: rollId,
       roll_sku,
       roll_collection_name,
       roll_variant_name,
       roll_width,
-      bottom_bar_item_id: config_snapshot.bottom_bar_item_id ?? null,
-      bottom_bar_sku: config_snapshot.bottom_bar_sku ?? null,
-      headbox_item_id: config_snapshot.headbox_item_id ?? null,
-      headbox_sku: config_snapshot.headbox_sku ?? null,
-      side_channel_item_id: config_snapshot.side_channel_item_id ?? null,
-      side_channel_sku: config_snapshot.side_channel_sku ?? null,
-      bottom_channel_item_id: config_snapshot.bottom_channel_item_id ?? null,
-      bottom_channel_sku: config_snapshot.bottom_channel_sku ?? null,
-      motor_item_id: config_snapshot.motor_item_id ?? null,
-      motor_sku: config_snapshot.motor_sku ?? null,
-      drive_item_id: config_snapshot.drive_item_id ?? null,
-      drive_sku: config_snapshot.drive_sku ?? null,
-      tube_item_id: config_snapshot.tube_item_id ?? null,
-      tube_sku: config_snapshot.tube_sku ?? null,
-      operating_type: config_snapshot.operating_type ?? null,
-      // Totals will be computed later once DB functions are fixed
+      // Totals se rellenan por recalculate/build_bom_preview en backend
       roll_msrp_total: 0,
       bom_total: 0,
       roll_plus_bom_total: 0,
-      labor_pct: 0,
+      labor_pct: config_snapshot.labor_pct ?? 0,
       accessories_total: 0,
       total_msrp: 0,
     };

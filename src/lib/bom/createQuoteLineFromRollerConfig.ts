@@ -63,12 +63,12 @@ export async function createQuoteLineFromRollerConfig(
   // Get MSRP (from CatalogItemsMSRP cache or CatalogItems.msrp)
   const { data: msrpData } = await supabase
     .from('CatalogItemsMSRP')
-    .select('msrp_sale_out')
+    .select('msrp')
     .eq('catalog_item_id', config.fabric_catalog_item_id)
     .or(`organization_id.eq.${organizationId},organization_id.is.null`)
     .maybeSingle();
 
-  const msrpSaleOut = msrpData?.msrp_sale_out || 0;
+  const msrpSaleOut = msrpData?.msrp || 0;
 
   if (!msrpSaleOut || msrpSaleOut === 0) {
     throw new Error(`Catalog item ${catalogItem.sku} does not have MSRP. Please define MSRP before adding to quote.`);
@@ -398,15 +398,15 @@ export async function createQuoteLineFromRollerConfig(
               // Obtener MSRP para los precios (aunque no se guarda en BOMInstanceLines, se usa para cálculos)
               const { data: msrpData } = await supabase
                 .from('CatalogItemsMSRP')
-                .select('catalog_item_id, msrp_sale_out')
+                .select('catalog_item_id, msrp')
                 .in('catalog_item_id', accessoryIds)
                 .or(`organization_id.eq.${organizationId},organization_id.is.null`);
 
               // Crear mapa de MSRP
               const msrpMap = new Map<string, number>();
-              msrpData?.forEach((msrp: { catalog_item_id: string; msrp_sale_out: number | null }) => {
-                if (msrp.catalog_item_id && msrp.msrp_sale_out != null) {
-                  msrpMap.set(msrp.catalog_item_id, Number(msrp.msrp_sale_out));
+              msrpData?.forEach((msrp: { catalog_item_id: string; msrp: number | null }) => {
+                if (msrp.catalog_item_id && msrp.msrp != null) {
+                  msrpMap.set(msrp.catalog_item_id, Number(msrp.msrp));
                 }
               });
 

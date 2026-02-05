@@ -36,13 +36,13 @@ export function useCatalogItems(
   
   const { family, productTypeId: optProductTypeId, role, categoryId, isRoll } = options;
 
-  const refetch = () => {
+  const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
     // Force clear any cached data to ensure fresh fetch
     setItems([]);
     setLoading(true);
     setLoadingMore(false);
-  };
+  }, []);
 
   useEffect(() => {
     let isMounted = true; // Flag to prevent state updates if component unmounts
@@ -189,10 +189,10 @@ export function useCatalogItems(
           return pageQuery.order('sku', { ascending: true }).range(from, to);
         };
         
-        type MsrpRow = { msrp_sale_in: number; msrp_sale_out: number; total_cost: number; shipping_cost: number; import_tax_cost: number };
+        type MsrpRow = { dealer_price: number; msrp: number; total_cost: number; shipping_cost: number; import_tax_cost: number };
         const enrichItems = (d: any[], m: Map<string, MsrpRow>): CatalogItem[] => (d || []).map((item: any) => {
           const msrpRow = m.get(item.id);
-          const finalMsrp = (msrpRow?.msrp_sale_out != null && !isNaN(msrpRow.msrp_sale_out)) ? msrpRow.msrp_sale_out : null;
+          const finalMsrp = (msrpRow?.msrp != null && !isNaN(msrpRow.msrp)) ? msrpRow.msrp : null;
           let salePrice = 0;
           if (finalMsrp != null) salePrice = finalMsrp;
           else if (item.cost_exw && item.default_margin_pct) salePrice = item.cost_exw * (1 + item.default_margin_pct / 100);
@@ -233,11 +233,11 @@ export function useCatalogItems(
             const batch = initialIds.slice(i, i + MSRP_BATCH);
             const { data: msrpData } = await supabase
               .from('CatalogItemsMSRP')
-              .select('catalog_item_id, msrp_sale_in, msrp_sale_out, total_cost, shipping_cost, import_tax_cost')
+              .select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost')
               .eq('organization_id', activeOrganizationId)
               .in('catalog_item_id', batch);
             (msrpData || []).forEach((row: any) => {
-              if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { msrp_sale_in: Number(row.msrp_sale_in ?? 0), msrp_sale_out: Number(row.msrp_sale_out ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) });
+              if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { dealer_price: Number(row.dealer_price ?? 0), msrp: Number(row.msrp ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) });
             });
           }
           if (import.meta.env.DEV) console.log(`✅ MSRP loaded for first ${msrpMap.size} items (before first render)`);
@@ -256,8 +256,8 @@ export function useCatalogItems(
             allData = [...allData, ...batchData];
             const batchIds = batchData.map((i: any) => i.id).filter(Boolean);
             if (batchIds.length > 0 && activeOrganizationId) {
-              const { data: mb } = await supabase.from('CatalogItemsMSRP').select('catalog_item_id, msrp_sale_in, msrp_sale_out, total_cost, shipping_cost, import_tax_cost').eq('organization_id', activeOrganizationId).in('catalog_item_id', batchIds);
-              (mb || []).forEach((row: any) => { if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { msrp_sale_in: Number(row.msrp_sale_in ?? 0), msrp_sale_out: Number(row.msrp_sale_out ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) }); });
+              const { data: mb } = await supabase.from('CatalogItemsMSRP').select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost').eq('organization_id', activeOrganizationId).in('catalog_item_id', batchIds);
+              (mb || []).forEach((row: any) => { if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { dealer_price: Number(row.dealer_price ?? 0), msrp: Number(row.msrp ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) }); });
             }
             const valid = enrichItems(allData, msrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
             if (isMounted) setItems(valid);

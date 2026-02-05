@@ -482,7 +482,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
           if (!categoryMaterials || categoryMaterials.length === 0) return null;
           
           const categoryTotal = categoryMaterials.reduce((sum, m) => sum + m.total_cost_exw, 0);
-          const categoryTotalMSRP = categoryMaterials.reduce((sum, m) => sum + (m.total_msrp_sale_out || 0), 0);
+          const categoryTotalMSRP = categoryMaterials.reduce((sum, m) => sum + (m.total_msrp || 0), 0);
 
           return (
             <div key={category} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -570,13 +570,13 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
                         {showCosts && (
                           <>
                             <td className="py-3 px-6 text-sm text-blue-700 text-right font-medium">
-                              {material.unit_msrp_sale_out
-                                ? formatCurrency(material.unit_msrp_sale_out, currency)
+                              {material.unit_msrp
+                                ? formatCurrency(material.unit_msrp, currency)
                                 : 'N/A'}
                             </td>
                             <td className="py-3 px-6 text-sm text-blue-900 text-right font-bold">
-                              {material.total_msrp_sale_out
-                                ? formatCurrency(material.total_msrp_sale_out, currency)
+                              {material.total_msrp
+                                ? formatCurrency(material.total_msrp, currency)
                                 : 'N/A'}
                             </td>
                             <td className="py-3 px-6 text-sm text-gray-500 text-right text-xs">
@@ -634,7 +634,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
                   <div className="text-xs text-blue-600 mb-1">Total MSRP (PVP)</div>
                   <div className="text-lg font-bold text-blue-700">
                     {formatCurrency(
-                      bomTotals.totalMSRPWithLabor || materials.reduce((sum, m) => sum + (m.total_msrp_sale_out || 0), 0),
+                      bomTotals.totalMSRPWithLabor || materials.reduce((sum, m) => sum + (m.total_msrp || 0), 0),
                       currency
                     )}
                   </div>

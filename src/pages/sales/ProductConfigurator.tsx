@@ -6,13 +6,12 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { X } from 'lucide-react';
 import { ProductType, ProductConfig } from './product-config/types';
-import { getProductSteps, canProceedToNext, getProductDefinition } from './product-config/product-registry';
+import { canProceedToNext } from './product-config/product-registry';
 import ProductStep from './curtain-config/ProductStep';
 import { useBOMTemplateQuestions } from '../../hooks/useBOMTemplateQuestions';
 import { UnifiedProductConfig, normalizeConfig } from './product-config/config-contract';
 import { useUIStore } from '../../stores/ui-store';
 import { createConfiguredProductPreview } from '../../lib/bom/createConfiguredProductPreview';
-import { matchBOMTemplate, MatchConfig } from '../../lib/bom/matchBOMTemplate';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { RoleSelection, isUnset, isNone, isSelected, toRoleSelection, getSelectionSku } from '../../lib/bom/selection';
 import { 
@@ -105,6 +104,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   const [currentStepIndex, setCurrentStepIndex] = useState(initialState.currentStepIndex);
   const [config, setConfig] = useState<Partial<ProductConfig>>(initialState.config);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const configRef = useRef<Partial<ProductConfig>>(initialState.config);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
   // CRITICAL: Update state when initialConfig changes AFTER mount (e.g., when switching to edit mode)
   const initialConfigRef = useRef(initialConfig);
@@ -389,7 +393,6 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   
   // currentStepIndex 0 = product selection, 1+ = product steps (steps[0], steps[1], etc.)
   const currentStep = productType && currentStepIndex > 0 ? steps[currentStepIndex - 1] : null;
-  const productDefinition = productType ? getProductDefinition(productType) : null;
 
   // Handle product type selection
   const handleProductTypeSelect = (type: ProductType, productTypeId?: string) => {
@@ -487,6 +490,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       // Merge updates while preserving critical fields
       const merged = { ...prev, ...updates };
       
+      // ✅ CRITICAL: Preserve draft quote_line_id unless explicitly changed
+      if ((prev as any).quote_line_id && !('quote_line_id' in (updates as any))) {
+        (merged as any).quote_line_id = (prev as any).quote_line_id;
+      }
+
       // CRITICAL: Always preserve productType, productTypeId, product_type_id, and bom_template_id
       if (prev.productType) {
         (merged as any).productType = prev.productType;
@@ -608,6 +616,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           bottom_channel_sku: null,
           side_channel_type: null,
           side_bottom_channel_selection: 'none',
+          // ✅ Limpiar persistencia de templates para que al re-entrar se recalcule desde color
+          _hardware_filtered_templates: undefined,
         } as any;
       case 'operating-system':
         return {
@@ -625,6 +635,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           tube_item_id: undefined,
           tube_sku: null,
           tube_type: undefined,
+          // ✅ Limpiar base y templates para que al re-entrar se recalculen desde Hardware
+          _operating_system_base_templates: undefined,
+          _hardware_filtered_templates: undefined,
         } as any;
       case 'accessories':
         return {
@@ -635,7 +648,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     }
   };
 
-  const clearSelectionsAfterStep = (targetIndex: number) => {
+  const clearSelectionsAfterStep = async (targetIndex: number) => {
     if (!steps.length) return;
     const stepArrayIndex = targetIndex - 1;
     const stepsToClear = targetIndex <= 0 ? steps : steps.slice(stepArrayIndex + 1);
@@ -658,11 +671,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     if (currentStepIndex > 1) {
       // Go back to previous product step
       const nextIndex = currentStepIndex - 1;
-      clearSelectionsAfterStep(nextIndex);
+      void clearSelectionsAfterStep(nextIndex);
       setCurrentStepIndex(nextIndex);
     } else if (currentStepIndex === 1) {
       // Go back to product selection (step 0)
-      clearSelectionsAfterStep(0);
+      void clearSelectionsAfterStep(0);
       setCurrentStepIndex(0);
       // Optionally clear product type to allow reselection
       // setProductType(null);
@@ -678,14 +691,14 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     if (hasInitialConfig) {
       // When editing, allow free navigation to all steps
       if (index < currentStepIndex) {
-        clearSelectionsAfterStep(index);
+        void clearSelectionsAfterStep(index);
       }
       setCurrentStepIndex(index);
     } else {
       // When creating new, only allow navigation to completed steps
       if (index <= currentStepIndex) {
         if (index < currentStepIndex) {
-          clearSelectionsAfterStep(index);
+          void clearSelectionsAfterStep(index);
         }
         setCurrentStepIndex(index);
       }
@@ -845,10 +858,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
 
     setIsSubmitting(true);
     try {
-      // ✅ NUEVA ARQUITECTURA: Matching automático AL FINAL
-      // En lugar de filtrar progresivamente, ahora hacemos el matching exacto al final
-      
-      // Preparar datos para matching
+      // ✅ NUEVA ARQUITECTURA: ConfiguredProduct es la base.
+      // El matching de bom_template_id se resuelve de forma estricta al crear el ConfiguredProduct
+      // (usando select_best_bom_template_v2_strict) y luego QuoteLine se genera desde ese snapshot.
+
+      // Helpers
       const pickSku = (cfg: any, keys: string[]): string | null => {
         for (const k of keys) {
           const v = cfg?.[k];
@@ -856,118 +870,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         }
         return null;
       };
-
-      // ✅ Obtener templates pre-filtrados del paso Hardware
-      const preFilteredTemplateIds = configAny._hardware_filtered_templates as string[] | undefined;
-      
-      const matchConfig: MatchConfig = {
-        organization_id: activeOrganizationId || '',
-        product_type_id: normalizedConfig.product_type_id || '',
-        hardware_color: normalizedConfig.hardware_color || configAny.hardwareColor || configAny.operatingSystemColor || null,
-        // ✅ CRITICAL: soportar camelCase/legacy keys para evitar undefined
-        bottom_bar_sku: pickSku(configAny, ['bottom_bar_sku', 'bottomBarSku', 'bottom_bar']) || null,
-        tube_sku: pickSku(configAny, ['tube_sku', 'tubeSku', 'tube_type', 'tubeType']) || null,
-        operation_type: (configAny.operation_type || configAny.drive_type || null) as 'motor' | 'manual' | null,
-        headbox_sku: configAny.headbox_sku || null,
-        side_channel_sku: configAny.side_channel_sku || null,
-        bottom_channel_sku: configAny.bottom_channel_sku || null,
-        // ✅ CRÍTICO: Usar pickSku para motor/drive también
-        motor_sku: pickSku(configAny, ['motor_sku', 'motorSku']) || null,
-        drive_sku: pickSku(configAny, ['drive_sku', 'driveSku', 'manual_drive']) || null,
-        // ✅ NUEVO: Pasar templates pre-filtrados
-        preFilteredTemplateIds: preFilteredTemplateIds || null,
-      };
-      
-      // ✅ SIEMPRE mostrar matchConfig para debugging (no solo en DEV)
-      console.log('🎯 [MATCH] Config enviado al matcher:', {
-        product_type_id: matchConfig.product_type_id,
-        hardware_color: matchConfig.hardware_color,
-        operation_type: matchConfig.operation_type,
-        bottom_bar_sku: matchConfig.bottom_bar_sku,
-        tube_sku: matchConfig.tube_sku,
-        motor_sku: matchConfig.motor_sku,
-        drive_sku: matchConfig.drive_sku,
-        preFilteredCount: preFilteredTemplateIds?.length ?? 0,
-        preFilteredIds: preFilteredTemplateIds?.slice(0, 5) ?? [],
-      });
-      
-      // Ejecutar matching automático
-      let finalBomTemplateId: string | null = null;
-      let matchWarning: string | undefined;
-      
-      if (activeOrganizationId && normalizedConfig.product_type_id) {
-        try {
-          const matchResult = await matchBOMTemplate(matchConfig);
-          finalBomTemplateId = matchResult.template_id;
-          matchWarning = matchResult.warning;
-          
-          // ✅ SIEMPRE mostrar resultado del matcher (no solo en DEV)
-          console.log('✅ [MATCH] Template seleccionado:', {
-            template_id: matchResult.template_id,
-            template_name: matchResult.template_name,
-            matched: matchResult.matched,
-            score: matchResult.matchScore,
-            matchedCriteria: matchResult.debug?.matchedCriteria,
-            unmatchedCriteria: matchResult.debug?.unmatchedCriteria,
-          });
-          
-          if (matchResult.warning) {
-            console.warn('⚠️ [MATCH] Warning:', matchResult.warning);
-          }
-          
-          // ✅ Mostrar warning si no hubo match exacto
-          if (matchWarning) {
-            console.warn('[ProductConfigurator] ⚠️ Template matching warning:', matchWarning);
-            useUIStore.getState().addNotification({
-              type: 'warning',
-              title: 'Template Matching Warning',
-              message: matchWarning,
-            });
-          }
-          
-          // ✅ Si no se encontró ningún template, mostrar error
-          if (!finalBomTemplateId) {
-            useUIStore.getState().addNotification({
-              type: 'error',
-              title: 'No Template Found',
-              message: 'No matching BOM template found for the current configuration. Please check your selections.',
-            });
-            setIsSubmitting(false);
-            return;
-          }
-        } catch (matchError: any) {
-          console.error('[ProductConfigurator] Error matching template:', matchError);
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Template Matching Error',
-            message: matchError?.message || 'Failed to find matching BOM template.',
-          });
-          setIsSubmitting(false);
-          return;
-        }
-      } else {
-        // Sin datos mínimos, no se puede resolver template
-        finalBomTemplateId = null;
-      }
-
-      // Crear config con el bom_template_id resuelto automáticamente
-      const configWithEffectiveBom = {
-        ...config,
-        bom_template_id: finalBomTemplateId,
-      };
-      
-      const finalNormalizedConfig = normalizeConfig(configWithEffectiveBom as Partial<UnifiedProductConfig>);
-      
-      if (import.meta.env.DEV) {
-        console.log('[ProductConfigurator] Completing configuration', {
-          product_type_id: finalNormalizedConfig.product_type_id,
-          bom_template_id: finalNormalizedConfig.bom_template_id,
-          finalBomTemplateId,
-          width_m: finalNormalizedConfig.width_m,
-          height_m: finalNormalizedConfig.height_m,
-          normalizedConfig: finalNormalizedConfig,
-        });
-      }
+      const finalNormalizedConfig = normalizedConfig as any;
 
       // ✅ NUEVO: Crear ConfiguredProduct preview antes de llamar onComplete
       // Esto genera BOM preview y calcula totals (fabric + bom) ANTES de crear QuoteLine
@@ -991,11 +894,12 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             // ✅ SKUs: asegurar que estén trim y no sean null/undefined
             bottom_bar_item_id: configAny.bottom_bar_item_id || null,
             bottom_bar_sku: pickSku(configAny, ['bottom_bar_sku', 'bottomBarSku', 'bottom_bar']) || null,
-            headbox_item_id: configAny.headbox_item_id || null,
+            // 'NONE' is UI-only tri-state; persist as null (no headbox/side/bottom channel)
+            headbox_item_id: (configAny.headbox_item_id === 'NONE' ? null : configAny.headbox_item_id) || null,
             headbox_sku: configAny.headbox_sku ? String(configAny.headbox_sku).trim() : null,
-            side_channel_item_id: configAny.side_channel_item_id || null,
+            side_channel_item_id: (configAny.side_channel_item_id === 'NONE' ? null : configAny.side_channel_item_id) || null,
             side_channel_sku: configAny.side_channel_sku ? String(configAny.side_channel_sku).trim() : null,
-            bottom_channel_item_id: configAny.bottom_channel_item_id || null,
+            bottom_channel_item_id: (configAny.bottom_channel_item_id === 'NONE' ? null : configAny.bottom_channel_item_id) || null,
             bottom_channel_sku: configAny.bottom_channel_sku ? String(configAny.bottom_channel_sku).trim() : null,
             motor_item_id: configAny.motor_item_id || null,
             motor_sku: configAny.motor_sku ? String(configAny.motor_sku).trim() : null,
@@ -1006,7 +910,24 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             operating_type: configAny.operation_type || configAny.drive_type || null,
             roll_catalog_item_id: finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId || null,
             quantity: finalNormalizedConfig.quantity || 1,
+            // ✅ Drop e instalación (para QuoteLines vía commit y config_snapshot)
+            fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
+            installationType: configAny.installationType ?? configAny.installation_type ?? null,
+            installationLocation: configAny.installationLocation ?? configAny.installation_location ?? null,
           };
+
+          // ✅ Pass candidate templates from progressive filtering (for strict disambiguation).
+          const filtered = (configAny as any)._hardware_filtered_templates;
+          if (Array.isArray(filtered)) {
+            const candidateIds = filtered.filter((x: any) => typeof x === 'string' && x.trim().length > 0);
+            if (candidateIds.length > 0) {
+              configSnapshot.candidate_template_ids = Array.from(new Set(candidateIds));
+            }
+            // If it is already narrowed to 1, use it directly.
+            if (candidateIds.length === 1) {
+              configSnapshot.bom_template_id = candidateIds[0];
+            }
+          }
 
           // ✅ DEBUG: Log config_snapshot antes de enviar
           if (import.meta.env.DEV) {
@@ -1039,13 +960,26 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           // Agregar configured_product_id al config antes de pasar a onComplete
           (finalNormalizedConfig as any).configured_product_id = previewResult.configured_product_id;
           (finalNormalizedConfig as any).configured_product_totals = previewResult.totals;
+          // ✅ CRITICAL: bom_template_id viene del ConfiguredProduct (strict matching)
+          (finalNormalizedConfig as any).bom_template_id = previewResult.bom_template_id;
+          // ✅ NEW: Pass bom_preview_snapshot for UI breakdown display
+          if (previewResult.bom_preview_snapshot) {
+            (finalNormalizedConfig as any).bom_preview_snapshot = previewResult.bom_preview_snapshot;
+          }
+          // ✅ Drop e instalación: normalizeConfig no los incluye; pasarlos para QuoteLines
+          (finalNormalizedConfig as any).fabricDrop = configAny.fabricDrop ?? configAny.fabric_drop ?? null;
+          (finalNormalizedConfig as any).installationType = configAny.installationType ?? configAny.installation_type ?? null;
+          (finalNormalizedConfig as any).installationLocation = configAny.installationLocation ?? configAny.installation_location ?? null;
         } catch (previewError: any) {
           // ✅ REQUERIR ConfiguredProduct - NO continuar sin él
           console.error('[ProductConfigurator] Error creating ConfiguredProduct preview:', previewError);
           
           // ✅ MEJORAR mensaje de error si es por BOM Template no encontrado
           let errorMessage = previewError.message || 'Unknown error';
-          if (errorMessage.includes('No matching BOMTemplate') || errorMessage.includes('BOMTemplate')) {
+          const lowered = errorMessage.toLowerCase();
+          if (lowered.includes('frontend fallback')) {
+            errorMessage = `No BOMTemplate match found for your selections. Please verify the selected motor/drive + tube + bottom bar exist together in a BOM Template. Details: ${errorMessage}`;
+          } else if (errorMessage.includes('No matching BOMTemplate')) {
             errorMessage = `No BOM Template found for this product type. Please create a BOM Template first in Catalog > BOM Templates. Original error: ${errorMessage}`;
           }
           
