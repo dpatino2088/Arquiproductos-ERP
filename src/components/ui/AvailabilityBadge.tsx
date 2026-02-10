@@ -1,4 +1,4 @@
-import type { AvailabilityType } from '../../hooks/useInventoryAvailability';
+import type { AvailabilityType } from '../../types/inventory';
 
 interface AvailabilityBadgeProps {
   type: AvailabilityType;

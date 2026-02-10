@@ -183,7 +183,7 @@ export async function commitConfiguredProductToQuoteLineFallback(
 
   return {
     quote_line_id: result.quoteLineId,
-    bom_instance_id: result.bomInstanceId || null,
+    bom_instance_id: null,
   };
 }
 

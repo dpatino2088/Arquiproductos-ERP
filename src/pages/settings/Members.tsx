@@ -88,7 +88,7 @@ export default function Members() {
   };
 
   const handleInvite = async () => {
-    if (!currentCompany?.id || !inviteEmail) return;
+    if (!currentDealer?.id || !inviteEmail) return;
 
     setIsInviting(true);
     try {
@@ -102,7 +102,7 @@ export default function Members() {
         email: inviteEmail,
         role: inviteRole,
         message: inviteMessage,
-        dealer_id: currentDealer.id,
+        dealer_id: currentDealer?.id,
       });
 
       // For now, just show success and reset form

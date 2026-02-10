@@ -68,7 +68,7 @@ function SortableRow({
   };
   return (
     <tr ref={setNodeRef} style={style} className={isDragging ? 'opacity-60 bg-gray-100' : ''}>
-      {renderFirstCell({ attributes, listeners })}
+      {renderFirstCell({ attributes: attributes as unknown as Record<string, unknown>, listeners: (listeners ?? {}) as unknown as Record<string, unknown> })}
       {children}
     </tr>
   );

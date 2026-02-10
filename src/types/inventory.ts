@@ -5,6 +5,9 @@
 
 export type InventoryAvailabilityStatus = 'IN_STOCK' | 'ON_ORDER' | 'OUT_OF_STOCK';
 
+/** Display type for availability badges (includes IN_TRANSIT, IMPORT, UNKNOWN). */
+export type AvailabilityType = 'IN_STOCK' | 'IN_TRANSIT' | 'IMPORT' | 'UNKNOWN';
+
 export type InventoryRiskLevel = 'low' | 'medium' | 'high' | 'critical' | null;
 
 export type InventoryAvailabilityRow = {

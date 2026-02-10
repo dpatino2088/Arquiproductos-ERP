@@ -119,7 +119,7 @@ export async function createQuoteLineFromRollerConfig(
     unit_cost_snapshot: catalogItem.cost_exw || 0,
     total_unit_cost_snapshot: pricingResult.totalUnitCost,
     discount_pct_used: pricingResult.discountPct,
-    customer_type_snapshot: customerType,
+    customer_type_snapshot: 'retail',
     price_basis: pricingResult.priceBasis,
     margin_pct_used:
       pricingResult.totalUnitCost > 0 && netUnitPrice > 0

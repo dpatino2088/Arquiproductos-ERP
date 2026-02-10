@@ -175,8 +175,8 @@ export default function QuoteLineCostsSectionV1({
     );
   }
 
-  const laborPercentage = settings?.labor_percentage ?? 10.0000;
-  const shippingPercentage = settings?.shipping_percentage ?? 15.0000;
+  const laborPercentage = (settings?.labor_pct ?? 0.10) * 100;
+  const shippingPercentage = (settings?.shipping_pct ?? 0.15) * 100;
   const isLaborManual = costs.labor_source === 'manual';
   const isShippingManual = costs.shipping_source === 'manual';
   const isImportTaxManual = costs.import_tax_source === 'manual';

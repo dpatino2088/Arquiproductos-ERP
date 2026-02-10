@@ -199,7 +199,7 @@ export function useProgressiveTemplateFilter(
     };
 
     loadData();
-  }, [activeOrganizationId, productTypeId, hardwareColor, safePanelCount]);
+  }, [activeOrganizationId, productTypeId, hardwareColor, panelCount]);
 
   // Filter templates by component
   const filterByComponent = useCallback((role: string, componentItemId: string): string[] => {

@@ -307,7 +307,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
+            {dealers.length === 0 && !loadingCompanies && (
               <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
             )}
           </div>
@@ -771,7 +771,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
+            {dealers.length === 0 && !loadingCompanies && (
               <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
             )}
           </div>

@@ -357,6 +357,7 @@ export default function ProposalPrint() {
                 const qty = line.line_type === 'custom' ? Number(line.qty) || 0 : snapFrozen?.qty ?? qlInfo?.quantity ?? 0;
                 // Unit price = adjusted (lineTotal/qty); no override display
                 const unitPrice = qty > 0 ? lineTotal / qty : 0;
+                const baseAmount = unitPrice;
                 const snap =
                   snapFrozen
                     ? { measurements: snapFrozen.measurements, accessories: snapFrozen.accessories }
