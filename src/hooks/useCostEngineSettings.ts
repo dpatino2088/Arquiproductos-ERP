@@ -6,21 +6,18 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 // COST SETTINGS (organization defaults)
 // ====================================================
 
+/** CostSettings: columnas según BD (dump V9). PK = organization_id; sin tiers. */
 export interface CostSettingsRow {
-  id: string;
   organization_id: string;
   labor_pct: number;
   shipping_pct: number;
   global_import_tax_pct: number;
-  default_msrp_pct_sale_out: number; // Global MSRP % Sale Out default (e.g., 0.35 = 35%)
-  reseller_discount_pct: number;
-  distributor_discount_pct: number;
-  partner_discount_pct: number;
-  vip_discount_pct: number;
   minimum_margin_pct: number;
-  default_margin_pct: number;
-  is_active: boolean;
-  created_at: string;
+  default_msrp_pct: number; // Default MSRP % (0-1, e.g. 0.65 = 65%)
+  itbms_pct?: number;       // ITBMS % (0-1, e.g. 0.07 = 7%). Used in Proposals.
+  import_tax_pct?: number;   // generated = global_import_tax_pct
+  is_active?: boolean;
+  created_at?: string;
   updated_at?: string | null;
 }
 
@@ -52,8 +49,8 @@ export function useCostSettings() {
       if (data) {
         console.log('📥 CostSettings loaded from DB:', {
           organization_id: data.organization_id,
-          default_msrp_pct_sale_out: data.default_msrp_pct_sale_out,
-          default_msrp_pct_sale_out_ui: data.default_msrp_pct_sale_out ? Math.round(data.default_msrp_pct_sale_out * 100) : 'N/A',
+          default_msrp_pct: data.default_msrp_pct,
+          default_msrp_pct_ui: data.default_msrp_pct ? Math.round(data.default_msrp_pct * 100) : 'N/A',
         });
       } else {
         console.warn('⚠️ No CostSettings found for organization:', activeOrganizationId);
@@ -207,8 +204,8 @@ export interface CategoryMarginRow {
   id: string;
   organization_id: string;
   category_id: string;
-  msrp_pct_sale_in: number; // MSRP % Sale-In (margin-on-sale) - defines distributor/internal price
-  msrp_pct_sale_out: number; // MSRP % Sale Out (margin-on-sale) - defines public price
+  minimum_margin_pct: number; // Minimum margin (sale-in / dealer price)
+  msrp_pct: number; // MSRP % (margin-on-sale for public price)
   created_at: string;
   updated_at?: string | null;
 }
@@ -247,14 +244,15 @@ export function useCategoryMargins() {
     refetch();
   }, [activeOrganizationId]);
 
-  const upsertMargin = async (category_id: string, msrp_pct_sale_in: number, msrp_pct_sale_out: number) => {
+  const upsertMargin = async (category_id: string, minimum_margin_pct: number, msrp_pct: number) => {
     if (!activeOrganizationId) throw new Error('No organization selected');
 
     const payload = {
       organization_id: activeOrganizationId,
       category_id,
-      msrp_pct_sale_in,
-      msrp_pct_sale_out,
+      minimum_margin_pct,
+      msrp_pct,
+      is_active: true,
     };
 
     console.log('💾 Upserting CategoryMargin:', payload);
@@ -269,8 +267,9 @@ export function useCategoryMargins() {
       .maybeSingle();
 
     if (error) {
+      const msg = error.message || error.details || String(error);
       console.error('❌ Error upserting CategoryMargin:', error);
-      throw error;
+      throw new Error(msg);
     }
 
     console.log('✅ CategoryMargin upserted:', data);

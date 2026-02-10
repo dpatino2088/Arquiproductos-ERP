@@ -6,6 +6,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useDirectoryContacts } from '../../hooks/useDirectoryContacts';
 import { useDeleteContact } from '../../hooks/useDirectory';
 import { useUIStore } from '../../stores/ui-store';
+import { getSupabaseErrorMessage } from '../../lib/supabase-error-utils';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
@@ -35,10 +36,10 @@ import {
 
 interface ContactItem {
   id: string;
-  firstName: string; // This will contain contact_name for compatibility
-  lastName: string; // This will be empty for unified model
+  firstName: string;
+  lastName: string;
   email: string;
-  company: string; // This will contain customer_name from DirectoryCustomers for company type
+  company: string; // Customer name from link contact.customer_id → DirectoryCustomers
   category: string;
   status: 'Active' | 'Inactive' | 'Archived';
   location: string;
@@ -46,6 +47,8 @@ interface ContactItem {
   avatar?: string;
   phone?: string;
   contactType?: 'Business' | 'Personal' | 'Vendor' | 'Customer';
+  createdBy?: string | null;
+  customer_id?: string | null; // Link to DirectoryCustomers (for Quotes contact dropdown)
 }
 
 // Function to generate avatar initials (100% reliable, works everywhere)
@@ -116,13 +119,20 @@ export default function Contacts() {
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
   // ✅ Hook siempre se llama, pero puede estar deshabilitado
-  const { contacts, isLoading: contactsLoading, error: contactsError, refetch } = useDirectoryContacts({
+  const { contacts, isPending: contactsPending, isInitialLoading: contactsInitialLoading, isScopeReady: contactsScopeReady, error: contactsError, refetch } = useDirectoryContacts({
     organizationId: activeOrganizationId ?? null,
     enabled: !!activeOrganizationId,
   });
   
   const { deleteContact, isDeleting } = useDeleteContact();
-  
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  const contactsLoading = orgLoading || !contactsScopeReady || contactsInitialLoading || contactsPending;
+  useEffect(() => {
+    setGlobalLoading(contactsLoading);
+    return () => setGlobalLoading(false);
+  }, [contactsLoading, setGlobalLoading]);
+
   // State hooks
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -144,7 +154,6 @@ export default function Contacts() {
   const [contactTypeSearchTerm, setContactTypeSearchTerm] = useState('');
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   
-  // Mapear DirectoryContact a ContactItem para compatibilidad con UI existente
   const [contactsData, setContactsData] = useState<ContactItem[]>([]);
 
   // Effect hooks
@@ -184,7 +193,7 @@ export default function Contacts() {
     };
   }, []);
   
-  // Mapear contacts a ContactItem
+  // Mapear contacts a ContactItem — siempre desde la lista estable (keepPreviousData: no vaciar al refetch)
   useEffect(() => {
     // Mapear contactos base (ya vienen con columnas explícitas del hook)
     const mapped = contacts.map(c => ({
@@ -198,6 +207,7 @@ export default function Contacts() {
       status: c.deleted ? 'Archived' : 'Active' as 'Active' | 'Inactive' | 'Archived',
       location: c.contact_city ? `${c.contact_city}${c.contact_country ? `, ${c.contact_country}` : ''}` : '',
       dateAdded: (c.created_at ? new Date(c.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]) as string,
+      createdBy: c.created_by_email ?? null,
       contactType: 'Business' as 'Business' | 'Personal' | 'Vendor' | 'Customer', // Map contact_type to UI contactType
       customer_id: c.customer_id || null,
       primary_phone: c.contact_primary_phone || '',
@@ -207,40 +217,31 @@ export default function Contacts() {
       contact_country: c.contact_country || '',
     }));
     
-    // Buscar Customers que tengan estos Contacts como Primary Contact (primary_contact_id)
-    const contactIds = mapped.map(c => c.id);
-    if (contactIds.length > 0 && activeOrganizationId) {
+    // Resolver "Customer" (company) desde el link contact.customer_id → DirectoryCustomers
+    const customerIds = [...new Set(mapped.map(c => c.customer_id).filter(Boolean) as string[])];
+    if (customerIds.length > 0 && activeOrganizationId) {
       (async () => {
         try {
           const { data: customersData, error } = await supabase
             .from('DirectoryCustomers')
-            .select('id, customer_name, primary_contact_id')
-            .in('primary_contact_id', contactIds)
+            .select('id, customer_name')
+            .in('id', customerIds)
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false);
 
           if (error) throw error;
 
-          if (customersData) {
-            // Crear un mapa: contact_id -> customer_name
-            const contactToCustomerMap = new Map<string, string>();
-            customersData.forEach((customer: { primary_contact_id?: string; customer_name?: string }) => {
-              if (customer.primary_contact_id && customer.customer_name) {
-                contactToCustomerMap.set(customer.primary_contact_id, customer.customer_name);
-              }
-            });
-            
-            // Actualizar company names en copia
-            const updated = mapped.map(c => {
-              const customerName = contactToCustomerMap.get(c.id);
-              return { ...c, company: customerName || '' };
-            });
-            setContactsData(updated);
-          } else {
-            setContactsData(mapped);
-          }
+          const customerIdToName = new Map<string, string>();
+          (customersData || []).forEach((row: { id: string; customer_name?: string }) => {
+            if (row.id && row.customer_name) customerIdToName.set(row.id, row.customer_name);
+          });
+          const updated = mapped.map(c => ({
+            ...c,
+            company: (c.customer_id && customerIdToName.get(c.customer_id)) || '',
+          }));
+          setContactsData(updated);
         } catch (err: any) {
-          console.error('[Contacts] Error loading customer names (primary contacts):', err);
+          console.error('[Contacts] Error loading customer names (customer_id link):', err);
           setContactsData(mapped);
         }
       })();
@@ -248,51 +249,13 @@ export default function Contacts() {
       setContactsData(mapped);
     }
   }, [contacts, activeOrganizationId]);
-  
+
   // Reset to first page when search changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
 
-  // ✅ NOW we can do conditional returns (hooks already called)
-  if (orgLoading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading organizations...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!activeOrganizationId) {
-    return (
-      <div className="py-6 px-6">
-        <div style={{ padding: '24px' }}>
-          <div>No organizations available</div>
-          <div>Selecciona una organización o revisa tu membership.</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (contactsError) {
-    return (
-      <div className="py-6 px-6">
-        <div style={{ padding: '24px' }}>
-          <div>Something went wrong</div>
-          <pre>{String(contactsError)}</pre>
-          <button onClick={refetch}>Try again</button>
-        </div>
-      </div>
-    );
-  }
-
-  const contactsIsError = !!contactsError;
-
+  // ✅ useMemo MUST run before any conditional return (rules of hooks)
   const filteredContacts = useMemo(() => {
     const filtered = contactsData.filter(contact => {
       // Search filter - safely handle undefined/null values
@@ -368,6 +331,34 @@ export default function Contacts() {
   const totalPages = Math.ceil(filteredContacts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedContacts = filteredContacts.slice(startIndex, startIndex + itemsPerPage);
+
+  // Conditional returns AFTER all hooks (rules of hooks)
+  if (orgLoading) return <div className="py-6 px-6" />;
+
+  if (!activeOrganizationId) {
+    return (
+      <div className="py-6 px-6">
+        <div style={{ padding: '24px' }}>
+          <div>No organizations available</div>
+          <div>Selecciona una organización o revisa tu membership.</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (contactsError) {
+    return (
+      <div className="py-6 px-6">
+        <div style={{ padding: '24px' }}>
+          <div>Something went wrong</div>
+          <pre>{String(contactsError)}</pre>
+          <button onClick={refetch}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!contactsScopeReady) return <div className="py-6 px-6" />;
 
   // Handle sorting
   const handleSort = (field: typeof sortBy) => {
@@ -550,7 +541,7 @@ export default function Contacts() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al eliminar',
-        message: error instanceof Error ? error.message : 'Error desconocido',
+        message: getSupabaseErrorMessage(error),
       });
     } finally {
       setLoading(false);
@@ -586,19 +577,10 @@ export default function Contacts() {
     }
   };
 
-  // Show loading state (only for contacts, orgLoading already handled above)
-  if (contactsLoading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading contacts...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (contactsInitialLoading) return <div className="py-6 px-6" />;
+
+  const showSkeleton = contacts.length === 0 && contactsPending;
+  const showOverlay = contacts.length > 0 && contactsPending;
 
   return (
     <div className="py-6">
@@ -952,6 +934,9 @@ export default function Contacts() {
         )}
       </div>
 
+      <div className="relative">
+        {showSkeleton ? <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[120px]" /> : (
+          <>
       {/* Table View */}
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
@@ -982,6 +967,7 @@ export default function Contacts() {
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Type</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created By</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
@@ -997,7 +983,7 @@ export default function Contacts() {
               <tbody className="divide-y divide-gray-200">
                 {filteredContacts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 px-6 text-center">
+                    <td colSpan={10} className="py-12 px-6 text-center">
                       <Contact className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No contacts found</p>
                       <p className="text-sm text-gray-500">
@@ -1017,7 +1003,7 @@ export default function Contacts() {
                         <span className="font-medium">{contact.firstName}</span>
                       </td>
                       <td className="py-4 px-6 text-gray-700 text-sm">
-                        <div className="whitespace-nowrap">{contact.company || 'N/A'}</div>
+                        <span className="whitespace-nowrap">{contact.company || '— Not linked'}</span>
                       </td>
                       <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
                         <div className="flex items-center gap-1">
@@ -1043,6 +1029,9 @@ export default function Contacts() {
                         }`}>
                           {formatContactTypeLabel((contact as any).contact_type || 'architect')}
                         </span>
+                      </td>
+                      <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
+                        {contact.createdBy || '—'}
                       </td>
                       <td className="py-4 px-6 text-gray-600 text-sm">
                         {(contact as any).created_at 
@@ -1283,6 +1272,10 @@ export default function Contacts() {
             </div>
           )}
         </div>
+      </div>
+          </>
+        )}
+        {showOverlay && <div className="absolute inset-0 z-10 rounded-lg pointer-events-none" aria-hidden />}
       </div>
 
       {/* Confirm Dialog */}

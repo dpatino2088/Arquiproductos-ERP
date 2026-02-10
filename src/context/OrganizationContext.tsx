@@ -11,6 +11,7 @@ import React, {
 import { supabase } from '../lib/supabase/client';
 import type { OrgRole } from '../types/roles';
 import { useAuthSession } from '../hooks/useAuthSession';
+import { mapLegacyRole } from '../rbac/rolePresets';
 
 /**
  * Organization Membership - represents a user's membership in an organization
@@ -123,7 +124,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
           user_id: m.user_id,
           user_email: (m.user_email || '').toString().trim(),
           user_name: m.user_name || null,
-          role: (m.role || 'viewer') as OrgRole,
+          role: mapLegacyRole((m.role || 'viewer') as string),
           status: (m.status || 'active') as 'invited' | 'active' | 'disabled',
           deleted: !!m.deleted,
           created_at: m.created_at || new Date().toISOString(),
@@ -140,10 +141,11 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
         }
 
         // ==============================
-        // STEP 2: If none, PORTAL CompanyPortalUsers
+        // STEP 2: If none, PORTAL DealerUsers
         // ==============================
         let orgIdsToLoad: string[] = [];
         let portalMode = false;
+        let activePortal: { organization_id?: string; dealer_id?: string }[] = [];
 
         if (internalOrgIds.length > 0) {
           portalMode = false;
@@ -160,8 +162,8 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
           // ✅ CORRECCIÓN: SOLO usar status, NO portal_user_status
           const { data: portalRows, error: portalErr } = await supabase
-            .from('CompanyPortalUsers')
-            .select('id, organization_id, portal_user_email, status, deleted, user_id')
+            .from('DealerUsers')
+            .select('id, organization_id, dealer_id, portal_user_email, status, deleted, user_id')
             .eq('deleted', false)
             .in('status', ['active', 'invited'])
             .or(orParts.join(','));
@@ -169,11 +171,11 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
           if (reqId !== requestSeqRef.current) return; // stale
 
           if (portalErr && import.meta.env.DEV) {
-            console.error('[OrganizationContext] CompanyPortalUsers error:', portalErr);
+            console.error('[OrganizationContext] DealerUsers error:', portalErr);
           }
 
           // ✅ Ya filtrado por query, usar directamente
-          const activePortal = portalRows || [];
+          activePortal = portalRows || [];
 
           const portalOrgIds = activePortal.map((pu: any) => pu.organization_id).filter(Boolean);
 
@@ -227,12 +229,38 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
             });
           }
         } else {
-          // portal: no asignar rol aquí (será null), OrganizationSwitcher usará useAccessContext.portalRole
+          // portal: mostrar nombre del Dealer (si existe) en lugar del Organization para quien ingresa
+          const dealerIdsByOrg = new Map<string, string>();
+          for (const pu of activePortal) {
+            if (pu.organization_id && pu.dealer_id && !dealerIdsByOrg.has(pu.organization_id)) {
+              dealerIdsByOrg.set(pu.organization_id, pu.dealer_id);
+            }
+          }
+          const dealerIds = Array.from(dealerIdsByOrg.values());
+          let dealerNames: Record<string, string> = {};
+          if (dealerIds.length > 0) {
+            const { data: dealersData } = await supabase
+              .from('Dealers')
+              .select('id, dealer_name')
+              .in('id', dealerIds)
+              .eq('deleted', false);
+            if (dealersData) {
+              const idToDealer = new Map<string, string>();
+              dealersData.forEach((d: { id: string; dealer_name?: string | null }) => {
+                if (d.dealer_name?.trim()) idToDealer.set(d.id, d.dealer_name.trim());
+              });
+              dealerIdsByOrg.forEach((dealerId, orgId) => {
+                const name = idToDealer.get(dealerId);
+                if (name) dealerNames[orgId] = name;
+              });
+            }
+          }
           for (const org of orgsData || []) {
+            const displayName = dealerNames[org.id] || org.name || 'Unnamed Organization';
             orgsMap.set(org.id, {
               id: org.id,
-              name: org.name || 'Unnamed Organization',
-              role: null, // Portal users don't have org roles, useAccessContext will provide portalRole
+              name: displayName,
+              role: null,
               status: 'active',
               created_at: org.created_at || new Date().toISOString(),
             });

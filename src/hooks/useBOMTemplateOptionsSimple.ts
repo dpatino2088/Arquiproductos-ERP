@@ -55,7 +55,9 @@ export interface TemplateFilterState {
  */
 export function useProgressiveTemplateFilter(
   productTypeId: string | null | undefined,
-  hardwareColor: string | null | undefined
+  hardwareColor: string | null | undefined,
+  /** Número de paños (1-3). Filtro aplicado ANTES de color. Default 1. */
+  panelCount: number = 1
 ): {
   filterState: TemplateFilterState | null;
   loading: boolean;
@@ -85,71 +87,49 @@ export function useProgressiveTemplateFilter(
       ? hardwareColor.trim().charAt(0).toUpperCase() + hardwareColor.trim().slice(1).toLowerCase()
       : null;
 
+    const safePanelCount = Math.min(3, Math.max(1, panelCount));
+
     const loadData = async () => {
       setLoading(true);
       setError(null);
 
       try {
-        // Step 1: Get all active templates for ProductType
-        // ✅ FIX: Primero buscar templates con color exacto, solo fallback a NULL si no hay
-        let templates: Array<{ id: string; name: string; hardware_color: string | null }> = [];
-        let templatesError: any = null;
-
-        if (normalizedColor) {
-          // Primero: buscar templates con el color EXACTO
-          const { data: exactColorTemplates, error: exactError } = await supabase
+        // Step 1: Get templates for ProductType -> panel_count -> color
+        const baseQuery = () =>
+          supabase
             .from('BOMTemplates')
             .select('id, name, hardware_color')
             .eq('organization_id', activeOrganizationId)
             .eq('product_type_id', productTypeId)
             .eq('is_active', true)
             .eq('archived', false)
-            .eq('hardware_color', normalizedColor);
+            .lte('panel_count_min', safePanelCount)
+            .gte('panel_count_max', safePanelCount);
 
+        let templates: Array<{ id: string; name: string; hardware_color: string | null }> = [];
+        let templatesError: any = null;
+
+        if (normalizedColor) {
+          const { data: exactColorTemplates, error: exactError } = await baseQuery().eq('hardware_color', normalizedColor);
           if (exactError) {
             templatesError = exactError;
           } else if (exactColorTemplates && exactColorTemplates.length > 0) {
-            // Hay templates con color exacto → usar solo esos
             templates = exactColorTemplates;
             if (import.meta.env.DEV) {
-              console.debug('[Progressive] Found templates with exact color match:', {
-                color: normalizedColor,
-                count: templates.length,
-              });
+              console.debug('[Progressive] Found templates with exact color match:', { color: normalizedColor, count: templates.length });
             }
           } else {
-            // No hay templates con color exacto → fallback a templates sin color (NULL)
-            const { data: nullColorTemplates, error: nullError } = await supabase
-              .from('BOMTemplates')
-              .select('id, name, hardware_color')
-              .eq('organization_id', activeOrganizationId)
-              .eq('product_type_id', productTypeId)
-              .eq('is_active', true)
-              .eq('archived', false)
-              .is('hardware_color', null);
-
-            if (nullError) {
-              templatesError = nullError;
-            } else {
+            const { data: nullColorTemplates, error: nullError } = await baseQuery().is('hardware_color', null);
+            if (nullError) templatesError = nullError;
+            else {
               templates = nullColorTemplates || [];
               if (import.meta.env.DEV) {
-                console.warn('[Progressive] No exact color match, using NULL color templates as fallback:', {
-                  requestedColor: normalizedColor,
-                  count: templates.length,
-                });
+                console.warn('[Progressive] No exact color match, using NULL color templates:', { requestedColor: normalizedColor, count: templates.length });
               }
             }
           }
         } else {
-          // Sin color especificado → obtener todos los templates
-          const { data: allTemplates, error: allError } = await supabase
-            .from('BOMTemplates')
-            .select('id, name, hardware_color')
-            .eq('organization_id', activeOrganizationId)
-            .eq('product_type_id', productTypeId)
-            .eq('is_active', true)
-            .eq('archived', false);
-
+          const { data: allTemplates, error: allError } = await baseQuery();
           templatesError = allError;
           templates = allTemplates || [];
         }
@@ -219,7 +199,7 @@ export function useProgressiveTemplateFilter(
     };
 
     loadData();
-  }, [activeOrganizationId, productTypeId, hardwareColor]);
+  }, [activeOrganizationId, productTypeId, hardwareColor, safePanelCount]);
 
   // Filter templates by component
   const filterByComponent = useCallback((role: string, componentItemId: string): string[] => {
@@ -401,17 +381,20 @@ export function useBOMTemplateOptionsSimple(
   hardwareColor: string | null | undefined,
   role: string,
   /** Si se provee, solo busca en estos templates específicos */
-  filteredTemplateIds?: string[] | null
+  filteredTemplateIds?: string[] | null,
+  /** Número de paños (1-3). Filtro aplicado ANTES de color. Default 1. */
+  panelCount: number = 1
 ): RoleOptionsResult {
   const [options, setOptions] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { activeOrganizationId } = useOrganizationContext();
 
+  const safePanelCount = Math.min(3, Math.max(1, panelCount));
+
   // Memoize filteredTemplateIds to avoid infinite loops
   const templateIdsKey = useMemo(() => {
     if (!filteredTemplateIds) return 'all';
-    // IMPORTANT: no mutar el array original (sort muta)
     return [...filteredTemplateIds].sort().join(',');
   }, [filteredTemplateIds]);
 
@@ -426,7 +409,6 @@ export function useBOMTemplateOptionsSimple(
     const normalizedRole = role.toLowerCase().trim();
     const requiresColor = COLOR_ROLES.has(normalizedRole) && !NON_COLOR_ROLES.has(normalizedRole);
 
-    // Si requiere color y no hay color, retornar vacío (excepto si hay templateIds filtrados)
     if (requiresColor && !hardwareColor && !filteredTemplateIds) {
       setOptions([]);
       setLoading(false);
@@ -446,55 +428,39 @@ export function useBOMTemplateOptionsSimple(
         let templateIds: string[];
 
         if (filteredTemplateIds && filteredTemplateIds.length > 0) {
-          // Usar los templates pre-filtrados
           templateIds = filteredTemplateIds;
           if (import.meta.env.DEV) {
             console.debug('[BOM] Using pre-filtered templates:', templateIds.length);
           }
         } else {
-          // Buscar templates por ProductType + Color (match exacto primero)
-          let templates: Array<{ id: string }> = [];
-          let templatesError: any = null;
-
-          if (requiresColor && normalizedColor) {
-            const { data: exactTemplates, error: exactError } = await supabase
+          // Order: product_type_id -> panel_count -> color
+          const baseQuery = () =>
+            supabase
               .from('BOMTemplates')
               .select('id')
               .eq('organization_id', activeOrganizationId)
               .eq('product_type_id', productTypeId)
               .eq('is_active', true)
               .eq('archived', false)
-              .eq('hardware_color', normalizedColor);
+              .lte('panel_count_min', safePanelCount)
+              .gte('panel_count_max', safePanelCount);
 
+          let templates: Array<{ id: string }> = [];
+          let templatesError: any = null;
+
+          if (requiresColor && normalizedColor) {
+            const { data: exactTemplates, error: exactError } = await baseQuery().eq('hardware_color', normalizedColor);
             if (exactError) {
               templatesError = exactError;
             } else if (exactTemplates && exactTemplates.length > 0) {
               templates = exactTemplates;
             } else {
-              const { data: nullColorTemplates, error: nullError } = await supabase
-                .from('BOMTemplates')
-                .select('id')
-                .eq('organization_id', activeOrganizationId)
-                .eq('product_type_id', productTypeId)
-                .eq('is_active', true)
-                .eq('archived', false)
-                .is('hardware_color', null);
-
-              if (nullError) {
-                templatesError = nullError;
-              } else {
-                templates = nullColorTemplates || [];
-              }
+              const { data: nullColorTemplates, error: nullError } = await baseQuery().is('hardware_color', null);
+              if (nullError) templatesError = nullError;
+              else templates = nullColorTemplates || [];
             }
           } else {
-            const { data: allTemplates, error: allError } = await supabase
-              .from('BOMTemplates')
-              .select('id')
-              .eq('organization_id', activeOrganizationId)
-              .eq('product_type_id', productTypeId)
-              .eq('is_active', true)
-              .eq('archived', false);
-
+            const { data: allTemplates, error: allError } = await baseQuery();
             templatesError = allError;
             templates = allTemplates || [];
           }
@@ -644,7 +610,7 @@ export function useBOMTemplateOptionsSimple(
     };
 
     fetchOptions();
-  }, [activeOrganizationId, productTypeId, hardwareColor, role, templateIdsKey]);
+  }, [activeOrganizationId, productTypeId, hardwareColor, role, templateIdsKey, safePanelCount]);
 
   return { options, loading, error };
 }
@@ -657,7 +623,8 @@ export function useBOMTemplateAllRoleOptions(
   productTypeId: string | null | undefined,
   hardwareColor: string | null | undefined,
   roles: string[],
-  filteredTemplateIds?: string[] | null
+  filteredTemplateIds?: string[] | null,
+  panelCount: number = 1
 ): {
   optionsByRole: Map<string, RoleOption[]>;
   loading: boolean;
@@ -704,48 +671,31 @@ export function useBOMTemplateAllRoleOptions(
         if (filteredTemplateIds && filteredTemplateIds.length > 0) {
           templateIds = filteredTemplateIds;
         } else {
-          let templates: Array<{ id: string }> = [];
-          let templatesError: any = null;
-
-          if (!allNonColor && normalizedColor) {
-            const { data: exactTemplates, error: exactError } = await supabase
+          const safePanel = Math.min(3, Math.max(1, panelCount));
+          const baseQuery = () =>
+            supabase
               .from('BOMTemplates')
               .select('id')
               .eq('organization_id', activeOrganizationId)
               .eq('product_type_id', productTypeId)
               .eq('is_active', true)
               .eq('archived', false)
-              .eq('hardware_color', normalizedColor);
+              .lte('panel_count_min', safePanel)
+              .gte('panel_count_max', safePanel);
+          let templates: Array<{ id: string }> = [];
+          let templatesError: any = null;
 
-            if (exactError) {
-              templatesError = exactError;
-            } else if (exactTemplates && exactTemplates.length > 0) {
-              templates = exactTemplates;
-            } else {
-              const { data: nullColorTemplates, error: nullError } = await supabase
-                .from('BOMTemplates')
-                .select('id')
-                .eq('organization_id', activeOrganizationId)
-                .eq('product_type_id', productTypeId)
-                .eq('is_active', true)
-                .eq('archived', false)
-                .is('hardware_color', null);
-
-              if (nullError) {
-                templatesError = nullError;
-              } else {
-                templates = nullColorTemplates || [];
-              }
+          if (!allNonColor && normalizedColor) {
+            const { data: exactTemplates, error: exactError } = await baseQuery().eq('hardware_color', normalizedColor);
+            if (exactError) templatesError = exactError;
+            else if (exactTemplates && exactTemplates.length > 0) templates = exactTemplates;
+            else {
+              const { data: nullColorTemplates, error: nullError } = await baseQuery().is('hardware_color', null);
+              if (nullError) templatesError = nullError;
+              else templates = nullColorTemplates || [];
             }
           } else {
-            const { data: allTemplates, error: allError } = await supabase
-              .from('BOMTemplates')
-              .select('id')
-              .eq('organization_id', activeOrganizationId)
-              .eq('product_type_id', productTypeId)
-              .eq('is_active', true)
-              .eq('archived', false);
-
+            const { data: allTemplates, error: allError } = await baseQuery();
             templatesError = allError;
             templates = allTemplates || [];
           }
@@ -889,7 +839,7 @@ export function useBOMTemplateAllRoleOptions(
     };
 
     fetchAllOptions();
-  }, [activeOrganizationId, productTypeId, hardwareColor, rolesKey, templateIdsKey]);
+  }, [activeOrganizationId, productTypeId, hardwareColor, rolesKey, templateIdsKey, panelCount]);
 
   return { optionsByRole, loading, error };
 }

@@ -98,48 +98,33 @@ export function resolveMarginPct(
 }
 
 /**
- * Get customer type discount percentage from CostSettings
- * 
- * Maps customer_type_name to corresponding discount field in CostSettings
- * 
- * @param customerType - Customer type: 'VIP' | 'Partner' | 'Reseller' | 'Distributor'
- * @param costSettings - CostSettings object with discount fields
- * @returns Discount percentage (0-100)
+ * Get discount percentage from DealerTier (Platinum/Gold/Silver/Bronze).
+ * Single source of truth: DealerTiers table.
+ *
+ * @param dealerTierId - Dealer tier id (from Dealer.dealer_tier_id)
+ * @param tiers - List of DealerTiers (e.g. from useDealerTiers)
+ * @returns Discount percentage 0-100; 35 (Bronze default) if tierId is null or not found
  */
-export function getCustomerTypeDiscount(
-  customerType: string,
-  costSettings: CostSettings | null
+export function getDealerTierDiscountPct(
+  dealerTierId: string | null,
+  tiers: { id: string; discount_pct: number }[]
 ): number {
-  if (!costSettings) return 0;
-  
-  switch (customerType) {
-    case 'Distributor':
-      return costSettings.discount_distributor_pct || 0;
-    case 'Reseller':
-      return costSettings.discount_reseller_pct || 0;
-    case 'Partner':
-      return costSettings.discount_partner_pct || 0;
-    case 'VIP':
-      return costSettings.discount_vip_pct || 0;
-    default:
-      return 0;
-  }
+  if (!dealerTierId) return 35; // Default: Bronze
+  const tier = tiers.find((t) => t.id === dealerTierId);
+  if (!tier) return 35;
+  const pct = Number(tier.discount_pct);
+  return Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 35;
 }
 
 /**
  * Calculate quote line unit price using MSRP tier pricing with margin guardrail
- * 
- * Logic:
- * 1. Start from catalog item MSRP (public price)
- * 2. Apply customer type discount
- * 3. Apply margin guardrail (margin-on-sale as floor)
- * 4. Return the maximum of (tier_price, min_price_allowed)
- * 
+ *
+ * Discount comes from DealerTiers (dealer's tier). CostSettings only used for min_margin_pct.
+ *
  * @param catalogItem - Catalog item with pricing fields
- * @param customerType - Customer type for discount lookup
- * @param costSettings - CostSettings with discounts and min_margin_pct
+ * @param discountPct - Discount percentage 0-100 (from DealerTiers via getDealerTierDiscountPct)
+ * @param costSettings - CostSettings for min_margin_pct (guardrail)
  * @param categoryMargin - Optional category margin for guardrail calculation
- * @returns Object with calculated price and metadata
  */
 export function calculateQuoteLinePrice(
   catalogItem: {
@@ -152,7 +137,7 @@ export function calculateQuoteLinePrice(
     import_tax_pct?: number | null;
     default_margin_pct?: number | null;
   },
-  customerType: string,
+  discountPct: number,
   costSettings: CostSettings | null,
   categoryMargin?: number | null
 ): {
@@ -165,10 +150,11 @@ export function calculateQuoteLinePrice(
   minPriceAllowed: number;
   priceBasis: 'MSRP_TIER' | 'MARGIN_FLOOR';
 } {
+  const safeDiscountPct = Number.isFinite(discountPct) ? Math.max(0, Math.min(100, discountPct)) : 35;
+
   // 1. MSRP lista (END USER price)
   const listPrice = catalogItem.msrp || 0;
   if (listPrice <= 0) {
-    // If no MSRP, return 0 (should not happen due to validation in QuoteNew)
     return {
       unitPrice: 0,
       basePrice: 0,
@@ -181,19 +167,20 @@ export function calculateQuoteLinePrice(
     };
   }
   
-  // 2. Get discount for customer type
-  const discountPct = getCustomerTypeDiscount(customerType, costSettings);
+  // 2. Use discount from DealerTiers (passed in)
   
   // 3. Precio con descuento por tier (CRÍTICO: aplicar descuento aquí)
-  const priceFromTier = discountPct > 0
-    ? listPrice * (1 - discountPct / 100)
+  const priceFromTier = safeDiscountPct > 0
+    ? listPrice * (1 - safeDiscountPct / 100)
     : listPrice;
   
   // 4. Calculate total unit cost (for margin guardrail)
   const totalUnitCost = computeTotalUnitCost(catalogItem);
   
-  // 5. Get minimum margin (guardrail)
-  const minMarginPct = costSettings?.min_margin_pct || 35;
+  // 5. Get minimum margin (guardrail). BD stores 0-1 (e.g. 0.35); we need 0-100 for formula.
+  const minMarginPct = costSettings?.minimum_margin_pct != null
+    ? costSettings.minimum_margin_pct * 100
+    : 35;
   
   // 6. Calculate minimum price allowed (margin-on-sale floor)
   const minPriceAllowed = totalUnitCost > 0 
@@ -211,9 +198,9 @@ export function calculateQuoteLinePrice(
       : 'MSRP_TIER';
   
   return {
-    unitPrice: Number(finalUnitPrice.toFixed(2)), // CRÍTICO: retornar finalUnitPrice, no listPrice
+    unitPrice: Number(finalUnitPrice.toFixed(2)),
     basePrice: Number(listPrice.toFixed(2)),
-    discountPct,
+    discountPct: safeDiscountPct,
     priceFromTier: Number(priceFromTier.toFixed(2)),
     totalUnitCost: Number(totalUnitCost.toFixed(2)),
     minMarginPct,

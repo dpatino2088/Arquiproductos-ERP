@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { router } from '../../lib/router';
 import { useManufacturingOrder } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useUIStore } from '../../stores/ui-store';
 import ManufacturingOrderTabs from '../../components/manufacturing/ManufacturingOrderTabs';
 import { ArrowLeft } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
@@ -16,6 +17,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [moId, setMoId] = useState<string | null>(normalizedPropMoId);
   const { manufacturingOrder, loading, error } = useManufacturingOrder(moId);
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
 
   // Get MO ID from URL if not provided
   useEffect(() => {
@@ -89,16 +96,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     );
   }
 
-  if (loading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-          <div className="h-32 bg-gray-200 rounded"></div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-6 px-6" />;
 
   if (error || !manufacturingOrder) {
     return (

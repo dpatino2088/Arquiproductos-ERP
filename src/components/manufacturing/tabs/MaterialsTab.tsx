@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useManufacturingMaterials } from '../../../hooks/useManufacturing';
 import { formatCurrency } from '../../../lib/utils';
 import { supabase } from '../../../lib/supabase/client';
@@ -8,6 +8,10 @@ import type { ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
 import BOMMonitoringDashboard from './BOMMonitoringDashboard';
 import { useBOMMonitoring } from '../../../hooks/useBOMMonitoring';
 import { normalizeUUID } from '../../../utils/uuid';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { useWarehouses } from '../../../hooks/useWarehouses';
+import { useInventoryAvailability } from '../../../hooks/useInventoryAvailability';
+import { InventoryAvailabilityBadge } from '../../inventory/InventoryAvailabilityBadge';
 
 interface MaterialsTabProps {
   moId: string;
@@ -47,6 +51,18 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
   const [shouldShowError, setShouldShowError] = useState(false);
   const [generatingBOM, setGeneratingBOM] = useState(false);
   const [showMonitoring, setShowMonitoring] = useState(false);
+
+  const { activeOrganizationId } = useOrganizationContext();
+  const { defaultWarehouse } = useWarehouses(activeOrganizationId);
+  const catalogItemIds = useMemo(
+    () => [...new Set(materials.map((m) => m.catalog_item_id).filter(Boolean))],
+    [materials]
+  );
+  const { map: availabilityMap } = useInventoryAvailability({
+    organizationId: activeOrganizationId ?? null,
+    warehouseId: defaultWarehouse?.id ?? null,
+    catalogItemIds,
+  });
 
   // Only show error if it persists after loading completes (not stale state)
   useEffect(() => {
@@ -519,6 +535,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
                       <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Cut W (mm)</th>
                       <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Cut H (mm)</th>
                       <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Notes</th>
+                      <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Availability</th>
                       {showCosts && (
                         <>
                           <th className="text-right py-3 px-6 font-medium text-blue-900 text-xs">Unit MSRP (PVP)</th>
@@ -566,6 +583,9 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
                         </td>
                         <td className="py-3 px-6 text-sm text-gray-600 max-w-xs truncate" title={material.calc_notes || undefined}>
                           {material.calc_notes || '—'}
+                        </td>
+                        <td className="py-3 px-6 text-sm">
+                          <InventoryAvailabilityBadge row={availabilityMap[material.catalog_item_id]} />
                         </td>
                         {showCosts && (
                           <>

@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useActiveDealer } from './useActiveDealer';
+import { useAccessContext } from './useAccessContext';
+import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 
 export type SaleOrderStatus = 'Draft' | 'Confirmed' | 'Scheduled for Production' | 'In Production' | 'Ready for Delivery' | 'Delivered' | 'Cancelled';
 
@@ -92,6 +95,8 @@ export function useSaleOrders() {
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
+  const { activeDealerId } = useActiveDealer();
+  const { userType } = useAccessContext();
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -106,12 +111,29 @@ export function useSaleOrders() {
         return;
       }
 
-      try {
-        setLoading(true);
-        setError(null);
+      setSaleOrders([]);
+      setLoading(true);
+      setError(null);
 
-        // Query with JOINs (DirectoryCustomers and Quotes)
-        const { data, error: queryError } = await supabase
+      try {
+        let effectiveDealerId: string | null = null;
+        if (userType === 'portal') {
+          const effective = await getEffectiveOrgAndDealer(supabase, {
+            activeOrgId: activeOrganizationId,
+            userType,
+            activeDealerId: null,
+          });
+          effectiveDealerId = effective.dealerId;
+          if (effectiveDealerId == null) {
+            setSaleOrders([]);
+            setLoading(false);
+            return;
+          }
+        } else {
+          effectiveDealerId = activeDealerId ?? null;
+        }
+
+        let query = supabase
           .from('SalesOrders')
           .select(`
             *,
@@ -127,6 +149,26 @@ export function useSaleOrders() {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
+
+        if (effectiveDealerId) {
+          const { data: quotesData } = await supabase
+            .from('Quotes')
+            .select('id')
+            .eq('organization_id', activeOrganizationId)
+            .eq('dealer_id', effectiveDealerId)
+            .or('deleted.is.false,deleted.is.null');
+
+          if (quotesData && quotesData.length > 0) {
+            const quoteIds = quotesData.map((q: { id: string }) => q.id);
+            query = query.in('quote_id', quoteIds);
+          } else {
+            setSaleOrders([]);
+            setLoading(false);
+            return;
+          }
+        }
+
+        const { data, error: queryError } = await query;
 
         if (queryError) {
           console.error('[useSaleOrders] Error fetching SalesOrders:', queryError);
@@ -145,7 +187,7 @@ export function useSaleOrders() {
     }
 
     fetchSaleOrders();
-  }, [activeOrganizationId, refreshTrigger]);
+  }, [activeOrganizationId, activeDealerId, userType, refreshTrigger]);
 
   return { saleOrders, loading, error, refetch };
 }

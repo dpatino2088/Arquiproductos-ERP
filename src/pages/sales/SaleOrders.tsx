@@ -85,6 +85,14 @@ export default function SaleOrders() {
   
   const { saleOrders, loading, error, refetch } = useSaleOrders();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  const moduleLoading = orgLoading || loading;
+  useEffect(() => {
+    setGlobalLoading(moduleLoading);
+    return () => setGlobalLoading(false);
+  }, [moduleLoading, setGlobalLoading]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -299,21 +307,7 @@ export default function SaleOrders() {
 
   const statusOptions: SaleOrderStatus[] = ['Draft', 'Confirmed', 'Scheduled for Production', 'In Production', 'Ready for Delivery', 'Delivered', 'Cancelled'];
 
-  // Show loading state (wait for organization to load first)
-  if (orgLoading || loading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">
-              {orgLoading ? 'Loading organization...' : 'Loading sales orders...'}
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (orgLoading || loading) return <div className="py-6 px-6" />;
 
   // Show message if no organization is selected
   if (!activeOrganizationId) {

@@ -21,7 +21,7 @@ export interface CommitConfiguredProductParams {
   organization_id: string;
   quote_id: string;
   configured_product_id: string;
-  company_id?: string | null;
+  dealer_id?: string | null;
   position?: string | null;
   area?: string | null;
   fabric_drop?: string | null;
@@ -52,7 +52,7 @@ export async function commitConfiguredProductToQuoteLine(
     organization_id,
     quote_id,
     configured_product_id,
-    company_id = null,
+    dealer_id = null,
     position = null,
     area = null,
     fabric_drop = null,
@@ -76,7 +76,7 @@ export async function commitConfiguredProductToQuoteLine(
       organization_id,
       quote_id,
       configured_product_id,
-      company_id,
+      dealer_id,
       position,
       area,
       fabric_drop,
@@ -85,12 +85,12 @@ export async function commitConfiguredProductToQuoteLine(
     });
   }
 
-  // Call the RPC
+  // Call the RPC (p_dealer_id after Company -> Dealer rename)
   const { data, error } = await supabase.rpc('commit_configured_product_to_quote_line', {
     p_org_id: organization_id,
     p_quote_id: quote_id,
     p_configured_product_id: configured_product_id,
-    p_company_id: company_id,
+    p_dealer_id: dealer_id,
     p_position: position,
     p_area: area,
     p_fabric_drop: fabric_drop,
@@ -161,7 +161,7 @@ export async function commitConfiguredProductToQuoteLineFallback(
   const result = await createQuoteLineFromConfiguredProduct({
     quoteId: params.quote_id,
     organizationId: params.organization_id,
-    companyId: params.company_id || undefined,
+    dealerId: params.dealer_id || undefined,
     configuredProductId: params.configured_product_id,
     bom_template_id: configuredProduct.bom_template_id,
     product_type_id: configuredProduct.product_type_id,

@@ -17,3 +17,11 @@ The image should show a roller blind manual drive mechanism with a beaded chain.
 The image should show a tubular motor for automated roller blinds.
 
 **Supported formats:** JPG, PNG, WebP, JPEG
+
+## Quote / Proposal PDF logo (Arquiproductos)
+
+To show a default logo in the Quote PDF when the dealer has no logo set, place your image at:
+
+- `Arquiproductos.png`
+
+The PDF will use it in the top-left header. If the file is missing, a placeholder box is shown.

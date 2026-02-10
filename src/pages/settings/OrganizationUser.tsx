@@ -56,7 +56,8 @@ export default function OrganizationUser() {
   const { user } = useAuthStore();
   const { canManageUsers, loading: roleLoading, role, isAdmin, isSuperAdmin } = useCurrentOrgRole();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
-  
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -76,6 +77,12 @@ export default function OrganizationUser() {
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const hasLoadedRef = useRef(false);
+
+  const moduleLoading = orgLoading || isLoading || roleLoading;
+  useEffect(() => {
+    setGlobalLoading(moduleLoading);
+    return () => setGlobalLoading(false);
+  }, [moduleLoading, setGlobalLoading]);
 
   useEffect(() => {
     registerSubmodules('Settings', [
@@ -602,18 +609,7 @@ export default function OrganizationUser() {
   };
 
   // Show loading state
-  if (orgLoading || isLoading || roleLoading) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading organization users...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (orgLoading || isLoading || roleLoading) return <div className="p-6" />;
 
   return (
     <div className="py-6">

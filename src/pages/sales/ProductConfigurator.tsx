@@ -110,6 +110,37 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     configRef.current = config;
   }, [config]);
 
+  // ✅ Garantizar que el config del snapshot (Edit/Duplicate) se aplica al estado para que las cards salgan seleccionadas
+  const SNAPSHOT_KEYS = [
+    'bottom_bar_sku', 'bottom_bar_item_id', 'hardware_color', 'hardwareColor',
+    'headbox_item_id', 'headbox_sku', 'side_channel_item_id', 'side_channel_sku',
+    'bottom_channel_item_id', 'bottom_channel_sku', 'tube_item_id', 'tube_sku',
+    'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'operation_type', 'drive_type',
+    '_hardware_filtered_templates',
+    'measurements', 'panels',
+  ] as const;
+
+  useEffect(() => {
+    if (!initialConfig || Object.keys(initialConfig).length === 0) return;
+    // Log solo primitivos (evitar [circular])
+    const ic = initialConfig as any;
+    console.log('[ProductConfigurator] initialConfig', String(ic.hardware_color ?? 'MISSING'), String(ic.bottom_bar_sku ?? 'MISSING'), String(ic.bottom_bar_item_id ?? 'MISSING'));
+    setConfig(prev => {
+      const snap = initialConfig as Record<string, unknown>;
+      let hasMissing = false;
+      const patch: Record<string, unknown> = {};
+      for (const k of SNAPSHOT_KEYS) {
+        if (snap[k] != null && (prev as any)[k] == null) {
+          patch[k] = snap[k];
+          hasMissing = true;
+        }
+      }
+      if (!hasMissing) return prev;
+      console.log('[ProductConfigurator] Patching missing snapshot keys', Object.keys(patch));
+      return { ...prev, ...patch };
+    });
+  }, [initialConfig]);
+
   // CRITICAL: Update state when initialConfig changes AFTER mount (e.g., when switching to edit mode)
   const initialConfigRef = useRef(initialConfig);
   useEffect(() => {
@@ -489,6 +520,15 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       
       // Merge updates while preserving critical fields
       const merged = { ...prev, ...updates };
+
+      // ✅ CRITICAL: Preserve snapshot keys (cards prefill) when updates OMIT them.
+      // If the update explicitly sends null for a key, respect that (intentional clear).
+      for (const k of SNAPSHOT_KEYS) {
+        const explicitlyInUpdate = k in (updates as any);
+        if (!explicitlyInUpdate && (prev as any)[k] != null && (merged as any)[k] == null) {
+          (merged as any)[k] = (prev as any)[k];
+        }
+      }
       
       // ✅ CRITICAL: Preserve draft quote_line_id unless explicitly changed
       if ((prev as any).quote_line_id && !('quote_line_id' in (updates as any))) {
@@ -751,10 +791,35 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     }
     // ✅ BOM Template is NOT required in validation - it's derived automatically
     // The template will be resolved when saving QuoteLine or generating BOM
-    if (!normalizedConfig.width_m || normalizedConfig.width_m <= 0) {
+    // ✅ Derive width/height from multiple sources (config.width_m, config.width_mm, panels sum, measurements)
+    const panelsForValidation = Array.isArray(configAny.panels) ? configAny.panels : (configAny.measurements?.panels ?? []);
+    const panelsSumMm = panelsForValidation.reduce((s: number, p: any) => s + (Number(p?.width_mm) || 0), 0);
+    const effectiveWidthM = normalizedConfig.width_m 
+      || (configAny.width_mm ? configAny.width_mm / 1000 : null) 
+      || (configAny.measurements?.width_total_mm ? configAny.measurements.width_total_mm / 1000 : null) 
+      || (panelsSumMm > 0 ? panelsSumMm / 1000 : null);
+    const effectiveHeightM = normalizedConfig.height_m 
+      || (configAny.height_mm ? configAny.height_mm / 1000 : null) 
+      || (configAny.measurements?.height_mm ? configAny.measurements.height_mm / 1000 : null);
+    
+    if (import.meta.env.DEV) {
+      console.log('[ProductConfigurator] Dimension validation', {
+        normalizedWidth: normalizedConfig.width_m,
+        normalizedHeight: normalizedConfig.height_m,
+        configWidth_mm: configAny.width_mm,
+        configHeight_mm: configAny.height_mm,
+        measurementsWidth: configAny.measurements?.width_total_mm,
+        measurementsHeight: configAny.measurements?.height_mm,
+        panelsSumMm,
+        effectiveWidthM,
+        effectiveHeightM,
+      });
+    }
+    
+    if (!effectiveWidthM || effectiveWidthM <= 0) {
       errors.push('Width is required');
     }
-    if (!normalizedConfig.height_m || normalizedConfig.height_m <= 0) {
+    if (!effectiveHeightM || effectiveHeightM <= 0) {
       errors.push('Height is required');
     }
     
@@ -879,11 +944,25 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           // Preparar config_snapshot con todos los datos necesarios
           // ✅ CRÍTICO: Todos los SKUs deben ser EXACTOS (trim, case-sensitive)
           // ✅ CRÍTICO: hardware_color debe ser EXACTO (normalizado)
+          const panelsList = Array.isArray(configAny.panels) ? configAny.panels : (configAny.panels ? [configAny.panels] : []);
+          const panelCount = configAny.measurements?.panel_count ?? (panelsList.length || 1);
+          const widthTotalMm = configAny.measurements?.width_total_mm ?? panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0);
+          const measurements = configAny.measurements ?? {
+            height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : configAny.height_mm ?? null,
+            width_total_mm: widthTotalMm,
+            panel_count: panelCount,
+            panels: (panelsList.length ? panelsList : [{ index: 1, width_mm: configAny.width_mm || 0 }]).map((p: any, i: number) => ({ index: i + 1, width_mm: p?.width_mm ?? 0 })),
+            is_interconnected: panelCount > 1,
+          };
+          // BOM/backend: use total width when multi-panel (sum of all paños) for fabric area and per-width components
+          const widthMmForBom = panelCount > 1 ? widthTotalMm : (panelsList[0]?.width_mm ?? configAny.width_mm ?? null);
           const configSnapshot: Record<string, any> = {
             ...finalNormalizedConfig,
-            // Asegurar que width_mm y height_mm estén en el snapshot
-            width_mm: finalNormalizedConfig.width_m ? finalNormalizedConfig.width_m * 1000 : null,
-            height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : null,
+            width_mm: widthMmForBom ?? (finalNormalizedConfig.width_m ? finalNormalizedConfig.width_m * 1000 : null),
+            height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : (measurements.height_mm ?? configAny.height_mm ?? null),
+            measurements,
+            // ✅ Persist top-level panels so MeasurementsStep can restore multi-panel configs on Edit
+            panels: Array.isArray(configAny.panels) ? configAny.panels : (measurements.panels || null),
             // ✅ hardware_color: normalizar (capitalize first letter)
             hardware_color: (() => {
               const color = finalNormalizedConfig.hardware_color || configAny.hardwareColor || configAny.operatingSystemColor;
@@ -894,13 +973,13 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             // ✅ SKUs: asegurar que estén trim y no sean null/undefined
             bottom_bar_item_id: configAny.bottom_bar_item_id || null,
             bottom_bar_sku: pickSku(configAny, ['bottom_bar_sku', 'bottomBarSku', 'bottom_bar']) || null,
-            // 'NONE' is UI-only tri-state; persist as null (no headbox/side/bottom channel)
-            headbox_item_id: (configAny.headbox_item_id === 'NONE' ? null : configAny.headbox_item_id) || null,
-            headbox_sku: configAny.headbox_sku ? String(configAny.headbox_sku).trim() : null,
-            side_channel_item_id: (configAny.side_channel_item_id === 'NONE' ? null : configAny.side_channel_item_id) || null,
-            side_channel_sku: configAny.side_channel_sku ? String(configAny.side_channel_sku).trim() : null,
-            bottom_channel_item_id: (configAny.bottom_channel_item_id === 'NONE' ? null : configAny.bottom_channel_item_id) || null,
-            bottom_channel_sku: configAny.bottom_channel_sku ? String(configAny.bottom_channel_sku).trim() : null,
+            // ✅ Persist 'NONE' as-is so Edit can distinguish between UNSET (null) and "Not Included" ('NONE')
+            headbox_item_id: configAny.headbox_item_id === 'NONE' ? 'NONE' : (configAny.headbox_item_id || null),
+            headbox_sku: configAny.headbox_item_id === 'NONE' ? null : (configAny.headbox_sku ? String(configAny.headbox_sku).trim() : null),
+            side_channel_item_id: configAny.side_channel_item_id === 'NONE' ? 'NONE' : (configAny.side_channel_item_id || null),
+            side_channel_sku: configAny.side_channel_item_id === 'NONE' ? null : (configAny.side_channel_sku ? String(configAny.side_channel_sku).trim() : null),
+            bottom_channel_item_id: configAny.bottom_channel_item_id === 'NONE' ? 'NONE' : (configAny.bottom_channel_item_id || null),
+            bottom_channel_sku: configAny.bottom_channel_item_id === 'NONE' ? null : (configAny.bottom_channel_sku ? String(configAny.bottom_channel_sku).trim() : null),
             motor_item_id: configAny.motor_item_id || null,
             motor_sku: configAny.motor_sku ? String(configAny.motor_sku).trim() : null,
             drive_item_id: configAny.drive_item_id || null,
@@ -914,6 +993,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
             installationType: configAny.installationType ?? configAny.installation_type ?? null,
             installationLocation: configAny.installationLocation ?? configAny.installation_location ?? null,
+            // ✅ Accesorios: incluir en snapshot para ConfiguredProduct.config_snapshot y cálculo de accessories_total
+            accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
           };
 
           // ✅ Pass candidate templates from progressive filtering (for strict disambiguation).
@@ -1000,6 +1081,60 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         });
         setIsSubmitting(false);
         return;
+      }
+
+      // ✅ CRITICAL: Ensure width_m/height_m are set from all available sources before passing to onComplete
+      // normalizeConfig may have lost width_mm, measurements, panels — re-derive here
+      if (!(finalNormalizedConfig as any).width_m || (finalNormalizedConfig as any).width_m <= 0) {
+        const w = configAny.width_mm ?? configAny.measurements?.width_total_mm ?? (panelsSumMm > 0 ? panelsSumMm : null);
+        if (w && w > 0) (finalNormalizedConfig as any).width_m = w / 1000;
+      }
+      if (!(finalNormalizedConfig as any).height_m || (finalNormalizedConfig as any).height_m <= 0) {
+        const h = configAny.height_mm ?? configAny.measurements?.height_mm ?? null;
+        if (h && h > 0) (finalNormalizedConfig as any).height_m = h / 1000;
+      }
+      // Carry over width_mm, height_mm, panels, measurements so Edit Save can use them
+      if (configAny.width_mm != null) (finalNormalizedConfig as any).width_mm = configAny.width_mm;
+      if (configAny.height_mm != null) (finalNormalizedConfig as any).height_mm = configAny.height_mm;
+      if (Array.isArray(configAny.panels)) (finalNormalizedConfig as any).panels = configAny.panels;
+      if (configAny.measurements) (finalNormalizedConfig as any).measurements = configAny.measurements;
+
+      // ✅ CRITICAL: Carry over hardware and component selections so Edit Save and getConfigFromQuoteLine get full config.
+      // normalizeConfig does not include these; without this, saved lines lose card selections when reopening.
+      (finalNormalizedConfig as any).hardware_color = (finalNormalizedConfig as any).hardware_color ?? configAny.hardware_color ?? configAny.hardwareColor ?? configAny.operatingSystemColor ?? null;
+      (finalNormalizedConfig as any).hardwareColor = (finalNormalizedConfig as any).hardware_color;
+      (finalNormalizedConfig as any).bottom_bar_item_id = configAny.bottom_bar_item_id ?? null;
+      (finalNormalizedConfig as any).bottom_bar_sku = configAny.bottom_bar_sku ?? configAny.bottomBarSku ?? null;
+      (finalNormalizedConfig as any).headbox_item_id = configAny.headbox_item_id ?? null;
+      (finalNormalizedConfig as any).headbox_sku = configAny.headbox_sku ?? null;
+      (finalNormalizedConfig as any).side_channel_item_id = configAny.side_channel_item_id ?? null;
+      (finalNormalizedConfig as any).side_channel_sku = configAny.side_channel_sku ?? null;
+      (finalNormalizedConfig as any).bottom_channel_item_id = configAny.bottom_channel_item_id ?? null;
+      (finalNormalizedConfig as any).bottom_channel_sku = configAny.bottom_channel_sku ?? null;
+      (finalNormalizedConfig as any).tube_item_id = configAny.tube_item_id ?? null;
+      (finalNormalizedConfig as any).tube_sku = configAny.tube_sku ?? configAny.tubeSku ?? configAny.tube_type ?? null;
+      (finalNormalizedConfig as any).drive_item_id = configAny.drive_item_id ?? null;
+      (finalNormalizedConfig as any).drive_sku = configAny.drive_sku ?? null;
+      (finalNormalizedConfig as any).motor_item_id = configAny.motor_item_id ?? null;
+      (finalNormalizedConfig as any).motor_sku = configAny.motor_sku ?? null;
+      (finalNormalizedConfig as any).operation_type = configAny.operation_type ?? configAny.drive_type ?? (finalNormalizedConfig as any).operation_type ?? null;
+      (finalNormalizedConfig as any).drive_type = (finalNormalizedConfig as any).operation_type;
+      (finalNormalizedConfig as any).accessories = Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig as any).accessories ?? [];
+      (finalNormalizedConfig as any).fabricDrop = configAny.fabricDrop ?? configAny.fabric_drop ?? (finalNormalizedConfig as any).fabricDrop ?? null;
+      (finalNormalizedConfig as any).installationType = configAny.installationType ?? configAny.installation_type ?? (finalNormalizedConfig as any).installationType ?? null;
+      (finalNormalizedConfig as any).installationLocation = configAny.installationLocation ?? configAny.installation_location ?? (finalNormalizedConfig as any).installationLocation ?? null;
+      
+      if (import.meta.env.DEV) {
+        console.log('[ProductConfigurator] Passing to onComplete', {
+          width_m: (finalNormalizedConfig as any).width_m,
+          height_m: (finalNormalizedConfig as any).height_m,
+          width_mm: (finalNormalizedConfig as any).width_mm,
+          height_mm: (finalNormalizedConfig as any).height_mm,
+          panels: (finalNormalizedConfig as any).panels,
+          hardware_color: (finalNormalizedConfig as any).hardware_color,
+          bottom_bar_item_id: (finalNormalizedConfig as any).bottom_bar_item_id,
+          bottom_bar_sku: (finalNormalizedConfig as any).bottom_bar_sku,
+        });
       }
 
       await onComplete(finalNormalizedConfig as ProductConfig);
@@ -1127,7 +1262,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             onClick={() => setCurrentStepIndex(0)}
             className={`w-full text-left px-4 py-3 mb-1 rounded transition-colors ${
               !productType
-                ? 'bg-primary text-white shadow-md'
+                ? 'bg-gray-900 text-white shadow-md'
                 : 'bg-green-50 text-green-700 hover:bg-green-100'
             }`}
           >
@@ -1156,7 +1291,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
                 disabled={!isAccessible}
                 className={`w-full text-left px-4 py-3 mb-1 rounded transition-colors ${
                   isActive
-                    ? 'bg-primary text-white shadow-md'
+                    ? 'bg-gray-900 text-white shadow-md'
                     : isCompleted
                     ? 'bg-green-50 text-green-700 hover:bg-green-100'
                     : isAccessible
@@ -1194,55 +1329,6 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         {/* Step Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {renderStepContent()}
-          
-          {/* FASE 5: Debug Panel (DEV ONLY) */}
-          {import.meta.env.DEV && (
-            <div className="mt-6 border-t border-gray-200 pt-4">
-              <details className="bg-gray-50 rounded-lg p-4">
-                <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
-                  🔍 Debug Info (DEV)
-                </summary>
-                <div className="mt-4 space-y-2 text-xs">
-                  <div>
-                    <strong>Product Type:</strong> {productType || 'N/A'}
-                  </div>
-                  <div>
-                    <strong>Current Step:</strong> {currentStepIndex + 1} / {steps.length}
-                  </div>
-                  <div>
-                    <strong>Hardware Color:</strong> {hardwareColor || 'Not selected'}
-                  </div>
-                  <div>
-                    <strong>Product Type ID:</strong> {productTypeIdForTemplates || 'N/A'}
-                  </div>
-                  <div>
-                    <strong>Config Keys:</strong> {Object.keys(config || {}).join(', ') || 'Empty'}
-                  </div>
-                  {config && (config as any).width_m && (
-                    <div>
-                      <strong>Measurements:</strong> {(config as any).width_m}m × {(config as any).height_m}m
-                    </div>
-                  )}
-                  {config && (config as any).variantId && (
-                    <div>
-                      <strong>Fabric Selected:</strong> Yes (ID: {(config as any).variantId})
-                    </div>
-                  )}
-                  {config && (config as any).accessories && Array.isArray((config as any).accessories) && (
-                    <div>
-                      <strong>Accessories:</strong> {(config as any).accessories.length} items
-                    </div>
-                  )}
-                  <details className="mt-2">
-                    <summary className="cursor-pointer text-xs text-gray-600">Full Config (JSON)</summary>
-                    <pre className="mt-2 text-xs bg-white p-2 rounded border overflow-auto max-h-40">
-                      {JSON.stringify(config, null, 2)}
-                    </pre>
-                  </details>
-                </div>
-              </details>
-            </div>
-          )}
         </div>
 
         {/* Navigation Footer */}
@@ -1261,8 +1347,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
                 <button
                   onClick={handleNext}
                   disabled={!!(isSubmitting || (!productType && currentStepIndex === 0) || (productType && !canProceed()))}
-                  className="px-6 py-2 rounded-lg text-white transition-colors text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                  className="px-6 py-2 rounded-lg bg-gray-900 text-white transition-colors text-sm font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Next
                 </button>

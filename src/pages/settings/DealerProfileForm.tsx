@@ -6,18 +6,24 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
-import { X, Mail, User, Shield, Calendar } from 'lucide-react';
+import { X, Mail, User, Shield, Calendar, Plus, Pencil, Trash2 } from 'lucide-react';
+import { useAuthStore } from '../../stores/auth-store';
+import { getRoleDescription, type CompanyPortalRole } from '../../portal/portalAccess';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Label from '../../components/ui/Label';
+import ImageUpload from '../../components/ui/ImageUpload';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
-import { useCompanies } from '../../hooks/useCompanies';
-import { useCompanyPortalUsers, type CompanyPortalUser } from '../../hooks/useCompanyPortalUsers';
+import { useDealers } from '../../hooks/useDealers';
+import { useDealerTiers } from '../../hooks/useDealerTiers';
+import { useDealerUsers, type DealerUser } from '../../hooks/useDealerUsers';
 
-// Schema for Dealer (Company)
+// Schema for Dealer
 const dealerSchema = z.object({
-  company_name: z.string().min(1, 'Dealer name is required'),
+  dealer_name: z.string().min(1, 'Dealer name is required'),
   identification_number: z.string().optional(),
   website: z.string()
     .optional()
@@ -29,8 +35,8 @@ const dealerSchema = z.object({
     }, {
       message: 'Invalid URL format. Use format like: example.com or https://example.com'
     }),
-  company_email: z.string().email('Invalid email').optional().or(z.literal('')),
-  company_phone: z.string().optional(),
+  dealer_email: z.string().email('Invalid email').optional().or(z.literal('')),
+  dealer_phone: z.string().optional(),
   alt_phone: z.string().optional(),
   primary_contact_id: z.string().optional(),
   street_address_line_1: z.string().optional(),
@@ -48,6 +54,8 @@ const dealerSchema = z.object({
   billing_country: z.string().optional(),
   notes: z.string().optional(),
   status: z.enum(['active', 'disabled']).optional(),
+  dealer_tier_id: z.string().uuid().optional().or(z.literal('')),
+  logo_url: z.string().optional().or(z.literal('')),
 });
 
 type DealerFormValues = z.infer<typeof dealerSchema>;
@@ -67,13 +75,34 @@ export default function DealerProfileForm() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const { activeOrganizationId } = useOrganizationContext();
-  const { isSuperAdmin, isOwner, isAdmin, isViewer, loading: roleLoading } = useCurrentOrgRole();
-  const { createCompany, updateCompany } = useCompanies();
-  
+  const { isSuperAdmin, isOwner, isAdmin, isMember, isViewer, loading: roleLoading } = useCurrentOrgRole();
+  const { createDealer, updateDealer } = useDealers();
+  const { tiers: dealerTiers } = useDealerTiers();
+
   // Load dealer users when in edit mode
-  const { users: dealerUsers, isLoading: loadingDealerUsers } = useCompanyPortalUsers(dealerId || null);
+  const { users: dealerUsers, isLoading: loadingDealerUsers, refetch: refetchDealerUsers } = useDealerUsers(dealerId || null, { onlyWhenDealerId: true });
+
+  // Add Dealer User modal (create user for this dealer only)
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [addUserName, setAddUserName] = useState('');
+  const [addUserEmail, setAddUserEmail] = useState('');
+  const [addUserRole, setAddUserRole] = useState<CompanyPortalRole>('member');
+  const [addUserStatus, setAddUserStatus] = useState<'invited' | 'active' | 'disabled'>('invited');
+  const [addUserSubmitting, setAddUserSubmitting] = useState(false);
+  const [addUserError, setAddUserError] = useState<string | null>(null);
+
+  // Edit Dealer User modal
+  const [editingUser, setEditingUser] = useState<DealerUser | null>(null);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserRole, setEditUserRole] = useState<CompanyPortalRole>('member');
+  const [editUserStatus, setEditUserStatus] = useState<'active' | 'disabled'>('active');
+  const [editUserSubmitting, setEditUserSubmitting] = useState(false);
+  const [editUserError, setEditUserError] = useState<string | null>(null);
+
+  const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
-  const canEdit = isSuperAdmin || isOwner || isAdmin;
+  const canEdit = isSuperAdmin || isOwner || isAdmin || isMember;
   const isReadOnly = roleLoading ? false : (isViewer || !canEdit);
 
   const {
@@ -89,6 +118,8 @@ export default function DealerProfileForm() {
       billing_same_as_location: true,
       status: 'active',
       primary_contact_id: '',
+      dealer_tier_id: '',
+      logo_url: '',
     },
   });
 
@@ -108,7 +139,7 @@ export default function DealerProfileForm() {
 
       try {
         const { data, error } = await supabase
-          .from('Companies')
+          .from('Dealers')
           .select('*')
           .eq('id', dealerId)
           .eq('organization_id', activeOrganizationId)
@@ -126,11 +157,11 @@ export default function DealerProfileForm() {
         }
 
         if (data) {
-          setValue('company_name', data.company_name || '');
+          setValue('dealer_name', data.dealer_name || '');
           setValue('identification_number', data.identification_number || '');
           setValue('website', data.website || '');
-          setValue('company_email', data.company_email || '');
-          setValue('company_phone', data.company_phone || '');
+          setValue('dealer_email', data.dealer_email || '');
+          setValue('dealer_phone', data.dealer_phone || '');
           setValue('alt_phone', data.alt_phone || '');
           setValue('primary_contact_id', data.primary_contact_id || '');
           setValue('street_address_line_1', data.street_address_line_1 || '');
@@ -139,6 +170,7 @@ export default function DealerProfileForm() {
           setValue('state', data.state || '');
           setValue('zip_code', data.zip_code || '');
           setValue('country', data.country || '');
+          setValue('dealer_tier_id', data.dealer_tier_id || '');
           setValue('billing_same_as_location', 
             data.billing_street_address_line_1 === data.street_address_line_1 &&
             data.billing_city === data.city &&
@@ -153,6 +185,7 @@ export default function DealerProfileForm() {
           setValue('billing_country', data.billing_country || '');
           setValue('notes', data.notes || '');
           setValue('status', (data.status || 'active') as 'active' | 'disabled');
+          setValue('logo_url', data.logo_url || '');
         }
       } catch (err) {
         console.error('Error loading dealer data:', err);
@@ -194,13 +227,13 @@ export default function DealerProfileForm() {
       try {
         setLoadingContacts(true);
         
-        const { data: orgCompanies } = await supabase
-          .from('Companies')
+        const { data: orgDealers } = await supabase
+          .from('Dealers')
           .select('id')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        const companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
+        const dealerIds = (orgDealers || []).map((c: { id: string }) => c.id);
 
         let query = supabase
           .from('DirectoryContacts')
@@ -208,18 +241,18 @@ export default function DealerProfileForm() {
           .eq('deleted', false)
           .order('contact_name', { ascending: true });
 
-        if (companyIds.length > 0) {
-          query = query.in('company_id', companyIds);
-          const { data: companyData } = await query;
+        if (dealerIds.length > 0) {
+          query = query.in('dealer_id', dealerIds);
+          const { data: dealerData } = await query;
           const { data: orgData } = await supabase
             .from('DirectoryContacts')
             .select('id, contact_name, contact_id_number, contact_type')
             .eq('organization_id', activeOrganizationId)
-            .is('company_id', null)
+            .is('dealer_id', null)
             .eq('deleted', false)
             .order('contact_name', { ascending: true });
 
-          const all = [...(companyData || []), ...(orgData || [])];
+          const all = [...(dealerData || []), ...(orgData || [])];
           const unique = Array.from(new Map(all.map(item => [item.id, item])).values());
           setContacts(unique);
         } else {
@@ -304,9 +337,9 @@ export default function DealerProfileForm() {
 
       const dealerData: any = {
         organization_id: activeOrganizationId,
-        company_name: values.company_name.trim(),
-        company_email: values.company_email?.trim().toLowerCase() || null,
-        company_phone: values.company_phone?.trim() || null,
+        dealer_name: values.dealer_name.trim(),
+        dealer_email: values.dealer_email?.trim().toLowerCase() || null,
+        dealer_phone: values.dealer_phone?.trim() || null,
         identification_number: values.identification_number?.trim() || null,
         website: normalizeWebsite(values.website),
         alt_phone: values.alt_phone || null,
@@ -326,19 +359,19 @@ export default function DealerProfileForm() {
         billing_country: billingAddress.billing_country || null,
         notes: values.notes || null,
         status: values.status || 'active',
+        dealer_tier_id: (values.dealer_tier_id && values.dealer_tier_id.trim() !== '') ? values.dealer_tier_id.trim() : null,
+        logo_url: values.logo_url?.trim() || null,
       };
 
       if (dealerId) {
-        // Update existing dealer - use updateCompany with UpdateCompanyInput
-        await updateCompany(dealerId, dealerData);
+        await updateDealer(dealerId, dealerData);
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Dealer updated successfully',
           message: 'The dealer has been updated and is now available.',
         });
       } else {
-        // Create new dealer - use createCompany with CreateCompanyInput
-        await createCompany(dealerData);
+        await createDealer(dealerData);
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Dealer created successfully',
@@ -359,6 +392,150 @@ export default function DealerProfileForm() {
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleAddDealerUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dealerId || !activeOrganizationId) return;
+    const trimmedName = addUserName.trim();
+    const trimmedEmail = addUserEmail.trim().toLowerCase();
+    if (!trimmedName) {
+      setAddUserError('Name is required');
+      return;
+    }
+    if (!trimmedEmail) {
+      setAddUserError('Email is required');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setAddUserError('Please enter a valid email address');
+      return;
+    }
+    const { user } = useAuthStore.getState();
+    if (!user?.id) {
+      setAddUserError('You must be logged in to create users');
+      return;
+    }
+    setAddUserSubmitting(true);
+    setAddUserError(null);
+    try {
+      const { data, error: createError } = await supabase.functions.invoke('create-temp-user', {
+        body: {
+          kind: 'portal',
+          organization_id: activeOrganizationId,
+          dealer_id: dealerId,
+          email: trimmedEmail,
+          name: trimmedName || null,
+          role: addUserRole,
+          status: addUserStatus,
+        },
+      });
+      if (createError) throw new Error(createError.message || 'Failed to create user');
+      if (!data?.ok) throw new Error(data?.error || 'Edge Function failed');
+      const emailSent = data?.email_sent === true;
+      let message = emailSent
+        ? `User created. An email with temporary credentials was sent to ${trimmedEmail}.`
+        : `User created. Email could not be sent (check RESEND_API_KEY and FROM_EMAIL in Supabase).`;
+      if (data?.temp_password) {
+        message += `\n\nTemporary password: ${data.temp_password}\n\nShare this password with the user.`;
+      }
+      useUIStore.getState().addNotification({
+        type: emailSent ? 'success' : 'warning',
+        title: 'User created',
+        message,
+      });
+      refetchDealerUsers();
+      setShowAddUserModal(false);
+      setAddUserName('');
+      setAddUserEmail('');
+      setAddUserRole('member');
+      setAddUserStatus('invited');
+    } catch (err: any) {
+      const msg = err?.message || 'Error creating user';
+      setAddUserError(msg);
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setAddUserSubmitting(false);
+    }
+  };
+
+  // Populate edit form when opening
+  useEffect(() => {
+    if (editingUser) {
+      setEditUserName(editingUser.portal_user_name || '');
+      setEditUserEmail(editingUser.portal_user_email || '');
+      const role = editingUser.portal_user_role || 'member';
+      setEditUserRole((role === 'member_manager' ? 'member_manager' : 'member') as CompanyPortalRole);
+      const st = (editingUser.portal_user_status || 'active').toLowerCase();
+      setEditUserStatus(st === 'disabled' ? 'disabled' : 'active');
+      setEditUserError(null);
+    }
+  }, [editingUser]);
+
+  const handleEditDealerUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser || !dealerId || !activeOrganizationId) return;
+    const trimmedName = editUserName.trim();
+    const trimmedEmail = editUserEmail.trim().toLowerCase();
+    if (!trimmedName) { setEditUserError('Name is required'); return; }
+    if (!trimmedEmail) { setEditUserError('Email is required'); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) { setEditUserError('Please enter a valid email address'); return; }
+    setEditUserSubmitting(true);
+    setEditUserError(null);
+    try {
+      const { error } = await supabase
+        .from('DealerUsers')
+        .update({
+          portal_user_name: trimmedName,
+          portal_user_email: trimmedEmail,
+          dealer_id: dealerId,
+          role: editUserRole,
+          status: editUserStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editingUser.id);
+      if (error) throw error;
+      useUIStore.getState().addNotification({ type: 'success', title: 'User updated', message: 'Dealer user has been updated.' });
+      refetchDealerUsers();
+      setEditingUser(null);
+    } catch (err: any) {
+      setEditUserError(err?.message || 'Failed to update user');
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message });
+    } finally {
+      setEditUserSubmitting(false);
+    }
+  };
+
+  const handleDeleteDealerUser = async (user: DealerUser) => {
+    if (!activeOrganizationId) return;
+    const confirmed = await showConfirm({
+      title: 'Delete user',
+      message: `Are you sure you want to delete "${user.portal_user_name || user.portal_user_email || 'this user'}"? This action cannot be undone.`,
+      variant: 'danger',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('delete_dealer_user', {
+        p_portal_user_id: user.id,
+        p_organization_id: activeOrganizationId,
+      });
+      if (error) throw error;
+      if (!data || (typeof data === 'object' && 'success' in data && !(data as any).success)) {
+        throw new Error((data && typeof data === 'object' && 'error' in data) ? (data as any).error : 'Could not delete user.');
+      }
+      useUIStore.getState().addNotification({ type: 'success', title: 'User deleted', message: 'Dealer user has been deleted.' });
+      refetchDealerUsers();
+    } catch (err: any) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'Failed to delete user.' });
+    } finally {
+      setLoading(false);
+      closeDialog();
     }
   };
 
@@ -569,12 +746,12 @@ export default function DealerProfileForm() {
               {/* Top Section */}
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
                 <div className="col-span-6">
-                  <Label htmlFor="company_name" className="text-xs" required>Dealer Name</Label>
-                  <Input 
-                    id="company_name" 
-                    {...register('company_name')}
+<Label htmlFor="dealer_name" className="text-xs" required>Dealer Name</Label>
+                  <Input
+                    id="dealer_name"
+                    {...register('dealer_name')}
                     className="py-1 text-xs"
-                    error={errors.company_name?.message}
+                    error={errors.dealer_name?.message}
                     disabled={isReadOnly}
                   />
                 </div>
@@ -603,6 +780,27 @@ export default function DealerProfileForm() {
                     </SelectContent>
                   </SelectShadcn>
                 </div>
+                <div className="col-span-12 mt-2">
+                  <Label htmlFor="dealer_tier_id" className="text-xs">Tier</Label>
+                  <SelectShadcn
+                    value={watch('dealer_tier_id') || '__default__'}
+                    onValueChange={(value) => setValue('dealer_tier_id', value === '__default__' ? '' : value)}
+                    disabled={isReadOnly}
+                  >
+                    <SelectTrigger className="py-1 text-xs">
+                      <SelectValue placeholder="Select tier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">Default: Bronze (35%)</SelectItem>
+                      {dealerTiers.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name} ({t.discount_pct}%)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  <p className="text-xs text-gray-500 mt-0.5">Discount tier for pricing. If not set, Bronze is used.</p>
+                </div>
               </div>
 
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
@@ -618,21 +816,21 @@ export default function DealerProfileForm() {
                   />
                 </div>
                 <div className="col-span-3">
-                  <Label htmlFor="company_email" className="text-xs">Email</Label>
+                  <Label htmlFor="dealer_email" className="text-xs">Email</Label>
                   <Input 
-                    id="company_email" 
-                    {...register('company_email')}
+                    id="dealer_email" 
+                    {...register('dealer_email')}
                     type="email" 
                     className="py-1 text-xs"
-                    error={errors.company_email?.message}
+                    error={errors.dealer_email?.message}
                     disabled={isReadOnly}
                   />
                 </div>
                 <div className="col-span-3">
-                  <Label htmlFor="company_phone" className="text-xs">Phone</Label>
+                  <Label htmlFor="dealer_phone" className="text-xs">Phone</Label>
                   <Input 
-                    id="company_phone" 
-                    {...register('company_phone')}
+                    id="dealer_phone" 
+                    {...register('dealer_phone')}
                     type="tel" 
                     className="py-1 text-xs"
                     disabled={isReadOnly}
@@ -761,8 +959,28 @@ export default function DealerProfileForm() {
               {/* Dealer Users Section - Only show in edit mode */}
               {dealerId && (
                 <div className="col-span-12 mt-6">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Dealer Users</h3>
-                  <p className="text-xs text-gray-500 mb-4">Users associated with this dealer</p>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">Dealer Users</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">Users associated with this dealer</p>
+                    </div>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddUserError(null);
+                          setAddUserName('');
+                          setAddUserEmail('');
+                          setAddUserRole('member');
+                          setAddUserName(''); setAddUserEmail(''); setAddUserRole('member'); setAddUserStatus('invited'); setAddUserError(null); setShowAddUserModal(true);
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add User
+                      </button>
+                    )}
+                  </div>
                   
                   {loadingDealerUsers ? (
                     <div className="text-center py-8">
@@ -772,7 +990,23 @@ export default function DealerProfileForm() {
                     <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
                       <User className="mx-auto h-12 w-12 text-gray-400 mb-3" />
                       <p className="text-sm text-gray-500 mb-1">No users found</p>
-                      <p className="text-xs text-gray-400">This dealer doesn't have any associated users yet.</p>
+                      <p className="text-xs text-gray-400 mb-4">This dealer doesn't have any associated users yet.</p>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddUserError(null);
+                            setAddUserName('');
+                            setAddUserEmail('');
+                            setAddUserRole('member');
+                            setAddUserName(''); setAddUserEmail(''); setAddUserRole('member'); setAddUserStatus('invited'); setAddUserError(null); setShowAddUserModal(true);
+                          }}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Add User
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg">
@@ -784,6 +1018,7 @@ export default function DealerProfileForm() {
                             <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Role</th>
                             <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Status</th>
                             <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Invited</th>
+                            {canEdit && <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Actions</th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -838,18 +1073,263 @@ export default function DealerProfileForm() {
                                   <span className="text-gray-400">—</span>
                                 )}
                               </td>
+                              {canEdit && (
+                                <td className="py-2 px-3 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingUser(user)}
+                                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                                      title="Edit user"
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteDealerUser(user)}
+                                      className="p-1.5 hover:bg-red-50 rounded text-red-600"
+                                      title="Delete user"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
                   )}
+
+                  {/* Add Dealer User modal */}
+                  {showAddUserModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden">
+                        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                          <h3 className="text-lg font-semibold text-gray-900">Add user to this dealer</h3>
+                          <button
+                            type="button"
+                            onClick={() => !addUserSubmitting && setShowAddUserModal(false)}
+                            className="text-gray-400 hover:text-gray-600 p-1"
+                            disabled={addUserSubmitting}
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                        <form onSubmit={handleAddDealerUserSubmit} className="p-4 space-y-4">
+                          {addUserError && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-sm text-red-800">
+                              {addUserError}
+                            </div>
+                          )}
+                          <div>
+                            <Label htmlFor="add_user_name">Name *</Label>
+                            <Input
+                              id="add_user_name"
+                              type="text"
+                              value={addUserName}
+                              onChange={(e) => setAddUserName(e.target.value)}
+                              placeholder="Full name"
+                              disabled={addUserSubmitting}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="add_user_email">Email *</Label>
+                            <Input
+                              id="add_user_email"
+                              type="email"
+                              value={addUserEmail}
+                              onChange={(e) => setAddUserEmail(e.target.value)}
+                              placeholder="user@example.com"
+                              disabled={addUserSubmitting}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="add_user_role">Role</Label>
+                            <select
+                              id="add_user_role"
+                              value={addUserRole}
+                              onChange={(e) => setAddUserRole(e.target.value as CompanyPortalRole)}
+                              disabled={addUserSubmitting}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                            >
+                              <option value="member_manager">Dealer Manager</option>
+                              <option value="member">Dealer Member</option>
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">{getRoleDescription(addUserRole)}</p>
+                          </div>
+                          <div>
+                            <Label htmlFor="add_user_status">Status</Label>
+                            <select
+                              id="add_user_status"
+                              value={addUserStatus}
+                              onChange={(e) => setAddUserStatus(e.target.value as 'invited' | 'active' | 'disabled')}
+                              disabled={addUserSubmitting}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                            >
+                              <option value="invited">Invited</option>
+                              <option value="active">Active</option>
+                              <option value="disabled">Disabled</option>
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Invited: pending acceptance. Active: can sign in. Disabled: no access.
+                            </p>
+                          </div>
+                          <div className="flex justify-end gap-2 pt-2">
+                            <button
+                              type="button"
+                              onClick={() => !addUserSubmitting && setShowAddUserModal(false)}
+                              disabled={addUserSubmitting}
+                              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={addUserSubmitting}
+                              className="px-3 py-1.5 text-sm font-medium text-white rounded-md disabled:opacity-50"
+                              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                            >
+                              {addUserSubmitting ? 'Creating...' : 'Create user'}
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Edit Dealer User modal */}
+                  {editingUser && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden">
+                        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                          <h3 className="text-lg font-semibold text-gray-900">Edit user</h3>
+                          <button
+                            type="button"
+                            onClick={() => !editUserSubmitting && setEditingUser(null)}
+                            className="text-gray-400 hover:text-gray-600 p-1"
+                            disabled={editUserSubmitting}
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                        <form onSubmit={handleEditDealerUserSubmit} className="p-4 space-y-4">
+                          {editUserError && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-sm text-red-800">
+                              {editUserError}
+                            </div>
+                          )}
+                          <div>
+                            <Label htmlFor="edit_user_name">Name *</Label>
+                            <Input
+                              id="edit_user_name"
+                              type="text"
+                              value={editUserName}
+                              onChange={(e) => setEditUserName(e.target.value)}
+                              placeholder="Full name"
+                              disabled={editUserSubmitting}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="edit_user_email">Email *</Label>
+                            <Input
+                              id="edit_user_email"
+                              type="email"
+                              value={editUserEmail}
+                              onChange={(e) => setEditUserEmail(e.target.value)}
+                              placeholder="user@example.com"
+                              disabled={editUserSubmitting}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="edit_user_role">Role</Label>
+                            <select
+                              id="edit_user_role"
+                              value={editUserRole}
+                              onChange={(e) => setEditUserRole(e.target.value as CompanyPortalRole)}
+                              disabled={editUserSubmitting}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                            >
+                              <option value="member_manager">Dealer Manager</option>
+                              <option value="member">Dealer Member</option>
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">{getRoleDescription(editUserRole)}</p>
+                          </div>
+                          <div>
+                            <Label htmlFor="edit_user_status">Status</Label>
+                            <select
+                              id="edit_user_status"
+                              value={editUserStatus}
+                              onChange={(e) => setEditUserStatus(e.target.value as 'active' | 'disabled')}
+                              disabled={editUserSubmitting}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                            >
+                              <option value="active">Active</option>
+                              <option value="disabled">Disabled</option>
+                            </select>
+                          </div>
+                          <div className="flex justify-end gap-2 pt-2">
+                            <button
+                              type="button"
+                              onClick={() => !editUserSubmitting && setEditingUser(null)}
+                              disabled={editUserSubmitting}
+                              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={editUserSubmitting}
+                              className="px-3 py-1.5 text-sm font-medium text-white rounded-md disabled:opacity-50"
+                              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                            >
+                              {editUserSubmitting ? 'Saving...' : 'Save'}
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Dealer Logo - Only show in edit mode. Drag and drop like Items. */}
+              {dealerId && activeOrganizationId && (
+                <div className="col-span-12 mt-6">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-1">Dealer Logo</h3>
+                  <p className="text-xs text-gray-500 mb-3">Logo shown on Proposal (top left) and in print/PDF. Click or drag and drop an image.</p>
+                  <div className="max-w-xs">
+                    <ImageUpload
+                      label=""
+                      currentImageUrl={watch('logo_url')?.trim() || null}
+                      onImageUploaded={(url) => setValue('logo_url', url ?? '', { shouldValidate: true })}
+                      disabled={isReadOnly}
+                      bucket="catalog-images"
+                      uploadPath={(file) => {
+                        const ext = file.name.split('.').pop() || 'png';
+                        return `dealer-logos/${activeOrganizationId}/${dealerId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

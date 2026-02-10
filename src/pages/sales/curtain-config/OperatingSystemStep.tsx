@@ -52,7 +52,7 @@ export default function OperatingSystemStep({
   const showOperatingSystem = questions.requiredSteps.operatingSystem;
   const showDriveType = questions.selectQuestions.drive_type;
   
-  // Get current selections (CAPITALIZED colors to match DB)
+  const panelCount = (config as any).measurements?.panel_count ?? (config as any).panels?.length ?? 1;
   const operationType = (config as any).operation_type || (config as any).drive_type || undefined;
   const hardwareColor = (config as any).hardware_color || (config as any).hardwareColor || (config as any).operatingSystemColor || null;
   const motorItemId = (config as any).motor_item_id || undefined;
@@ -284,9 +284,10 @@ export default function OperatingSystemStep({
   // ✅ Motor: desde templates filtrados (motor NO depende de color)
   const { options: motorOptions, loading: loadingMotor, error: motorError } = useBOMTemplateOptionsSimple(
     canLoadOptions ? productTypeId : null,
-    null, // Motor no depende de color
+    null,
     'motor',
-    templatesForMotor // ✅ solo templates motor cuando aplica
+    templatesForMotor,
+    panelCount
   );
   
   // ✅ Drive: desde templates filtrados (drive SÍ depende de color)
@@ -294,7 +295,8 @@ export default function OperatingSystemStep({
     canLoadOptions ? productTypeId : null,
     canLoadOptions ? hardwareColor : null,
     'drive',
-    templatesForManual // ✅ solo templates manual cuando aplica
+    templatesForManual,
+    panelCount
   );
   
   // ✅ Calcular templates filtrados por motor/drive seleccionado
@@ -332,9 +334,10 @@ export default function OperatingSystemStep({
   // ✅ Tube: desde templates filtrados por motor/drive (tube NO depende de color)
   const { options: tubeOptions, loading: loadingTube, error: tubeError } = useBOMTemplateOptionsSimple(
     canLoadOptions ? productTypeId : null,
-    null, // Tube no depende de color
+    null,
     'tube',
-    templatesAfterOperation
+    templatesAfterOperation,
+    panelCount
   );
 
   const loading = loadingMotor || loadingDrive || loadingTube;
@@ -622,7 +625,7 @@ export default function OperatingSystemStep({
             </p>
           </div>
         )}
-        <div className={selectionDisabled ? 'pointer-events-none opacity-50' : ''}>
+        <div className={`space-y-8 ${selectionDisabled ? 'pointer-events-none opacity-50' : ''}`}>
         <div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Operating System</h3>
           <p className="text-sm text-gray-600">
@@ -633,9 +636,9 @@ export default function OperatingSystemStep({
         {/* Operating System Type (Manual/Motor) */}
         {showDriveType && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">OPERATION TYPE</Label>
+            <Label className="text-sm font-medium mb-5 block">OPERATION TYPE</Label>
             <p className="text-xs text-gray-500 mb-2">Determines which drive block components are included in the BOM</p>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {operatingSystemOptions.map((option) => {
                 const isSelected = operationType === option.value;
                 const imageError = imageErrors[option.value] || false;
@@ -654,7 +657,7 @@ export default function OperatingSystemStep({
                     }}
                     className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                       isSelected
-                        ? 'border-2 border-primary shadow-lg'
+                        ? 'border-2 border-gray-900 shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                     } ${selectionDisabled ? 'opacity-50' : ''}`}
                   >
@@ -673,7 +676,7 @@ export default function OperatingSystemStep({
                         <X className="w-4 h-4 text-gray-600" />
                       </button>
                     )}
-                    <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden relative">
+                    <div className="aspect-square bg-white flex items-center justify-center overflow-hidden relative">
                       {imageError ? (
                         <ImageIcon className="w-16 h-16 text-gray-300" />
                       ) : (
@@ -687,9 +690,9 @@ export default function OperatingSystemStep({
                       )}
                     </div>
                     
-                    <div className="p-4">
+                    <div className="p-4 bg-gray-100">
                       <h3 className={`font-semibold text-sm truncate text-center ${
-                        isSelected ? 'text-primary' : 'text-gray-900'
+                        isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                       }`} title={option.label}>
                         {option.label}
                       </h3>
@@ -709,11 +712,11 @@ export default function OperatingSystemStep({
         {/* Motor Selection (only if motor) */}
         {operationType === 'motor' && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">MOTORS</Label>
+            <Label className="text-sm font-medium mb-5 block">MOTORS</Label>
             {loadingMotor ? (
               <div className="text-sm text-gray-500 mt-2">Loading motors...</div>
             ) : motorOptions.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {motorOptions.map((item) => {
                   const isSelected = motorItemId === item.id;
                   return (
@@ -725,7 +728,7 @@ export default function OperatingSystemStep({
                       }}
                       className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                         isSelected
-                          ? 'border-2 border-primary shadow-lg'
+                          ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                       } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
@@ -757,7 +760,7 @@ export default function OperatingSystemStep({
                           <X className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
-                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                      <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                         {item.image_url ? (
                           <img
                             src={item.image_url}
@@ -768,16 +771,11 @@ export default function OperatingSystemStep({
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4">
-                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                      <div className="p-4 bg-gray-100">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>
                         <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
-                        {import.meta.env.DEV && item.templateIds && (
-                          <p className="text-xs text-blue-500 mt-1">
-                            {relevantTemplateCount(item.templateIds, templatesAfterOperation as any)} template(s)
-                          </p>
-                        )}
                       </div>
                     </div>
                   );
@@ -786,11 +784,6 @@ export default function OperatingSystemStep({
             ) : (
               <div className="text-sm text-gray-500">
                 No motors available for ProductType
-                {import.meta.env.DEV && (
-                  <div className="text-xs text-red-500 mt-1">
-                    Debug: productTypeId={productTypeId}, filteredTemplates={hardwareFilteredTemplates?.length ?? 'none'}, error={motorError}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -799,11 +792,11 @@ export default function OperatingSystemStep({
         {/* Manual Drive Selection (only if manual) */}
         {operationType === 'manual' && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">MECHANISM / MANUAL DRIVE</Label>
+            <Label className="text-sm font-medium mb-5 block">MECHANISM / MANUAL DRIVE</Label>
             {loadingDrive ? (
               <div className="text-sm text-gray-500 mt-2">Loading drive options...</div>
             ) : driveOptions.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {driveOptions.map((item) => {
                   const isSelected = driveItemId === item.id;
                   return (
@@ -815,7 +808,7 @@ export default function OperatingSystemStep({
                       }}
                       className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                         isSelected
-                          ? 'border-2 border-primary shadow-lg'
+                          ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                       } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
@@ -846,7 +839,7 @@ export default function OperatingSystemStep({
                           <X className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
-                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                      <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                         {item.image_url ? (
                           <img
                             src={item.image_url}
@@ -857,16 +850,11 @@ export default function OperatingSystemStep({
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4">
-                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                      <div className="p-4 bg-gray-100">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>
                         <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
-                        {import.meta.env.DEV && item.templateIds && (
-                          <p className="text-xs text-blue-500 mt-1">
-                            {relevantTemplateCount(item.templateIds, templatesAfterOperation as any)} template(s)
-                          </p>
-                        )}
                       </div>
                     </div>
                   );
@@ -875,11 +863,6 @@ export default function OperatingSystemStep({
             ) : (
               <div className="text-sm text-gray-500">
                 No manual drive options available
-                {import.meta.env.DEV && (
-                  <div className="text-xs text-red-500 mt-1">
-                    Debug: productTypeId={productTypeId}, hardwareColor={hardwareColor}, filteredTemplates={hardwareFilteredTemplates?.length ?? 'none'}, error={driveError}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -888,11 +871,11 @@ export default function OperatingSystemStep({
         {/* Tube Selection (show when motor or drive is selected) */}
         {((operationType === 'motor' && motorItemId) || (operationType === 'manual' && driveItemId)) && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">TUBE TYPE</Label>
+            <Label className="text-sm font-medium mb-5 block">TUBE TYPE</Label>
             {loadingTube ? (
               <div className="text-sm text-gray-500 mt-2">Loading tube options...</div>
             ) : tubeOptions.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {tubeOptions.map((item) => {
                   const isSelected = tubeItemId === item.id;
                   return (
@@ -904,7 +887,7 @@ export default function OperatingSystemStep({
                       }}
                       className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                         isSelected
-                          ? 'border-2 border-primary shadow-lg'
+                          ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                       } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
@@ -942,7 +925,7 @@ export default function OperatingSystemStep({
                           <X className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
-                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                      <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                         {item.image_url ? (
                           <img
                             src={item.image_url}
@@ -953,16 +936,11 @@ export default function OperatingSystemStep({
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4">
-                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                      <div className="p-4 bg-gray-100">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>
                         <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
-                        {import.meta.env.DEV && item.templateIds && (
-                          <p className="text-xs text-blue-500 mt-1">
-                            {relevantTemplateCount(item.templateIds, templatesAfterOperation as any)} template(s)
-                          </p>
-                        )}
                       </div>
                     </div>
                   );
@@ -971,27 +949,7 @@ export default function OperatingSystemStep({
             ) : (
               <div className="text-sm text-gray-500">
                 No tube options available for current selection
-                {import.meta.env.DEV && (
-                  <div className="text-xs text-red-500 mt-1">
-                    Debug: templatesAfterOperation={templatesAfterOperation?.length ?? 'none'}, error={tubeError}
-                  </div>
-                )}
               </div>
-            )}
-          </div>
-        )}
-        
-        {/* Debug: Templates filtrados */}
-        {import.meta.env.DEV && (
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-xs text-blue-700">
-              <strong>Templates after Operation step:</strong>{' '}
-              {templatesAfterOperation?.length ?? 'not filtered'} template(s) match current selection
-            </p>
-            {hardwareFilteredTemplates && (
-              <p className="text-xs text-blue-600 mt-1">
-                From Hardware step: {hardwareFilteredTemplates.length} template(s)
-              </p>
             )}
           </div>
         )}

@@ -30,19 +30,30 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(rollerConfig.width_mm && rollerConfig.height_mm);
 
     case 'variants':
-      return !!(rollerConfig.collectionId && rollerConfig.variantId);
+      // VariantsStep usa collectionName/collection_name + variantId (CatalogItem id).
+      // Aceptar también collectionId legacy para compatibilidad.
+      const hasCollection = !!(
+        (rollerConfig as any).collectionName ||
+        (rollerConfig as any).collection_name ||
+        (rollerConfig as any).collectionId
+      );
+      const hasVariant = !!(
+        (rollerConfig as any).variantId ||
+        (rollerConfig as any).fabric_catalog_item_id ||
+        (rollerConfig as any).fabric_variant_id
+      );
+      return hasCollection && hasVariant;
 
     case 'hardware':
-      // ✅ NUEVO FLUJO SECUENCIAL: Hardware requiere color + bottom bar
-      // Headbox: obligatorio para dual/triple, opcional para roller
+      // Requiere color + bottom bar + headbox explícito + side channel explícito (no avanzar si falta alguna elección)
       const hasColor = !!((rollerConfig as any).hardwareColor || (rollerConfig as any).hardware_color);
       const hasBottomBar = !!((rollerConfig as any).bottom_bar_item_id || (rollerConfig as any).bottom_bar_sku);
+      // Headbox: debe estar elegido (UUID o 'NONE'), no puede quedar UNSET
+      const hasHeadboxExplicit = (rollerConfig as any).headbox_item_id != null;
+      // Side channel: debe estar elegido (UUID o 'NONE') para que el template se resuelva correctamente
+      const hasSideChannelExplicit = (rollerConfig as any).side_channel_item_id != null;
 
-      // Headbox requerido solo para dual/triple shades
-      const isDualOrTriple = (rollerConfig as any).product_type_id === 'dual-shade' || (rollerConfig as any).product_type_id === 'triple-shade';
-      const hasHeadbox = !!((rollerConfig as any).headbox_item_id || (rollerConfig as any).headbox_sku);
-
-      return hasColor && hasBottomBar && (!isDualOrTriple || hasHeadbox);
+      return hasColor && hasBottomBar && hasHeadboxExplicit && hasSideChannelExplicit;
 
     case 'operating-system':
       // ✅ NUEVO FLUJO: Operating system + drive/motor específico + tube obligatorios

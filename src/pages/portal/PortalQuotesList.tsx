@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useAuthStore } from '../../stores/auth-store';
+import { useUIStore } from '../../stores/ui-store';
 import { 
   canCreateQuote, 
   canViewQuote, 
@@ -20,7 +21,7 @@ import { Plus, FileText, CheckCircle, XCircle, Clock } from 'lucide-react';
 
 interface PortalUser {
   id: string;
-  company_id: string;
+  dealer_id: string;
   portal_user_role: CompanyPortalRole | null;
 }
 
@@ -30,6 +31,12 @@ export default function PortalQuotesList() {
   const [portalUser, setPortalUser] = useState<PortalUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
 
   // Load portal user info
   useEffect(() => {
@@ -41,16 +48,16 @@ export default function PortalQuotesList() {
 
       try {
         const { data, error: userError } = await supabase
-          .from('CompanyPortalUsers')
+          .from('DealerUsers')
           // IMPORTANT: Use 'role' and 'status' columns (matches actual DB schema)
-          .select('id, company_id, role, status')
+          .select('id, dealer_id, role, status')
           .eq('user_id', user.id)
           .eq('deleted', false)
           .in('status', ['active', 'invited'])
           .maybeSingle();
 
         if (userError) {
-          console.error('[PortalQuotesList] CompanyPortalUsers lookup error', {
+          console.error('[PortalQuotesList] DealerUsers lookup error', {
             message: userError.message,
             details: userError.details,
             hint: userError.hint,
@@ -64,7 +71,7 @@ export default function PortalQuotesList() {
           const rawRole = data.role;
           setPortalUser({
             id: data.id,
-            company_id: data.company_id,
+            dealer_id: data.dealer_id,
             portal_user_role: normalizeRole(rawRole || 'member'),
           });
         }
@@ -94,8 +101,8 @@ export default function PortalQuotesList() {
         // RLS will automatically filter based on role
         const { data, error: quotesError } = await supabase
           .from('Quotes')
-          .select('id, quote_no, status, company_id, created_by_portal_user_id, created_at')
-          .eq('company_id', portalUser.company_id)
+          .select('id, quote_no, status, dealer_id, created_by_portal_user_id, created_at')
+          .eq('dealer_id', portalUser.dealer_id)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
 
@@ -145,18 +152,7 @@ export default function PortalQuotesList() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-500">Loading quotes...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="p-6" />;
 
   if (error) {
     return (

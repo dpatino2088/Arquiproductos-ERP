@@ -47,7 +47,14 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
   const { activeOrganizationId, hasOrganizations, loading: orgLoading } = useOrganizationContext();
   const { user } = useAuthStore();
   const { isSuperAdmin, isAdmin, loading: roleLoading } = useCurrentOrgRole();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
   const hasLoadedRef = useRef(false);
+
+  const moduleLoading = orgLoading || roleLoading || loading;
+  useEffect(() => {
+    setGlobalLoading(moduleLoading);
+    return () => setGlobalLoading(false);
+  }, [moduleLoading, setGlobalLoading]);
   const loadingRef = useRef(false);
   const savePermissionsFnRef = useRef<(() => Promise<void>) | null>(null);
   const permissionsSaveRef = useRef<(() => Promise<void>) | null>(null);
@@ -419,18 +426,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     await handleSaveAll(false);
   };
 
-  if (orgLoading || roleLoading || loading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Cargando...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (orgLoading || roleLoading || loading) return <div className="py-6 px-6" />;
 
   if (!orgLoading && !hasOrganizations) {
     return <NoOrganizationMessage />;

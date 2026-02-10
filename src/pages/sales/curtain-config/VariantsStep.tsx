@@ -14,6 +14,7 @@ import { useManufacturers, useCatalogItemById } from '../../../hooks/useCatalog'
 import { useFabricCollections, useFabricVariants } from '../../../hooks/useFabricCatalog';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { supabase } from '../../../lib/supabase/client';
+import type { CatalogItemRollSpecsRow } from '../../../services/catalogItemRollSpecs';
 import { Image as ImageIcon, Search, X } from 'lucide-react';
 
 interface VariantsStepProps {
@@ -36,6 +37,9 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
 
   // MSRP Sale Out from CatalogItemsMSRP (per-org)
   const [msrpSaleOut, setMsrpSaleOut] = useState<number | null>(null);
+  // Roll Specs from CatalogItemRollSpecs (when variant selected)
+  const [rollSpecs, setRollSpecs] = useState<CatalogItemRollSpecsRow | null>(null);
+  const [loadingRollSpecs, setLoadingRollSpecs] = useState(false);
 
   // Search state for manufacturers
   const [manufacturerSearch, setManufacturerSearch] = useState('');
@@ -60,10 +64,12 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     }
   }, [manufacturerName]);
 
-  // Sync collectionSearch with collectionName
+  // Sync collectionSearch only when collectionName changes from config (no restaurar al borrar)
+  const prevCollectionNameRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (collectionName && !collectionSearch) {
-      setCollectionSearch(collectionName);
+    if (prevCollectionNameRef.current !== collectionName) {
+      prevCollectionNameRef.current = collectionName;
+      setCollectionSearch(collectionName || '');
     }
   }, [collectionName]);
 
@@ -129,6 +135,37 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     return () => { cancelled = true; };
   }, [variantId, activeOrganizationId]);
 
+  // Load Roll Specs from CatalogItemRollSpecs when variant is selected (with org for RLS)
+  useEffect(() => {
+    if (!variantId || !activeOrganizationId) {
+      setRollSpecs(null);
+      setLoadingRollSpecs(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingRollSpecs(true);
+    setRollSpecs(null);
+    supabase
+      .from('CatalogItemRollSpecs')
+      .select('*')
+      .eq('catalog_item_id', variantId)
+      .eq('organization_id', activeOrganizationId)
+      .maybeSingle()
+      .then(({ data, error }: { data: CatalogItemRollSpecsRow | null; error: Error | null }) => {
+        if (cancelled) return;
+        if (error) {
+          if (import.meta.env.DEV) console.warn('[VariantsStep] Roll specs fetch:', error.message);
+          setRollSpecs(null);
+          return;
+        }
+        setRollSpecs((data as CatalogItemRollSpecsRow | null) ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRollSpecs(false);
+      });
+    return () => { cancelled = true; };
+  }, [variantId, activeOrganizationId]);
+
   // Fetch collections and variants (with optional manufacturer filter)
   const {
     collections,
@@ -189,18 +226,29 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     return '—';
   }, [variantId, variants, manufacturers]);
 
-  // Extract fabric specs from variants (only what exists in CatalogItems)
+  // Extract fabric specs from variants or from selectedCatalogItem (fallback when editing / variant not in list)
+  // Variant = CatalogItems.variant_name
   const fabricSpecs = useMemo(() => {
     const selectedVariant = variants.find(v => v.id === variantId);
-    if (!selectedVariant) return null;
-
-    return {
-      manufacturer: selectedManufacturerName,
-      rollWidth: selectedVariant.roll_width ? `${selectedVariant.roll_width}m` : '—',
-      color: selectedVariant.color || '—',
-      description: selectedVariant.description || '—',
-    };
-  }, [variantId, variants, selectedManufacturerName]);
+    if (selectedVariant) {
+      return {
+        manufacturer: selectedManufacturerName,
+        rollWidth: selectedVariant.roll_width ? `${selectedVariant.roll_width}m` : '—',
+        variantName: selectedVariant.variant_name ?? selectedVariant.color ?? '—',
+        description: selectedVariant.description ?? '—',
+      };
+    }
+    if (selectedCatalogItem && variantId) {
+      const rw = (selectedCatalogItem as any).roll_width_m ?? (selectedCatalogItem as any).roll_width;
+      return {
+        manufacturer: selectedManufacturerName,
+        rollWidth: rw != null ? `${rw}m` : '—',
+        variantName: (selectedCatalogItem as any).variant_name ?? (selectedCatalogItem as any).name ?? '—',
+        description: (selectedCatalogItem as any).description ?? '—',
+      };
+    }
+    return null;
+  }, [variantId, variants, selectedManufacturerName, selectedCatalogItem]);
 
   // Filter collections based on search
   const filteredCollections = useMemo(() => {
@@ -214,21 +262,22 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
   // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
       // Manufacturer dropdown
       if (
         manufacturerDropdownRef.current &&
-        !manufacturerDropdownRef.current.contains(event.target as Node) &&
+        !manufacturerDropdownRef.current.contains(target) &&
         manufacturerInputRef.current &&
-        !manufacturerInputRef.current.contains(event.target as Node)
+        !manufacturerInputRef.current.contains(target)
       ) {
         setShowManufacturerDropdown(false);
       }
       // Collection dropdown
       if (
         collectionDropdownRef.current &&
-        !collectionDropdownRef.current.contains(event.target as Node) &&
+        !collectionDropdownRef.current.contains(target) &&
         collectionInputRef.current &&
-        !collectionInputRef.current.contains(event.target as Node)
+        !collectionInputRef.current.contains(target)
       ) {
         setShowCollectionDropdown(false);
       }
@@ -282,7 +331,6 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
 
   const handleCollectionSearchChange = (value: string) => {
     setCollectionSearch(value);
-    setShowCollectionDropdown(true);
   };
 
   const handleVariantChange = (variantIdValue: string) => {
@@ -365,7 +413,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                     type="button"
                     onClick={() => handleManufacturerChange('', '')}
                     className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
-                      !manufacturerId ? 'bg-primary/10 font-medium' : ''
+                      !manufacturerId ? 'bg-gray-200 font-medium' : ''
                     }`}
                   >
                     All manufacturers
@@ -381,7 +429,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                         type="button"
                         onClick={() => handleManufacturerChange(m.id, m.name)}
                         className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
-                          m.id === manufacturerId ? 'bg-primary/10 font-medium' : ''
+                          m.id === manufacturerId ? 'bg-gray-200 font-medium' : ''
                         }`}
                       >
                         {m.name}
@@ -393,7 +441,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
             </div>
           </div>
 
-          {/* Collection Dropdown with Search */}
+          {/* Collection dropdown: shows all collections on focus, filter by typing */}
           <div className="mb-6 relative">
             <Label htmlFor="collection" className="text-xs mb-1">
               Collection
@@ -405,16 +453,19 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                   ref={collectionInputRef}
                   id="collection"
                   type="text"
-                  value={collectionSearch || collectionName || ''}
+                  value={collectionSearch}
                   onChange={(e) => handleCollectionSearchChange(e.target.value)}
                   onFocus={() => setShowCollectionDropdown(true)}
                   placeholder={loadingCollections ? 'Loading...' : 'Search or select collection'}
                   className="pl-8"
                   disabled={loadingCollections}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
                 />
               </div>
-              
-              {/* Dropdown for filtered collections */}
+
+              {/* Dropdown con todas las colecciones (se abre al enfocar; se filtra al escribir) */}
               {showCollectionDropdown && !loadingCollections && !collectionsError && (
                 <div
                   ref={collectionDropdownRef}
@@ -422,7 +473,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                 >
                   {filteredCollections.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-gray-500">
-                      {collectionSearch ? 'No collections found' : 'No collections available'}
+                      {collectionSearch.trim() ? 'No se encontraron colecciones' : 'No hay colecciones disponibles'}
                     </div>
                   ) : (
                     filteredCollections.map((name) => (
@@ -431,7 +482,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                         type="button"
                         onClick={() => handleCollectionChange(name)}
                         className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-100 ${
-                          name === collectionName ? 'bg-primary/10 font-medium' : ''
+                          name === collectionName ? 'bg-gray-200 font-medium' : ''
                         }`}
                       >
                         {name}
@@ -441,7 +492,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                 </div>
               )}
             </div>
-            
+
             {collectionsError && (
               <p className="mt-1 text-xs text-red-600">
                 {String(collectionsError)}
@@ -453,13 +504,6 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
           {collectionName && (
             <div className="mb-4">
               <Label className="text-xs mb-3 block">Variants</Label>
-              
-              {/* Debug info in DEV */}
-              {import.meta.env.DEV && (
-                <div className="mb-2 text-xs text-gray-500">
-                  Collection: "{collectionName}" | Variants: {variants.length} | Loading: {loadingVariants ? 'Yes' : 'No'} | Error: {variantsError ? String(variantsError) : 'None'} | Selected: {variantId || 'None'}
-                </div>
-              )}
               
               {loadingVariants ? (
                 <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
@@ -473,11 +517,6 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
               ) : variants.length === 0 ? (
                 <div className="text-center text-gray-500 py-8 border border-gray-200 rounded-lg">
                   <p className="text-sm">No variants available for this collection</p>
-                  {import.meta.env.DEV && collectionName && (
-                    <p className="text-xs mt-1 text-gray-400">
-                      Collection: "{collectionName}" | ProductTypeId: {productTypeId}
-                    </p>
-                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -495,7 +534,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                         onClick={() => handleVariantChange(variant.id)}
                         className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                           isSelected
-                            ? 'border-2 border-primary shadow-lg'
+                            ? 'border-2 border-gray-900 shadow-lg'
                             : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                         }`}
                       >
@@ -520,7 +559,7 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                           </button>
                         )}
                         {/* Image */}
-                        <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                        <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
                           {(variant as any).image_url ? (
                             <img
                               src={(variant as any).image_url}
@@ -536,10 +575,10 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
                         </div>
                         
                         {/* Card Content */}
-                        <div className="p-4">
+                        <div className="p-4 bg-gray-100">
                           {/* Variant Name */}
                           <h3 className={`font-semibold text-sm mb-2 truncate ${
-                            isSelected ? 'text-primary' : 'text-gray-900'
+                            isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                           }`} title={variant.variant_name || variant.sku || 'Unknown'}>
                             {variant.variant_name || (variant as any).item_name || variant.sku || 'Unknown'}
                           </h3>
@@ -580,41 +619,64 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
           )}
         </div>
 
-        {/* Fabric Spec Details */}
-        {variantId && fabricSpecs && (
+        {/* Fabric Spec Details (incl. CatalogItemRollSpecs) */}
+        {variantId && (
           <div className="border-t border-gray-200 pt-4">
             <Label className="text-sm font-medium mb-3 block">Fabric Spec Details</Label>
-            {loadingSelectedItem ? (
+            {loadingSelectedItem || loadingRollSpecs ? (
               <div className="text-sm text-gray-500 py-2">Loading...</div>
             ) : (
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="text-gray-600">Manufacturer:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.manufacturer}</span>
+                    <span className="ml-2 font-medium">{fabricSpecs?.manufacturer ?? '—'}</span>
                   </div>
                   <div>
                     <span className="text-gray-600">Roll Width:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs.rollWidth}</span>
+                    <span className="ml-2 font-medium">{fabricSpecs?.rollWidth ?? '—'}</span>
                   </div>
-                  {fabricSpecs.color !== '—' && (
-                    <div>
-                      <span className="text-gray-600">Color:</span>
-                      <span className="ml-2 font-medium">{fabricSpecs.color}</span>
-                    </div>
-                  )}
-                  {msrpSaleOut != null && !isNaN(msrpSaleOut) && (
-                    <div>
-                      <span className="text-gray-600">MSRP Sale Out:</span>
-                      <span className="ml-2 font-medium">${Number(msrpSaleOut).toFixed(2)}</span>
-                    </div>
-                  )}
-                  {fabricSpecs.description !== '—' && (
-                    <div className="col-span-2">
-                      <span className="text-gray-600">Description:</span>
-                      <span className="ml-2 font-medium">{fabricSpecs.description}</span>
-                    </div>
-                  )}
+                  <div>
+                    <span className="text-gray-600">Variant:</span>
+                    <span className="ml-2 font-medium">{fabricSpecs?.variantName ?? '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">MSRP / m²:</span>
+                    <span className="ml-2 font-medium">{msrpSaleOut != null && !isNaN(msrpSaleOut) ? `$${Number(msrpSaleOut).toFixed(2)}` : '—'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-gray-600">Description:</span>
+                    <span className="ml-2 font-medium">{fabricSpecs?.description ?? '—'}</span>
+                  </div>
+                  {/* CatalogItemRollSpecs: siempre mostrar filas; valor "—" o No si no hay datos */}
+                  <div>
+                    <span className="text-gray-600">Can rotate:</span>
+                    <span className="ml-2 font-medium">{rollSpecs ? (rollSpecs.can_rotate ? 'Yes' : 'No') : '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Weldable:</span>
+                    <span className="ml-2 font-medium">{rollSpecs ? (rollSpecs.is_weldable ? 'Yes' : 'No') : '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Raw material:</span>
+                    <span className="ml-2 font-medium">{rollSpecs?.raw_material ?? '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Openness:</span>
+                    <span className="ml-2 font-medium">{rollSpecs?.openness_factor_pct != null && rollSpecs.openness_factor_pct !== '' ? `${Number(rollSpecs.openness_factor_pct)}%` : '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Weight (g/m²):</span>
+                    <span className="ml-2 font-medium">{rollSpecs?.weight_g_m2 != null && rollSpecs.weight_g_m2 !== '' ? Number(rollSpecs.weight_g_m2) : '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Weight (kg/m²):</span>
+                    <span className="ml-2 font-medium">{rollSpecs?.weight_kg_m2 != null && rollSpecs.weight_kg_m2 !== '' ? Number(rollSpecs.weight_kg_m2) : '—'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-gray-600">Notes:</span>
+                    <span className="ml-2 font-medium">{rollSpecs?.notes ?? '—'}</span>
+                  </div>
                 </div>
               </div>
             )}

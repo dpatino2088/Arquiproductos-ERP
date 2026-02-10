@@ -7,7 +7,7 @@ import {
   Settings as SettingsIcon,
   ChevronRight,
   X,
-  Shield
+  Shield,
 } from 'lucide-react';
 import OrganizationUser from './OrganizationUser';
 import OrganizationUserNew from './OrganizationUserNew';
@@ -52,19 +52,25 @@ export default function CompanySettings() {
   // Determine if we're in dealer profile edit mode
   const isDealerEditMode = currentRoute.match(/\/settings\/dealer-profile\/edit\/([^/]+)/);
   const isDealerNewMode = currentRoute.includes('/settings/dealer-profile/new');
-  const isDealerUserMode = currentRoute.includes('/settings/dealer-profile/user');
   
-  // Ensure activeSection matches route for dealer-profile (including user tab)
+  // Ensure activeSection matches route for dealer-profile
   useEffect(() => {
-    if ((currentRoute.includes('/settings/dealer-profile') || isDealerUserMode) && activeSection !== 'dealer-profile') {
+    if (currentRoute.includes('/settings/dealer-profile') && activeSection !== 'dealer-profile') {
       setActiveSection('dealer-profile');
     }
-  }, [currentRoute, isDealerUserMode, activeSection]);
+  }, [currentRoute, activeSection]);
 
   // Ensure activeSection matches route for cost-engine
   useEffect(() => {
     if (currentRoute.includes('/settings/cost-engine') && activeSection !== 'cost-engine') {
       setActiveSection('cost-engine');
+    }
+  }, [currentRoute, activeSection]);
+
+  // When on /settings/roles we show Roles page (full page), so keep section in sync if user opens settings again
+  useEffect(() => {
+    if (currentRoute.includes('/settings/roles') && activeSection !== 'roles') {
+      setActiveSection('roles');
     }
   }, [currentRoute, activeSection]);
 
@@ -85,7 +91,8 @@ export default function CompanySettings() {
   const settingsMenu = [
     { id: 'organization', label: 'Organization', icon: Users },
     { id: 'dealer-profile', label: 'Dealer Profile', icon: Building },
-    { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon }
+    { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon },
+    { id: 'roles', label: 'Roles & Permissions', icon: Shield }
   ];
 
   // Tab configurations for each section
@@ -109,6 +116,8 @@ export default function CompanySettings() {
       router.navigate('/settings/dealer-profile');
     } else if (sectionId === 'cost-engine') {
       router.navigate('/settings/cost-engine');
+    } else if (sectionId === 'roles') {
+      router.navigate('/admin/roles');
     }
   };
 

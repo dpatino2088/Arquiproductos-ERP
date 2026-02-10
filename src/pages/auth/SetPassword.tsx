@@ -97,7 +97,7 @@ export default function SetPasswordPage() {
       }
 
       const { error: portalErr } = await supabase
-            .from('CompanyPortalUsers')
+            .from('DealerUsers')
         .update({ 
           must_change_password: false,
           temp_password_set_at: null,
@@ -106,7 +106,7 @@ export default function SetPasswordPage() {
         .eq('user_id', userId);
 
       if (portalErr) {
-        console.warn('[SetPassword] CompanyPortalUsers update warning:', portalErr);
+        console.warn('[SetPassword] DealerUsers update warning:', portalErr);
       }
 
       console.log('[SetPassword] Flags cleared successfully');

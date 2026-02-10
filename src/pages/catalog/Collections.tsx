@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useCatalogCollections, useCatalogItems, useManufacturers } from '../../hooks/useCatalog';
 import { useProductTypes } from '../../hooks/useProductTypes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { router } from '../../lib/router';
 import { Search, Eye, Plus, Package, ChevronLeft, ChevronRight, Image as ImageIcon, X, Filter } from 'lucide-react';
@@ -13,6 +14,13 @@ export default function Collections() {
   const { items: catalogItems, loading: loadingItems } = useCatalogItems({ isRoll: true });
   const { manufacturers } = useManufacturers();
   const { productTypes } = useProductTypes();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  const initialLoading = loading && collections.length === 0;
+  useEffect(() => {
+    setGlobalLoading(initialLoading);
+    return () => setGlobalLoading(false);
+  }, [initialLoading, setGlobalLoading]);
 
   const [manufacturerIdsWithIsRoll, setManufacturerIdsWithIsRoll] = useState<Set<string>>(new Set());
   const [manufacturerIdsLoaded, setManufacturerIdsLoaded] = useState(false);
@@ -150,18 +158,7 @@ export default function Collections() {
     setCurrentPage(1);
   }, [searchTerm, manufacturerId]);
 
-  if (loading && collections.length === 0) {
-    return (
-      <div className="py-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading collections...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading && collections.length === 0) return <div className="py-6 px-6" />;
 
   return (
     <div className="py-6">

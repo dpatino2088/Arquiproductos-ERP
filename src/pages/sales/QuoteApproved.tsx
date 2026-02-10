@@ -77,6 +77,12 @@ export default function QuoteApproved() {
   const { clearSubmoduleNav } = useSubmoduleNav();
   const { quotes, loading, error, refetch } = useApprovedQuotesWithProgress();
   const { activeOrganizationId } = useOrganizationContext();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -237,19 +243,7 @@ export default function QuoteApproved() {
     router.navigate(`/sales/quotes/${quote.id}/edit`);
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading approved quotes...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-6 px-6" />;
 
   // Show error state
   if (error) {

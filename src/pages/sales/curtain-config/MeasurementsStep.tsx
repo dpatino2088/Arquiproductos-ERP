@@ -15,12 +15,12 @@ const FABRIC_DROP_OPTIONS = [
   {
     id: 'normal' as const,
     name: 'Normal',
-    imageUrl: '/images/fabric-drop-normal.jpg', // Actualizar con la ruta correcta
+    imageUrl: '/images/Normal.png',
   },
   {
     id: 'inverted' as const,
     name: 'Inverted',
-    imageUrl: '/images/fabric-drop-inverted.jpg', // Actualizar con la ruta correcta
+    imageUrl: '/images/Inverted.png',
   }
 ];
 
@@ -28,12 +28,12 @@ const INSTALLATION_TYPE_OPTIONS = [
   {
     id: 'inside' as const,
     name: 'Inside',
-    imageUrl: '/images/installation-inside.jpg', // Actualizar con la ruta correcta
+    imageUrl: '/images/Inside.png',
   },
   {
     id: 'outside' as const,
     name: 'Outside',
-    imageUrl: '/images/installation-outside.jpg', // Actualizar con la ruta correcta
+    imageUrl: '/images/Outside.png',
   }
 ];
 
@@ -41,12 +41,12 @@ const INSTALLATION_LOCATION_OPTIONS = [
   {
     id: 'ceiling' as const,
     name: 'Ceiling',
-    imageUrl: '/images/installation-ceiling.jpg', // Actualizar con la ruta correcta
+    imageUrl: '/images/Ceilling.png',
   },
   {
     id: 'wall' as const,
     name: 'Wall',
-    imageUrl: '/images/installation-wall.jpg', // Actualizar con la ruta correcta
+    imageUrl: '/images/Wall.png',
   }
 ];
 
@@ -54,83 +54,123 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
   // Check if product type is Triple Shade (no Fabric Drop for Triple Shade)
   const isTripleShade = (config as any).productType === 'triple-shade';
   const productType = (config as any).productType;
+
+  // Support legacy snapshot keys (snake_case) so Edit always shows previous selection.
+  const currentFabricDrop = (config as any).fabricDrop ?? (config as any).fabric_drop;
+  const currentInstallationType = (config as any).installationType ?? (config as any).installation_type;
+  const currentInstallationLocation = (config as any).installationLocation ?? (config as any).installation_location;
   
   // Products that support multiple panels (interconnected curtains)
   const supportsPanels = ['roller-shade', 'dual-shade', 'triple-shade'].includes(productType);
-  
-  // Initialize panels array - panels only store width_mm, height_mm is global
-  const getPanels = (): Panel[] => {
+
+  // measurements: { height_mm, width_total_mm, panel_count, panels: [{ index, width_mm }], is_interconnected }
+  const getPanelsFromConfig = (): Panel[] => {
     const panels = (config as any).panels;
     if (panels && Array.isArray(panels) && panels.length > 0) {
-      // Ensure panels only have width_mm (remove height_mm if present)
-      return panels.map(p => ({ width_mm: p.width_mm || 0 }));
+      return panels.map((p: any) => ({ width_mm: p.width_mm || 0 }));
     }
-    // Legacy: create single panel from width_mm (height_mm is stored separately)
-    return [
-      {
-        width_mm: config.width_mm || 0,
-      }
-    ];
+    return [{ width_mm: config.width_mm || 0 }];
   };
-  
-  const [panels, setPanels] = React.useState<Panel[]>(getPanels());
-  
-  // Sync panels when config changes externally
+
+  const panelCountFromConfig = Math.min(3, Math.max(1, (config as any).measurements?.panel_count ?? (config as any).panels?.length ?? 1));
+  const [panelCount, setPanelCount] = React.useState<1 | 2 | 3>(panelCountFromConfig as 1 | 2 | 3);
+  const [panels, setPanels] = React.useState<Panel[]>(() => {
+    const fromConfig = getPanelsFromConfig();
+    const count = panelCountFromConfig;
+    if (fromConfig.length === count) return fromConfig;
+    const next: Panel[] = [];
+    for (let i = 0; i < count; i++) next.push({ width_mm: fromConfig[i]?.width_mm ?? 0 });
+    return next;
+  });
+
+  const buildMeasurements = (heightMm: number | undefined, panelsList: Panel[]) => {
+    const height_mm = heightMm ?? config.height_mm ?? 0;
+    const width_total_mm = panelsList.reduce((sum, p) => sum + (p.width_mm || 0), 0);
+    const panel_count = panelsList.length;
+    return {
+      height_mm: height_mm || undefined,
+      width_total_mm,
+      panel_count,
+      panels: panelsList.map((p, i) => ({ index: i + 1, width_mm: p.width_mm || 0 })),
+      is_interconnected: panel_count > 1,
+    };
+  };
+
+  const pushMeasurementsAndPanels = (heightMm: number | undefined, newPanels: Panel[], clearTemplates = false) => {
+    const measurements = buildMeasurements(heightMm, newPanels);
+    // ✅ FIX: Para multi-panel, width_mm debe ser la suma total, no solo el primer panel
+    const totalWidthMm = newPanels.reduce((sum, p) => sum + (p.width_mm || 0), 0);
+    const updates: Record<string, unknown> = {
+      panels: newPanels,
+      measurements,
+      width_mm: totalWidthMm || undefined,
+      width_m: totalWidthMm ? totalWidthMm / 1000 : null,
+    };
+    if (clearTemplates) updates._hardware_filtered_templates = undefined;
+    console.log('[MeasurementsStep] pushMeasurementsAndPanels', { 
+      panelCount: newPanels.length, 
+      panelWidths: newPanels.map(p => p.width_mm),
+      totalWidthMm,
+      width_m: updates.width_m 
+    });
+    onUpdate(updates as any);
+  };
+
+  const prevMeasurementsRef = React.useRef<{ panel_count?: number } | null>(null);
   React.useEffect(() => {
-    const newPanels = getPanels();
-    setPanels(newPanels);
-  }, [config.width_mm, (config as any).panels]);
-  
+    const meas = (config as any).measurements;
+    const fromConfig = getPanelsFromConfig();
+    const count = meas?.panel_count ?? (config as any).panels?.length ?? 1;
+    const safeCount = Math.min(3, Math.max(1, count)) as 1 | 2 | 3;
+    if (prevMeasurementsRef.current?.panel_count === safeCount && fromConfig.length === safeCount) return;
+    prevMeasurementsRef.current = meas || { panel_count: safeCount };
+    setPanelCount(safeCount);
+    const next: Panel[] = [];
+    for (let i = 0; i < safeCount; i++) next.push({ width_mm: fromConfig[i]?.width_mm ?? 0 });
+    setPanels(next);
+  }, [(config as any).panels, (config as any).measurements?.panel_count]);
+
   const handleAddPanel = () => {
     if (panels.length < 3) {
-      // New panel only needs width (height is global)
       const newPanels = [...panels, { width_mm: 0 }];
       setPanels(newPanels);
-      onUpdate({ panels: newPanels } as any);
+      setPanelCount(newPanels.length as 1 | 2 | 3);
+      pushMeasurementsAndPanels(config.height_mm, newPanels);
     }
   };
-  
+
   const handleRemovePanel = (index: number) => {
     if (panels.length > 1) {
       const newPanels = panels.filter((_, i) => i !== index);
       setPanels(newPanels);
-      onUpdate({ panels: newPanels } as any);
+      setPanelCount(newPanels.length as 1 | 2 | 3);
+      pushMeasurementsAndPanels(config.height_mm, newPanels, true);
     }
   };
-  
+
   const handlePanelWidthUpdate = (index: number, value: number) => {
     const newPanels = [...panels];
     newPanels[index] = { width_mm: value || 0 };
     setPanels(newPanels);
-    onUpdate({ panels: newPanels } as any);
-    
-    // Also update legacy width_mm for backward compatibility (use first panel)
-    // FASE 2: Also update width_m in meters for unified contract
-    if (index === 0 && newPanels[0]) {
-      const width_m = newPanels[0].width_mm ? newPanels[0].width_mm / 1000 : null;
-      onUpdate({
-        width_mm: newPanels[0].width_mm || undefined,
-        width_m: width_m,
-      } as any);
-    }
+    pushMeasurementsAndPanels(config.height_mm, newPanels);
   };
-  
-  // Handle global height update (applies to all panels)
+
   const handleHeightUpdate = (value: number) => {
-    // FASE 2: Also update height_m in meters for unified contract
     const height_m = value ? value / 1000 : null;
-    onUpdate({ 
+    onUpdate({
       height_mm: value || undefined,
       height_m: height_m,
     } as any);
+    const measurements = buildMeasurements(value, panels);
+    onUpdate({ measurements } as any);
   };
   
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-8">
         {/* DIMENSIONS */}
         <div>
-          <Label className="text-sm font-medium mb-4 block">DIMENSIONS</Label>
+          <Label className="text-sm font-medium mb-5 block">DIMENSIONS</Label>
           {supportsPanels ? (
             // Multi-panel view
             <div className="space-y-4">
@@ -144,6 +184,9 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     value={config.area || ''}
                     onChange={(e) => onUpdate({ area: e.target.value })}
                     placeholder=""
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
                 <div>
@@ -151,9 +194,12 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                   <Input
                     id="position"
                     type="text"
-                    value={config.position || ''}
+                    value={config.position !== undefined && config.position !== '' ? String(config.position) : ''}
                     onChange={(e) => onUpdate({ position: e.target.value })}
                     placeholder=""
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
                 <div>
@@ -165,9 +211,12 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     value={(config as any).quantity || ''}
                     onChange={(e) => onUpdate({ quantity: parseInt(e.target.value) || 1 } as any)}
                     placeholder="1"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
-                <div></div> {/* Empty space to maintain grid-cols-4 */}
+                <div></div>
               </div>
               
               {/* Row 2: Width Panel 1, Height, Add Panel button */}
@@ -260,23 +309,29 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
               {/* Row 1: Area, Position, Quantity */}
               <div className="grid grid-cols-4 gap-6">
                 <div>
-                  <Label htmlFor="area" className="text-xs mb-1">Area</Label>
+                  <Label htmlFor="area-single" className="text-xs mb-1">Area</Label>
                   <Input
-                    id="area"
+                    id="area-single"
                     type="text"
                     value={config.area || ''}
                     onChange={(e) => onUpdate({ area: e.target.value })}
                     placeholder=""
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="position" className="text-xs mb-1">Position</Label>
+                  <Label htmlFor="position-single" className="text-xs mb-1">Position</Label>
                   <Input
-                    id="position"
+                    id="position-single"
                     type="text"
-                    value={config.position || ''}
+                    value={config.position !== undefined && config.position !== '' ? String(config.position) : ''}
                     onChange={(e) => onUpdate({ position: e.target.value })}
                     placeholder=""
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
                 <div>
@@ -288,9 +343,12 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     value={(config as any).quantity || ''}
                     onChange={(e) => onUpdate({ quantity: parseInt(e.target.value) || 1 } as any)}
                     placeholder="1"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
                 </div>
-                <div></div> {/* Empty space to maintain grid-cols-4 */}
+                <div></div>
               </div>
               
               {/* Row 2: Width, Height */}
@@ -335,22 +393,22 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
         {/* 2. FABRIC DROP - Drop de la tela Normal e Invertida (Hidden for Triple Shade) */}
         {!isTripleShade && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">FABRIC DROP</Label>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <Label className="text-sm font-medium mb-5 block">FABRIC DROP</Label>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {FABRIC_DROP_OPTIONS.map((option) => {
-                const isSelected = config.fabricDrop === option.id;
+                const isSelected = currentFabricDrop === option.id;
                 return (
                   <div
                     key={option.id}
                     onClick={() => onUpdate({ fabricDrop: isSelected ? undefined : option.id })}
                     className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
                       isSelected
-                        ? 'border-2 border-primary shadow-lg'
+                        ? 'border-2 border-gray-900 shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                     }`}
                   >
                     {/* Image */}
-                    <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                    <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
                       {option.imageUrl ? (
                         <img
                           src={option.imageUrl}
@@ -366,10 +424,10 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     </div>
                     
                     {/* Card Content */}
-                    <div className="p-4">
+                    <div className="p-4 bg-gray-100">
                       {/* Option Name */}
                       <h3 className={`font-semibold text-sm truncate text-center ${
-                        isSelected ? 'text-primary' : 'text-gray-900'
+                        isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                       }`} title={option.name}>
                         {option.name}
                       </h3>
@@ -383,23 +441,23 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
 
         {/* 3. INSTALLATION TYPE & LOCATION - En una sola línea */}
         <div>
-          <Label className="text-sm font-medium mb-4 block">INSTALLATION TYPE & LOCATION</Label>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <Label className="text-sm font-medium mb-5 block">INSTALLATION TYPE & LOCATION</Label>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {/* Installation Type Options */}
             {INSTALLATION_TYPE_OPTIONS.map((option) => {
-              const isSelected = config.installationType === option.id;
+              const isSelected = currentInstallationType === option.id;
               return (
                 <div
                   key={option.id}
                   onClick={() => onUpdate({ installationType: isSelected ? undefined : option.id })}
                   className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
                     isSelected
-                      ? 'border-2 border-primary shadow-lg'
+                      ? 'border-2 border-gray-900 shadow-lg'
                       : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                   }`}
                 >
                   {/* Image */}
-                  <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                  <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
                     {option.imageUrl ? (
                       <img
                         src={option.imageUrl}
@@ -415,10 +473,10 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                   </div>
                   
                   {/* Card Content */}
-                  <div className="p-4">
+                  <div className="p-4 bg-gray-100">
                     {/* Option Name */}
                     <h3 className={`font-semibold text-sm truncate text-center ${
-                      isSelected ? 'text-primary' : 'text-gray-900'
+                      isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                     }`} title={option.name}>
                       {option.name}
                     </h3>
@@ -429,19 +487,19 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
             
             {/* Installation Location Options */}
             {INSTALLATION_LOCATION_OPTIONS.map((option) => {
-              const isSelected = config.installationLocation === option.id;
+              const isSelected = currentInstallationLocation === option.id;
               return (
                 <div
                   key={option.id}
                   onClick={() => onUpdate({ installationLocation: isSelected ? undefined : option.id })}
                   className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
                     isSelected
-                      ? 'border-2 border-primary shadow-lg'
+                      ? 'border-2 border-gray-900 shadow-lg'
                       : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                   }`}
                 >
                   {/* Image */}
-                  <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                  <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
                     {option.imageUrl ? (
                       <img
                         src={option.imageUrl}
@@ -457,10 +515,10 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                   </div>
                   
                   {/* Card Content */}
-                  <div className="p-4">
+                  <div className="p-4 bg-gray-100">
                     {/* Option Name */}
                     <h3 className={`font-semibold text-sm truncate text-center ${
-                      isSelected ? 'text-primary' : 'text-gray-900'
+                      isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                     }`} title={option.name}>
                       {option.name}
                     </h3>

@@ -75,7 +75,13 @@ export default function OrderList() {
   
   const loading = loadingSO;
   const error = null;
-  
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
+
   const refetch = async () => {
     // Refetch Sales Orders to ensure data is up to date
     // CRITICAL: This ensures Sales Orders remain visible after MO creation
@@ -768,18 +774,7 @@ export default function OrderList() {
   };
 
 
-  if (loading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading order list...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-6 px-6" />;
 
   if (error) {
     return (

@@ -70,11 +70,11 @@ export function useCurrentOrgRole(
         setLoading(true);
         setError(null);
 
-        // ✅ CRITICAL FIX: First check if user is a Portal User (CompanyPortalUsers)
+        // ✅ CRITICAL FIX: First check if user is a Portal User (DealerUsers)
         // Portal users should NOT have Organization roles - they are external customers
         // IMPORTANT: Use 'role' and 'status' columns (matches actual DB schema)
         const { data: portalUser, error: portalError } = await supabase
-          .from('CompanyPortalUsers')
+          .from('DealerUsers')
           .select('id, role, status')
           .eq('user_id', userId)
           .eq('deleted', false)
@@ -82,7 +82,7 @@ export function useCurrentOrgRole(
           .maybeSingle();
 
         if (portalError && import.meta.env.DEV) {
-          console.error('[useCurrentOrgRole] CompanyPortalUsers lookup error', {
+          console.error('[useCurrentOrgRole] DealerUsers lookup error', {
             message: portalError.message,
             details: portalError.details,
             hint: portalError.hint,

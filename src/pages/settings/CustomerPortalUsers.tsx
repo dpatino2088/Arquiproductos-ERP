@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useCompanyPortalUsers, type CompanyPortalUser } from '../../hooks/useCompanyPortalUsers';
+import { useDealerUsers, type DealerUser } from '../../hooks/useDealerUsers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -15,7 +15,7 @@ interface PortalUser {
   user_id: string | null;
   user_name: string | null;
   user_email: string | null;
-  company_id: string | null;
+  dealer_id: string | null;
   contact_id: string | null;
   contact_name: string | null;
   contact_email: string | null;
@@ -79,56 +79,56 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
   // Form state
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
-  const [company_id, setCompany_id] = useState<string>(''); // Cambiado: company_id en lugar de customer_id
+  const [dealer_id, setDealer_id] = useState<string>(''); // Cambiado: dealer_id en lugar de customer_id
   const [status, setStatus] = useState<string>('authorized');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Dropdown data: Companies (NO DirectoryCustomers)
-  const [companies, setCompanies] = useState<Array<{ id: string; company_name: string }>>([]);
+  // Dropdown data: Dealers
+  const [dealers, setDealers] = useState<Array<{ id: string; dealer_name: string }>>([]);
   
   // Loading states
-  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  const [loadingDealers, setLoadingDealers] = useState(false);
 
-  // Load companies (de la organization actual)
-  const loadCompanies = useCallback(async () => {
+  // Load dealers (de la organization actual)
+  const loadDealers = useCallback(async () => {
     if (!organizationId) return;
     
-    setLoadingCompanies(true);
+    setLoadingDealers(true);
     try {
       const { data, error } = await supabase
-        .from('Companies')
-        .select('id, company_name')
+        .from('Dealers')
+        .select('id, dealer_name')
         .eq('organization_id', organizationId)
         .eq('deleted', false)
-        .order('company_name', { ascending: true });
+        .order('dealer_name', { ascending: true });
 
       if (error) {
-        console.error('Error loading companies:', error);
-        setCompanies([]);
+        console.error('Error loading dealers:', error);
+        setDealers([]);
       } else {
-        setCompanies(data || []);
+        setDealers(data || []);
       }
     } catch (err) {
-      console.error('Error loading companies:', err);
-      setCompanies([]);
+      console.error('Error loading dealers:', err);
+      setDealers([]);
     } finally {
-      setLoadingCompanies(false);
+      setLoadingDealers(false);
     }
   }, [organizationId]);
 
   // Load data when modal opens
   useEffect(() => {
     if (isOpen) {
-      loadCompanies();
+      loadDealers();
       // Reset form
       setUser_name('');
       setUser_email('');
-      setCompany_id(''); // Cambiado: company_id
+      setDealer_id(''); // Cambiado: dealer_id
       setStatus('authorized');
       setSubmitError(null);
     }
-  }, [isOpen, loadCompanies]);
+  }, [isOpen, loadDealers]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,7 +155,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
     }
 
     if (!user?.id) {
-      setSubmitError('You must be logged in to create portal users');
+      setSubmitError('You must be logged in to create dealer users');
       return;
     }
 
@@ -173,15 +173,15 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       const validStatuses = ['invited', 'active', 'disabled'];
       const finalStatus = validStatuses.includes(normalizedStatus) ? normalizedStatus : 'invited';
 
-      // Validar que company_id existe (requerido en nuevo schema)
-      if (!company_id) {
-        setSubmitError('Company is required');
+      // Validar que dealer_id existe (requerido en nuevo schema)
+      if (!dealer_id) {
+        setSubmitError('Dealer is required');
         setIsSubmitting(false);
         return;
       }
 
       const insertPayload = {
-        company_id: company_id, // Cambiado: company_id (requerido, NO nullable)
+        dealer_id: dealer_id, // Cambiado: dealer_id (requerido, NO nullable)
         portal_user_email: trimmedEmail,
         portal_user_status: finalStatus,
         invited_by_user_id: user.id,
@@ -189,26 +189,26 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       };
 
       const { error: insertError } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .insert(insertPayload);
 
       if (insertError) {
         // Enhanced error message showing what was sent
-        const errorMsg = insertError.message || 'Failed to create portal user';
+        const errorMsg = insertError.message || 'Failed to create dealer user';
         const statusInfo = `Status sent: "${status}" (normalized to "${finalStatus}")`;
         throw new Error(`${errorMsg}. ${statusInfo}. Payload: ${JSON.stringify(insertPayload)}`);
       }
 
       addNotification({
         type: 'success',
-        title: 'Portal User Created',
-        message: 'The portal user has been created successfully.',
+        title: 'Dealer User Created',
+        message: 'The dealer user has been created successfully.',
       });
 
       onSuccess();
       onClose();
     } catch (err: any) {
-      const errorMessage = err.message || 'Error creating portal user';
+      const errorMessage = err.message || 'Error creating dealer user';
       setSubmitError(errorMessage);
       addNotification({
         type: 'error',
@@ -227,7 +227,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Add Portal User</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Add Dealer User</h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -275,30 +275,30 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
 
           {/* Customer Selection (Optional) */}
           <div>
-            <Label htmlFor="company_id">Company *</Label>
-            {loadingCompanies ? (
-              <div className="text-sm text-gray-500 py-2">Loading companies...</div>
+            <Label htmlFor="dealer_id">Dealer *</Label>
+            {loadingDealers ? (
+              <div className="text-sm text-gray-500 py-2">Loading dealers...</div>
             ) : (
               <select
-                id="company_id"
-                value={company_id}
+                id="dealer_id"
+                value={dealer_id}
                 onChange={(e) => {
-                  setCompany_id(e.target.value);
+                  setDealer_id(e.target.value);
                 }}
                 required
                 disabled={isSubmitting}
                 className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select a company</option>
-                {companies.map((c) => (
+                <option value="">Select a dealer</option>
+                {dealers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.company_name}
+                    {c.dealer_name}
                   </option>
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
-              <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
+            {dealers.length === 0 && !loadingDealers && (
+              <p className="text-xs text-gray-500 mt-1">No dealers available. Create a dealer first.</p>
             )}
           </div>
 
@@ -335,7 +335,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
               className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
-              {isSubmitting ? 'Creating...' : 'Create Portal User'}
+              {isSubmitting ? 'Creating...' : 'Create Dealer User'}
             </button>
           </div>
         </form>
@@ -351,56 +351,56 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
   // Form state
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
-  const [company_id, setCompany_id] = useState<string>(''); // Cambiado: company_id
+  const [dealer_id, setDealer_id] = useState<string>(''); // Cambiado: dealer_id
   const [status, setStatus] = useState<string>('invited');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Dropdown data: Companies (NO DirectoryCustomers)
-  const [companies, setCompanies] = useState<Array<{ id: string; company_name: string }>>([]);
+  // Dropdown data: Dealers
+  const [dealers, setDealers] = useState<Array<{ id: string; dealer_name: string }>>([]);
   
   // Loading states
-  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  const [loadingDealers, setLoadingDealers] = useState(false);
 
-  // Load companies (de la organization actual)
-  const loadCompanies = useCallback(async () => {
+  // Load dealers (de la organization actual)
+  const loadDealers = useCallback(async () => {
     if (!organizationId) return;
     
-    setLoadingCompanies(true);
+    setLoadingDealers(true);
     try {
       const { data, error } = await supabase
-        .from('Companies')
-        .select('id, company_name')
+        .from('Dealers')
+        .select('id, dealer_name')
         .eq('organization_id', organizationId)
         .eq('deleted', false)
-        .order('company_name', { ascending: true });
+        .order('dealer_name', { ascending: true });
 
       if (error) {
-        console.error('Error loading companies:', error);
-        setCompanies([]);
+        console.error('Error loading dealers:', error);
+        setDealers([]);
       } else {
-        setCompanies(data || []);
+        setDealers(data || []);
       }
     } catch (err) {
-      console.error('Error loading companies:', err);
-      setCompanies([]);
+      console.error('Error loading dealers:', err);
+      setDealers([]);
     } finally {
-      setLoadingCompanies(false);
+      setLoadingDealers(false);
     }
   }, [organizationId]);
 
   // Load data when modal opens or user changes
   useEffect(() => {
     if (isOpen && user) {
-      loadCompanies();
+      loadDealers();
       // Populate form with user data
       setUser_name(user.user_name || '');
       setUser_email((user as any).portal_user_email ?? user.user_email ?? '');
-      setCompany_id((user as any).company_id || ''); // Cambiado: company_id
+      setDealer_id((user as any).dealer_id || ''); // Cambiado: dealer_id
       setStatus((user as any).portal_user_status ?? user.status ?? 'invited');
       setSubmitError(null);
     }
-  }, [isOpen, user, loadCompanies]);
+  }, [isOpen, user, loadDealers]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -432,7 +432,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     }
 
     if (!currentUser?.id) {
-      setSubmitError('You must be logged in to edit portal users');
+      setSubmitError('You must be logged in to edit dealer users');
       return;
     }
 
@@ -444,42 +444,42 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       const validStatuses = ['invited', 'active', 'disabled'];
       const finalStatus = validStatuses.includes(status.toLowerCase()) ? status.toLowerCase() : 'invited';
 
-      // Validar que company_id existe (requerido en nuevo schema)
-      if (!company_id) {
-        setSubmitError('Company is required');
+      // Validar que dealer_id existe (requerido en nuevo schema)
+      if (!dealer_id) {
+        setSubmitError('Dealer is required');
         setIsSubmitting(false);
         return;
       }
 
-      // SOLO columnas explícitas: portal_user_email, portal_user_status, company_id
+      // SOLO columnas explícitas: portal_user_email, portal_user_status, dealer_id
       const updatePayload = {
-        company_id: company_id, // Cambiado: company_id (requerido, NO nullable)
+        dealer_id: dealer_id, // Cambiado: dealer_id (requerido, NO nullable)
         portal_user_email: trimmedEmail,
         portal_user_status: finalStatus,
         updated_at: new Date().toISOString(),
       };
 
       const { error: updateError } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update(updatePayload)
         .eq('id', user.id)
         .eq('organization_id', organizationId);
 
       if (updateError) {
-        const errorMsg = updateError.message || 'Failed to update portal user';
+        const errorMsg = updateError.message || 'Failed to update dealer user';
         throw new Error(`${errorMsg}. Payload: ${JSON.stringify(updatePayload)}`);
       }
 
       addNotification({
         type: 'success',
-        title: 'Portal User Updated',
-        message: 'The portal user has been updated successfully.',
+        title: 'Dealer User Updated',
+        message: 'The dealer user has been updated successfully.',
       });
 
       onSuccess();
       onClose();
     } catch (err: any) {
-      const errorMessage = err.message || 'Error updating portal user';
+      const errorMessage = err.message || 'Error updating dealer user';
       setSubmitError(errorMessage);
       addNotification({
         type: 'error',
@@ -498,7 +498,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Edit Portal User</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Edit Dealer User</h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -544,30 +544,30 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
             />
           </div>
 
-          {/* Company Selection (Required) */}
+          {/* Dealer Selection (Required) */}
           <div>
-            <Label htmlFor="edit_company_id">Company *</Label>
-            {loadingCompanies ? (
-              <div className="text-sm text-gray-500 py-2">Loading companies...</div>
+            <Label htmlFor="edit_dealer_id">Dealer *</Label>
+            {loadingDealers ? (
+              <div className="text-sm text-gray-500 py-2">Loading dealers...</div>
             ) : (
               <select
-                id="edit_company_id"
-                value={company_id}
-                onChange={(e) => setCompany_id(e.target.value)}
+                id="edit_dealer_id"
+                value={dealer_id}
+                onChange={(e) => setDealer_id(e.target.value)}
                 required
                 disabled={isSubmitting}
                 className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select a company</option>
-                {companies.map((c) => (
+                <option value="">Select a dealer</option>
+                {dealers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.company_name}
+                    {c.dealer_name}
                   </option>
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
-              <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
+            {dealers.length === 0 && !loadingDealers && (
+              <p className="text-xs text-gray-500 mt-1">No dealers available. Create a dealer first.</p>
             )}
           </div>
 
@@ -604,7 +604,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
               className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
-              {isSubmitting ? 'Updating...' : 'Update Portal User'}
+              {isSubmitting ? 'Updating...' : 'Update Dealer User'}
             </button>
           </div>
         </form>
@@ -620,52 +620,52 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
   // Form state
   const [email, setEmail] = useState<string>('');
   const [name, setName] = useState<string>('');
-  const [company_id, setCompany_id] = useState<string>('');
+  const [dealer_id, setDealer_id] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Dropdown data: Companies (NO DirectoryCustomers)
-  const [companies, setCompanies] = useState<Array<{ id: string; company_name: string }>>([]);
-  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  // Dropdown data: Dealers
+  const [dealers, setDealers] = useState<Array<{ id: string; dealer_name: string }>>([]);
+  const [loadingDealers, setLoadingDealers] = useState(false);
 
-  // Load companies (de la organization actual)
-  const loadCompanies = useCallback(async () => {
+  // Load dealers (de la organization actual)
+  const loadDealers = useCallback(async () => {
     if (!organizationId) return;
     
-    setLoadingCompanies(true);
+    setLoadingDealers(true);
     try {
       const { data, error } = await supabase
-        .from('Companies')
-        .select('id, company_name')
+        .from('Dealers')
+        .select('id, dealer_name')
         .eq('organization_id', organizationId)
         .eq('deleted', false)
-        .order('company_name', { ascending: true });
+        .order('dealer_name', { ascending: true });
 
       if (error) {
-        console.error('Error loading companies:', error);
-        setCompanies([]);
+        console.error('Error loading dealers:', error);
+        setDealers([]);
       } else {
-        setCompanies(data || []);
+        setDealers(data || []);
       }
     } catch (err) {
-      console.error('Error loading companies:', err);
-      setCompanies([]);
+      console.error('Error loading dealers:', err);
+      setDealers([]);
     } finally {
-      setLoadingCompanies(false);
+      setLoadingDealers(false);
     }
   }, [organizationId]);
 
   // Load data when modal opens
   useEffect(() => {
     if (isOpen) {
-      loadCompanies();
+      loadDealers();
       // Reset form
       setEmail('');
       setName('');
-      setCompany_id('');
+      setDealer_id('');
       setSubmitError(null);
     }
-  }, [isOpen, loadCompanies]);
+  }, [isOpen, loadDealers]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -695,19 +695,19 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
     setSubmitError(null);
 
     try {
-      // Validar que company_id existe (requerido en nuevo schema)
-      if (!company_id) {
-        setSubmitError('Company is required');
+      // Validar que dealer_id existe (requerido en nuevo schema)
+      if (!dealer_id) {
+        setSubmitError('Dealer is required');
         setIsSubmitting(false);
         return;
       }
 
-      // First, create or find CompanyPortalUser record
+      // First, create or find DealerUser record
       let portalUserId: string;
 
-      // Check if portal user already exists
+      // Check if dealer user already exists
       const { data: existingUser, error: checkError } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .select('id')
         .eq('organization_id', organizationId)
         .eq('portal_user_email', trimmedEmail)
@@ -721,12 +721,12 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
       if (existingUser) {
         portalUserId = existingUser.id;
       } else {
-        // Create new portal user record
+        // Create new dealer user record
         const { data: newUser, error: createError } = await supabase
-          .from('CompanyPortalUsers')
+          .from('DealerUsers')
           .insert({
-            // SOLO columnas explícitas: portal_user_email, portal_user_status, company_id
-            company_id: company_id,
+            // SOLO columnas explícitas: portal_user_email, portal_user_status, dealer_id
+            dealer_id: dealer_id,
             portal_user_email: trimmedEmail,
             portal_user_status: 'invited',
             invited_by_user_id: currentUser.id,
@@ -736,11 +736,11 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
           .single();
 
         if (createError) {
-          throw new Error(`Failed to create portal user: ${createError.message}`);
+          throw new Error(`Failed to create dealer user: ${createError.message}`);
         }
 
         if (!newUser?.id) {
-          throw new Error('Failed to create portal user: No ID returned');
+          throw new Error('Failed to create dealer user: No ID returned');
         }
 
         portalUserId = newUser.id;
@@ -810,7 +810,7 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Invite Portal User</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Invite Dealer User</h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -855,30 +855,30 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
             />
           </div>
 
-          {/* Company Selection (Required) */}
+          {/* Dealer Selection (Required) */}
           <div>
-            <Label htmlFor="invite_company_id">Company *</Label>
-            {loadingCompanies ? (
-              <div className="text-sm text-gray-500 py-2">Loading companies...</div>
+            <Label htmlFor="invite_dealer_id">Dealer *</Label>
+            {loadingDealers ? (
+              <div className="text-sm text-gray-500 py-2">Loading dealers...</div>
             ) : (
               <select
-                id="invite_company_id"
-                value={company_id}
-                onChange={(e) => setCompany_id(e.target.value)}
+                id="invite_dealer_id"
+                value={dealer_id}
+                onChange={(e) => setDealer_id(e.target.value)}
                 required
                 disabled={isSubmitting}
                 className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select a company</option>
-                {companies.map((c) => (
+                <option value="">Select a dealer</option>
+                {dealers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.company_name}
+                    {c.dealer_name}
                   </option>
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
-              <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
+            {dealers.length === 0 && !loadingDealers && (
+              <p className="text-xs text-gray-500 mt-1">No dealers available. Create a dealer first.</p>
             )}
           </div>
 
@@ -894,7 +894,7 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !email.trim() || !company_id}
+              disabled={isSubmitting || !email.trim() || !dealer_id}
               className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
@@ -907,13 +907,19 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
   );
 }
 
-export default function CompanyPortalUsers() {
+export default function DealerUsers() {
   // ✅ Hooks at the TOP (React rules)
   const { activeOrganizationId } = useOrganizationContext();
-  const { users, isLoading: loading, error, refetch } = useCompanyPortalUsers();
+  const { users, isLoading: loading, error, refetch } = useDealerUsers();
   const { user: currentUser } = useAuthStore();
-  const { addNotification } = useUIStore();
+  const { addNotification, setGlobalLoading } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -933,7 +939,7 @@ export default function CompanyPortalUsers() {
       setAuthorizingId(userId);
 
       const { error } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update({ portal_user_status: 'active' })
         .eq('id', userId)
         .eq('organization_id', activeOrganizationId);
@@ -945,7 +951,7 @@ export default function CompanyPortalUsers() {
       addNotification({
         type: 'success',
         title: 'User Authorized',
-        message: 'Portal user has been authorized successfully.',
+        message: 'Dealer user has been authorized successfully.',
       });
 
       refetch();
@@ -971,7 +977,7 @@ export default function CompanyPortalUsers() {
     if (!activeOrganizationId) return;
 
     const confirmed = await showConfirm({
-      title: 'Delete Portal User',
+      title: 'Delete Dealer User',
       message: `Are you sure you want to delete "${user.user_name || ((user as any).portal_user_email ?? user.user_email)}"? This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
@@ -985,7 +991,7 @@ export default function CompanyPortalUsers() {
 
     try {
       const { error } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update({ deleted: true, updated_at: new Date().toISOString() })
         .eq('id', user.id)
         .eq('organization_id', activeOrganizationId);
@@ -995,7 +1001,7 @@ export default function CompanyPortalUsers() {
       addNotification({
         type: 'success',
         title: 'User Deleted',
-        message: 'Portal user has been deleted successfully.',
+        message: 'Dealer user has been deleted successfully.',
       });
 
       refetch();
@@ -1016,7 +1022,7 @@ export default function CompanyPortalUsers() {
     if (!activeOrganizationId) return;
 
     const confirmed = await showConfirm({
-      title: 'Archive Portal User',
+      title: 'Archive Dealer User',
       message: `Are you sure you want to archive "${user.user_name || ((user as any).portal_user_email ?? user.user_email)}"?`,
       variant: 'warning',
       confirmText: 'Archive',
@@ -1030,7 +1036,7 @@ export default function CompanyPortalUsers() {
 
     try {
       const { error } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update({ portal_user_status: 'disabled', updated_at: new Date().toISOString() })
         .eq('id', user.id)
         .eq('organization_id', activeOrganizationId);
@@ -1040,7 +1046,7 @@ export default function CompanyPortalUsers() {
       addNotification({
         type: 'success',
         title: 'User Archived',
-        message: 'Portal user has been archived successfully.',
+        message: 'Dealer user has been archived successfully.',
       });
 
       refetch();
@@ -1135,26 +1141,14 @@ export default function CompanyPortalUsers() {
     }
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading portal users...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="p-6" />;
 
   // Show error state
   if (error) {
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error loading portal users</p>
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading dealer users</p>
           <p className="text-sm text-red-700">{error}</p>
         </div>
       </div>
@@ -1167,7 +1161,7 @@ export default function CompanyPortalUsers() {
       <div className="p-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
-          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view portal users.</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view dealer users.</p>
         </div>
       </div>
     );
@@ -1178,9 +1172,9 @@ export default function CompanyPortalUsers() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Company Portal Users</h1>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Dealer Users</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage company portal access and permissions
+            Manage dealer user access and permissions
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -1198,7 +1192,7 @@ export default function CompanyPortalUsers() {
                 className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm"
               >
                 <Send className="w-4 h-4" />
-                Invite Portal User
+                Invite Dealer User
               </button>
               <button
                 onClick={() => setIsCreateOpen(true)}
@@ -1206,7 +1200,7 @@ export default function CompanyPortalUsers() {
                 style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               >
                 <Plus className="w-4 h-4" />
-                Add Portal User
+                Add Dealer User
               </button>
             </>
           )}
@@ -1234,14 +1228,14 @@ export default function CompanyPortalUsers() {
                 <tr>
                   <td colSpan={8} className="py-12 px-6 text-center">
                     <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 mb-2">No portal users found</p>
+                    <p className="text-gray-600 mb-2">No dealer users found</p>
                     <p className="text-sm text-gray-500">
-                      Portal users will appear here once they are created.
+                      Dealer users will appear here once they are created.
                     </p>
                   </td>
                 </tr>
               ) : (
-                users.map((user: CompanyPortalUser) => (
+                users.map((user: DealerUser) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     {/* User Name (ALWAYS from user) */}
                     <td className="py-4 px-6 text-gray-900 text-sm">
@@ -1376,7 +1370,7 @@ export default function CompanyPortalUsers() {
       {/* Summary */}
       {users.length > 0 && (
         <div className="mt-4 text-sm text-gray-600">
-          Showing {users.length} portal user{users.length !== 1 ? 's' : ''}
+          Showing {users.length} dealer user{users.length !== 1 ? 's' : ''}
         </div>
       )}
 

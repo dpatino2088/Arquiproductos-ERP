@@ -217,7 +217,7 @@ export default function CatalogItemNew() {
     shipping_cost: number;
     import_tax_cost: number;
     minimum_margin_pct: number;
-    msrp_pct_sale_out: number;
+    msrp_pct: number;
   } | null>(null);
   const [msrpLoading, setMsrpLoading] = useState(false);
   
@@ -761,7 +761,7 @@ export default function CatalogItemNew() {
       try {
         const { data, error } = await supabase
           .from('CatalogItemsMSRP')
-          .select('dealer_price, msrp, total_cost, shipping_cost, import_tax_cost, minimum_margin_pct, msrp_pct_sale_out')
+          .select('dealer_price, msrp, total_cost, shipping_cost, import_tax_cost, minimum_margin_pct, msrp_pct')
           .eq('catalog_item_id', itemId)
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
@@ -775,7 +775,7 @@ export default function CatalogItemNew() {
             shipping_cost: Number(data.shipping_cost ?? 0),
             import_tax_cost: Number(data.import_tax_cost ?? 0),
             minimum_margin_pct: Number(data.minimum_margin_pct ?? 0),
-            msrp_pct_sale_out: Number(data.msrp_pct_sale_out ?? 0),
+            msrp_pct: Number(data.msrp_pct ?? 0),
           });
         }
       } catch (err) {
@@ -1792,7 +1792,7 @@ export default function CatalogItemNew() {
                   <div>
                     <p className="font-medium text-gray-700">MSRP % Sale Out</p>
                     <p className="text-lg font-semibold text-primary">
-                      {(msrpRow.msrp_pct_sale_out * 100).toFixed(2)}%
+                      {(msrpRow.msrp_pct * 100).toFixed(2)}%
                     </p>
                     <p className="text-xs text-gray-500 mt-1">From category</p>
                   </div>

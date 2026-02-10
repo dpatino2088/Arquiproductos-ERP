@@ -56,9 +56,9 @@ export function normalizeConfig(config: Partial<UnifiedProductConfig>): UnifiedP
     bom_template_id: config.bom_template_id || null,
     productType: config.productType,
     
-    // Measurements
-    width_m: config.width_m ?? null,
-    height_m: config.height_m ?? null,
+    // Measurements — derive from width_mm/height_mm when width_m/height_m are missing (MeasurementsStep sets both but React state can lose one)
+    width_m: config.width_m ?? ((config as any).width_mm ? (config as any).width_mm / 1000 : null),
+    height_m: config.height_m ?? ((config as any).height_mm ? (config as any).height_mm / 1000 : null),
     area: config.area || null,
     position: config.position ?? '',
     quantity: config.quantity ?? 1,

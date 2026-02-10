@@ -44,24 +44,40 @@ export function OrganizationSwitcher() {
 
   // Get the actual role to display based on user type
   // For portal users: always use portalRole (ignores orgRole which is null)
-  // For internal users: use orgRole from organization context
+  // For internal users: SuperAdmin always shows "SuperAdmin"; else use OrganizationUsers.role (org summary), never DealerUsers.role
   const getDisplayRole = (orgRole: string | null): string | null => {
     if (userType === "portal") {
-      // Portal users: always use portalRole (member_manager or member)
       return portalRole || null;
     }
     if (userType === "internal") {
-      // Internal users: use orgRole from organization, fallback to internalRole
+      // Internal SuperAdmin: always show SuperAdmin, do not use org.role (e.g. operator from membership)
+      if (isSuperAdmin) return "superadmin";
+      // Internal non-SuperAdmin: use org role from OrganizationUsers (already in org summary), fallback to internalRole
       return orgRole || internalRole || null;
     }
-    // Unknown user type: use orgRole as-is
     return orgRole;
   };
 
   const getRoleBadge = (role: string | null) => {
-    // Map roles to display labels
+    // Portal (dealer) roles: Dealer Member y Dealer Manager
+    if (userType === 'portal' && role === 'member') {
+      const roleInfo = { label: 'Dealer Member', color: 'text-green-700', bgColor: 'bg-green-50' };
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${roleInfo.color} ${roleInfo.bgColor}`}>
+          {roleInfo.label}
+        </span>
+      );
+    }
+    if (userType === 'portal' && role === 'member_manager') {
+      const roleInfo = { label: 'Dealer Manager', color: 'text-blue-700', bgColor: 'bg-blue-50' };
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${roleInfo.color} ${roleInfo.bgColor}`}>
+          {roleInfo.label}
+        </span>
+      );
+    }
+    // Internal roles
     const roleMap: Record<string, { label: string; color: string; bgColor: string }> = {
-      // Internal roles
       superadmin: { label: 'SuperAdmin', color: 'text-purple-700', bgColor: 'bg-purple-50' },
       owner: { label: 'Owner', color: 'text-purple-700', bgColor: 'bg-purple-50' },
       admin: { label: 'Admin', color: 'text-blue-700', bgColor: 'bg-blue-50' },
@@ -69,9 +85,6 @@ export function OrganizationSwitcher() {
       procurement: { label: 'Procurement', color: 'text-indigo-700', bgColor: 'bg-indigo-50' },
       finance: { label: 'Finance', color: 'text-teal-700', bgColor: 'bg-teal-50' },
       member: { label: 'Member', color: 'text-green-700', bgColor: 'bg-green-50' },
-      // Portal roles
-      member_manager: { label: 'Member Manager', color: 'text-blue-700', bgColor: 'bg-blue-50' },
-      // Legacy/fallback
       viewer: { label: 'Viewer', color: 'text-gray-700', bgColor: 'bg-gray-50' },
     };
 
@@ -153,24 +166,15 @@ export function OrganizationSwitcher() {
         </span>
         {/* Show role badge in header for current organization */}
         {activeOrganization && (() => {
-          // For portal users, use portalRole from useAccessContext (not org.role which is 'viewer')
-          // For internal users, use the role from organization context
-          const displayRole = userType === "portal" 
-            ? portalRole 
-            : (userType === "internal" ? (activeOrganization.role || internalRole) : activeOrganization.role);
-          
+          const displayRole = getDisplayRole(activeOrganization.role || null);
           if (!displayRole) return null;
-          
-          // Show SuperAdmin badge for superadmin/internal
-          if (userType === "internal" && (displayRole === "superadmin" || isSuperAdmin)) {
+          if (userType === "internal" && displayRole === "superadmin") {
             return (
               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
                 SuperAdmin
               </span>
             );
           }
-          
-          // Show role badge for portal or other internal roles
           return getRoleBadge(displayRole);
         })()}
         <ChevronDown
@@ -223,7 +227,7 @@ export function OrganizationSwitcher() {
                       >
                         {org.name}
                       </div>
-                      <div className="mt-1">{getRoleBadge(getDisplayRole(org.role || null))}</div>
+                      <div className="mt-1">{getRoleBadge(getDisplayRole(org.role ?? null))}</div>
                     </div>
                   </div>
                   {isActive && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useCompanies, type Company, type CreateCompanyInput, type UpdateCompanyInput } from '../../hooks/useCompanies';
+import { useDealers, type Dealer, type CreateDealerInput, type UpdateDealerInput } from '../../hooks/useDealers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useUIStore } from '../../stores/ui-store';
@@ -11,7 +11,7 @@ import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
-// StatusBadge component similar to CompanyPortalUsers
+// StatusBadge component similar to DealerUser
 interface StatusBadgeProps {
   status: string;
   deleted?: boolean;
@@ -68,39 +68,37 @@ export default function CompaniesSettings() {
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const { companies, isLoading, error, fetchCompanies, createCompany, updateCompany, archiveCompany } = useCompanies();
-  
-  // Search and view state
+  const { dealers, isLoading, error, fetchDealers, createDealer, updateDealer, archiveDealer } = useDealers();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  
-  // Companies list state
+
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editingCompany, setEditingCompany] = useState<Dealer | null>(null);
   
   // Form state - use 'active', 'disabled', or 'archived' (archived = soft delete)
   const [formData, setFormData] = useState({
-    company_name: '',
-    company_email: '',
+    dealer_name: '',
+    dealer_email: '',
     status: 'active' as 'active' | 'disabled' | 'archived',
   });
 
-  // Filter companies by search term
+  // Filter dealers by search term
   const filteredCompanies = useMemo(() => {
-    if (!searchTerm) return companies;
+    if (!searchTerm) return dealers;
     const search = searchTerm.toLowerCase();
-    return companies.filter(company => 
-      (company.company_name?.toLowerCase() || '').includes(search) ||
-      (company.company_email?.toLowerCase() || '').includes(search) ||
-      (company.company_no?.toLowerCase() || '').includes(search)
+    return dealers.filter(company => 
+      (company.dealer_name?.toLowerCase() || '').includes(search) ||
+      (company.dealer_email?.toLowerCase() || '').includes(search) ||
+      (company.dealer_no?.toLowerCase() || '').includes(search)
     );
-  }, [companies, searchTerm]);
+  }, [dealers, searchTerm]);
 
 
   // Handle add company
   const handleAddCompany = async () => {
-    if (!formData.company_name.trim()) {
+    if (!formData.dealer_name.trim()) {
       addNotification({
         type: 'error',
         title: 'Validation error',
@@ -123,9 +121,9 @@ export default function CompaniesSettings() {
       // Handle 'archived' status - should not be set on create, only on update
       const finalStatus = formData.status === 'archived' ? 'active' : formData.status;
       
-      const input: CreateCompanyInput = {
-        company_name: formData.company_name.trim(),
-        company_email: formData.company_email.trim() || undefined,
+      const input: CreateDealerInput = {
+        dealer_name: formData.dealer_name.trim(),
+        dealer_email: formData.dealer_email.trim() || undefined,
         status: finalStatus, // finalStatus is already 'active' | 'disabled' (archived mapped to active above)
       };
 
@@ -133,7 +131,7 @@ export default function CompaniesSettings() {
         console.log('[CompaniesSettings] Creating company with input:', input);
       }
 
-      const newCompany = await createCompany(input);
+      const newCompany = await createDealer(input);
       
       if (import.meta.env.DEV) {
         console.log('[CompaniesSettings] Company created successfully:', newCompany);
@@ -142,7 +140,7 @@ export default function CompaniesSettings() {
       addNotification({
         type: 'success',
         title: 'Company created',
-        message: `Company created: ${newCompany.company_no || 'N/A'} - ${newCompany.company_name}`,
+        message: `Company created: ${newCompany.dealer_no || 'N/A'} - ${newCompany.dealer_name}`,
       });
 
       closeModal();
@@ -161,7 +159,7 @@ export default function CompaniesSettings() {
 
   // Handle update company
   const handleUpdateCompany = async () => {
-    if (!editingCompany || !formData.company_name.trim()) {
+    if (!editingCompany || !formData.dealer_name.trim()) {
       addNotification({
         type: 'error',
         title: 'Validation error',
@@ -175,29 +173,29 @@ export default function CompaniesSettings() {
       
       // Handle 'archived' status - if archived, do soft delete instead of status update
       if (formData.status === 'archived') {
-        await archiveCompany(editingCompany.id);
+        await archiveDealer(editingCompany.id);
         addNotification({
           type: 'success',
           title: 'Company archived',
-          message: `Company ${editingCompany.company_no || editingCompany.company_name} has been archived.`,
+          message: `Company ${editingCompany.dealer_no || editingCompany.dealer_name} has been archived.`,
         });
       } else {
         // Normal status update (active or disabled)
-        const input: UpdateCompanyInput = {
-          company_name: formData.company_name.trim(),
-          company_email: formData.company_email.trim() || undefined,
+        const input: UpdateDealerInput = {
+          dealer_name: formData.dealer_name.trim(),
+          dealer_email: formData.dealer_email.trim() || undefined,
           status: formData.status, // 'active' or 'disabled'
         };
 
-        await updateCompany(editingCompany.id, input);
+        await updateDealer(editingCompany.id, input);
         
         addNotification({
           type: 'success',
           title: 'Company updated',
-          message: `Company ${editingCompany.company_no || editingCompany.company_name} updated successfully.`,
+          message: `Company ${editingCompany.dealer_no || editingCompany.dealer_name} updated successfully.`,
         });
         // Refresh the list to show updated status
-        await fetchCompanies();
+        await fetchDealers();
       }
 
       setEditingCompany(null);
@@ -216,10 +214,10 @@ export default function CompaniesSettings() {
   };
 
   // Handle delete company (archive - soft delete)
-  const handleDeleteCompany = async (company: Company) => {
+  const handleDeleteCompany = async (company: Dealer) => {
     const confirmed = await showConfirm({
       title: 'Archive Company',
-      message: `Are you sure you want to archive "${company.company_name}"? This action can be undone.`,
+      message: `Are you sure you want to archive "${company.dealer_name}"? This action can be undone.`,
       variant: 'warning',
       confirmText: 'Archive',
       cancelText: 'Cancel',
@@ -229,14 +227,14 @@ export default function CompaniesSettings() {
 
     try {
       setIsSubmitting(true);
-      await archiveCompany(company.id);
+      await archiveDealer(company.id);
       addNotification({
         type: 'success',
         title: 'Company archived',
-        message: `Company ${company.company_no || company.company_name} has been archived.`,
+        message: `Company ${company.dealer_no || company.dealer_name} has been archived.`,
       });
       // Refresh the list to remove archived company
-      await fetchCompanies();
+      await fetchDealers();
     } catch (err: any) {
       console.error('[CompaniesSettings] Error archiving company:', err);
       addNotification({
@@ -252,8 +250,8 @@ export default function CompaniesSettings() {
   // Reset form
   const resetForm = () => {
     setFormData({
-      company_name: '',
-      company_email: '',
+      dealer_name: '',
+      dealer_email: '',
       status: 'active' as 'active' | 'disabled' | 'archived',
     });
   };
@@ -266,15 +264,15 @@ export default function CompaniesSettings() {
   };
 
   // Open edit modal
-  const openEditModal = (company: Company) => {
+  const openEditModal = (company: Dealer) => {
     // Normalize status: if deleted, show as 'archived', otherwise use status
     const normalizedStatus = company.deleted 
       ? 'archived' 
       : (company.status === 'active' ? 'active' : 'disabled');
     
     setFormData({
-      company_name: company.company_name,
-      company_email: company.company_email || '',
+      dealer_name: company.dealer_name,
+      dealer_email: company.dealer_email || '',
       status: normalizedStatus as 'active' | 'disabled' | 'archived',
     });
     setEditingCompany(company);
@@ -309,7 +307,7 @@ export default function CompaniesSettings() {
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800">Please select an organization to view companies.</p>
+          <p className="text-sm text-yellow-800">Please select an organization to view dealers.</p>
         </div>
       </div>
     );
@@ -333,7 +331,7 @@ export default function CompaniesSettings() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Companies</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage companies in your organization ({filteredCompanies.length} total)
+            Manage dealers in your organization ({filteredCompanies.length} total)
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -361,11 +359,11 @@ export default function CompaniesSettings() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search companies by name, email, number..."
+                placeholder="Search dealers by name, email, number..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Search companies"
+                aria-label="Search dealers"
               />
             </div>
             
@@ -427,21 +425,21 @@ export default function CompaniesSettings() {
           {isLoading ? (
             <div className="text-center py-12 px-6">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-              <p className="text-sm text-gray-600">Loading companies...</p>
+              <p className="text-sm text-gray-600">Loading dealers...</p>
             </div>
           ) : error ? (
             <div className="py-6 px-6">
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-sm text-red-800">Error loading companies: {error}</p>
+                <p className="text-sm text-red-800">Error loading dealers: {error}</p>
               </div>
             </div>
-          ) : companies.length === 0 ? (
+          ) : dealers.length === 0 ? (
             <div className="text-center py-12 px-6">
               <Building className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600 mb-2">No companies found</p>
+              <p className="text-gray-600 mb-2">No dealers found</p>
               <p className="text-sm text-gray-500">
                 {canManageCompanies 
-                  ? 'Start by adding companies to your organization'
+                  ? 'Start by adding dealers to your organization'
                   : 'Companies will appear here once they are created.'}
               </p>
             </div>
@@ -463,13 +461,13 @@ export default function CompaniesSettings() {
                 {filteredCompanies.map((company) => (
                   <tr key={company.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap font-mono">
-                      {company.company_no || '-'}
+                      {company.dealer_no || '-'}
                     </td>
                     <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
-                      <span className="font-medium">{company.company_name}</span>
+                      <span className="font-medium">{company.dealer_name}</span>
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
-                      {company.company_email || '-'}
+                      {company.dealer_email || '-'}
                     </td>
                     <td className="py-4 px-6 whitespace-nowrap">
                       <StatusBadge status={company.status} deleted={company.deleted} />
@@ -534,25 +532,25 @@ export default function CompaniesSettings() {
 
             <div className="space-y-4">
               <div>
-                <Label htmlFor="company_name" className="text-xs" required>
+                <Label htmlFor="dealer_name" className="text-xs" required>
                   Company Name
                 </Label>
                 <Input
-                  id="company_name"
-                  value={formData.company_name}
-                  onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                  id="dealer_name"
+                  value={formData.dealer_name}
+                  onChange={(e) => setFormData({ ...formData, dealer_name: e.target.value })}
                   placeholder="Enter company name"
                   className="mt-1"
                 />
               </div>
 
               <div>
-                <Label htmlFor="company_email" className="text-xs">Email</Label>
+                <Label htmlFor="dealer_email" className="text-xs">Email</Label>
                 <Input
-                  id="company_email"
+                  id="dealer_email"
                   type="email"
-                  value={formData.company_email}
-                  onChange={(e) => setFormData({ ...formData, company_email: e.target.value })}
+                  value={formData.dealer_email}
+                  onChange={(e) => setFormData({ ...formData, dealer_email: e.target.value })}
                   placeholder="company@example.com"
                   className="mt-1"
                 />
@@ -588,7 +586,7 @@ export default function CompaniesSettings() {
               {editingCompany && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <p className="text-xs text-blue-800">
-                    <strong>Company Number:</strong> {editingCompany.company_no || 'N/A'} (cannot be changed)
+                    <strong>Company Number:</strong> {editingCompany.dealer_no || 'N/A'} (cannot be changed)
                   </p>
                 </div>
               )}
@@ -603,7 +601,7 @@ export default function CompaniesSettings() {
               </button>
               <button
                 onClick={editingCompany ? handleUpdateCompany : handleAddCompany}
-                disabled={isSubmitting || !formData.company_name.trim()}
+                disabled={isSubmitting || !formData.dealer_name.trim()}
                 className="flex-1 px-4 py-2 bg-primary text-white rounded text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? 'Saving...' : editingCompany ? 'Update' : 'Create'} Company

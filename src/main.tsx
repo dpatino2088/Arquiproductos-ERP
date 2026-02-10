@@ -21,6 +21,7 @@ import './lib/service-worker' // Initialize Service Worker
 import './lib/performance-budgets' // Initialize performance budgets
 import { useAuthStore } from './stores/auth-store'
 import { OrganizationProvider } from './context/OrganizationContext'
+import { ActingAsProvider } from './context/ActingAsContext'
 import { PermissionProvider } from './context/PermissionContext'
 
 // Initialize performance monitoring
@@ -41,10 +42,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <OrganizationProvider>
-        <PermissionProvider>
-          <App />
+        <ActingAsProvider>
+          <PermissionProvider>
+            <App />
           <ReactQueryDevtools initialIsOpen={false} />
-        </PermissionProvider>
+          </PermissionProvider>
+        </ActingAsProvider>
       </OrganizationProvider>
     </QueryClientProvider>
   </React.StrictMode>

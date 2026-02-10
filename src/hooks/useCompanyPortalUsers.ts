@@ -53,6 +53,7 @@ export interface CompanyPortalUser {
  * IMPORTANTE: Filtra por organization_id (via Companies join) Y opcionalmente por company_id
  * 
  * @param companyId - Opcional: si se proporciona, filtra solo por ese company_id específico
+ * @deprecated Tablas CompanyPortalUsers/Companies renombradas a DealerUsers/Dealers. Usar useDealerUsers().
  */
 export function useCompanyPortalUsers(companyId?: string | null) {
   const [users, setUsers] = useState<CompanyPortalUser[]>([]);

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { useCatalogItems, useItemCategories, useLeafItemCategories } from '../../hooks/useCatalog';
 import { useBOMCRUD, useBOMComponents } from '../../hooks/useBOM';
@@ -25,6 +26,13 @@ export default function BOMTab() {
   const [error, setError] = useState<string | null>(null);
   const [showBOMModal, setShowBOMModal] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  const initialLoading = productTypesLoading || templatesLoading;
+  useEffect(() => {
+    setGlobalLoading(initialLoading);
+    return () => setGlobalLoading(false);
+  }, [initialLoading, setGlobalLoading]);
 
   // Group templates by product type - MUST be before early returns (React hooks rule)
   const templatesByProductType = useMemo(() => {
@@ -86,14 +94,7 @@ export default function BOMTab() {
     refetchTemplates();
   };
 
-  // Early returns AFTER all hooks
-  if (productTypesLoading || templatesLoading) {
-    return (
-      <div className="bg-white border border-gray-200 rounded-lg py-12 px-6 text-center">
-        <p className="text-sm text-gray-600">Loading BOMs...</p>
-      </div>
-    );
-  }
+  if (productTypesLoading || templatesLoading) return <div className="py-6 px-6" />;
 
   if (error) {
     return (

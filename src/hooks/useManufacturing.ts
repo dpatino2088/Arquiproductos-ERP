@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { useActiveCompany } from './useActiveCompany';
+import { useActiveDealer } from './useActiveDealer';
 import { normalizeUUID } from '../utils/uuid';
 
 // ============================================================================
@@ -102,20 +102,19 @@ export interface BomInstanceTotals {
 
 /**
  * Hook para obtener ManufacturingOrders
- * IMPORTANTE: Filtra por organization_id Y company_id (a través de SalesOrders -> Quotes)
- * 
- * @param companyId - Opcional: si se proporciona, filtra solo por ese company_id específico
+ * Filtra por organization_id Y dealer_id (vía SalesOrders -> Quotes)
+ *
+ * @param dealerId - Opcional: filtra solo por ese dealer_id
  */
-export function useManufacturingOrders(companyId?: string | null) {
+export function useManufacturingOrders(dealerId?: string | null) {
   const [manufacturingOrders, setManufacturingOrders] = useState<ManufacturingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeCompanyId } = useActiveCompany();
-  
-  // Usar companyId proporcionado o el activo del hook
-  const effectiveCompanyId = companyId ?? activeCompanyId;
+  const { activeDealerId } = useActiveDealer();
+
+  const effectiveDealerId = dealerId ?? activeDealerId;
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -138,10 +137,8 @@ export function useManufacturingOrders(companyId?: string | null) {
           console.log('🔍 useManufacturingOrders: Fetching ManufacturingOrders for organization:', activeOrganizationId);
         }
 
-        // Si hay company_id, primero obtener SalesOrders de ese company
         let salesOrderIds: string[] | null = null;
-        if (effectiveCompanyId) {
-          // Obtener SalesOrders que pertenecen a Quotes con este company_id
+        if (effectiveDealerId) {
           const { data: salesOrdersData } = await supabase
             .from('SalesOrders')
             .select('id, quote_id')
@@ -149,14 +146,13 @@ export function useManufacturingOrders(companyId?: string | null) {
             .eq('deleted', false);
 
           if (salesOrdersData && salesOrdersData.length > 0) {
-            // Obtener Quotes para estos SalesOrders y filtrar por company_id
             const quoteIds = salesOrdersData.map((so: { quote_id?: string }) => so.quote_id).filter((id: string | undefined): id is string => !!id);
             if (quoteIds.length > 0) {
               const { data: quotesData } = await supabase
                 .from('Quotes')
                 .select('id')
                 .in('id', quoteIds)
-                .eq('company_id', effectiveCompanyId)
+                .eq('dealer_id', effectiveDealerId)
                 .eq('deleted', false);
 
               if (quotesData) {
@@ -176,7 +172,6 @@ export function useManufacturingOrders(companyId?: string | null) {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        // Filtrar por sales_order_id si hay company_id
         if (salesOrderIds !== null) {
           if (salesOrderIds.length === 0) {
             // No hay SalesOrders para este company, retornar vacío
@@ -222,7 +217,6 @@ export function useManufacturingOrders(companyId?: string | null) {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        // Filtrar por sales_order_id si hay company_id
         if (salesOrderIds !== null && salesOrderIds.length > 0) {
           queryWithJoins = queryWithJoins.in('sales_order_id', salesOrderIds);
         }
@@ -242,10 +236,10 @@ export function useManufacturingOrders(companyId?: string | null) {
 
         if (import.meta.env.DEV) {
           console.log('✅ useManufacturingOrders: Found', data?.length || 0, 'ManufacturingOrders (with JOINs)');
-          if (effectiveCompanyId && data && data.length > 0) {
-            console.log('   Filtered by company_id:', effectiveCompanyId);
-          } else if (effectiveCompanyId && (!data || data.length === 0)) {
-            console.warn('   No ManufacturingOrders found for company_id:', effectiveCompanyId);
+          if (effectiveDealerId && data && data.length > 0) {
+            console.log('   Filtered by dealer_id:', effectiveDealerId);
+          } else if (effectiveDealerId && (!data || data.length === 0)) {
+            console.warn('   No ManufacturingOrders found for dealer_id:', effectiveDealerId);
           }
         }
 
@@ -259,7 +253,7 @@ export function useManufacturingOrders(companyId?: string | null) {
     }
 
     fetchManufacturingOrders();
-  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
+  }, [activeOrganizationId, effectiveDealerId, refreshTrigger]);
 
   return { manufacturingOrders, loading, error, refetch };
 }

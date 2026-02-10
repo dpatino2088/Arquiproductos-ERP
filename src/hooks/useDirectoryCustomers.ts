@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useActiveDealer } from './useActiveDealer';
+import { useAccessContext } from './useAccessContext';
+import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 
 /**
  * Customer shape canónico para UI
@@ -8,7 +11,7 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 export interface DirectoryCustomer {
   id: string;
   organization_id: string;
-  company_id?: string; // Nuevo: company_id (nullable durante transición)
+  dealer_id?: string; // Opcional: dealer_id
   customer_name: string;
   customer_email?: string | null;
   customer_phone?: string | null;
@@ -34,6 +37,7 @@ export interface DirectoryCustomer {
   deleted: boolean;
   created_at?: string;
   updated_at?: string;
+  created_by_email?: string | null;
 }
 
 /**
@@ -94,83 +98,59 @@ export interface UpdateCustomerInput {
 
 /**
  * Hook para gestionar DirectoryCustomers con transición gradual a columnas explícitas
- * 
+ *
  * REGLA DE ORO:
  * - Leer: seleccionar explícitas + genéricas (safe select con fallback)
  * - Mostrar/editar: usar explícitas con fallback a genéricas
  * - Escribir (insert/update): SOLO columnas explícitas (nunca genéricas)
+ *
+ * DEALER SCOPE (igual que useDirectoryContacts):
+ * - activeDealerId viene de useActiveDealer() (SuperAdmin "acting as dealer").
+ * - Si activeDealerId existe => filtro estricto .eq('dealer_id', activeDealerId); al cambiar dealer, refetch por deps.
  */
 export function useDirectoryCustomers(params?: { organizationId?: string | null; enabled?: boolean }) {
   const [customers, setCustomers] = useState<DirectoryCustomer[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isPending, setIsPending] = useState(false);
+  const [hasResolvedOnce, setHasResolvedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fetchIdRef = useRef(0);
   const { activeOrganizationId: contextOrgId } = useOrganizationContext();
-  
-  // Use provided organizationId or fallback to context
+  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { userType } = useAccessContext();
+
   const activeOrganizationId = params?.organizationId ?? contextOrgId;
   const enabled = params?.enabled ?? true;
+  /** Para org: solo true cuando ActingAs hidrató (dealer conocido). Para portal: true. No renderizar lista hasta que sea true. */
+  const isScopeReady = userType === 'internal' ? hasHydrated : true;
+  const isInitialLoading = !hasResolvedOnce;
+
+  /** Columnas explícitas de DirectoryCustomers según dump (sin name/email/phone que no existen) */
+  const DIRECTORY_CUSTOMERS_SELECT = `
+    id, organization_id, dealer_id, created_by_email,
+    customer_name, customer_email, customer_phone,
+    identification_number, customer_type_name, website,
+    alt_phone, primary_contact_id,
+    street_address_line_1, street_address_line_2, city, state, zip_code, country,
+    billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
+    notes, status, deleted, created_at, updated_at
+  `.replace(/\s+/g, ' ').trim();
 
   /**
-   * Safe select: intenta con explícitas + genéricas, fallback a solo explícitas si falla
-   * Query base: Filtrar por organization_id, deleted=false, ordenar por created_at DESC
-   * NO filtrar por status (incluir NULL)
+   * Select customers: solo columnas explícitas (evita 42703 y warning "Generic columns not found").
    */
-  const safeSelectCustomers = useCallback(async (orgId: string) => {
-    // Primera intento: explícitas + genéricas (incluyendo company_id)
-    const explicitAndGeneric = `
-      id, organization_id, company_id, 
-      customer_name, customer_email, customer_phone, 
-      identification_number, customer_type_name, website,
-      alt_phone, primary_contact_id,
-      street_address_line_1, street_address_line_2, city, state, zip_code, country,
-      billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
-      notes, status, deleted, created_at, updated_at,
-      name, email, phone
-    `.replace(/\s+/g, ' ').trim();
-    
-    try {
-      const { data, error: queryError } = await supabase
-        .from('DirectoryCustomers')
-        .select(explicitAndGeneric)
-        .eq('organization_id', orgId)
-        .eq('deleted', false)
-        .order('created_at', { ascending: false });
-        
-      if (queryError) {
-        throw queryError;
-      }
-      return data || [];
-    } catch (err: any) {
-      // Si falla por columna inexistente, reintentar SOLO con explícitas
-      if (err?.code === '42703' || err?.message?.includes('does not exist') || err?.message?.includes('column')) {
-        if (import.meta.env.DEV) {
-          console.warn('[useDirectoryCustomers] Generic columns not found, retrying with explicit columns only');
-        }
-        
-        const explicitOnly = `
-          id, organization_id, company_id, 
-          customer_name, customer_email, customer_phone,
-          identification_number, customer_type_name, website,
-          alt_phone, primary_contact_id,
-          street_address_line_1, street_address_line_2, city, state, zip_code, country,
-          billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
-          notes, status, deleted, created_at, updated_at
-        `.replace(/\s+/g, ' ').trim();
-        
-        const { data: retryData, error: retryError } = await supabase
-          .from('DirectoryCustomers')
-          .select(explicitOnly)
-          .eq('organization_id', orgId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-          
-        if (retryError) {
-          throw retryError;
-        }
-        return retryData || [];
-      }
-      throw err;
+  const safeSelectCustomers = useCallback(async (orgId: string, dealerId: string | null = null) => {
+    let q = supabase
+      .from('DirectoryCustomers')
+      .select(DIRECTORY_CUSTOMERS_SELECT)
+      .eq('organization_id', orgId)
+      .eq('deleted', false)
+      .order('created_at', { ascending: false });
+    if (dealerId != null) {
+      q = q.eq('dealer_id', dealerId);
     }
+    const { data, error: queryError } = await q;
+    if (queryError) throw queryError;
+    return data || [];
   }, []);
 
   /**
@@ -184,7 +164,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     return {
       id: row.id,
       organization_id: row.organization_id,
-      company_id: row.company_id || undefined,
+      dealer_id: row.dealer_id || undefined,
       customer_name,
       customer_email,
       customer_phone,
@@ -210,66 +190,91 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       deleted: row.deleted || false,
       created_at: row.created_at || undefined,
       updated_at: row.updated_at || undefined,
+      created_by_email: row.created_by_email ?? null,
     };
   }, []);
 
   /**
-   * Fetch customers - Query base obligatoria:
-   * - Filtrar por organization_id = activeOrganizationId
-   * - deleted = false
-   * - NO filtrar por status si es NULL
-   * - Ordenar por created_at DESC
+   * Fetch customers — regla de oro: portal = dealer_id obligatorio (0 si null); org = selectedDealerId o todos.
    */
   const fetchCustomers = useCallback(async () => {
     if (!enabled || !activeOrganizationId) {
       setCustomers([]);
-      setIsLoading(false);
+      setIsPending(false);
+      setHasResolvedOnce(false);
       setError(null);
       return;
     }
 
-    try {
-      setIsLoading(true);
-      setError(null);
+    const thisFetchId = ++fetchIdRef.current;
+    setIsPending(true);
 
-      // Query base obligatoria según requerimientos
-      const data = await safeSelectCustomers(activeOrganizationId);
+    try {
+      let dealerId: string | null = null;
+      if (userType === 'portal') {
+        const effective = await getEffectiveOrgAndDealer(supabase, {
+          activeOrgId: activeOrganizationId,
+          userType,
+          activeDealerId: null,
+        });
+        dealerId = effective.dealerId;
+        if (dealerId == null) {
+          if (thisFetchId === fetchIdRef.current) {
+            setCustomers([]);
+            setIsPending(false);
+            setHasResolvedOnce(true);
+          }
+          return;
+        }
+      } else {
+        dealerId = activeDealerId ?? null;
+      }
+
+      const data = await safeSelectCustomers(activeOrganizationId, dealerId);
       const mapped = data.map(mapToCustomer);
 
+      if (thisFetchId !== fetchIdRef.current) return;
       if (import.meta.env.DEV) {
         console.log('[useDirectoryCustomers] Fetched customers:', {
           count: mapped.length,
-          organizationId: activeOrganizationId,
-          sample: mapped[0] || null,
+          userType,
+          dealerId,
         });
       }
-
       setCustomers(mapped);
+      setError(null);
     } catch (err: any) {
+      if (thisFetchId !== fetchIdRef.current) return;
       const errorMessage = err?.message || 'Error loading customers';
       console.error('[useDirectoryCustomers] Error:', errorMessage, err);
       setError(errorMessage);
-      setCustomers([]);
+      // Mantener lista previa en error (no vaciar)
     } finally {
-      setIsLoading(false);
+      if (thisFetchId === fetchIdRef.current) {
+        setIsPending(false);
+        setHasResolvedOnce(true);
+      }
     }
-  }, [enabled, activeOrganizationId, safeSelectCustomers, mapToCustomer]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectCustomers, mapToCustomer]);
 
   /**
-   * Create customer (SOLO columnas explícitas)
-   * Siempre usar organization_id (company_id es opcional)
+   * Create customer — payload mínimo. org/dealer vía getEffectiveOrgAndDealer.
    */
-  const createCustomer = useCallback(async (input: CreateCustomerInput & { company_id?: string }): Promise<DirectoryCustomer> => {
-    if (!activeOrganizationId) {
-      throw new Error('No active organization');
-    }
-
+  const createCustomer = useCallback(async (input: CreateCustomerInput & { dealer_id?: string }): Promise<DirectoryCustomer> => {
     try {
-      // Normalizar: trim() y email lowercase
-      // Siempre usar organization_id (company_id es opcional)
-      const payload: any = {
-        organization_id: activeOrganizationId, // Siempre requerido
-        company_id: input.company_id || null,
+      const { orgId, dealerId } = await getEffectiveOrgAndDealer(supabase, {
+        activeOrgId: activeOrganizationId ?? null,
+        userType,
+        activeDealerId: activeDealerId ?? null,
+      });
+
+      if (!orgId) {
+        throw new Error('No hay organización activa. Selecciona una organización o inicia sesión en el portal.');
+      }
+
+      const payload: Record<string, unknown> = {
+        organization_id: orgId,
+        dealer_id: dealerId ?? input.dealer_id ?? null,
         customer_name: input.customer_name.trim(),
         customer_email: input.customer_email?.trim().toLowerCase() || null,
         customer_phone: input.customer_phone?.trim() || null,
@@ -295,12 +300,15 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
         deleted: false,
       };
 
-      // NO incluir name/email/phone genéricas
+      if (import.meta.env.DEV) {
+        console.log('[useDirectoryCustomers] Insert payload', { organization_id: payload.organization_id, dealer_id: payload.dealer_id });
+      }
+
       const { data, error: insertError } = await supabase
         .from('DirectoryCustomers')
         .insert(payload)
         .select(`
-          id, organization_id, company_id,
+          id, organization_id, dealer_id,
           customer_name, customer_email, customer_phone,
           identification_number, customer_type_name, website,
           alt_phone, primary_contact_id,
@@ -311,25 +319,27 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
         .single();
 
       if (insertError) {
+        const isRls = insertError.message?.toLowerCase().includes('row-level security') || insertError.code === '42501';
+        if (isRls) {
+          throw new Error('No tienes permisos para crear clientes en este dealer. Comprueba que tu usuario portal esté vinculado (email coincida).');
+        }
         throw insertError;
       }
 
-      const newCustomer = mapToCustomer({ ...data, company_id: input.company_id || null });
-
+      const newCustomer = mapToCustomer({ ...data, dealer_id: (data?.dealer_id ?? input.dealer_id) || null });
       if (import.meta.env.DEV) {
-        console.log('[useDirectoryCustomers] Created customer:', newCustomer);
+        console.log('[useDirectoryCustomers] Created customer:', newCustomer.id);
       }
-
-      // Refrescar lista
       await fetchCustomers();
-
       return newCustomer;
     } catch (err: any) {
-      const errorMessage = err?.message || 'Error creating customer';
-      console.error('[useDirectoryCustomers] Create error:', errorMessage, err);
+      const errorMessage = err?.message ?? 'Error creating customer';
+      if (import.meta.env.DEV) {
+        console.error('[useDirectoryCustomers] Create error:', errorMessage, err);
+      }
       throw new Error(errorMessage);
     }
-  }, [activeOrganizationId, fetchCustomers, mapToCustomer]);
+  }, [activeOrganizationId, activeDealerId, userType, fetchCustomers, mapToCustomer]);
 
   /**
    * Update customer (SOLO columnas explícitas)
@@ -413,7 +423,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
         .eq('organization_id', activeOrganizationId || '')
         .eq('deleted', false)
         .select(`
-          id, organization_id, company_id,
+          id, organization_id, dealer_id,
           customer_name, customer_email, customer_phone,
           identification_number, customer_type_name, website,
           alt_phone, primary_contact_id,
@@ -445,26 +455,31 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
   }, [activeOrganizationId, fetchCustomers, mapToCustomer]);
 
   /**
-   * Soft delete customer
+   * Soft delete customer (vía RPC para respetar permisos Dealer; fallback a UPDATE directo)
    */
   const archiveCustomer = useCallback(async (id: string): Promise<void> => {
     try {
-      const { error: updateError } = await supabase
-        .from('DirectoryCustomers')
-        .update({ deleted: true })
-        .eq('id', id)
-        .eq('organization_id', activeOrganizationId || '')
-        .eq('deleted', false);
-
-      if (updateError) {
-        throw updateError;
+      const { data, error: rpcError } = await supabase.rpc('soft_delete_directory_customer', {
+        p_customer_id: id,
+      });
+      if (rpcError) {
+        if (rpcError.code === '42883') {
+          const { error: updateError } = await supabase
+            .from('DirectoryCustomers')
+            .update({ deleted: true })
+            .eq('id', id)
+            .eq('organization_id', activeOrganizationId || '')
+            .eq('deleted', false);
+          if (updateError) throw updateError;
+        } else throw rpcError;
+      } else if (data !== 1 && data != null) {
+        throw new Error('Customer not found or no permission to delete');
       }
 
       if (import.meta.env.DEV) {
         console.log('[useDirectoryCustomers] Archived customer:', id);
       }
 
-      // Refrescar lista
       await fetchCustomers();
     } catch (err: any) {
       const errorMessage = err?.message || 'Error archiving customer';
@@ -480,20 +495,37 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     fetchCustomers();
   }, [fetchCustomers]);
 
-  // Auto-fetch cuando cambia organization (siempre declarado, no condicional)
+  // Al cambiar dealer u org: limpiar lista y marcar como no resuelto para no mostrar datos de otro scope.
   useEffect(() => {
-    if (enabled) {
-      fetchCustomers();
-    } else {
+    if (!enabled) return;
+    setHasResolvedOnce(false);
+    setCustomers([]);
+    setError(null);
+  }, [activeDealerId, activeOrganizationId, enabled]);
+
+  // Auto-fetch cuando cambia organization (siempre declarado, no condicional).
+  // Org user: no hacer el primer fetch hasta que ActingAs haya hidratado (evita flash con todos los datos).
+  useEffect(() => {
+    if (!enabled) {
       setCustomers([]);
-      setIsLoading(false);
+      setIsPending(false);
+      setHasResolvedOnce(false);
       setError(null);
+      return;
     }
-  }, [fetchCustomers, enabled]);
+    if (userType === 'internal' && !hasHydrated) {
+      return;
+    }
+    fetchCustomers();
+  }, [fetchCustomers, enabled, userType, hasHydrated]);
 
   return {
     customers,
-    isLoading,
+    isLoading: isPending,
+    isPending,
+    isInitialLoading,
+    isScopeReady,
+    hasResolvedOnce,
     error,
     fetchCustomers,
     createCustomer,

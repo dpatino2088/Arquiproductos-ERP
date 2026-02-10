@@ -30,7 +30,18 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(tripleConfig.width_mm && tripleConfig.height_mm);
 
     case 'variants':
-      return !!(tripleConfig.frontFabric?.collectionId && tripleConfig.frontFabric?.variantId);
+      // VariantsStep actual es compartido y usa collectionName/collection_name + variantId (CatalogItem id).
+      const hasCollection = !!(
+        (tripleConfig as any).collectionName ||
+        (tripleConfig as any).collection_name ||
+        (tripleConfig as any).collectionId
+      );
+      const hasVariant = !!(
+        (tripleConfig as any).variantId ||
+        (tripleConfig as any).fabric_catalog_item_id ||
+        (tripleConfig as any).fabric_variant_id
+      );
+      return hasCollection && hasVariant;
 
     case 'hardware':
       // ✅ NUEVO FLUJO SECUENCIAL: Hardware requiere color + bottom bar + headbox (obligatorio para triple)

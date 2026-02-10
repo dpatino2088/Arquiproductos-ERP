@@ -3,6 +3,9 @@ import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useCatalogItems, useDeleteCatalogItem, useCatalogCategories } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useWarehouses } from '../../hooks/useWarehouses';
+import { useInventoryAvailability } from '../../hooks/useInventoryAvailability';
+import { InventoryAvailabilityBadge } from '../../components/inventory/InventoryAvailabilityBadge';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
@@ -58,6 +61,13 @@ export default function Items() {
   const { items, loading, loadingMore, error, refetch } = useCatalogItems();
   const { categories: catalogCategories } = useCatalogCategories();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
+
   const [activeTab, setActiveTab] = useState<'items' | 'manufacturer' | 'categories' | 'collection'>('items');
 
   // Register Catalog submodules when Items component mounts
@@ -71,6 +81,16 @@ export default function Items() {
     }
   }, [registerSubmodules]);
   const { activeOrganizationId } = useOrganizationContext();
+  const { defaultWarehouse } = useWarehouses(activeOrganizationId);
+  const catalogItemIds = useMemo(
+    () => [...new Set((items ?? []).map((i) => i.id).filter(Boolean))],
+    [items]
+  );
+  const { map: availabilityMap } = useInventoryAvailability({
+    organizationId: activeOrganizationId ?? null,
+    warehouseId: defaultWarehouse?.id ?? null,
+    catalogItemIds,
+  });
   const { deleteItem, isDeleting } = useDeleteCatalogItem();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -522,26 +542,7 @@ export default function Items() {
   const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedFamily.length + 
                              selectedMeasureBasis.length + selectedActive.length;
 
-  // ✅ OPTIMIZACIÓN: No renderizar la tabla hasta que los datos estén completamente cargados
-  if (loading) {
-    return (
-      <div className="py-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-title font-semibold text-foreground mb-1">Items</h1>
-            <p className="text-small text-muted-foreground">Manage your product catalog, items, and collections</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading items...</p>
-            <p className="text-xs text-gray-500 mt-2">Please wait while we load your catalog</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-6 px-6" />;
 
   if (error) {
     return (
@@ -942,13 +943,14 @@ export default function Items() {
                       {sortBy === 'active' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Availability</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 px-6 text-center">
+                    <td colSpan={10} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                           <Search className="w-6 h-6 text-gray-400" />
@@ -1037,6 +1039,9 @@ export default function Items() {
                             Active
                           </span>
                         )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <InventoryAvailabilityBadge row={availabilityMap[item.id]} />
                       </td>
                       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">

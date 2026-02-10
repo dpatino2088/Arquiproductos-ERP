@@ -49,8 +49,10 @@ const CompanyReports = lazy(() => import('./pages/reports/CompanyReports'));
 const Sales = lazy(() => import('./pages/sales/Sales'));
 const Orders = lazy(() => import('./pages/sales/Orders'));
 const Quotes = lazy(() => import('./pages/sales/Quotes'));
-const QuoteApproved = lazy(() => import('./pages/sales/QuoteApproved'));
 const QuoteNew = lazy(() => import('./pages/sales/QuoteNew'));
+const Proposals = lazy(() => import('./pages/sales/Proposals'));
+const ProposalDetail = lazy(() => import('./pages/sales/ProposalDetail'));
+const ProposalPrint = lazy(() => import('./pages/sales/ProposalPrint'));
 const SaleOrders = lazy(() => import('./pages/sales/SaleOrders'));
 const SaleOrderNew = lazy(() => import('./pages/sales/SaleOrderNew'));
 
@@ -81,7 +83,9 @@ const CompanySettings = lazy(() => import('./pages/settings/CompanySettings'));
 const OrganizationUsers = lazy(() => import('./pages/settings/OrganizationUsers'));
 const OrganizationUser = lazy(() => import('./pages/settings/OrganizationUser'));
 const OrganizationUserNew = lazy(() => import('./pages/settings/OrganizationUserNew'));
-const CompanyPortalUsers = lazy(() => import('./pages/settings/CompanyPortalUsers'));
+const DealerUsers = lazy(() => import('./pages/settings/DealerUsers'));
+const Roles = lazy(() => import('./pages/settings/Roles'));
+const AdminRoles = lazy(() => import('./pages/admin/Roles'));
 
 // Auth pages (NO lazy - son críticas para el flujo)
 import Login from './pages/auth/Login';
@@ -94,6 +98,8 @@ import NewPassword from './pages/auth/NewPassword';
 import SetPassword from './pages/auth/SetPassword';
 import AcceptInvite from './pages/auth/AcceptInvite';
 import AccessDenied from './pages/auth/AccessDenied';
+import SelectActingDealer from './pages/SelectActingDealer';
+import { SuperAdminActingGate } from './components/SuperAdminActingGate';
 
 
 
@@ -275,7 +281,8 @@ function App() {
     router.addRoute('/new-password', () => setCurrentPage('new-password'));
     router.addRoute('/auth/new-password', () => setCurrentPage('new-password'));
     router.addRoute('/access-denied', () => setCurrentPage('access-denied'));
-    
+    router.addRoute('/select-acting-dealer', () => setCurrentPage('select-acting-dealer'));
+
     // Error routes (always available)
     router.addRoute('/400', () => setCurrentPage('bad-request'));
     router.addRoute('/401', () => setCurrentPage('unauthorized'));
@@ -474,14 +481,28 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/sales/quotes/approved', () => {
+    router.addRoute('/sales/proposals', () => {
       if (isAuthenticated) {
-        setCurrentPage('quote-approved');
+        setCurrentPage('proposals');
       } else {
         setCurrentPage('login');
       }
     });
-    
+    router.addRoute('/sales/proposals/:id/print', () => {
+      if (isAuthenticated) {
+        setCurrentPage('proposal-print');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/proposals/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('proposal-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+
     // Catalog routes
     router.addRoute('/catalog', () => {
       if (isAuthenticated) {
@@ -738,9 +759,17 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/settings/dealer-users', () => {
+      if (isAuthenticated) {
+        setCurrentPage('dealer-users');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    // Legacy: redirect old URL to same page
     router.addRoute('/settings/company-portal-users', () => {
       if (isAuthenticated) {
-        setCurrentPage('company-portal-users');
+        setCurrentPage('dealer-users');
       } else {
         setCurrentPage('login');
       }
@@ -768,8 +797,10 @@ function App() {
         setCurrentPage('login');
       }
     });
+    // Redirect legacy Dealer User tab to Dealer List (user management is in Dealer Detail)
     router.addRoute('/settings/dealer-profile/user', () => {
       if (isAuthenticated) {
+        router.navigate('/settings/dealer-profile', false);
         setCurrentPage('company-settings');
       } else {
         setCurrentPage('login');
@@ -789,7 +820,30 @@ function App() {
         setCurrentPage('login');
       }
     });
-    
+    router.addRoute('/settings/dealer-tiers', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+        router.navigate('/settings/cost-engine');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/roles', () => {
+      if (isAuthenticated) {
+        setCurrentPage('admin-roles');
+        router.navigate('/admin/roles', false);
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/admin/roles', () => {
+      if (isAuthenticated) {
+        setCurrentPage('admin-roles');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+
     // Other routes
     router.addRoute('/time-tracking', () => {
       if (isAuthenticated) {
@@ -925,10 +979,12 @@ function App() {
         return <RequireModule module="sales"><Orders /></RequireModule>;
       case 'quotes':
         return <RequireModule module="sales"><Quotes /></RequireModule>;
-      case 'quote-approved':
-        return <RequireModule module="sales"><QuoteApproved /></RequireModule>;
       case 'quote-new':
         return <RequireModule module="sales"><QuoteNew /></RequireModule>;
+      case 'proposals':
+        return <RequireModule module="sales"><Proposals /></RequireModule>;
+      case 'proposal-detail':
+        return <RequireModule module="sales"><ProposalDetail /></RequireModule>;
       case 'sale-orders':
         return <RequireModule module="sales"><SaleOrders /></RequireModule>;
       case 'sale-order-new':
@@ -979,8 +1035,11 @@ function App() {
         return <OrganizationUsers organizationId={null} />;
       case 'organization-user':
         return <OrganizationUser />;
-      case 'company-portal-users':
-        return <CompanyPortalUsers />;
+      case 'dealer-users':
+        return <DealerUsers />;
+      case 'roles':
+      case 'admin-roles':
+        return <RequireModule module="settings"><AdminRoles /></RequireModule>;
       // Note: 'organization-user-new' routes now render CompanySettings which handles the embedded form
       
       // Auth pages
@@ -1004,7 +1063,9 @@ function App() {
         return <AccessDenied />;
       case 'auth-reset-password':
         return <ResetPasswordForm />;
-      
+      case 'select-acting-dealer':
+        return <SelectActingDealer />;
+
       default:
         return <ManagementDashboard />;
     }
@@ -1067,9 +1128,30 @@ function App() {
             );
           }
 
+          if (currentPage === 'proposal-print') {
+            return (
+              <ErrorBoundary>
+                <Suspense fallback={<div className="p-6">Loading...</div>}>
+                  <RequireModule module="sales">
+                    <ProposalPrint />
+                  </RequireModule>
+                </Suspense>
+              </ErrorBoundary>
+            );
+          }
+
+          if (currentPage === 'select-acting-dealer') {
+            return (
+              <ErrorBoundary>
+                <SelectActingDealer />
+              </ErrorBoundary>
+            );
+          }
+
           // Regular pages with layout - protected by AuthGate
           return (
           <AuthGate>
+            <SuperAdminActingGate>
             <SubmoduleNavProvider>
               <Layout>
                 <ErrorBoundary>
@@ -1089,6 +1171,7 @@ function App() {
               </ErrorBoundary>
             </Layout>
           </SubmoduleNavProvider>
+            </SuperAdminActingGate>
           </AuthGate>
           );
         })()}

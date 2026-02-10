@@ -26,7 +26,7 @@ interface OrganizationData {
 
 interface OrganizationStats {
   organizationUsers: number;
-  companies: number;
+  dealers: number;
   portalUsers: number;
 }
 
@@ -35,7 +35,7 @@ export default function OrganizationProfileView() {
   const [organizationData, setOrganizationData] = useState<OrganizationData | null>(null);
   const [stats, setStats] = useState<OrganizationStats>({
     organizationUsers: 0,
-    companies: 0,
+    dealers: 0,
     portalUsers: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -119,19 +119,19 @@ export default function OrganizationProfileView() {
         });
 
         // Fetch statistics
-        const [orgUsersResult, companiesResult, portalUsersResult] = await Promise.all([
+        const [orgUsersResult, dealersResult, portalUsersResult] = await Promise.all([
           supabase
             .from('OrganizationUsers')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false),
           supabase
-            .from('Companies')
+            .from('Dealers')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false),
           supabase
-            .from('CompanyPortalUsers')
+            .from('DealerUsers')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false),
@@ -139,7 +139,7 @@ export default function OrganizationProfileView() {
 
         setStats({
           organizationUsers: orgUsersResult.count || 0,
-          companies: companiesResult.count || 0,
+          dealers: dealersResult.count || 0,
           portalUsers: portalUsersResult.count || 0,
         });
       } catch (err: any) {
@@ -228,8 +228,8 @@ export default function OrganizationProfileView() {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600 mb-1">Companies</p>
-              <p className="text-2xl font-semibold text-gray-900">{stats.companies}</p>
+              <p className="text-sm font-medium text-gray-600 mb-1">Dealers</p>
+              <p className="text-2xl font-semibold text-gray-900">{stats.dealers}</p>
             </div>
             <div className="p-3 bg-green-50 rounded-lg">
               <Building className="w-6 h-6 text-green-600" />
@@ -240,7 +240,7 @@ export default function OrganizationProfileView() {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600 mb-1">Portal Users</p>
+              <p className="text-sm font-medium text-gray-600 mb-1">Dealer Users</p>
               <p className="text-2xl font-semibold text-gray-900">{stats.portalUsers}</p>
             </div>
             <div className="p-3 bg-purple-50 rounded-lg">

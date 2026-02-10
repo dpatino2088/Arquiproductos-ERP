@@ -8,9 +8,22 @@ interface ImageUploadProps {
   currentImageUrl?: string | null;
   onImageUploaded: (url: string | null) => void;
   disabled?: boolean;
+  /** Storage bucket (default: catalog-images) */
+  bucket?: string;
+  /** Custom storage path. If not provided, uses {organizationId}/{timestamp}-{random}.{ext} */
+  uploadPath?: (file: File) => string;
+  /** Label above the drop zone (default: Item Image) */
+  label?: string;
 }
 
-export default function ImageUpload({ currentImageUrl, onImageUploaded, disabled }: ImageUploadProps) {
+export default function ImageUpload({
+  currentImageUrl,
+  onImageUploaded,
+  disabled,
+  bucket = 'catalog-images',
+  uploadPath,
+  label = 'Item Image',
+}: ImageUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(currentImageUrl || null);
   const [isDragging, setIsDragging] = useState(false);
@@ -41,9 +54,13 @@ export default function ImageUpload({ currentImageUrl, onImageUploaded, disabled
     setIsUploading(true);
 
     try {
-      if (!activeOrganizationId) {
-        throw new Error('No organization selected');
-      }
+      const fileName = uploadPath
+        ? uploadPath(file)
+        : (() => {
+            if (!activeOrganizationId) throw new Error('No organization selected');
+            const fileExt = file.name.split('.').pop();
+            return `${activeOrganizationId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+          })();
 
       // Create preview
       const reader = new FileReader();
@@ -52,13 +69,9 @@ export default function ImageUpload({ currentImageUrl, onImageUploaded, disabled
       };
       reader.readAsDataURL(file);
 
-      // Generate unique filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${activeOrganizationId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-
       // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('catalog-images')
+      const { error: uploadError } = await supabase.storage
+        .from(bucket)
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false,
@@ -70,7 +83,7 @@ export default function ImageUpload({ currentImageUrl, onImageUploaded, disabled
 
       // Get public URL
       const { data: urlData } = supabase.storage
-        .from('catalog-images')
+        .from(bucket)
         .getPublicUrl(fileName);
 
       console.log('🔍 ImageUpload - URL Data:', {
@@ -134,14 +147,15 @@ export default function ImageUpload({ currentImageUrl, onImageUploaded, disabled
     if (!currentImageUrl) return;
 
     try {
-      // Extract filename from URL
-      const urlParts = currentImageUrl.split('/');
-      const fileName = urlParts.slice(-2).join('/'); // Get last two parts (orgId/filename)
+      // Extract storage path from public URL: .../object/public/{bucket}/{path}
+      const segment = `/object/public/${bucket}/`;
+      const idx = currentImageUrl.indexOf(segment);
+      const path = idx >= 0 ? currentImageUrl.slice(idx + segment.length) : null;
+      if (!path) return;
 
-      // Delete from storage
       const { error } = await supabase.storage
-        .from('catalog-images')
-        .remove([fileName]);
+        .from(bucket)
+        .remove([path]);
 
       if (error) {
         console.error('Error deleting image:', error);
@@ -163,7 +177,7 @@ export default function ImageUpload({ currentImageUrl, onImageUploaded, disabled
 
   return (
     <div className="space-y-2">
-      <label className="text-xs font-medium text-gray-700">Item Image</label>
+      <label className="text-xs font-medium text-gray-700">{label}</label>
       
       {preview ? (
         <div className="relative inline-block">

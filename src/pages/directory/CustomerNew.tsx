@@ -8,6 +8,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { COUNTRY_OPTIONS, COUNTRIES } from '../../lib/constants';
 import { X, Trash2 } from 'lucide-react';
 import { useDeleteCustomer } from '../../hooks/useDirectory';
+import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -93,6 +94,7 @@ export default function CustomerNew() {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const { activeOrganizationId } = useOrganizationContext();
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
+  const { createCustomer, updateCustomer } = useDirectoryCustomers({ organizationId: activeOrganizationId ?? undefined });
   
   // Get permissions: use AccessContext for portal users, CurrentOrgRole for internal users
   const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
@@ -250,14 +252,14 @@ export default function CustomerNew() {
       try {
         setLoadingContacts(true);
         
-        // Primero obtener companies de la organization
-        const { data: orgCompanies } = await supabase
-          .from('Companies')
+        // Primero obtener dealers de la organization
+        const { data: orgDealers } = await supabase
+          .from('Dealers')
           .select('id')
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        const companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
+        const dealerIds = (orgDealers || []).map((c: { id: string }) => c.id);
 
         // Usar solo columnas explícitas que existen
         let query = supabase
@@ -266,21 +268,21 @@ export default function CustomerNew() {
           .eq('deleted', false)
           .order('contact_name', { ascending: true });
 
-        // Filtrar por company_id si existen, sino por organization_id
-        if (companyIds.length > 0) {
-          query = query.in('company_id', companyIds);
-          // También incluir contacts sin company_id pero con organization_id (transición)
-          const { data: companyData } = await query;
+        // Filtrar por dealer_id si existen, sino por organization_id
+        if (dealerIds.length > 0) {
+          query = query.in('dealer_id', dealerIds);
+          // También incluir contacts sin dealer_id pero con organization_id (transición)
+          const { data: dealerData } = await query;
           const { data: orgData } = await supabase
             .from('DirectoryContacts')
             .select('id, contact_name, contact_id_number, contact_type')
             .eq('organization_id', activeOrganizationId)
-            .is('company_id', null)
+            .is('dealer_id', null)
             .eq('deleted', false)
             .order('contact_name', { ascending: true });
 
           // Combinar sin duplicados
-          const all = [...(companyData || []), ...(orgData || [])];
+          const all = [...(dealerData || []), ...(orgData || [])];
           const unique = Array.from(new Map(all.map(item => [item.id, item])).values());
           setContacts(unique);
         } else {
@@ -382,85 +384,41 @@ export default function CustomerNew() {
         return;
       }
 
-      // Normalize website URL: add https:// if no protocol is provided
       const normalizeWebsite = (url: string | undefined | null): string | null => {
         if (!url || url.trim() === '') return null;
         const trimmed = url.trim();
-        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-          return trimmed;
-        }
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
         return `https://${trimmed}`;
       };
 
-      const customerData: any = {
-        organization_id: activeOrganizationId,
+      const customerInput = {
         customer_type_name: values.customer_type_name,
         customer_name: values.customer_name,
-        customer_email: values.email?.trim().toLowerCase() || null, // Usar customer_email (columna explícita) con normalización
-        customer_phone: values.customer_phone?.trim() || null, // Usar customer_phone (NO company_phone)
-        website: normalizeWebsite(values.website),
-        alt_phone: values.alt_phone || null,
-        identification_number: values.identification_number?.trim() || null,
-        primary_contact_id: values.primary_contact_id, // Required field
+        customer_email: values.email?.trim().toLowerCase() || undefined,
+        customer_phone: values.customer_phone?.trim() || undefined,
+        website: normalizeWebsite(values.website) ?? undefined,
+        alt_phone: values.alt_phone || undefined,
+        identification_number: values.identification_number?.trim() || undefined,
+        primary_contact_id: values.primary_contact_id,
         street_address_line_1: values.street_address_line_1,
-        street_address_line_2: values.street_address_line_2 || null,
-        city: values.city || null,
-        state: values.state || null,
-        zip_code: values.zip_code || null,
-        country: values.country || null,
-        billing_street_address_line_1: billingAddress.billing_street_address_line_1 || null,
-        billing_street_address_line_2: billingAddress.billing_street_address_line_2 || null,
-        billing_city: billingAddress.billing_city || null,
-        billing_state: billingAddress.billing_state || null,
-        billing_zip_code: billingAddress.billing_zip_code || null,
-        billing_country: billingAddress.billing_country || null,
-        deleted: false,
+        street_address_line_2: values.street_address_line_2 || undefined,
+        city: values.city || undefined,
+        state: values.state || undefined,
+        zip_code: values.zip_code || undefined,
+        country: values.country || undefined,
+        billing_street_address_line_1: billingAddress.billing_street_address_line_1 || undefined,
+        billing_street_address_line_2: billingAddress.billing_street_address_line_2 || undefined,
+        billing_city: billingAddress.billing_city || undefined,
+        billing_state: billingAddress.billing_state || undefined,
+        billing_zip_code: billingAddress.billing_zip_code || undefined,
+        billing_country: billingAddress.billing_country || undefined,
       };
 
-      let result;
       if (customerId) {
-        // Update existing customer
-        result = await supabase
-          .from('DirectoryCustomers')
-          .update(customerData)
-          .eq('id', customerId)
-          .eq('organization_id', activeOrganizationId)
-          .select(`
-            id, organization_id, company_id,
-            customer_name, customer_email, customer_phone,
-            identification_number, customer_type_name, website,
-            alt_phone, primary_contact_id,
-            street_address_line_1, street_address_line_2, city, state, zip_code, country,
-            billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
-            notes, status, deleted, created_at, updated_at
-          `)
-          .single();
+        await updateCustomer(customerId, customerInput);
       } else {
-        // Create new customer
-        customerData.created_at = new Date().toISOString();
-        result = await supabase
-        .from('DirectoryCustomers')
-        .insert([customerData])
-        .select(`
-          id, organization_id, company_id,
-          customer_name, customer_email, customer_phone,
-          identification_number, customer_type_name, website,
-          alt_phone, primary_contact_id,
-          street_address_line_1, street_address_line_2, city, state, zip_code, country,
-          billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country,
-          notes, status, deleted, created_at, updated_at
-        `)
-        .single();
+        await createCustomer(customerInput);
       }
-
-      const { data, error } = result;
-
-      if (error) {
-        console.error('Error saving customer:', error);
-        throw error;
-      }
-
-      console.log('Customer saved successfully:', data);
       
       // Show success notification
       useUIStore.getState().addNotification({

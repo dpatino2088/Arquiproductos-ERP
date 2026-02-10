@@ -1,10 +1,14 @@
 /**
  * Generate Quote PDF
- * Creates a PDF document similar to the Claroscuro quote format
+ * Same header format as Proposal: logo top-right, company name, quote number,
+ * Contact / Customer / Address | Date / Valid until / Seller. Table: #, AREA, POSITION, DESCRIPTION, QTY, UNIT, TOTAL.
+ * Supports dealer (prices by tier) and client (MSRP + optional discount) variants.
  */
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+export type PDFVariant = 'dealer' | 'client';
 
 interface QuoteLine {
   id: string;
@@ -44,6 +48,36 @@ interface Customer {
 
 interface Contact {
   contact_name?: string;
+  contact_email?: string;
+}
+
+export interface GenerateQuotePDFOptions {
+  variant: PDFVariant;
+  /** Discount % (0–100) applied to subtotal for client version only */
+  clientDiscountPct?: number;
+  /** Dealer/org logo – data URL or base64 PNG, top-left */
+  logoPngBase64?: string;
+  /** Logo width in mm (preserve aspect ratio; if set, logoHeightMm should also be set) */
+  logoWidthMm?: number;
+  /** Logo height in mm (preserve aspect ratio) */
+  logoHeightMm?: number;
+  /** Dealer name below logo (left column) */
+  dealerName?: string;
+  /** Dealer full address below "Address:" (left column) */
+  dealerAddress?: string;
+  /** Created-by / seller name (left column, below dealer name) */
+  sellerName?: string;
+  /** Description text (right column, below Customer) */
+  description?: string;
+}
+
+function formatCurrency(amount: number, currency: string = 'USD'): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
 }
 
 export function generateQuotePDF(
@@ -51,188 +85,239 @@ export function generateQuotePDF(
   customer: Customer | null,
   contact: Contact | null,
   lines: QuoteLine[],
-  organizationName: string = 'Arquiproductos'
+  organizationName: string = 'Arquiproductos',
+  options: GenerateQuotePDFOptions = { variant: 'client' }
 ) {
-  const doc = new jsPDF();
+  const { variant, clientDiscountPct = 0, logoPngBase64, logoWidthMm, logoHeightMm, dealerName, dealerAddress, sellerName, description } = options;
+  const isDealer = variant === 'dealer';
+
+  const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 20;
-  let yPos = margin;
+  const marginX = 12;
+  const marginTop = 14;
+  const marginBottom = 14;
+  const usableWidth = pageWidth - marginX * 2;
+  const valueX = pageWidth - marginX;
+  const labelX = valueX - 58;
+  let yPos = marginTop;
 
-  // Colors
-  const primaryColor = [0, 0, 0]; // Black
-  const secondaryColor = [128, 128, 128]; // Gray
-
-  // Header Section
-  doc.setFontSize(24);
+  // —— LEFT COLUMN: Logo (top-left), Dealer name, Created by, Address (dealer) ——
+  const logoMaxMm = 18;
+  const logoW = logoWidthMm ?? logoMaxMm;
+  const logoH = logoHeightMm ?? logoMaxMm;
+  const logoX = marginX;
+  const logoY = marginTop;
+  if (logoPngBase64) {
+    try {
+      const logoFormat = /data:image\/jpe?g/i.test(logoPngBase64) ? 'JPEG' : 'PNG';
+      doc.addImage(logoPngBase64, logoFormat, logoX, logoY, logoW, logoH);
+    } catch {
+      // ignore invalid image
+    }
+  } else {
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.2);
+    doc.rect(logoX, logoY, logoW, logoH);
+  }
+  let leftY = logoY + logoH + 4;
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text(organizationName.toUpperCase(), margin, yPos);
-  yPos += 10;
-
-  doc.setFontSize(16);
+  doc.text(dealerName ?? organizationName, marginX, leftY);
+  leftY += 5;
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('PROPUESTA', margin, yPos);
-  yPos += 8;
+  doc.text(`Created by: ${sellerName ?? 'System'}`, marginX, leftY);
+  leftY += 5;
+  doc.setFont('helvetica', 'bold');
+  doc.text('Address:', marginX, leftY);
+  doc.setFont('helvetica', 'normal');
+  const addressStr = dealerAddress ?? '—';
+  const addressLines = doc.splitTextToSize(addressStr, 55);
+  addressLines.forEach((line: string, i: number) => {
+    doc.text(line, marginX, leftY + 4 + i * 4);
+  });
+  const leftBlockEnd = leftY + 4 + addressLines.length * 4 + 6;
 
-  // Quote Number
+  // —— RIGHT COLUMN: Quote number (top right), Date, Valid, Contact, Customer, Description ——
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text(quote.quote_no, pageWidth - margin - doc.getTextWidth(quote.quote_no), yPos - 8);
-
-  // Quote Details
-  yPos += 5;
-  doc.setFontSize(10);
+  doc.text(quote.quote_no, pageWidth - marginX, yPos, { align: 'right' });
+  doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
-  
-  const details = [
-    { label: 'Cliente:', value: customer?.customer_name || 'N/A' },
-    { label: 'Fecha:', value: new Date(quote.created_at).toLocaleDateString('es-PA', { year: 'numeric', month: '2-digit', day: '2-digit' }) },
-    { label: 'Sitio:', value: customer?.customer_name || 'N/A' },
-    { label: 'Validez:', value: '30 Días' },
-    { label: 'Descripción:', value: `${quote.quote_no} - ${customer?.customer_name || 'Cotización'}` },
-    { label: 'Vendedor:', value: 'Sistema' },
+  doc.text(isDealer ? 'PROPUESTA DEALER' : 'PROPUESTA CLIENTE', pageWidth - marginX, yPos + 6, { align: 'right' });
+  let rightY = yPos + 14;
+  const dateStr = new Date(quote.created_at).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const detailsRight: Array<{ label: string; value: string }> = [
+    { label: 'Date:', value: dateStr },
+    { label: 'Valid:', value: '30 days' },
+    { label: 'Contact:', value: contact?.contact_name ?? contact?.contact_email ?? 'N/A' },
+    { label: 'Customer:', value: customer?.customer_name ?? 'N/A' },
+    { label: 'Description:', value: description ?? quote.notes ?? '—' },
   ];
-
-  details.forEach((detail, index) => {
-    if (index % 2 === 0) {
-      doc.text(`${detail.label} ${detail.value}`, margin, yPos);
-    } else {
-      doc.text(`${detail.label} ${detail.value}`, pageWidth / 2, yPos);
-      yPos += 6;
-    }
+  doc.setFontSize(9);
+  const gapValidContactMm = 10; // 1 cm entre Valid y Contact
+  detailsRight.forEach((row, index) => {
+    if (index === 2) rightY += gapValidContactMm;
+    doc.setFont('helvetica', 'bold');
+    doc.text(row.label, labelX, rightY, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    const valLines = doc.splitTextToSize(row.value, 52);
+    valLines.forEach((line: string, i: number) => {
+      doc.text(line, valueX, rightY + i * 4, { align: 'right' });
+    });
+    rightY += 4 + (valLines.length - 1) * 4 + 3;
   });
+  const rightBlockEnd = rightY + 4;
 
-  if (details.length % 2 === 1) {
-    yPos += 6;
-  }
+  yPos = Math.max(leftBlockEnd, rightBlockEnd) + 6;
 
-  yPos += 5;
-
-  // Table Data
-  const tableData = lines.map((line, index) => {
-    const area = line.area || 'N/A';
-    const position = line.position || 'N/A';
-    const description = [
-      line.product_type || 'N/A',
-      line.collection_name && line.variant_name 
+  // Table: same structure as Proposal (#, AREA, POSITION, DESCRIPTION / PRODUCT, QTY, BASE/UNIT PRICE, LINE TOTAL)
+  const buildDescription = (line: QuoteLine): string => {
+    const parts = [
+      line.product_type ?? line.CatalogItems?.item_name ?? '—',
+      line.collection_name && line.variant_name
         ? `${line.collection_name} - ${line.variant_name}`
-        : line.collection_name || line.variant_name || '',
-      line.drive_type === 'motor' ? 'Motorizada' : line.drive_type === 'manual' ? 'Manual' : '',
-      line.width_m && line.height_m 
-        ? `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)} mm`
+        : line.collection_name ?? line.variant_name ?? '',
+      line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '',
+      line.width_m != null && line.height_m != null
+        ? `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)}`
         : '',
-    ].filter(Boolean).join(' | ');
+    ].filter(Boolean);
+    return parts.join(' | ') || '—';
+  };
 
+  const tableData = lines.map((line, index) => {
+    const qty = line.qty || 1;
+    const unitPrice = line.line_total / qty;
+    const lineTotal =
+      variant === 'dealer'
+        ? line.line_total
+        : clientDiscountPct > 0
+          ? line.line_total * (1 - clientDiscountPct / 100)
+          : line.line_total;
+    const unitForDisplay = lineTotal / qty;
     return [
-      area,
       String(index + 1),
-      description || 'N/A',
-      line.qty.toFixed(2),
-      formatCurrency(line.line_total / line.qty, quote.currency),
-      formatCurrency(line.line_total, quote.currency),
+      line.area ?? '—',
+      line.position ?? '—',
+      buildDescription(line),
+      String(qty),
+      formatCurrency(unitForDisplay, quote.currency),
+      formatCurrency(lineTotal, quote.currency),
     ];
   });
 
-  // Generate table
+  const W = {
+    n: 9,
+    area: 25,
+    pos: 20,
+    desc: usableWidth - (9 + 25 + 20 + 12 + 28 + 28),
+    qty: 12,
+    unit: 28,
+    total: 28,
+  };
+
   autoTable(doc, {
     startY: yPos,
-    head: [['Área', 'ID', 'Descripción', 'Cantidad', 'Precio Unit', 'Precio Total']],
+    head: [['#', 'AREA', 'POSITION', 'DESCRIPTION / PRODUCT', 'QTY', 'BASE/UNIT PRICE', 'LINE TOTAL']],
     body: tableData,
-    theme: 'striped',
+    theme: 'plain',
+    margin: { left: marginX, right: marginX },
+    rowPageBreak: 'avoid',
+    styles: {
+      font: 'helvetica',
+      fontSize: 8,
+      overflow: 'linebreak',
+      cellPadding: { top: 3, bottom: 3, left: 2, right: 2 },
+    },
     headStyles: {
-      fillColor: [240, 240, 240],
-      textColor: [0, 0, 0],
+      fillColor: [245, 245, 245],
+      textColor: [60, 60, 60],
       fontStyle: 'bold',
-      fontSize: 9,
+      fontSize: 8,
+      overflow: 'hidden',
     },
     bodyStyles: {
       fontSize: 8,
+      textColor: [30, 30, 30],
+      minCellHeight: 18,
+      valign: 'middle',
     },
     columnStyles: {
-      0: { cellWidth: 30 },
-      1: { cellWidth: 15 },
-      2: { cellWidth: 70 },
-      3: { cellWidth: 20, halign: 'right' },
-      4: { cellWidth: 25, halign: 'right' },
-      5: { cellWidth: 25, halign: 'right' },
+      0: { cellWidth: W.n, halign: 'center', valign: 'middle', overflow: 'visible' },
+      1: { cellWidth: W.area, halign: 'left', valign: 'middle' },
+      2: { cellWidth: W.pos, halign: 'center', valign: 'middle' },
+      3: { cellWidth: W.desc, halign: 'left', valign: 'middle' },
+      4: { cellWidth: W.qty, halign: 'right', valign: 'middle' },
+      5: { cellWidth: W.unit, halign: 'right', valign: 'middle' },
+      6: { cellWidth: W.total, halign: 'right', valign: 'middle' },
     },
-    margin: { left: margin, right: margin },
   });
 
-  // Get final Y position after table
   const finalY = (doc as any).lastAutoTable.finalY || yPos + 50;
   yPos = finalY + 10;
 
-  // Summary Section
+  // Summary (same style as Proposal)
   const productsTotal = lines.reduce((sum, line) => sum + line.line_total, 0);
-  const discount = 0; // TODO: Get from quote if available
-  const labor = 0; // TODO: Get from quote if available
-  const shipping = 0; // TODO: Get from quote if available
-  const subtotal = quote.totals.subtotal || productsTotal;
-  const tax = quote.totals.tax_total || 0;
-  const total = quote.totals.total || subtotal + tax;
+  const discountAmount =
+    !isDealer && clientDiscountPct > 0 ? productsTotal * (clientDiscountPct / 100) : 0;
+  const subtotal = productsTotal - discountAmount;
+  const tax = quote.totals?.tax_total ?? 0;
+  const total = quote.totals?.total ?? subtotal + tax;
 
-  const summaryData = [
-    ['Productos:', formatCurrency(productsTotal, quote.currency)],
-    ['Descuento:', formatCurrency(-discount, quote.currency)],
-    ['Mano de Obra:', formatCurrency(labor, quote.currency)],
-    ['Flete:', formatCurrency(shipping, quote.currency)],
-    ['SubTotal:', formatCurrency(subtotal, quote.currency)],
-    ['ITBMS:', formatCurrency(tax, quote.currency)],
-    ['Gran Total:', formatCurrency(total, quote.currency)],
-  ];
+  const summaryData: [string, string][] = [['Subtotal:', formatCurrency(subtotal, quote.currency)]];
+  if (discountAmount > 0) {
+    summaryData.push(['Discount:', formatCurrency(-discountAmount, quote.currency)]);
+  }
+  summaryData.push(['ITBMS', formatCurrency(tax, quote.currency)]);
+  summaryData.push(['Total:', formatCurrency(total, quote.currency)]);
 
-  // Summary table
   autoTable(doc, {
     startY: yPos,
     body: summaryData,
     theme: 'plain',
-    bodyStyles: {
-      fontSize: 9,
-    },
+    bodyStyles: { fontSize: 9 },
     columnStyles: {
       0: { cellWidth: 50, fontStyle: 'bold' },
       1: { cellWidth: 50, halign: 'right', fontStyle: 'bold' },
     },
-    margin: { left: pageWidth - 120, right: margin },
+    margin: { left: pageWidth - 120, right: marginX },
   });
 
-  // Check if we need a new page for terms
-  const termsY = (doc as any).lastAutoTable.finalY || yPos + 50;
-  if (termsY > pageHeight - 80) {
+  let termsY = (doc as any).lastAutoTable.finalY || yPos + 50;
+  if (termsY > pageHeight - marginBottom - 60) {
     doc.addPage();
-    yPos = margin;
+    yPos = marginTop;
   } else {
     yPos = termsY + 15;
   }
 
-  // Terms and Conditions (simplified)
-  doc.setFontSize(12);
+  // Terms (same as Proposal, English)
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text('Términos y Condiciones Generales', margin, yPos);
-  yPos += 8;
-
-  doc.setFontSize(9);
+  doc.text('Terms and Conditions', marginX, yPos);
+  yPos += 7;
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   const terms = [
-    `• Cualquier contrato, pago o cheque debe ser emitido a nombre de: ${organizationName.toUpperCase()}`,
-    '• La presente propuesta de venta es válida por treinta (30) días hábiles desde su fecha de emisión.',
-    '• Se requerirá un abono del sesenta por ciento (60%) del precio de venta total para confirmar el pedido.',
-    '• El saldo restante deberá ser pagado contra la entrega de los productos.',
-    '• Los tiempos de entrega podrán variar dependiendo del producto.',
+    `• Any contract, payment or check must be issued to: ${organizationName.toUpperCase()}`,
+    '• This proposal is valid for thirty (30) business days from the date of issue.',
+    '• A deposit of sixty percent (60%) of the total sale price will be required to confirm the order.',
+    '• The remaining balance shall be paid upon delivery of the products.',
+    '• Delivery times may vary depending on the product.',
   ];
-
   terms.forEach((term) => {
-    const lines = doc.splitTextToSize(term, pageWidth - 2 * margin);
-    lines.forEach((line: string) => {
-      if (yPos > pageHeight - 30) {
+    const splitLines = doc.splitTextToSize(term, pageWidth - 2 * marginX);
+    splitLines.forEach((line: string) => {
+      if (yPos > pageHeight - marginBottom - 20) {
         doc.addPage();
-        yPos = margin;
+        yPos = marginTop;
       }
-      doc.text(line, margin, yPos);
-      yPos += 5;
+      doc.text(line, marginX, yPos);
+      yPos += 4;
     });
-    yPos += 2;
+    yPos += 1;
   });
 
   // Footer
@@ -241,23 +326,8 @@ export function generateQuotePDF(
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(
-      `${i} / ${pageCount}`,
-      pageWidth / 2,
-      pageHeight - 10,
-      { align: 'center' }
-    );
+    doc.text(`${i} / ${pageCount}`, pageWidth / 2, pageHeight - marginBottom + 4, { align: 'center' });
   }
 
   return doc;
 }
-
-function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return new Intl.NumberFormat('es-PA', {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-

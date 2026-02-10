@@ -53,12 +53,14 @@ type Body =
   | {
       kind: "portal";
       organization_id: string;
-      company_id: string;
+      company_id?: string;
+      dealer_id?: string;
       role: "member" | "member_manager" | string;
       name?: string | null;
       email?: string;
       portal_user_email?: string;
       user_email?: string;
+      status?: "invited" | "active" | "disabled";
       debug_return_password?: boolean;
     };
 
@@ -111,8 +113,9 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "Missing organization_id" }, 400);
     }
 
-    if (body.kind === "portal" && !(body as any).company_id) {
-      return json({ ok: false, error: "Missing company_id" }, 400);
+    const portalDealerId = (body as any).dealer_id ?? (body as any).company_id;
+    if (body.kind === "portal" && !portalDealerId) {
+      return json({ ok: false, error: "Missing dealer_id (or company_id)" }, 400);
     }
 
     const email = normalizeEmail(rawEmail);
@@ -178,26 +181,29 @@ Deno.serve(async (req) => {
     }
 
     if (body.kind === "portal") {
+      const portalStatus = (body as any).status && ["invited", "active", "disabled"].includes((body as any).status)
+        ? (body as any).status
+        : "invited";
       const { error } = await admin
-        .from("CompanyPortalUsers")
+        .from("DealerUsers")
         .upsert(
           {
             organization_id: (body as any).organization_id,
-            company_id: (body as any).company_id,
+            dealer_id: portalDealerId,
             user_id: userId,
             portal_user_email: email,
             portal_user_name: (body as any).name ?? null,
             role: (body as any).role,
-            status: "active",
+            status: portalStatus,
             must_change_password: true,
             temp_password_set_at: now,
             deleted: false,
             updated_at: now,
           },
-          { onConflict: "company_id,portal_user_email" },
+          { onConflict: "dealer_id,portal_user_email" },
         );
 
-      if (error) throw new Error(`CompanyPortalUsers upsert failed: ${error.message}`);
+      if (error) throw new Error(`DealerUsers upsert failed: ${error.message}`);
     }
 
     // 3) Send email via Resend (only if secrets are configured)

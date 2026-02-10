@@ -7,7 +7,7 @@ export interface PortalUserStatusBadgeProps {
 }
 
 /**
- * Status badge for Customer Portal Users
+ * Status badge for Dealer Users
  * Shows both account status and invitation status with color coding
  */
 export function PortalUserStatusBadge({ 

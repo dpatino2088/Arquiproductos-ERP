@@ -73,6 +73,15 @@ BEGIN
 
   v_config := COALESCE(v_cp.config_snapshot, '{}'::jsonb);
 
+  -- 0.5) Accessories total from config_snapshot (array of { id, name, qty, price })
+  IF jsonb_typeof(v_config->'accessories') = 'array' THEN
+    SELECT COALESCE(SUM(
+      (elem->>'price')::numeric * GREATEST(COALESCE((elem->>'qty')::numeric, 0), 0)
+    ), 0) INTO v_accessories_total
+    FROM jsonb_array_elements(v_config->'accessories') AS elem;
+  END IF;
+  v_accessories_total := ROUND(COALESCE(v_accessories_total, 0), 2);
+
   -- Calculate dimensions
   v_width_mm := COALESCE(v_cp.width_mm, 0);
   v_height_mm := COALESCE(v_cp.height_mm, 0);
@@ -308,13 +317,14 @@ BEGIN
     'bom_total_cost', 0
   );
 
-  -- ✅ Also update ConfiguredProducts columns with these totals (labor_pct desde CostSettings)
+  -- ✅ Also update ConfiguredProducts columns with these totals (labor_pct desde CostSettings, accessories_total desde config_snapshot)
   UPDATE public."ConfiguredProducts"
   SET roll_msrp_total = v_roll_msrp_total,
       bom_total = v_bom_sum,
       labor_pct = v_labor_pct,
       labor_amount = v_labor_amount,
       roll_plus_bom_total = v_roll_msrp_total + v_bom_sum,
+      accessories_total = v_accessories_total,
       total_msrp = v_total_msrp,
       updated_at = now()
   WHERE id = p_configured_product_id

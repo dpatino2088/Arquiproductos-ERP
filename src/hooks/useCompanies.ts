@@ -77,6 +77,7 @@ export interface UpdateCompanyInput {
 /**
  * Hook para gestionar Companies (dealers/empresas que cotizan)
  * Companies pertenecen a Organizations
+ * @deprecated Tabla Companies fue renombrada a Dealers. Usar useDealers().
  */
 export function useCompanies() {
   const [companies, setCompanies] = useState<Company[]>([]);

@@ -7,7 +7,7 @@ export default function Sales() {
 
   useEffect(() => {
     // Sales component is only rendered for /sales route
-    // Submodules are registered by Quotes.tsx and QuoteApproved.tsx
+    // Submodules are registered by Quotes.tsx and Proposals.tsx
     // Just clear submodules when leaving the sales module
     const currentPath = window.location.pathname;
     if (currentPath === '/sales' || currentPath === '/sales/') {

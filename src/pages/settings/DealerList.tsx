@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useCompanies, type Company } from '../../hooks/useCompanies';
+import { useDealers, type Dealer } from '../../hooks/useDealers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useUIStore } from '../../stores/ui-store';
-import { Building, Plus, Edit, Archive, Search, Filter, List, Grid3X3 } from 'lucide-react';
+import { Building, Plus, Edit, Trash2, Search, Filter, List, Grid3X3 } from 'lucide-react';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
@@ -53,45 +53,43 @@ function StatusBadge({ status, deleted = false }: StatusBadgeProps) {
 export default function DealerList() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
-  const { isSuperAdmin, isOwner, isAdmin, loading: roleLoading } = useCurrentOrgRole();
+  const { isSuperAdmin, isOwner, isAdmin, isMember, loading: roleLoading } = useCurrentOrgRole();
   const { addNotification } = useUIStore();
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
   
-  const { companies, isLoading, error, fetchCompanies, archiveCompany } = useCompanies();
+  const { dealers, isLoading, error, fetchDealers, archiveDealer } = useDealers();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [archivingId, setArchivingId] = useState<string | null>(null);
 
-  const canManageCompanies = isSuperAdmin || isOwner || isAdmin;
+  const canManageDealers = isSuperAdmin || isOwner || isAdmin || isMember;
 
-  // Register tabs for Dealer Profile module (similar to Directory)
   useEffect(() => {
     registerSubmodules('Settings', [
       { id: 'dealer-list', label: 'Dealer List', href: '/settings/dealer-profile' },
-      { id: 'dealer-user', label: 'Dealer User', href: '/settings/dealer-profile/user' },
     ]);
   }, [registerSubmodules]);
 
-  const filteredCompanies = useMemo(() => {
-    if (!searchTerm) return companies;
+  const filteredDealers = useMemo(() => {
+    if (!searchTerm) return dealers;
     const search = searchTerm.toLowerCase();
-    return companies.filter(company => 
-      (company.company_name?.toLowerCase() || '').includes(search) ||
-      (company.company_email?.toLowerCase() || '').includes(search) ||
-      (company.company_no?.toLowerCase() || '').includes(search)
+    return dealers.filter(dealer =>
+      (dealer.dealer_name?.toLowerCase() || '').includes(search) ||
+      (dealer.dealer_email?.toLowerCase() || '').includes(search) ||
+      (dealer.dealer_no?.toLowerCase() || '').includes(search)
     );
-  }, [companies, searchTerm]);
+  }, [dealers, searchTerm]);
 
-  const handleEdit = (company: Company) => {
-    router.navigate(`/settings/dealer-profile/edit/${company.id}`);
+  const handleEdit = (dealer: Dealer) => {
+    router.navigate(`/settings/dealer-profile/edit/${dealer.id}`);
   };
 
-  const handleDelete = async (company: Company) => {
+  const handleDelete = async (dealer: Dealer) => {
     const confirmed = await showConfirm({
       title: 'Archive Dealer',
-      message: `Are you sure you want to archive "${company.company_name}"? This action can be undone.`,
+      message: `Are you sure you want to archive "${dealer.dealer_name}"? This action can be undone.`,
       variant: 'warning',
       confirmText: 'Archive',
       cancelText: 'Cancel',
@@ -100,14 +98,14 @@ export default function DealerList() {
     if (!confirmed) return;
 
     try {
-      setArchivingId(company.id);
-      await archiveCompany(company.id);
+      setArchivingId(dealer.id);
+      await archiveDealer(dealer.id);
       addNotification({
         type: 'success',
         title: 'Dealer archived',
-        message: `Dealer ${company.company_no || company.company_name} has been archived.`,
+        message: `Dealer ${dealer.dealer_no || dealer.dealer_name} has been archived.`,
       });
-      await fetchCompanies();
+      await fetchDealers();
     } catch (err: any) {
       addNotification({
         type: 'error',
@@ -146,11 +144,11 @@ export default function DealerList() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Dealer List</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage dealers in your organization ({filteredCompanies.length} total)
+            Manage dealers in your organization ({filteredDealers.length} total)
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {canManageCompanies && !roleLoading && (
+          {canManageDealers && !roleLoading && (
             <button
               onClick={() => router.navigate('/settings/dealer-profile/new')}
               className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
@@ -239,12 +237,12 @@ export default function DealerList() {
                 <p className="text-sm text-red-800">Error loading dealers: {error}</p>
               </div>
             </div>
-          ) : companies.length === 0 ? (
+          ) : dealers.length === 0 ? (
             <div className="text-center py-12 px-6">
               <Building className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">No dealers found</p>
               <p className="text-sm text-gray-500">
-                {canManageCompanies 
+                {canManageDealers 
                   ? 'Start by adding dealers to your organization'
                   : 'Dealers will appear here once they are created.'}
               </p>
@@ -259,59 +257,59 @@ export default function DealerList() {
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Phone</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Status</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Date Added</th>
-                  {canManageCompanies && !roleLoading && (
+                  {canManageDealers && !roleLoading && (
                     <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                   )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredCompanies.map((company) => (
-                  <tr key={company.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => handleEdit(company)}>
+                {filteredDealers.map((dealer) => (
+                  <tr key={dealer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => handleEdit(dealer)}>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap font-mono">
-                      {company.company_no || '-'}
+                      {dealer.dealer_no || '-'}
                     </td>
                     <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
-                      <span className="font-medium">{company.company_name}</span>
+                      <span className="font-medium">{dealer.dealer_name}</span>
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
-                      {company.company_email || '-'}
+                      {dealer.dealer_email || '-'}
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
-                      {company.company_phone || '-'}
+                      {dealer.dealer_phone || '-'}
                     </td>
                     <td className="py-4 px-6 whitespace-nowrap">
-                      <StatusBadge status={company.status} deleted={company.deleted} />
+                      <StatusBadge status={dealer.status} deleted={dealer.deleted} />
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
-                      {company.created_at 
-                        ? new Date(company.created_at).toLocaleDateString()
+                      {dealer.created_at 
+                        ? new Date(dealer.created_at).toLocaleDateString()
                         : '-'}
                     </td>
-                    {canManageCompanies && !roleLoading && (
+                    {canManageDealers && !roleLoading && (
                       <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2 justify-end">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleEdit(company);
+                              handleEdit(dealer);
                             }}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                             title="Edit dealer"
-                            disabled={company.deleted}
+                            disabled={dealer.deleted}
                           >
                             <Edit className="w-4 h-4" />
                           </button>
-                          {!company.deleted && (
+                          {!dealer.deleted && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDelete(company);
+                                handleDelete(dealer);
                               }}
-                              disabled={archivingId === company.id}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                              title="Archive dealer"
+                              disabled={archivingId === dealer.id}
+                              className="p-1.5 hover:bg-red-50 rounded transition-colors text-red-600 disabled:opacity-50"
+                              title="Eliminar (archivar) dealer"
                             >
-                              <Archive className="w-4 h-4" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           )}
                         </div>

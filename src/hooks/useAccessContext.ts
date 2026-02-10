@@ -11,6 +11,7 @@ export type ModuleKey =
   | "directory"
   | "sales"
   | "catalog"
+  | "inventory"
   | "manufacturing"
   | "financials"
   | "settings";
@@ -26,7 +27,7 @@ type AccessContextState = {
 
   allowedModules: ModuleKey[];
   canApprove: boolean;
-  canSeeAllCompanyQuotes: boolean;
+  canSeeAllDealerQuotes: boolean;
   canEditDirectory: boolean;
 
   isInternal: boolean;
@@ -82,7 +83,7 @@ export function useAccessContext(): AccessContextState {
       setLoading(true);
 
       // =========================================================
-      // 1) PORTAL FIRST (CompanyPortalUsers)  ✅ (safer)
+      // 1) PORTAL FIRST (DealerUsers)  ✅ (safer)
       // =========================================================
       const orParts: string[] = [];
       if (uid) orParts.push(`user_id.eq.${uid}`);
@@ -94,15 +95,15 @@ export function useAccessContext(): AccessContextState {
           : "id.eq.00000000-0000-0000-0000-000000000000";
 
       const { data: cpuRow, error: cpuErr } = await supabase
-        .from("CompanyPortalUsers")
-        .select("id, organization_id, role, status, deleted, portal_user_email, user_id")
+        .from("DealerUsers")
+        .select("id, organization_id, dealer_id, role, status, deleted, portal_user_email, user_id")
         .eq("deleted", false)
         .in("status", ["active", "invited"])
         .or(portalOr)
         .maybeSingle();
 
       if (cpuErr) {
-        console.error("[useAccessContext] CompanyPortalUsers lookup error", {
+        console.error("[useAccessContext] DealerUsers lookup error", {
           message: cpuErr.message,
           details: cpuErr.details,
           hint: cpuErr.hint,
@@ -209,7 +210,7 @@ export function useAccessContext(): AccessContextState {
       // =========================================================
       if (!cancelled) {
         if (import.meta.env.DEV) {
-          console.log("[useAccessContext] No user found in CompanyPortalUsers or OrganizationUsers");
+          console.log("[useAccessContext] No user found in DealerUsers or OrganizationUsers");
         }
         setUserType("unknown");
         setInternalRole(null);
@@ -242,7 +243,7 @@ export function useAccessContext(): AccessContextState {
   const allowedModules = useMemo<ModuleKey[]>(() => {
     if (userType === "portal") return PORTAL_ALLOWED_MODULES;
     if (userType === "internal") {
-      return ["dashboard", "directory", "sales", "catalog", "manufacturing", "financials", "settings"];
+      return ["dashboard", "directory", "sales", "catalog", "inventory", "manufacturing", "financials", "settings"];
     }
     return ["dashboard"];
   }, [userType]);
@@ -252,9 +253,8 @@ export function useAccessContext(): AccessContextState {
     return true; // Internal users: approve logic tied to permissions
   }, [userType, portalRole]);
 
-  const canSeeAllCompanyQuotes = useMemo(() => {
-    // Only member_manager portal users can see all company quotes
-    // member portal users can only see their own quotes
+  const canSeeAllDealerQuotes = useMemo(() => {
+    // Only member_manager portal users can see all dealer quotes
     return userType === "portal" && portalRole === "member_manager";
   }, [userType, portalRole]);
 
@@ -271,7 +271,7 @@ export function useAccessContext(): AccessContextState {
       portalRole,
       allowedModules,
       canApprove,
-      canSeeAllCompanyQuotes,
+      canSeeAllDealerQuotes,
       canEditDirectory,
     });
   }
@@ -287,7 +287,7 @@ export function useAccessContext(): AccessContextState {
 
     allowedModules,
     canApprove,
-    canSeeAllCompanyQuotes,
+    canSeeAllDealerQuotes,
     canEditDirectory,
 
     isInternal: userType === "internal",

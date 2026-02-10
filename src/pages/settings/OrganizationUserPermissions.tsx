@@ -233,6 +233,12 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const previousRoleRef = useRef<typeof userRole | null>(null);
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
 
   // Only admins can edit permissions
   const canEdit = isSuperAdmin || isAdmin;
@@ -706,18 +712,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
     return sorted;
   }, [permissions]);
 
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center min-h-[200px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading permissions...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="p-6" />;
 
   return (
     <div className="space-y-6">

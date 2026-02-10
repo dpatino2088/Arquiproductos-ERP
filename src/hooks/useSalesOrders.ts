@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { useActiveCompany } from './useActiveCompany';
+import { useActiveDealer } from './useActiveDealer';
 
 /**
  * SalesOrder shape canónico para UI
@@ -9,7 +9,7 @@ import { useActiveCompany } from './useActiveCompany';
 export interface SalesOrder {
   id: string;
   organization_id: string;
-  company_id: string; // Requerido en nuevo schema
+  dealer_id: string;
   quote_id: string;
   sales_order_no: string;
   tracking_status: string;
@@ -22,7 +22,7 @@ export interface SalesOrder {
   Quotes?: {
     id: string;
     quote_no: string;
-    company_id: string;
+    dealer_id: string;
   };
   DirectoryCustomers?: {
     id: string;
@@ -32,20 +32,19 @@ export interface SalesOrder {
 
 /**
  * Hook para obtener SalesOrders
- * IMPORTANTE: Filtra por organization_id Y company_id
- * 
- * @param companyId - Opcional: si se proporciona, filtra solo por ese company_id específico
+ * Filtra por organization_id Y dealer_id (vía Quotes)
+ *
+ * @param dealerId - Opcional: filtra solo por ese dealer_id
  */
-export function useSalesOrders(companyId?: string | null) {
+export function useSalesOrders(dealerId?: string | null) {
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeCompanyId } = useActiveCompany();
-  
-  // Usar companyId proporcionado o el activo del hook
-  const effectiveCompanyId = companyId ?? activeCompanyId;
+  const { activeDealerId } = useActiveDealer();
+
+  const effectiveDealerId = dealerId ?? activeDealerId;
 
   const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
@@ -64,7 +63,6 @@ export function useSalesOrders(companyId?: string | null) {
         setLoading(true);
         setError(null);
 
-        // Query: filtrar por organization_id Y company_id (si está disponible)
         let query = supabase
           .from('SalesOrders')
           .select(`
@@ -72,7 +70,7 @@ export function useSalesOrders(companyId?: string | null) {
             Quotes:quote_id (
               id,
               quote_no,
-              company_id
+              dealer_id
             ),
             DirectoryCustomers:customer_id (
               id,
@@ -82,30 +80,25 @@ export function useSalesOrders(companyId?: string | null) {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false);
 
-        // Filtrar por company_id si está disponible
-        if (effectiveCompanyId) {
-          // SalesOrders no tiene company_id directamente, filtrar a través de Quotes
-          // Primero obtener Quotes con este company_id
+        if (effectiveDealerId) {
           const { data: quotesData } = await supabase
             .from('Quotes')
             .select('id')
             .eq('organization_id', activeOrganizationId)
-            .eq('company_id', effectiveCompanyId)
+            .eq('dealer_id', effectiveDealerId)
             .eq('deleted', false);
 
           if (quotesData && quotesData.length > 0) {
             const quoteIds = quotesData.map((q: { id: string }) => q.id);
             query = query.in('quote_id', quoteIds);
           } else {
-            // No hay Quotes para este company, retornar vacío
             setSalesOrders([]);
             setLoading(false);
             return;
           }
         } else {
-          // Warning en DEV si hay SalesOrders sin company_id (a través de Quotes)
           if (import.meta.env.DEV) {
-            console.warn('[useSalesOrders] No company_id provided. SalesOrders without company_id (via Quotes) will be included.');
+            console.warn('[useSalesOrders] No dealer_id provided. SalesOrders without dealer_id (via Quotes) will be included.');
           }
         }
 
@@ -117,14 +110,13 @@ export function useSalesOrders(companyId?: string | null) {
           throw queryError;
         }
 
-        // Warning en DEV si hay SalesOrders sin company_id
         if (import.meta.env.DEV && data && data.length > 0) {
-          const withoutCompanyId = data.filter((so: any) => {
+          const withoutDealerId = data.filter((so: any) => {
             const quote = so.Quotes;
-            return !quote || !quote.company_id;
+            return !quote || !quote.dealer_id;
           });
-          if (withoutCompanyId.length > 0) {
-            console.warn('[useSalesOrders] Found', withoutCompanyId.length, 'SalesOrders without company_id (via Quotes):', withoutCompanyId.map((so: any) => ({ id: so.id, sales_order_no: so.sales_order_no })));
+          if (withoutDealerId.length > 0) {
+            console.warn('[useSalesOrders] Found', withoutDealerId.length, 'SalesOrders without dealer_id (via Quotes):', withoutDealerId.map((so: any) => ({ id: so.id, sales_order_no: so.sales_order_no })));
           }
         }
 
@@ -140,7 +132,7 @@ export function useSalesOrders(companyId?: string | null) {
     }
 
     fetchSalesOrders();
-  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
+  }, [activeOrganizationId, effectiveDealerId, refreshTrigger]);
 
   return { salesOrders, loading, error, refetch };
 }

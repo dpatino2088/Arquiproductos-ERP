@@ -11,7 +11,9 @@ import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
 import { usePermissions, MODULE_PERMS } from '../hooks/usePermissions';
 import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useActingAsContext } from '../context/ActingAsContext';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
+import { ActingAsSwitcher } from './layout/ActingAsSwitcher';
 import { 
   getSidebarStyles, 
   getButtonStyles, 
@@ -55,6 +57,46 @@ import {
 
 interface LayoutProps {
   children: ReactNode;
+}
+
+/** Línea de carga en la parte superior del header. Usa globalLoading del store; retraso mínimo al ocultar para evitar parpadeo. */
+const MIN_HIDE_DELAY_MS = 320;
+function TopBarLoading() {
+  const globalLoading = useUIStore((s) => s.globalLoading);
+  const [visible, setVisible] = useState(false);
+  const hideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (globalLoading) {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+      setVisible(true);
+      return;
+    }
+    if (!visible) return;
+    hideTimeoutRef.current = setTimeout(() => {
+      hideTimeoutRef.current = null;
+      setVisible(false);
+    }, MIN_HIDE_DELAY_MS);
+    return () => {
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+    };
+  }, [globalLoading, visible]);
+
+  if (!visible) return null;
+  return (
+    <div
+      className="absolute left-0 right-0 top-0 h-0.5 rounded-full overflow-hidden bg-gray-200 z-50"
+      aria-hidden="true"
+    >
+      <div
+        className="h-full w-1/3 rounded-full bg-primary animate-pulse"
+        style={{ animationDuration: '1.2s' }}
+      />
+    </div>
+  );
 }
 
 // Memoized navigation item component
@@ -141,10 +183,23 @@ function Layout({ children }: LayoutProps) {
   const { isMember, isSuperAdmin, role: currentRole } = useCurrentOrgRole();
   const { can, loading: permissionsLoading } = usePermissions();
   const { allowedModules, loading: accessLoading, userType } = useAccessContext();
-  const { role: orgContextRole } = useOrganizationContext();
-  
-  // Determine if user is SuperAdmin (check both sources for reliability)
+  const { activeOrganization, role: orgContextRole } = useOrganizationContext();
+  const actingAs = useActingAsContext();
+
+  // Solo Organization Super Admin ve el switcher "Dealer Account" (rol canónico: superadmin)
   const isSuperAdminUser = isSuperAdmin || orgContextRole === 'superadmin' || currentRole === 'superadmin';
+
+  // Nombre del dealer para el header: solo si hay dealer seleccionado y no es el mismo que la org (si es Arquiproductos no mostrar nada extra)
+  const orgName = activeOrganization?.name?.trim() || '';
+  const dealerDisplayInHeader =
+    userType === 'internal' &&
+    isSuperAdminUser &&
+    actingAs?.activeDealerId &&
+    actingAs.activeDisplayName &&
+    orgName &&
+    orgName.toLowerCase() !== (actingAs.activeDisplayName || '').trim().toLowerCase()
+      ? actingAs.activeDisplayName
+      : null;
   
   // Debug log for SuperAdmin detection
   if (import.meta.env.DEV) {
@@ -301,8 +356,8 @@ function Layout({ children }: LayoutProps) {
         // Directory is active if we're on any directory route
         return currentRoute.includes('/directory');
       case 'Sales':
-        // Sales is active if we're on any sales/quotes route
-        return currentRoute.includes('/sales/quotes');
+        // Sales is active if we're on any sales/quotes or sales/proposals route
+        return currentRoute.includes('/sales/quotes') || currentRoute.includes('/sales/proposals');
       case 'Sales Orders':
         // Sales Orders is active if we're on any sale-orders route
         return currentRoute.includes('/sale-orders');
@@ -350,6 +405,7 @@ function Layout({ children }: LayoutProps) {
       { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, module: 'sales' },
       { name: 'Sales Orders', href: '/sale-orders', icon: FileText, module: 'sales' }, // Uses 'sales' module for permissions
       { name: 'Catalog', href: '/catalog', icon: Book, module: 'catalog' },
+      { name: 'Inventory', href: '/inventory', icon: Package, module: 'inventory' },
       { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, module: 'manufacturing' },
       { name: 'Financials', href: '/financials', icon: DollarSign, module: 'financials' },
     ];
@@ -482,6 +538,7 @@ function Layout({ children }: LayoutProps) {
         directory: "directory",
         sales: "sales",
         catalog: "catalog",
+        inventory: "inventory",
         manufacturing: "manufacturing",
         financials: "financials",
         settings: "settings",
@@ -797,10 +854,17 @@ function Layout({ children }: LayoutProps) {
           }}
           role="banner"
         >
+          {/* Top loading bar: línea delgada fija arriba del header, visible mientras globalLoading; mínimo ~300ms visible para evitar parpadeo */}
+          <TopBarLoading />
           <div className="flex items-center justify-between h-full px-6">
-            {/* Left side - Organization Switcher */}
-            <div className="flex items-center" style={{ marginLeft: '-4px', minWidth: '300px' }}>
+            {/* Left side - Organization Switcher; nombre del dealer en header cuando hay uno seleccionado distinto a la org (si es Arquiproductos no sale nada). */}
+            <div className="flex items-center gap-4 flex-shrink-0" style={{ marginLeft: '-4px', minWidth: '280px' }}>
               <OrganizationSwitcher />
+              {dealerDisplayInHeader && (
+                <span className="text-sm font-medium" style={{ color: 'var(--gray-950)' }} title="Dealer actual">
+                  {dealerDisplayInHeader}
+                </span>
+              )}
             </div>
 
             {/* Center - Empty space for future use */}
@@ -864,7 +928,7 @@ function Layout({ children }: LayoutProps) {
                 {/* User Dropdown Menu */}
                 {isUserMenuOpen && (
                   <div 
-                    className="absolute right-0 mt-2 w-56 bg-white shadow-lg border border-gray-200 py-2 z-50"
+                    className={`absolute right-0 mt-2 bg-white shadow-lg border border-gray-200 py-2 z-50 ${userType === 'internal' && isSuperAdminUser ? 'w-64' : 'w-56'}`}
                     style={{ top: '100%' }}
                     role="menu"
                     aria-label="User account menu"
@@ -882,15 +946,12 @@ function Layout({ children }: LayoutProps) {
                       )}
                     </div>
 
-                    {/* Organization Section - OCULTO */}
-                    {/* {currentOrganization && (
-                      <div className="py-1 border-b border-gray-100">
-                        <div className="px-4 py-2">
-                          <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">ORGANIZATION</div>
-                          <div className="text-sm text-gray-900 font-medium">{currentOrganization.name}</div>
-                        </div>
+                    {/* Dealer Account - mismo card (solo Super Admin). Selector debajo de la etiqueta. Al elegir dealer se cierra el menú. */}
+                    {userType === 'internal' && isSuperAdminUser && (
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <ActingAsSwitcher labelAbove onAfterSelect={() => setIsUserMenuOpen(false)} />
                       </div>
-                    )} */}
+                    )}
 
                     {/* Menu Items */}
                     <div className="py-1">
@@ -1022,7 +1083,7 @@ function Layout({ children }: LayoutProps) {
         {/* Main Content */}
         <main 
           id="main-content"
-          className="flex-1 transition-all duration-300"
+          className="flex-1 min-w-0 transition-all duration-300"
           style={{
             marginLeft: isSettingsRoute ? '0px' : mainMarginLeft,
             paddingTop: isSettingsRoute ? '0px' : mainPaddingTop,

@@ -3,6 +3,7 @@ import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
+import DimensionsStackView from '../../../components/DimensionsStackView';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 // ============================================================================
@@ -70,6 +71,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     sku?: string;
     collection_name?: string;
     variant_name?: string;
+    roll_width_m?: number | null;
   } | null>(null);
   const [loadingFabric, setLoadingFabric] = useState(false);
   
@@ -111,7 +113,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
         setLoadingFabric(true);
         const { data: catalogItem, error } = await supabase
           .from('CatalogItems')
-          .select('sku, collection_name, variant_name')
+          .select('sku, collection_name, variant_name, roll_width_m, roll_width')
           .eq('id', variantId)
           .eq('organization_id', activeOrganizationId)
           .eq('is_active', true) // Use is_active instead of deleted
@@ -128,10 +130,12 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
         }
 
         if (catalogItem) {
+          const rw = (catalogItem as any).roll_width_m ?? (catalogItem as any).roll_width;
           setFabricData({
             sku: catalogItem.sku || undefined,
             collection_name: catalogItem.collection_name || undefined,
             variant_name: catalogItem.variant_name || undefined,
+            roll_width_m: rw != null ? Number(rw) : null,
           });
         } else {
           setFabricData(null);
@@ -447,18 +451,36 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   // Get snapshot totals breakdown for display
   const snapshotTotals = hasValidSnapshot ? bomPreviewSnapshot?.totals : null;
 
-  // Get dimensions display
-  const getDimensionsDisplay = () => {
-    const width_mm = (config as any).width_mm;
-    const height_mm = (config as any).height_mm;
-    if (width_mm && height_mm) {
-      return `${width_mm.toFixed(0)} x ${height_mm.toFixed(0)} mm`;
-    }
-    return 'Not set';
+  const dimensionsSource = {
+    width_mm: (config as any).width_mm,
+    height_mm: (config as any).height_mm,
+    measurements: (config as any).measurements,
+    panels: (config as any).panels,
   };
-
-  const dimensionsDisplay = getDimensionsDisplay();
+  const measurements = (config as any).measurements;
+  const widthTotalMm = measurements?.width_total_mm ?? (config as any).width_mm ?? null;
+  const heightMm = measurements?.height_mm ?? (config as any).height_mm ?? null;
+  const hasTotalDimensions = widthTotalMm != null && widthTotalMm > 0 && heightMm != null && heightMm > 0;
   const hasFabricData = fabricData && (fabricData.sku || fabricData.collection_name || fabricData.variant_name);
+
+  // Total tela (m²) desde BOM snapshot para conservar como dato
+  const fabricM2 = (() => {
+    if (!hasValidSnapshot || !bomPreviewSnapshot?.items) return null;
+    const roll = bomPreviewSnapshot.items.find((i: any) => i.kind === 'roll' || i.role === 'fabric');
+    return roll?.qty != null ? Number(roll.qty) : null;
+  })();
+
+  // Regla: ningún paño puede ser más ancho que el rollo; observación: rotar la tela si aplica
+  const panelsList = (config as any).measurements?.panels ?? (Array.isArray((config as any).panels) ? (config as any).panels : []);
+  const rollWidthMm = fabricData?.roll_width_m != null && fabricData.roll_width_m > 0
+    ? fabricData.roll_width_m * 1000
+    : null;
+  const panelsExceedingRoll = rollWidthMm != null && panelsList.length > 0
+    ? panelsList
+        .map((p: any, i: number) => ({ index: i + 1, width_mm: p?.width_mm ?? 0 }))
+        .filter((p: { index: number; width_mm: number }) => p.width_mm > rollWidthMm)
+    : [];
+  const showRollWidthWarning = panelsExceedingRoll.length > 0;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -510,10 +532,37 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                   <span className="font-medium text-gray-700">Mounting:</span>
                   <span className="ml-2 text-gray-900">{(config as any).mountingCassette || (config as any).mountingType || 'Not selected'}</span>
                 </div>
-                <div>
-                  <span className="font-medium text-gray-700">Dimensions:</span>
-                  <span className="ml-2 text-gray-900">{dimensionsDisplay}</span>
+                <div className="col-span-2">
+                  <span className="font-medium text-gray-700">Dimensions (mm):</span>
+                  <div className="mt-1 text-gray-900">
+                    <DimensionsStackView source={dimensionsSource} />
+                  </div>
+                  {hasTotalDimensions && (
+                    <div className="mt-1.5 text-gray-600 text-sm">
+                      <span className="font-medium text-gray-600">Medidas totales:</span>{' '}
+                      <span className="tabular-nums">{Math.round(widthTotalMm)} × {Math.round(heightMm)} mm</span>
+                    </div>
+                  )}
                 </div>
+                {fabricM2 != null && (
+                  <div>
+                    <span className="font-medium text-gray-700">Total tela (m²):</span>
+                    <span className="ml-2 text-gray-900">{fabricM2.toFixed(2)} m²</span>
+                  </div>
+                )}
+                {showRollWidthWarning && (
+                  <div className="col-span-2 mt-2 p-3 bg-amber-50 border border-amber-200 rounded text-sm">
+                    <p className="font-medium text-amber-800">
+                      Regla: ningún paño puede ser más ancho que el rollo ({Math.round(rollWidthMm!)} mm).
+                    </p>
+                    <p className="text-amber-700 mt-1">
+                      Paño(s) que exceden: {panelsExceedingRoll.map((p: any) => `Paño ${p.index} (${p.width_mm} mm)`).join(', ')}.
+                    </p>
+                    <p className="text-amber-700 mt-1 italic">
+                      Observación: rotar la tela si la tela lo permite.
+                    </p>
+                  </div>
+                )}
                 <div>
                   <span className="font-medium text-gray-700">Film Type:</span>
                   <span className="ml-2 text-gray-900">{(config as any).filmType || 'Not selected'}</span>
@@ -572,21 +621,6 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             </div>
           </div>
         </div>
-        
-        {/* Debug Info (DEV only) */}
-        {import.meta.env.DEV && (
-          <details className="mt-4 p-3 bg-gray-50 rounded-lg text-xs">
-            <summary className="cursor-pointer text-gray-500 font-medium">
-              Debug Info (DEV)
-            </summary>
-            <pre className="mt-2 text-gray-600 overflow-auto max-h-40">
-              {JSON.stringify({
-                bom_template_id: bomTemplateId,
-                _hardware_filtered_templates: (config as any)._hardware_filtered_templates?.length,
-              }, null, 2)}
-            </pre>
-          </details>
-        )}
         
         {/* BOM Breakdown Section */}
         <div className="mt-6 pt-6 border-t border-gray-200">
@@ -689,7 +723,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                             {line.sku || '-'}
                           </td>
                           <td className={`px-3 py-2 whitespace-nowrap text-right ${line.isChild ? 'text-gray-600' : 'text-gray-900'}`}>
-                            {line.qty.toFixed(3)}
+                            {Number(line.qty).toFixed(2)}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-center text-gray-500">
                             {line.uom}
@@ -702,6 +736,49 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           </td>
                         </tr>
                       ))}
+                      {/* Accessories as breakdown row when snapshot has total */}
+                      {snapshotTotals && (snapshotTotals.accessories_total || 0) > 0 && (
+                        <tr className="bg-gray-50 border-t border-gray-200">
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className="font-medium text-gray-900">Accessories</span>
+                            {config.accessories?.length ? (
+                              <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-200 text-gray-600 rounded">
+                                {config.accessories.length} items
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">—</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
+                            {config.accessories?.length || 1}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-center text-gray-500">ea</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
+                            ${((snapshotTotals.accessories_total || 0) / (config.accessories?.length || 1)).toFixed(2)}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-gray-900">
+                            ${(snapshotTotals.accessories_total || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      )}
+                      {/* Labor as breakdown row when snapshot has amount */}
+                      {snapshotTotals && (snapshotTotals.labor_amount || 0) > 0 && (
+                        <tr className="bg-gray-50 border-t border-gray-200">
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className="font-medium text-gray-900">
+                              Labor ({snapshotTotals.labor_pct ?? 0}%)
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">—</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">1</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-center text-gray-500">—</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
+                            ${(snapshotTotals.labor_amount || 0).toFixed(2)}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-gray-900">
+                            ${(snapshotTotals.labor_amount || 0).toFixed(2)}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                     <tfoot className="bg-gray-100">
                       {/* Show detailed breakdown if snapshot totals available */}

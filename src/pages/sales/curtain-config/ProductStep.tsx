@@ -1,12 +1,23 @@
-import { useMemo, useEffect, useRef } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { useProductTypes } from '../../../hooks/useProductTypes';
+import { useUIStore } from '../../../stores/ui-store';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/SelectShadcn';
 import { useBOMTemplates } from '../../../hooks/useBOMTemplates';
 import { Image as ImageIcon } from 'lucide-react';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
+
+// Imágenes por tipo de producto (public/images)
+const PRODUCT_TYPE_IMAGES: Record<string, string> = {
+  'Roller Shade': '/images/Roller Shade.png',
+  'Dual Shade': '/images/Dual Shade.png',
+  'Triple Shade': '/images/Triple Shade.png',
+  'Drapery': '/images/Drapery.png',
+  'Awning': '/images/Awning.png',
+  'Window Film': '/images/Window Film.png',
+};
 
 interface ProductStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -106,10 +117,17 @@ const PRODUCT_UI_METADATA: Record<string, {
 export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   // Load ProductTypes from database
   const { productTypes, loading: loadingProductTypes } = useProductTypes();
-  const { role } = useOrganizationContext();
-  
-  // ✅ DEBUG MODE: Solo mostrar selector de BOM Template en modo debug o para superadmin/admin
-  const showTemplatePicker = import.meta.env.DEV && (role === 'superadmin' || role === 'admin');
+  useOrganizationContext();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loadingProductTypes);
+    return () => setGlobalLoading(false);
+  }, [loadingProductTypes, setGlobalLoading]);
+
+  // Debug BOM template picker oculto (no se muestra en UI)
+  const showTemplatePicker = false;
+  const [productImageErrors, setProductImageErrors] = useState<Record<string, boolean>>({});
   
   // FASE 1: Support both productTypeId (legacy) and product_type_id (unified contract)
   const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
@@ -118,16 +136,6 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   
   // Load BOM Templates for selected product type
   const { templates: bomTemplates, loading: loadingBOMTemplates } = useBOMTemplates(productTypeId || undefined);
-  
-  // DEBUG: Log templates loading
-  console.log('[ProductStep] 🔍 BOM Templates state', { 
-    productTypeId, 
-    templatesCount: bomTemplates.length, 
-    loading: loadingBOMTemplates,
-    templates: bomTemplates.map(t => ({ id: t.id, name: t.name, product_type_id: t.product_type_id })),
-    currentBomTemplateId: (config as any).bom_template_id,
-    shouldAutoSelect: bomTemplates.length === 1 && !(config as any).bom_template_id && productTypeId && !loadingBOMTemplates,
-  });
   
   // FASE 1: CRITICAL - Clear bom_template_id when product_type_id changes
   useEffect(() => {
@@ -250,17 +258,8 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   };
   
   // Show loading state
-  if (loadingProductTypes) {
-    return (
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
-          <div className="text-center text-gray-500 py-8">Loading product types...</div>
-        </div>
-      </div>
-    );
-  }
-  
+  if (loadingProductTypes) return <div className="py-6 px-6" />;
+
   // Show error if no product types
   if (productCards.length === 0) {
     return (
@@ -302,21 +301,29 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
                 }}
                 className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
                   isSelected
-                    ? 'border-2 border-primary shadow-lg'
+                    ? 'border-2 border-gray-900 shadow-lg'
                     : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                 }`}
               >
-                {/* Image */}
-                <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
-                  {/* TODO: Add image from Supabase storage */}
-                  <ImageIcon className="w-16 h-16 text-gray-300" />
+                {/* Image: fondo blanco */}
+                <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
+                  {PRODUCT_TYPE_IMAGES[product.name] && !productImageErrors[product.name] ? (
+                    <img
+                      src={PRODUCT_TYPE_IMAGES[product.name]}
+                      alt={product.name}
+                      className="w-full h-full object-contain"
+                      onError={() => setProductImageErrors((prev) => ({ ...prev, [product.name]: true }))}
+                    />
+                  ) : (
+                    <ImageIcon className="w-16 h-16 text-gray-300" />
+                  )}
                 </div>
                 
-                {/* Card Content */}
-                <div className="p-4">
+                {/* Pie del Card: gris (mismo que el fondo del card) */}
+                <div className="p-4 bg-gray-100">
                   {/* Product Name */}
                   <h3 className={`font-semibold text-sm truncate text-center ${
-                    isSelected ? 'text-primary' : 'text-gray-900'
+                    isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                   }`} title={product.name}>
                     {product.name}
                   </h3>

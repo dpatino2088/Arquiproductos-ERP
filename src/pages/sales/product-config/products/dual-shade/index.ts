@@ -30,7 +30,18 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(dualConfig.width_mm && dualConfig.height_mm);
 
     case 'variants':
-      return !!(dualConfig.frontFabric?.collectionId && dualConfig.frontFabric?.variantId);
+      // VariantsStep actual es compartido y usa collectionName/collection_name + variantId (CatalogItem id).
+      const hasCollection = !!(
+        (dualConfig as any).collectionName ||
+        (dualConfig as any).collection_name ||
+        (dualConfig as any).collectionId
+      );
+      const hasVariant = !!(
+        (dualConfig as any).variantId ||
+        (dualConfig as any).fabric_catalog_item_id ||
+        (dualConfig as any).fabric_variant_id
+      );
+      return hasCollection && hasVariant;
 
     case 'hardware':
       // ✅ NUEVO FLUJO SECUENCIAL: Hardware requiere color + bottom bar + headbox (obligatorio para dual)

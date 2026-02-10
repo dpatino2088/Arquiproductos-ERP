@@ -8,6 +8,7 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
+import { getSupabaseErrorMessage } from '../../lib/supabase-error-utils';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { 
@@ -48,6 +49,7 @@ interface CustomerItem {
   city?: string;
   totalRevenue?: number;
   avatar?: string;
+  createdBy?: string | null;
 }
 
 // Function to generate avatar initials from company name
@@ -93,19 +95,26 @@ export default function Customers() {
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
   // ✅ Hook siempre se llama, pero puede estar deshabilitado
-  const { customers, isLoading: customersLoading, error: customersError, refetch } = useDirectoryCustomers({
+  const { customers, isPending: customersPending, isInitialLoading: customersInitialLoading, isScopeReady: customersScopeReady, error: customersError, refetch, archiveCustomer } = useDirectoryCustomers({
     organizationId: activeOrganizationId ?? null,
     enabled: !!activeOrganizationId,
   });
   
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
-  
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  const customersLoading = orgLoading || !customersScopeReady || customersInitialLoading || customersPending;
+  useEffect(() => {
+    setGlobalLoading(customersLoading);
+    return () => setGlobalLoading(false);
+  }, [customersLoading, setGlobalLoading]);
+
   // Mapear DirectoryCustomer a CustomerItem para compatibilidad con UI existente
   // También necesitamos cargar primary_contact_id y customer_type_name
   const [customersData, setCustomersData] = useState<CustomerItem[]>([]);
   
   useEffect(() => {
-    // Mapear customers base
+    // Mapear customers base (keepPreviousData: no vaciar al refetch)
     const mapped = customers.map(c => ({
       id: c.id,
       companyName: c.customer_name || '',
@@ -118,6 +127,7 @@ export default function Customers() {
       location: c.city ? `${c.city}${c.country ? `, ${c.country}` : ''}` : '',
       country: c.country || '',
       city: c.city || '',
+      createdBy: c.created_by_email ?? null,
       dateAdded: c.created_at ? new Date(c.created_at).toISOString().split('T')[0] : '',
       totalRevenue: 0,
       primary_contact_id: c.primary_contact_id || null,
@@ -155,7 +165,7 @@ export default function Customers() {
       setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
     }
   }, [customers, activeOrganizationId]);
-  
+
   const customersIsError = !!customersError;
 
   // State hooks
@@ -208,44 +218,7 @@ export default function Customers() {
     setCurrentPage(1);
   }, [searchTerm]);
 
-  // ✅ NOW we can do conditional returns (hooks already called)
-  if (orgLoading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading organizations...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!activeOrganizationId) {
-    return (
-      <div className="py-6 px-6">
-        <div style={{ padding: '24px' }}>
-          <div>No organizations available</div>
-          <div>Selecciona una organización o revisa tu membership.</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (customersError) {
-    return (
-      <div className="py-6 px-6">
-        <div style={{ padding: '24px' }}>
-          <div>Something went wrong</div>
-          <pre>{String(customersError)}</pre>
-          <button onClick={refetch}>Try again</button>
-        </div>
-      </div>
-    );
-  }
-
-  // Filtered and sorted customers
+  // Filtered and sorted customers (hooks MUST run before any conditional return — same as DirectoryContacts)
   const filteredCustomers = useMemo(() => {
     if (!customersData || customersData.length === 0) return [];
 
@@ -329,24 +302,24 @@ export default function Customers() {
   }, []);
 
   const handleStatusToggle = useCallback((status: string) => {
-    setSelectedStatus(prev => 
-      prev.includes(status) 
+    setSelectedStatus(prev =>
+      prev.includes(status)
         ? prev.filter(s => s !== status)
         : [...prev, status]
     );
   }, []);
 
   const handleCustomerTypeToggle = useCallback((customerType: string) => {
-    setSelectedCustomerType(prev => 
-      prev.includes(customerType) 
+    setSelectedCustomerType(prev =>
+      prev.includes(customerType)
         ? prev.filter(c => c !== customerType)
         : [...prev, customerType]
     );
   }, []);
 
   const handleLocationToggle = useCallback((location: string) => {
-    setSelectedLocation(prev => 
-      prev.includes(location) 
+    setSelectedLocation(prev =>
+      prev.includes(location)
         ? prev.filter(l => l !== location)
         : [...prev, location]
     );
@@ -355,7 +328,7 @@ export default function Customers() {
   const getFilteredStatusOptions = useCallback(() => {
     const statusOptions = ['Active', 'Inactive', 'On Hold', 'Archived'];
     if (!statusSearchTerm) return statusOptions;
-    return statusOptions.filter(status => 
+    return statusOptions.filter(status =>
       status.toLowerCase().includes(statusSearchTerm.toLowerCase())
     );
   }, [statusSearchTerm]);
@@ -363,7 +336,7 @@ export default function Customers() {
   const getFilteredCustomerTypeOptions = useCallback(() => {
     const customerTypeOptions = ['VIP', 'Partner', 'Reseller', 'Distributor'];
     if (!customerTypeSearchTerm) return customerTypeOptions;
-    return customerTypeOptions.filter(type => 
+    return customerTypeOptions.filter(type =>
       type.toLowerCase().includes(customerTypeSearchTerm.toLowerCase())
     );
   }, [customerTypeSearchTerm]);
@@ -371,7 +344,7 @@ export default function Customers() {
   const getFilteredLocationOptions = useCallback(() => {
     const locationOptions = Array.from(new Set(customersData.map(c => c.location).filter(Boolean)));
     if (!locationSearchTerm) return locationOptions;
-    return locationOptions.filter(location => 
+    return locationOptions.filter(location =>
       location.toLowerCase().includes(locationSearchTerm.toLowerCase())
     );
   }, [locationSearchTerm, customersData]);
@@ -392,7 +365,7 @@ export default function Customers() {
 
   const handleArchiveCustomer = useCallback(async (customer: CustomerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    
+
     const confirmed = await showConfirm({
       title: 'Archivar Customer',
       message: `¿Estás seguro de que deseas archivar "${customer.companyName}"?`,
@@ -404,40 +377,30 @@ export default function Customers() {
     if (!confirmed) return;
 
     try {
-      if (!activeOrganizationId) return;
-      
       setLoading(true);
-      // Soft delete: update deleted = true (NO hard delete)
-      const { error } = await supabase
-        .from('DirectoryCustomers')
-        .update({ deleted: true })
-        .eq('id', customer.id)
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false);
-
-      if (error) throw error;
+      await archiveCustomer(customer.id);
 
       useUIStore.getState().addNotification({
         type: 'success',
         title: 'Customer archivado',
         message: 'El customer ha sido archivado correctamente.',
       });
-      
+
       refetch();
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al archivar',
-        message: error instanceof Error ? error.message : 'Error desconocido',
+        message: getSupabaseErrorMessage(error),
       });
     } finally {
       setLoading(false);
     }
-  }, [showConfirm, activeOrganizationId, refetch, setLoading]);
+  }, [showConfirm, archiveCustomer, refetch, setLoading]);
 
   const handleDeleteCustomer = useCallback(async (customer: CustomerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    
+
     const confirmed = await showConfirm({
       title: 'Eliminar Customer',
       message: `¿Estás seguro de que deseas eliminar "${customer.companyName}"? Esta acción no se puede deshacer.`,
@@ -461,14 +424,13 @@ export default function Customers() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error al eliminar',
-        message: error instanceof Error ? error.message : 'Error desconocido',
+        message: getSupabaseErrorMessage(error),
       });
     } finally {
       setLoading(false);
     }
   }, [showConfirm, deleteCustomer, refetch, setLoading]);
 
-  // Badge helpers
   const getStatusBadge = useCallback((status: string) => {
     switch (status) {
       case 'Active':
@@ -476,15 +438,14 @@ export default function Customers() {
       case 'Inactive':
         return <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-status-gray">Inactive</span>;
       case 'On Hold':
-        return <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-status-orange">On Hold</span>;
+        return <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-orange-700">On Hold</span>;
       case 'Archived':
-        return <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-status-purple">Archived</span>;
+        return <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700">Archived</span>;
       default:
         return <span className="px-1.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: 'color-mix(in srgb, var(--neutral-gray) 10%, transparent)', color: 'var(--neutral-gray)' }}>{status}</span>;
     }
   }, []);
 
-  // Format customer type label (enum: contractor, architecture_studio, design_studio, end_user)
   const formatCustomerTypeLabel = useCallback((type: string) => {
     const typeMap: Record<string, string> = {
       contractor: 'Contractor',
@@ -524,19 +485,38 @@ export default function Customers() {
     }).format(amount);
   }, []);
 
-  // Loading state (only for customers, orgLoading already handled above)
-  if (customersLoading) {
+  // Conditional returns AFTER all hooks (rules of hooks) — same order as DirectoryContacts
+  if (orgLoading) return <div className="py-6 px-6" />;
+
+  if (!activeOrganizationId) {
     return (
       <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading customers...</p>
-          </div>
+        <div style={{ padding: '24px' }}>
+          <div>No organizations available</div>
+          <div>Selecciona una organización o revisa tu membership.</div>
         </div>
       </div>
     );
   }
+
+  if (customersError) {
+    return (
+      <div className="py-6 px-6">
+        <div style={{ padding: '24px' }}>
+          <div>Something went wrong</div>
+          <pre>{String(customersError)}</pre>
+          <button onClick={refetch}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!customersScopeReady) return <div className="py-6 px-6" />;
+
+  if (customersInitialLoading) return <div className="py-6 px-6" />;
+
+  const showSkeleton = customers.length === 0 && customersPending;
+  const showOverlay = customers.length > 0 && customersPending;
 
   // Error state
   if (customersIsError && customersError) {
@@ -837,6 +817,9 @@ export default function Customers() {
         )}
       </div>
 
+      <div className="relative">
+        {showSkeleton ? <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[120px]" /> : (
+          <>
       {/* Table View */}
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
@@ -859,6 +842,7 @@ export default function Customers() {
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Customer Type</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created By</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
@@ -874,7 +858,7 @@ export default function Customers() {
               <tbody>
                 {filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 px-6 text-center">
+                    <td colSpan={10} className="py-12 px-6 text-center">
                       <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No customers found</p>
                       <p className="text-sm text-gray-500">
@@ -933,6 +917,7 @@ export default function Customers() {
                           return getCustomerTypeBadge(formatCustomerTypeLabel(type));
                         })()}
                       </td>
+                      <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">{customer.createdBy || '—'}</td>
                       <td className="py-4 px-6 text-gray-600 text-sm">{customer.dateAdded ? new Date(customer.dateAdded).toLocaleDateString() : 'N/A'}</td>
                       <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
@@ -1177,6 +1162,10 @@ export default function Customers() {
             </div>
           )}
         </div>
+      </div>
+          </>
+        )}
+        {showOverlay && <div className="absolute inset-0 z-10 rounded-lg pointer-events-none" aria-hidden />}
       </div>
 
       {/* Confirm Dialog */}

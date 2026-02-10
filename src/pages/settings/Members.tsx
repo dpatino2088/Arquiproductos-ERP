@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useCompanyStore } from '../../stores/company-store';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { supabase } from '../../lib/supabase/client';
 import { Plus, Mail, MoreVertical, X } from 'lucide-react';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -26,7 +26,7 @@ const ROLES = [
 ];
 
 export default function Members() {
-  const { currentCompany } = useCompanyStore();
+  const { activeDealer: currentDealer } = useActiveDealer();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const [members, setMembers] = useState<Member[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -40,14 +40,14 @@ export default function Members() {
   // Load members
   useEffect(() => {
     loadMembers();
-  }, [currentCompany?.id]);
+  }, [currentDealer?.id]);
 
   const loadMembers = async () => {
-    if (!currentCompany?.id) return;
+    if (!currentDealer?.id) return;
 
     setIsLoading(true);
     try {
-      // Get company_users
+      // Get company_users (dealer_id = current dealer)
       // Note: We can't directly join auth.users, so we'll get user_id and fetch emails separately if needed
       const { data, error } = await supabase
         .from('company_users')
@@ -57,7 +57,7 @@ export default function Members() {
           role,
           created_at
         `)
-        .eq('company_id', currentCompany.id)
+        .eq('dealer_id', currentDealer.id)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false });
 
@@ -96,13 +96,13 @@ export default function Members() {
       // This would typically:
       // 1. Create an invite record
       // 2. Send an email invitation
-      // 3. Add to company_users with status='invited'
+      // 3. Add to company_users with status='invited' (dealer_id)
       
       console.log('Inviting member:', {
         email: inviteEmail,
         role: inviteRole,
         message: inviteMessage,
-        company_id: currentCompany.id,
+        dealer_id: currentDealer.id,
       });
 
       // For now, just show success and reset form
@@ -121,14 +121,14 @@ export default function Members() {
   };
 
   const handleRoleChange = async (memberId: string, newRole: 'super_admin' | 'admin' | 'supervisor' | 'employee') => {
-    if (!currentCompany?.id) return;
+    if (!currentDealer?.id) return;
 
     try {
       const { error } = await supabase
         .from('company_users')
         .update({ role: newRole })
         .eq('id', memberId)
-        .eq('company_id', currentCompany.id);
+        .eq('dealer_id', currentDealer.id);
 
       if (error) {
         console.error('Error updating role:', error);
@@ -151,7 +151,7 @@ export default function Members() {
   };
 
   const handleRemove = async (memberId: string) => {
-    if (!currentCompany?.id) return;
+    if (!currentDealer?.id) return;
 
     const confirmed = await showConfirm({
       title: 'Eliminar Miembro',
@@ -169,7 +169,7 @@ export default function Members() {
         .from('company_users')
         .update({ is_deleted: true })
         .eq('id', memberId)
-        .eq('company_id', currentCompany.id);
+        .eq('dealer_id', currentDealer.id);
 
       if (error) {
         console.error('Error removing member:', error);
@@ -177,7 +177,7 @@ export default function Members() {
       }
 
       // Reload members
-      await       loadMembers();
+      await loadMembers();
     } catch (error) {
       console.error('Error removing member:', error);
     } finally {

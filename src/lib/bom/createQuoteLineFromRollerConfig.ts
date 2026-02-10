@@ -20,9 +20,10 @@ export interface CreateQuoteLineFromRollerConfigParams {
     variant_name?: string | null;
     quantity?: number;
   };
-  customerType?: string; // For pricing tier
-  costSettings?: any; // Cost settings for pricing
-  editingLineId?: string | null; // If editing existing line
+  /** Discount % 0-100 from DealerTiers (Platinum/Gold/Silver/Bronze). Default 35 (Bronze). */
+  discountPct?: number;
+  costSettings?: any; // For min_margin_pct guardrail
+  editingLineId?: string | null;
 }
 
 export interface CreateQuoteLineResult {
@@ -33,7 +34,7 @@ export interface CreateQuoteLineResult {
 export async function createQuoteLineFromRollerConfig(
   params: CreateQuoteLineFromRollerConfigParams
 ): Promise<CreateQuoteLineResult> {
-  const { organizationId, quoteId, config, customerType = 'VIP', costSettings, editingLineId } = params;
+  const { organizationId, quoteId, config, discountPct = 35, costSettings, editingLineId } = params;
 
   // Validate required fields
   if (!config.fabric_catalog_item_id) {
@@ -91,9 +92,9 @@ export async function createQuoteLineFromRollerConfig(
       import_tax_pct: null,
       default_margin_pct: null,
     },
-    customerType,
+    discountPct,
     costSettings || null,
-    null // categoryMargin
+    null
   );
 
   const netUnitPrice = pricingResult.unitPrice;

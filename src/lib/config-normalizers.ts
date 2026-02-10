@@ -183,6 +183,11 @@ export function logConfigDiff(prev: AnyConfig, next: AnyConfig, label: string) {
   });
   
   if (diff.lost.length > 0 || diff.changed.length > 0 || diff.added.length > 0) {
-    console.warn('[ConfigDiff] State change detected', diff);
+    // Log only JSON string to avoid console serializing nested/circular refs ("[circular]")
+    try {
+      console.warn('[ConfigDiff] State change detected', JSON.stringify(diff, null, 2));
+    } catch {
+      console.warn('[ConfigDiff] State change detected (diff keys)', { lost: diff.lost.length, changed: diff.changed.length, added: diff.added.length });
+    }
   }
 }

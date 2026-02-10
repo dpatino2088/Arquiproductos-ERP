@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useContacts } from '../../hooks/useDirectory';
+import { useUIStore } from '../../stores/ui-store';
 import { Contact, Building } from 'lucide-react';
 
 export default function DirectoryReports() {
   const { registerSubmodules } = useSubmoduleNav();
   const { contacts, loading, error } = useContacts();
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
   const [selectedType, setSelectedType] = useState<'all' | 'customer'>('all');
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
 
   useEffect(() => {
     registerSubmodules('Reports', []);
@@ -21,16 +28,7 @@ export default function DirectoryReports() {
 
   const customerCount = contacts.length;
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-sm text-gray-600">Loading directory reports...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-6 px-6" />;
 
   if (error) {
     return (

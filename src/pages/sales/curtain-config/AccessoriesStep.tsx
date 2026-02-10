@@ -286,11 +286,6 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
                     ? `Error loading items: ${catalogError}` 
                     : `No items found for "${searchTerm}"`}
                 </p>
-                {import.meta.env.DEV && (
-                  <p className="text-xs text-gray-400 mt-2 text-center">
-                    Searchable items: {searchableCatalogItems.length} | Total items: {catalogItems.length}
-                  </p>
-                )}
               </div>
             )}
           </div>

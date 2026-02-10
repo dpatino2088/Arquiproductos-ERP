@@ -567,11 +567,13 @@ export default function BOMTemplates() {
             name: duplicatedName,
             description: template.description || null,
             hardware_color: (template as any).hardware_color || null,
+            panel_count_min: (template as any).panel_count_min ?? 1,
+            panel_count_max: (template as any).panel_count_max ?? 1,
             metadata: (template as any).metadata || {},
             is_active: true,
             archived: false,
           })
-          .select('id, product_type_id, code, name, description, hardware_color')
+          .select('id, product_type_id, code, name, description, hardware_color, panel_count_min, panel_count_max')
           .single();
 
         if (!templateError && created) {
@@ -743,6 +745,7 @@ export default function BOMTemplates() {
             templateName: newTemplate.name || duplicatedName,
             templateDescription: newTemplate.description || '',
             templateHardwareColor: newTemplate.hardware_color || '',
+            templatePanelCount: (newTemplate as any).panel_count_min ?? (newTemplate as any).panel_count_max ?? 1,
             components: mappedDraftComponents,
             showAddComponentForm: false,
           })
@@ -1189,6 +1192,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
   const [templateName, setTemplateName] = useState<string>('');
   const [templateDescription, setTemplateDescription] = useState<string>('');
   const [templateHardwareColor, setTemplateHardwareColor] = useState<string>(''); // ✅ Hardware color (White, Black, etc.) or empty for all colors
+  const [templatePanelCount, setTemplatePanelCount] = useState<1 | 2 | 3>(1); // ✅ Paños (1, 2 or 3) - filter in configurator
   const [components, setComponents] = useState<any[]>([]);
   const [componentsToDelete, setComponentsToDelete] = useState<string[]>([]); // ✅ IDs de componentes a borrar en save
   const initialComponentsRef = useRef<any[]>([]); // ✅ Snapshot inicial para comparar
@@ -1380,6 +1384,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
           if (parsed.templateName) setTemplateName(parsed.templateName);
           if (parsed.templateDescription) setTemplateDescription(parsed.templateDescription);
           if (parsed.templateHardwareColor !== undefined) setTemplateHardwareColor(parsed.templateHardwareColor || '');
+          if (parsed.templatePanelCount !== undefined) setTemplatePanelCount(Math.min(3, Math.max(1, Number(parsed.templatePanelCount) || 1)) as 1 | 2 | 3);
           if (parsed.components) {
             const shouldRestoreComponents =
               !editingTemplateId ||
@@ -1409,11 +1414,12 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
       templateName,
       templateDescription,
       templateHardwareColor,
+      templatePanelCount,
       components,
       showAddComponentForm,
     };
     sessionStorage.setItem(draftKey, JSON.stringify(payload));
-  }, [draftKey, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, components, showAddComponentForm]);
+  }, [draftKey, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, components, showAddComponentForm]);
 
   // ✅ PERSISTENCIA: Restaurar al volver al tab
   useOnVisibilityChange(useCallback(() => {
@@ -1427,6 +1433,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
           if (parsed.templateName) setTemplateName(parsed.templateName);
           if (parsed.templateDescription) setTemplateDescription(parsed.templateDescription);
           if (parsed.templateHardwareColor !== undefined) setTemplateHardwareColor(parsed.templateHardwareColor || '');
+          if (parsed.templatePanelCount !== undefined) setTemplatePanelCount(Math.min(3, Math.max(1, Number(parsed.templatePanelCount) || 1)) as 1 | 2 | 3);
           if (parsed.components) {
             const shouldRestoreComponents =
               !editingTemplateId ||
@@ -1465,6 +1472,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
             setTemplateName(data.name || data.template_name || '');
             setTemplateDescription(data.description || '');
             setTemplateHardwareColor(data.hardware_color || ''); // ✅ Load hardware_color
+            const pc = data.panel_count_min ?? data.panel_count_max ?? 1;
+            setTemplatePanelCount(Math.min(3, Math.max(1, Number(pc) || 1)) as 1 | 2 | 3);
             // ✅ Backend still saves metadata (as {}), but UI doesn't use it
           }
         });
@@ -1475,6 +1484,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
       setTemplateName('');
       setTemplateDescription('');
       setTemplateHardwareColor('');
+      setTemplatePanelCount(1);
       setComponents([]);
       setComponentsToDelete([]);
       initialComponentsRef.current = [];
@@ -2788,6 +2798,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
           name: normalizedTemplateName,
           description: templateDescription || null,
           hardware_color: normalizedHardwareColor,
+          panel_count_min: templatePanelCount,
+          panel_count_max: templatePanelCount,
           metadata: {},
         } as any);
         templateId = editingTemplateId;
@@ -2798,6 +2810,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
           name: normalizedTemplateName,
           description: templateDescription || null,
           hardware_color: normalizedHardwareColor,
+          panel_count_min: templatePanelCount,
+          panel_count_max: templatePanelCount,
           metadata: {},
         } as any);
         templateId = newTemplate.id;
@@ -3435,6 +3449,30 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
             </SelectShadcn>
             <p className="text-xs text-gray-500 mt-1">
               Select the hardware color (White, Black, etc.) to filter templates in the product configurator. Required field.
+            </p>
+          </div>
+
+          {/* Paños / Panel count - same style as Hardware Color */}
+          <div className="mb-6">
+            <Label htmlFor="template_panel_count" className="text-sm" required>
+              Paños / Panels
+            </Label>
+            <SelectShadcn
+              value={String(templatePanelCount)}
+              onValueChange={(value) => setTemplatePanelCount(Number(value) as 1 | 2 | 3)}
+              required
+            >
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="Select number of panels (required)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">1 paño</SelectItem>
+                <SelectItem value="2">2 paños</SelectItem>
+                <SelectItem value="3">3 paños</SelectItem>
+              </SelectContent>
+            </SelectShadcn>
+            <p className="text-xs text-gray-500 mt-1">
+              Number of panels (paños) this template supports. Used to filter templates in the product configurator. Required field.
             </p>
           </div>
 

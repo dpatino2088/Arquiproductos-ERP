@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { useActiveCompany } from './useActiveCompany';
+import { useActiveDealer } from './useActiveDealer';
+import { useAccessContext } from './useAccessContext';
+import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 
 /**
  * Contact Type enum values (DB uses EN, UI shows ES)
@@ -26,7 +28,7 @@ export const CONTACT_TYPE_LABELS: Record<ContactType, string> = {
 export interface DirectoryContact {
   id: string;
   organization_id: string;
-  company_id?: string | null;
+  dealer_id?: string | null;
   customer_id?: string | null;
   // Campos explícitos con fallback a genéricos
   contact_title?: string | null;
@@ -46,13 +48,14 @@ export interface DirectoryContact {
   deleted: boolean;
   created_at?: string;
   updated_at?: string;
+  created_by_email?: string | null;
 }
 
 /**
  * Input para crear Contact
  */
 export interface CreateContactInput {
-  company_id?: string | null;
+  dealer_id?: string | null;
   customer_id?: string | null;
   contact_title?: string | null;
   contact_name: string;
@@ -74,7 +77,7 @@ export interface CreateContactInput {
  * Input para actualizar Contact
  */
 export interface UpdateContactInput {
-  company_id?: string | null;
+  dealer_id?: string | null;
   customer_id?: string | null;
   contact_title?: string | null;
   contact_name?: string;
@@ -92,163 +95,63 @@ export interface UpdateContactInput {
   contact_country?: string | null;
 }
 
+/** Columnas explícitas de DirectoryContacts según dump (sin genéricas name/email/title que no existen) */
+const DIRECTORY_CONTACTS_SELECT = `
+  id, organization_id, dealer_id, customer_id, created_by_email,
+  contact_title, contact_name, contact_id_number, contact_type,
+  contact_primary_phone, contact_cell_phone, contact_alt_phone, contact_email,
+  contact_street_address, contact_street_address_2, contact_city, contact_state, contact_zip_code, contact_country,
+  deleted, created_at, updated_at
+`.replace(/\s+/g, ' ').trim();
+
 /**
- * Hook para gestionar DirectoryContacts con transición gradual a columnas explícitas
- * 
- * REGLA DE ORO:
- * - Leer: seleccionar explícitas + genéricas (safe select con fallback)
- * - Mostrar/editar: usar explícitas con fallback a genéricas
- * - Escribir (insert/update): SOLO columnas explícitas (nunca genéricas)
+ * Hook para gestionar DirectoryContacts.
+ * - SELECT/INSERT/UPDATE: solo columnas explícitas del esquema (dump V9).
+ * - RLS: dircontacts_insert exige organization_id NOT NULL; enviamos organization_id y dealer_id siempre.
  */
 export function useDirectoryContacts(params?: { organizationId?: string | null; enabled?: boolean }) {
   const [contacts, setContacts] = useState<DirectoryContact[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isPending, setIsPending] = useState(false);
+  const [hasResolvedOnce, setHasResolvedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fetchIdRef = useRef(0);
   const { activeOrganizationId: contextOrgId } = useOrganizationContext();
-  const { activeCompanyId } = useActiveCompany();
-  
-  // Use provided organizationId or fallback to context
+  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { userType } = useAccessContext();
+
   const activeOrganizationId = params?.organizationId ?? contextOrgId;
   const enabled = params?.enabled ?? true;
+  /** Para org: solo true cuando ActingAs hidrató (dealer conocido). Para portal: true. No renderizar lista hasta que sea true. */
+  const isScopeReady = userType === 'internal' ? hasHydrated : true;
+  const isInitialLoading = !hasResolvedOnce;
 
   /**
-   * Safe select: intenta con explícitas + genéricas, fallback a solo explícitas si falla
+   * Lista de contactos: una sola fuente de verdad.
+   * Caso A (portal): organization_id = activeOrgId y dealer_id = current_dealer_id; si dealer_id null → 0 resultados.
+   * Caso B (org): si selectedDealerId (activeDealerId) → dealer_id = selectedDealerId; si no → todos los de la org.
    */
-  const safeSelectContacts = useCallback(async (orgId: string, companyIds: string[] = []) => {
-    // SELECT mínimo: explícitas + genéricas para transición
-    const explicitAndGeneric = `
-      id, organization_id, company_id, customer_id,
-      contact_title, title,
-      contact_name, name,
-      contact_id_number, id_number,
-      contact_type, type,
-      contact_primary_phone, primary_phone,
-      contact_cell_phone, cell_phone,
-      contact_alt_phone, alt_phone,
-      contact_email, email,
-      contact_street_address, street_address,
-      contact_street_address_2, street_address_2,
-      contact_city, city,
-      contact_state, state,
-      contact_zip_code, zip_code,
-      contact_country, country,
-      deleted, created_at, updated_at
-    `.replace(/\s+/g, ' ').trim();
-    
-    try {
-      // ✅ SIEMPRE filtrar por organization_id primero (necesario para RLS)
-      // Luego opcionalmente filtrar por company_id si existen
-      if (companyIds.length > 0) {
-        // Query 1: Contacts con company_id en la lista
-        const { data: companyData, error: companyError } = await supabase
+  const safeSelectContacts = useCallback(
+    async (orgId: string, options: { userType: 'internal' | 'portal' | 'unknown'; dealerId: string | null; selectedDealerId: string | null }) => {
+      let q = supabase
         .from('DirectoryContacts')
-        .select(explicitAndGeneric)
-          .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id primero
-          .in('company_id', companyIds)
+        .select(DIRECTORY_CONTACTS_SELECT)
+        .eq('organization_id', orgId)
         .eq('deleted', false)
         .order('created_at', { ascending: false });
 
-        if (companyError) {
-          throw companyError;
-        }
-
-        // Query 2: Contacts sin company_id pero con organization_id (transición)
-        const { data: orgData, error: orgError } = await supabase
-          .from('DirectoryContacts')
-          .select(explicitAndGeneric)
-          .eq('organization_id', orgId)
-          .is('company_id', null)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-
-        if (orgError) {
-          throw orgError;
-        }
-
-        // Combinar sin duplicados
-        const all = [...(companyData || []), ...(orgData || [])] as unknown as Array<{ id?: string }>;
-        const withId = all.filter((item: { id?: unknown }) => item && typeof item === 'object' && typeof item.id === 'string') as Array<{ id: string }>;
-        return Array.from(new Map(withId.map((item) => [item.id, item])).values());
+      if (options.userType === 'portal') {
+        if (options.dealerId == null) return [];
+        q = q.eq('dealer_id', options.dealerId);
       } else {
-        // Query simple: solo por organization_id
-        const { data, error: queryError } = await supabase
-          .from('DirectoryContacts')
-          .select(explicitAndGeneric)
-          .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-        
-        if (queryError) {
-          throw queryError;
-        }
-        return data || [];
+        if (options.selectedDealerId != null) q = q.eq('dealer_id', options.selectedDealerId);
       }
-    } catch (err: any) {
-      // Si falla por columna inexistente, reintentar SOLO con explícitas
-      if (err?.code === '42703' || err?.message?.includes('does not exist') || err?.message?.includes('column')) {
-        if (import.meta.env.DEV) {
-          console.warn('[useDirectoryContacts] Generic columns not found, retrying with explicit columns only');
-        }
-        
-        const explicitOnly = `
-          id, organization_id, company_id, customer_id,
-          contact_title, contact_name, contact_id_number, contact_type,
-          contact_primary_phone, contact_cell_phone, contact_alt_phone, contact_email,
-          contact_street_address, contact_street_address_2, contact_city, contact_state, contact_zip_code, contact_country,
-          deleted, created_at, updated_at
-        `.replace(/\s+/g, ' ').trim();
-        
-        // ✅ Retry también debe filtrar por organization_id primero
-        if (companyIds.length > 0) {
-          // Retry Query 1: Contacts con company_id
-          const { data: retryCompanyData, error: retryCompanyError } = await supabase
-          .from('DirectoryContacts')
-          .select(explicitOnly)
-            .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id primero
-            .in('company_id', companyIds)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
 
-          if (retryCompanyError) {
-            throw retryCompanyError;
-          }
-
-          // Retry Query 2: Contacts sin company_id
-          const { data: retryOrgData, error: retryOrgError } = await supabase
-            .from('DirectoryContacts')
-            .select(explicitOnly)
-            .eq('organization_id', orgId)
-            .is('company_id', null)
-            .eq('deleted', false)
-            .order('created_at', { ascending: false });
-
-          if (retryOrgError) {
-            throw retryOrgError;
-          }
-
-          const all = [...(retryCompanyData || []), ...(retryOrgData || [])] as unknown as Array<{ id?: string }>;
-          const withId = all.filter((item): item is { id: string } => item != null && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string');
-          return Array.from(new Map(withId.map((item) => [item.id, item])).values());
-        } else {
-          // Retry Query simple: solo por organization_id
-          const { data: retryData, error: retryError } = await supabase
-            .from('DirectoryContacts')
-            .select(explicitOnly)
-            .eq('organization_id', orgId) // ✅ CRITICAL: Filtrar por organization_id
-            .eq('deleted', false)
-            .order('created_at', { ascending: false });
-          
-          if (retryError) {
-            throw retryError;
-          }
-          const retryRows = (retryData || []) as unknown as Array<{ id?: string }>;
-          const withIdRetry = retryRows.filter((item): item is { id: string } => item != null && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string');
-          return Array.from(new Map(withIdRetry.map((item) => [item.id, item])).values());
-        }
-      }
-      throw err;
-    }
-  }, []);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    },
+    []
+  );
 
   /**
    * Normalizar contact_type: acepta EN, retorna EN o null
@@ -292,7 +195,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     return {
       id: row.id,
       organization_id: row.organization_id,
-      company_id: row.company_id || null,
+      dealer_id: row.dealer_id || null,
       customer_id: row.customer_id || null,
       contact_title,
       contact_name,
@@ -311,55 +214,74 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
       deleted: row.deleted || false,
       created_at: row.created_at || undefined,
       updated_at: row.updated_at || undefined,
+      created_by_email: row.created_by_email ?? null,
     };
   }, [normalizeContactType]);
 
   /**
-   * Fetch contacts (por company_id con fallback a organization_id)
+   * Fetch contacts — regla de oro: portal = dealer_id obligatorio; org = selectedDealerId o todos.
    */
   const fetchContacts = useCallback(async () => {
     if (!enabled || !activeOrganizationId) {
       setContacts([]);
-      setIsLoading(false);
+      setIsPending(false);
+      setHasResolvedOnce(false);
       setError(null);
       return;
     }
 
+    const thisFetchId = ++fetchIdRef.current;
+    setIsPending(true);
+
     try {
-      setIsLoading(true);
-      setError(null);
+      let dealerId: string | null = null;
+      if (userType === 'portal') {
+        const effective = await getEffectiveOrgAndDealer(supabase, {
+          activeOrgId: activeOrganizationId,
+          userType,
+          activeDealerId: null,
+        });
+        dealerId = effective.dealerId;
+        if (dealerId == null) {
+          if (thisFetchId === fetchIdRef.current) {
+            setContacts([]);
+            setIsPending(false);
+            setHasResolvedOnce(true);
+          }
+          return;
+        }
+      }
 
-      // Primero obtener companies de la organization
-      const { data: orgCompanies } = await supabase
-        .from('Companies')
-        .select('id')
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false);
-
-      const companyIds = (orgCompanies || []).map((c: { id: string }) => c.id);
-
-      // Usar safeSelectContacts que maneja company_id y organization_id
-      const data = await safeSelectContacts(activeOrganizationId, companyIds);
+      const data = await safeSelectContacts(activeOrganizationId, {
+        userType,
+        dealerId,
+        selectedDealerId: userType === 'portal' ? null : activeDealerId,
+      });
       const mapped = data.map(mapToContact);
 
+      if (thisFetchId !== fetchIdRef.current) return;
       if (import.meta.env.DEV) {
         console.log('[useDirectoryContacts] Fetched contacts:', {
           count: mapped.length,
-          companyIds: companyIds.length,
-          sample: mapped[0] || null,
+          userType,
+          dealerId: userType === 'portal' ? dealerId : activeDealerId,
         });
       }
-
       setContacts(mapped);
+      setError(null);
     } catch (err: any) {
+      if (thisFetchId !== fetchIdRef.current) return;
       const errorMessage = err?.message || 'Error loading contacts';
       console.error('[useDirectoryContacts] Error:', errorMessage, err);
       setError(errorMessage);
-      setContacts([]);
+      // Mantener contactos previos en error (no vaciar)
     } finally {
-      setIsLoading(false);
+      if (thisFetchId === fetchIdRef.current) {
+        setIsPending(false);
+        setHasResolvedOnce(true);
+      }
     }
-  }, [enabled, activeOrganizationId, safeSelectContacts, mapToContact]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectContacts, mapToContact]);
 
   /**
    * Get contact by ID
@@ -370,18 +292,9 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     }
 
     try {
-      // SOLO columnas explícitas - no usar genéricas que no existen
-      const explicitOnly = `
-        id, organization_id, company_id, customer_id,
-        contact_title, contact_name, contact_id_number, contact_type,
-        contact_primary_phone, contact_cell_phone, contact_alt_phone, contact_email,
-        contact_street_address, contact_street_address_2, contact_city, contact_state, contact_zip_code, contact_country,
-        deleted, created_at, updated_at
-      `.replace(/\s+/g, ' ').trim();
-
       const { data, error: queryError } = await supabase
         .from('DirectoryContacts')
-        .select(explicitOnly)
+        .select(DIRECTORY_CONTACTS_SELECT)
         .eq('id', id)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
@@ -400,25 +313,28 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
   }, [enabled, activeOrganizationId, mapToContact]);
 
   /**
-   * Create contact (SOLO columnas explícitas)
+   * Create contact — payload mínimo (solo columnas reales). org/dealer vía getEffectiveOrgAndDealer.
    */
   const createContact = useCallback(async (input: CreateContactInput): Promise<DirectoryContact> => {
-    if (!activeOrganizationId) {
-      throw new Error('No active organization');
-    }
-
     try {
-      // Payload SOLO con columnas explícitas
-      // IMPORTANT: organization_id debe SIEMPRE establecerse para que OrganizationUsers puedan ver los contacts
-      // company_id es más específico (para portal users), pero organization_id es necesario para RLS de OrganizationUsers
-      const payload: any = {
-        company_id: input.company_id ?? activeCompanyId ?? null,
-        organization_id: activeOrganizationId, // SIEMPRE establecer organization_id (necesario para RLS de OrganizationUsers)
+      const { orgId, dealerId } = await getEffectiveOrgAndDealer(supabase, {
+        activeOrgId: activeOrganizationId ?? null,
+        userType,
+        activeDealerId: activeDealerId ?? null,
+      });
+
+      if (!orgId) {
+        throw new Error('No hay organización activa. Selecciona una organización o inicia sesión en el portal.');
+      }
+
+      const payload: Record<string, unknown> = {
+        organization_id: orgId,
+        dealer_id: dealerId ?? input.dealer_id ?? null,
         customer_id: input.customer_id || null,
         contact_title: input.contact_title?.trim() || null,
         contact_name: input.contact_name.trim(),
         contact_id_number: input.contact_id_number?.trim() || null,
-        contact_type: input.contact_type, // Ya viene en EN
+        contact_type: input.contact_type,
         contact_primary_phone: input.contact_primary_phone?.trim() || null,
         contact_cell_phone: input.contact_cell_phone?.trim() || null,
         contact_alt_phone: input.contact_alt_phone?.trim() || null,
@@ -432,12 +348,15 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         deleted: false,
       };
 
-      // NO incluir columnas genéricas (name, email, phone, etc.)
+      if (import.meta.env.DEV) {
+        console.log('[useDirectoryContacts] Insert payload', { organization_id: payload.organization_id, dealer_id: payload.dealer_id });
+      }
+
       const { data, error: insertError } = await supabase
         .from('DirectoryContacts')
         .insert(payload)
         .select(`
-          id, organization_id, company_id, customer_id,
+          id, organization_id, dealer_id, customer_id,
           contact_title, contact_name, contact_id_number, contact_type,
           contact_primary_phone, contact_cell_phone, contact_alt_phone, contact_email,
           contact_street_address, contact_street_address_2, contact_city, contact_state, contact_zip_code, contact_country,
@@ -446,25 +365,27 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         .single();
 
       if (insertError) {
+        const isRls = insertError.message?.toLowerCase().includes('row-level security') || insertError.code === '42501';
+        if (isRls) {
+          throw new Error('No tienes permisos para crear contactos en este dealer. Comprueba que tu usuario portal esté vinculado (email coincida).');
+        }
         throw insertError;
       }
 
       const newContact = mapToContact(data);
-
       if (import.meta.env.DEV) {
-        console.log('[useDirectoryContacts] Created contact:', newContact);
+        console.log('[useDirectoryContacts] Created contact:', newContact.id);
       }
-
-      // Refrescar lista
       await fetchContacts();
-
       return newContact;
     } catch (err: any) {
-      const errorMessage = err?.message || 'Error creating contact';
-      console.error('[useDirectoryContacts] Create error:', errorMessage, err);
+      const errorMessage = err?.message ?? 'Error creating contact';
+      if (import.meta.env.DEV) {
+        console.error('[useDirectoryContacts] Create error:', errorMessage, err);
+      }
       throw new Error(errorMessage);
     }
-  }, [enabled, activeOrganizationId, activeCompanyId, fetchContacts, mapToContact]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, fetchContacts, mapToContact]);
 
   /**
    * Update contact (SOLO columnas explícitas)
@@ -473,8 +394,8 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     try {
       const payload: any = {};
       
-      if (input.company_id !== undefined) {
-        payload.company_id = input.company_id || null;
+      if (input.dealer_id !== undefined) {
+        payload.dealer_id = input.dealer_id || null;
       }
       if (input.customer_id !== undefined) {
         payload.customer_id = input.customer_id || null;
@@ -535,7 +456,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         .eq('id', id)
         .eq('deleted', false)
         .select(`
-          id, organization_id, company_id, customer_id,
+          id, organization_id, dealer_id, customer_id,
           contact_title, contact_name, contact_id_number, contact_type,
           contact_primary_phone, contact_cell_phone, contact_alt_phone, contact_email,
           contact_street_address, contact_street_address_2, contact_city, contact_state, contact_zip_code, contact_country,
@@ -565,26 +486,31 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
   }, [enabled, activeOrganizationId, fetchContacts, mapToContact]);
 
   /**
-   * Soft delete contact
+   * Soft delete contact (vía RPC para respetar permisos Dealer; fallback a UPDATE directo)
    */
   const softDeleteContact = useCallback(async (id: string): Promise<void> => {
     try {
-      const { error: updateError } = await supabase
-        .from('DirectoryContacts')
-        .update({ deleted: true })
-        .eq('id', id)
-        .eq('organization_id', activeOrganizationId || '')
-        .eq('deleted', false);
-
-      if (updateError) {
-        throw updateError;
+      const { data, error: rpcError } = await supabase.rpc('soft_delete_directory_contact', {
+        p_contact_id: id,
+      });
+      if (rpcError) {
+        if (rpcError.code === '42883') {
+          const { error: updateError } = await supabase
+            .from('DirectoryContacts')
+            .update({ deleted: true })
+            .eq('id', id)
+            .eq('organization_id', activeOrganizationId || '')
+            .eq('deleted', false);
+          if (updateError) throw updateError;
+        } else throw rpcError;
+      } else if (data !== 1 && data != null) {
+        throw new Error('Contact not found or no permission to delete');
       }
 
       if (import.meta.env.DEV) {
         console.log('[useDirectoryContacts] Soft deleted contact:', id);
       }
 
-      // Refrescar lista
       await fetchContacts();
     } catch (err: any) {
       const errorMessage = err?.message || 'Error deleting contact';
@@ -600,20 +526,37 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     fetchContacts();
   }, [fetchContacts]);
 
-  // Auto-fetch cuando cambia organization (siempre declarado, no condicional)
+  // Al cambiar dealer u org: limpiar lista y marcar como no resuelto para no mostrar datos de otro scope.
   useEffect(() => {
-    if (enabled) {
-      fetchContacts();
-    } else {
+    if (!enabled) return;
+    setHasResolvedOnce(false);
+    setContacts([]);
+    setError(null);
+  }, [activeDealerId, activeOrganizationId, enabled]);
+
+  // Auto-fetch cuando cambia organization (siempre declarado, no condicional).
+  // Org user: no hacer el primer fetch hasta que ActingAs haya hidratado (evita flash con todos los contactos).
+  useEffect(() => {
+    if (!enabled) {
       setContacts([]);
-      setIsLoading(false);
+      setIsPending(false);
+      setHasResolvedOnce(false);
       setError(null);
+      return;
     }
-  }, [fetchContacts, enabled]);
+    if (userType === 'internal' && !hasHydrated) {
+      return;
+    }
+    fetchContacts();
+  }, [fetchContacts, enabled, userType, hasHydrated]);
 
   return {
     contacts,
-    isLoading,
+    isLoading: isPending,
+    isPending,
+    isInitialLoading,
+    isScopeReady,
+    hasResolvedOnce,
     error,
     fetchContacts,
     getContactById,

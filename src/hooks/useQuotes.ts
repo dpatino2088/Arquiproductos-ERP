@@ -1,25 +1,46 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
+import { getAppUsersDisplayNames } from '../lib/appUsersDisplayNames';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { useActiveCompany } from './useActiveCompany';
+import { useActiveDealer } from './useActiveDealer';
+import { useAccessContext } from './useAccessContext';
+import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 import { Quote, QuoteLine } from '../types/catalog';
+import type { QuoteStatus } from '../types/catalog';
+
+/** Shape devuelto por useQuotes para la lista (una sola fuente de verdad: dealer + enriquecimiento) */
+export interface QuoteListItem {
+  id: string;
+  quote_no: string;
+  status: QuoteStatus;
+  customer_id: string | null;
+  customer_name: string;
+  contact_id: string | null;
+  contact_name: string;
+  total: number;
+  created_at: string;
+  organization_id: string;
+  dealer_id: string | null;
+  /** coalesce(AppUsers.display_name, 'Legacy / Imported') */
+  created_by: string;
+  [key: string]: unknown;
+}
 
 /**
  * Hook principal para obtener quotes
- * IMPORTANTE: Filtra por organization_id Y company_id (si está disponible)
- * 
- * @param companyId - Opcional: si se proporciona, filtra solo por ese company_id específico
+ * IMPORTANTE: Filtra por organization_id Y dealer_id (effectiveDealerId desde useActiveDealer cuando SuperAdmin "acting as dealer")
+ *
+ * @param dealerId - Opcional: si se proporciona, filtra solo por ese dealer_id específico
  */
-export function useQuotes(companyId?: string | null) {
-  const [quotes, setQuotes] = useState<Quote[]>([]);
+export function useQuotes(dealerId?: string | null) {
+  const [quotes, setQuotes] = useState<QuoteListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeCompanyId } = useActiveCompany();
-  
-  // Usar companyId proporcionado o el activo del hook
-  const effectiveCompanyId = companyId ?? activeCompanyId;
+  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { userType } = useAccessContext();
+  const selectedDealerId = dealerId ?? activeDealerId;
 
   // ✅ OPTIMIZACIÓN: Refetch simplificado - solo incrementar trigger y dejar que useEffect maneje todo
   const refetch = useCallback(() => {
@@ -37,13 +58,15 @@ export function useQuotes(companyId?: string | null) {
   }, []);
 
   useEffect(() => {
+    if (userType === 'internal' && !hasHydrated) return;
     let isMounted = true; // ✅ Flag para evitar actualizaciones de estado si el componente se desmonta
     
     async function fetchQuotes() {
       if (import.meta.env.DEV) {
         console.log('[useQuotes] fetchQuotes triggered', {
           activeOrganizationId,
-          effectiveCompanyId,
+          userType,
+          selectedDealerId,
           refreshTrigger,
         });
       }
@@ -57,32 +80,44 @@ export function useQuotes(companyId?: string | null) {
         return;
       }
 
+      if (isMounted) {
+        setQuotes([]);
+        setLoading(true);
+        setError(null);
+      }
+
       try {
-        if (isMounted) {
-          setLoading(true);
-          setError(null);
+        let effectiveDealerId: string | null = null;
+        if (userType === 'portal') {
+          const effective = await getEffectiveOrgAndDealer(supabase, {
+            activeOrgId: activeOrganizationId,
+            userType,
+            activeDealerId: null,
+          });
+          effectiveDealerId = effective.dealerId;
+          if (effectiveDealerId == null) {
+            if (isMounted) {
+              setQuotes([]);
+              setLoading(false);
+            }
+            return;
+          }
+        } else {
+          effectiveDealerId = selectedDealerId ?? null;
         }
 
-        // Query: filtrar por organization_id Y company_id (si está disponible)
+        // Query: misma regla que Directory — portal = dealer_id obligatorio; org = selectedDealerId o todos
         let query = supabase
           .from('Quotes')
-          .select('*')
+          .select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id')
           .eq('organization_id', activeOrganizationId)
-          // ✅ Treat NULL as not deleted (some rows may have deleted = NULL)
           .or('deleted.is.false,deleted.is.null');
 
-        // Filtrar por company_id si está disponible
-        if (effectiveCompanyId) {
-          query = query.eq('company_id', effectiveCompanyId);
-        } else {
-          // Warning en DEV si hay quotes sin company_id
-          if (import.meta.env.DEV) {
-            console.warn('[useQuotes] No company_id provided. Quotes without company_id will be included.');
-          }
+        if (effectiveDealerId) {
+          query = query.eq('dealer_id', effectiveDealerId);
         }
 
         const { data: quotesData, error: quotesError } = await query
-          .order('updated_at', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false });
 
         if (quotesError) {
@@ -102,27 +137,51 @@ export function useQuotes(companyId?: string | null) {
           return;
         }
 
-        // Obtener customer names por separado
+        // created_by: batched + cached AppUsers (internal ERP uses created_by_user_id).
+        // Verificación manual: ver docs/CREATED_BY_VERIFICATION.md (query Quote + AppUsers).
+        const createdByUserIds = quotesData
+          .map((q: any) => q.created_by_user_id)
+          .filter((id: any): id is string => !!id);
+        const appUsersMap = await getAppUsersDisplayNames(createdByUserIds);
+
+        // Obtener customer names y contact names por separado (para lista única fuente de verdad)
         const customerIds = [...new Set(
           quotesData
             .map((q: any) => q.customer_id)
             .filter((id: any): id is string => !!id)
         )];
+        const contactIds = [...new Set(
+          quotesData
+            .map((q: any) => q.contact_id)
+            .filter((id: any): id is string => !!id)
+        )];
 
-        let customersMap = new Map<string, { id: string; customer_name: string }>();
-        if (customerIds.length > 0) {
-          const { data: customersData } = await supabase
-            .from('DirectoryCustomers')
-            .select('id, customer_name')
-            .in('id', customerIds)
-            .or('deleted.is.false,deleted.is.null');
+        let customersMap = new Map<string, string>();
+        let contactsMap = new Map<string, string>();
 
-          if (customersData) {
-            customersMap = new Map(
-            customersData.map((c: any) => [c.id, { id: c.id, customer_name: c.customer_name }])
-            );
-          }
-        }
+        const [customersRes, contactsRes] = await Promise.all([
+          customerIds.length > 0
+            ? supabase
+                .from('DirectoryCustomers')
+                .select('id, customer_name')
+                .in('id', customerIds)
+                .or('deleted.is.false,deleted.is.null')
+            : Promise.resolve({ data: [] }),
+          contactIds.length > 0
+            ? supabase
+                .from('DirectoryContacts')
+                .select('id, contact_name')
+                .in('id', contactIds)
+                .eq('deleted', false)
+            : Promise.resolve({ data: [] }),
+        ]);
+
+        (customersRes.data || []).forEach((c: any) => {
+          customersMap.set(c.id, c.customer_name ?? 'Sin nombre');
+        });
+        (contactsRes.data || []).forEach((c: any) => {
+          contactsMap.set(c.id, (c.contact_name ?? '').toString().trim() || 'Sin nombre');
+        });
 
         // Obtener QuoteLines por separado
         // Note: QuoteLines does NOT have a 'deleted' column in the schema
@@ -150,19 +209,30 @@ export function useQuotes(companyId?: string | null) {
           }
         }
 
-        // Enriquecer quotes con datos relacionados
-        const enrichedQuotes = quotesData.map((quote: any) => ({
-          ...quote,
-          DirectoryCustomers: quote.customer_id ? customersMap.get(quote.customer_id) || null : null,
-          QuoteLines: quoteLinesMap.get(quote.id) || []
-        }));
+        // Enriquecer quotes con datos para lista (una sola fuente de verdad: dealer + customer_name, contact_name, total, created_by)
+        const enrichedQuotes = quotesData.map((quote: any) => {
+          const lines = quoteLinesMap.get(quote.id) || [];
+          const total = lines.reduce((sum: number, l: any) => sum + Number(l.msrp ?? 0), 0);
+          const createdBy = quote.created_by_user_id
+            ? (appUsersMap.get(quote.created_by_user_id) ?? 'Legacy / Imported')
+            : 'Legacy / Imported';
+          return {
+            ...quote,
+            DirectoryCustomers: quote.customer_id ? { id: quote.customer_id, customer_name: customersMap.get(quote.customer_id) || 'Cliente no encontrado' } : null,
+            QuoteLines: lines,
+            customer_name: quote.customer_id ? (customersMap.get(quote.customer_id) || 'Cliente no encontrado') : 'Consumidor Final',
+            contact_name: quote.contact_id ? (contactsMap.get(quote.contact_id) || 'Contacto no encontrado') : '-',
+            total,
+            created_by: createdBy,
+          };
+        });
 
         if (import.meta.env.DEV) {
           console.log('[useQuotes] Setting enriched quotes:', enrichedQuotes.length);
         }
 
         if (isMounted) {
-          setQuotes(enrichedQuotes as Quote[]);
+          setQuotes(enrichedQuotes as QuoteListItem[]);
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading quotes';
@@ -190,7 +260,7 @@ export function useQuotes(companyId?: string | null) {
     return () => {
       isMounted = false;
     };
-  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
+  }, [activeOrganizationId, selectedDealerId, userType, refreshTrigger, hasHydrated]);
 
   return { quotes, loading, error, refetch };
 }
@@ -200,24 +270,24 @@ export function useQuotes(companyId?: string | null) {
  */
 /**
  * Hook para obtener quotes aprobadas con progreso
- * IMPORTANTE: Filtra por organization_id Y company_id (si está disponible)
+ * IMPORTANTE: Filtra por organization_id Y dealer_id (si está disponible)
  */
-export function useApprovedQuotesWithProgress(companyId?: string | null) {
+export function useApprovedQuotesWithProgress(dealerId?: string | null) {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeCompanyId } = useActiveCompany();
-  
-  // Usar companyId proporcionado o el activo del hook
-  const effectiveCompanyId = companyId ?? activeCompanyId;
+  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { userType } = useAccessContext();
+  const selectedDealerId = dealerId ?? activeDealerId;
 
   const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
   useEffect(() => {
+    if (userType === 'internal' && !hasHydrated) return;
     async function fetchApprovedQuotes() {
       if (!activeOrganizationId) {
         setLoading(false);
@@ -226,11 +296,29 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
         return;
       }
 
-      try {
-        setLoading(true);
-        setError(null);
+      setQuotes([]);
+      setLoading(true);
+      setError(null);
 
-        // Query: filtrar por organization_id, status='approved' Y company_id (si está disponible)
+      try {
+        let effectiveDealerId: string | null = null;
+        if (userType === 'portal') {
+          const effective = await getEffectiveOrgAndDealer(supabase, {
+            activeOrgId: activeOrganizationId,
+            userType,
+            activeDealerId: null,
+          });
+          effectiveDealerId = effective.dealerId;
+          if (effectiveDealerId == null) {
+            setQuotes([]);
+            setLoading(false);
+            return;
+          }
+        } else {
+          effectiveDealerId = selectedDealerId ?? null;
+        }
+
+        // Query: misma regla que Directory — portal = dealer_id obligatorio; org = selectedDealerId o todos
         let query = supabase
           .from('Quotes')
           .select('*')
@@ -238,9 +326,8 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
           .eq('status', 'approved')
           .or('deleted.is.false,deleted.is.null');
 
-        // Filtrar por company_id si está disponible
-        if (effectiveCompanyId) {
-          query = query.eq('company_id', effectiveCompanyId);
+        if (effectiveDealerId) {
+          query = query.eq('dealer_id', effectiveDealerId);
         }
 
         const { data: quotesData, error: quotesError } = await query
@@ -357,7 +444,7 @@ export function useApprovedQuotesWithProgress(companyId?: string | null) {
     }
 
     fetchApprovedQuotes();
-  }, [activeOrganizationId, effectiveCompanyId, refreshTrigger]);
+  }, [activeOrganizationId, selectedDealerId, userType, refreshTrigger, hasHydrated]);
 
   return { quotes, loading, error, refetch };
 }
@@ -396,6 +483,7 @@ export function useQuoteLines(quoteId: string | null) {
           .from('QuoteLines')
           .select('*')
           .eq('quote_id', quoteId)
+          .order('sort_order', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true });
 
         // ✅ OPTIMIZED: Solo log resumen, no datos completos
@@ -414,6 +502,24 @@ export function useQuoteLines(quoteId: string | null) {
         if (!data || data.length === 0) {
           setLines([]);
           return;
+        }
+
+        // Quote + AppUsers (cached) para quote_created_at, quote_no, quote_created_by (Created by del Quote)
+        let quoteCreatedAt: string | null = null;
+        let quoteNo: string | null = null;
+        let quoteCreatedBy = 'Legacy / Imported';
+        const { data: quoteRow } = await supabase
+          .from('Quotes')
+          .select('created_at, quote_no, created_by_user_id')
+          .eq('id', quoteId)
+          .maybeSingle();
+        if (quoteRow) {
+          quoteCreatedAt = quoteRow.created_at ?? null;
+          quoteNo = quoteRow.quote_no ?? null;
+          if (quoteRow.created_by_user_id) {
+            const auMap = await getAppUsersDisplayNames([quoteRow.created_by_user_id]);
+            quoteCreatedBy = auMap.get(quoteRow.created_by_user_id) ?? 'Legacy / Imported';
+          }
         }
 
         const lineIds = data.map((line: any) => line.id);
@@ -502,12 +608,13 @@ export function useQuoteLines(quoteId: string | null) {
           roll_plus_bom_total: number;
           total_msrp: number;
           bom_preview_snapshot: any;
+          config_snapshot: any;
         }
         let configuredProductsMap = new Map<string, ConfiguredProductData>();
         if (configuredProductIds.size > 0) {
           const { data: cpData } = await supabase
             .from('ConfiguredProducts')
-            .select('id, roll_plus_bom_total, total_msrp, bom_preview_snapshot')
+            .select('id, roll_plus_bom_total, total_msrp, bom_preview_snapshot, config_snapshot')
             .in('id', Array.from(configuredProductIds))
             .eq('organization_id', activeOrganizationId)
             .or('deleted.is.false,deleted.is.null');
@@ -518,10 +625,57 @@ export function useQuoteLines(quoteId: string | null) {
                 roll_plus_bom_total: cp.roll_plus_bom_total || 0,
                 total_msrp: cp.total_msrp || 0,
                 bom_preview_snapshot: cp.bom_preview_snapshot || null,
+                config_snapshot: cp.config_snapshot || null,
               }])
             );
           }
         }
+
+        // 4.7. Accessories desde config_snapshot: recoger catalog_item_id de todos los accesorios y cargar CatalogItems
+        const accessoryCatalogItemIds = new Set<string>();
+        configuredProductsMap.forEach((cp: ConfiguredProductData) => {
+          const accessories = cp.config_snapshot?.accessories;
+          if (Array.isArray(accessories)) {
+            accessories.forEach((acc: any) => {
+              const id = acc.id ?? acc.catalog_item_id;
+              if (id) accessoryCatalogItemIds.add(String(id));
+            });
+          }
+        });
+        if (accessoryCatalogItemIds.size > 0) {
+          const ids = Array.from(accessoryCatalogItemIds);
+          const { data: accessoryItems } = await supabase
+            .from('CatalogItems')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure')
+            .in('id', ids)
+            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
+            .eq('is_active', true);
+          if (accessoryItems?.length) {
+            accessoryItems.forEach((item: any) => catalogItemsMap.set(item.id, item));
+          }
+        }
+
+        // 4.8. Rellenar components.accessories desde config_snapshot por línea
+        data.forEach((line: any) => {
+          const cpId = line.configured_product_id || line.metadata?.configured_product_id;
+          const cp = cpId ? configuredProductsMap.get(cpId) : null;
+          const accessories = cp?.config_snapshot?.accessories;
+          const lineComponents = componentsByLineId.get(line.id);
+          if (lineComponents && Array.isArray(accessories) && accessories.length > 0) {
+            lineComponents.accessories = accessories.map((acc: any, idx: number) => {
+              const catalogItemId = acc.id ?? acc.catalog_item_id;
+              const catalogItem = catalogItemId ? catalogItemsMap.get(catalogItemId) : null;
+              return {
+                id: `${line.id}-acc-${idx}`,
+                catalog_item_id: catalogItemId ?? null,
+                component_role: 'accessory',
+                qty: acc.qty ?? 1,
+                CatalogItems: catalogItem || null,
+                item_name: acc.name ?? catalogItem?.name ?? catalogItem?.sku ?? null,
+              };
+            });
+          }
+        });
 
         // 5. Enriquecer líneas con todos los datos
         const enrichedLines = data.map((line: any) => {
@@ -530,41 +684,48 @@ export function useQuoteLines(quoteId: string | null) {
           const fabricItem = fabric?.CatalogItems || null;
           const options = optionsByLineId.get(line.id) || {};
           
-          // ✅ SNAPSHOT SOURCE OF TRUTH: Prioridad para precios:
-          // 1. bom_preview_snapshot.totals.total_msrp (ConfiguredProduct snapshot)
-          // 2. QuoteLines.msrp (snapshot guardado)
-          // 3. Suma de snapshots individuales (fallback)
+          // ✅ UI solo lee del backend: QuoteLines.msrp = total de línea, QuoteLines.unit_msrp = precio unitario.
+          // No sobrescribir con snapshot/ConfiguredProduct cuando ya hay valor en la línea (evita doble qty y fuentes distintas).
           const cpId = line.configured_product_id || line.metadata?.configured_product_id;
           const configuredProduct = cpId ? configuredProductsMap.get(cpId) : null;
           const snapshot = configuredProduct?.bom_preview_snapshot;
           const snapshotTotals = snapshot?.version === '1' ? snapshot?.totals : null;
           
-          // ✅ MSRP: prioridad snapshot → ConfiguredProduct → QuoteLine → snapshots
-          let finalMsrp = line.msrp || 0;
-          if (snapshotTotals?.total_msrp && snapshotTotals.total_msrp > 0) {
-            finalMsrp = snapshotTotals.total_msrp;
-          } else if (snapshotTotals && (finalMsrp === 0 || !finalMsrp)) {
-            // Snapshot existe pero total_msrp es 0 o no persistido: calcular desde totals (igual que el breakdown)
-            const fromTotals =
-              (Number(snapshotTotals.roll_msrp_total) || 0) +
-              (Number(snapshotTotals.bom_total) || 0) +
-              (Number(snapshotTotals.labor_amount) || 0) +
-              (Number(snapshotTotals.accessories_total) || 0);
-            if (fromTotals > 0) finalMsrp = fromTotals;
-          }
-          if ((!finalMsrp || finalMsrp === 0) && configuredProduct?.total_msrp && configuredProduct.total_msrp > 0) {
-            finalMsrp = configuredProduct.total_msrp;
-          } else if ((!finalMsrp || finalMsrp === 0) && configuredProduct?.roll_plus_bom_total && configuredProduct.roll_plus_bom_total > 0) {
-            finalMsrp = configuredProduct.roll_plus_bom_total;
-          }
-          if (!finalMsrp || finalMsrp === 0) {
-            finalMsrp = (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
+          const hasLineMsrp = line.msrp != null && Number(line.msrp) > 0;
+          let finalMsrp: number;
+          let finalUnitMsrp: number | null = line.unit_msrp != null ? Number(line.unit_msrp) : null;
+          if (hasLineMsrp) {
+            finalMsrp = Number(line.msrp);
+            if (finalUnitMsrp == null) {
+              const qty = line.quantity ?? line.qty ?? 1;
+              finalUnitMsrp = qty > 0 ? finalMsrp / qty : finalMsrp;
+            }
+          } else {
+            if (snapshotTotals?.total_msrp && snapshotTotals.total_msrp > 0) {
+              finalMsrp = Number(snapshotTotals.total_msrp);
+            } else if (snapshotTotals) {
+              finalMsrp =
+                (Number(snapshotTotals.roll_msrp_total) || 0) +
+                (Number(snapshotTotals.bom_total) || 0) +
+                (Number(snapshotTotals.labor_amount) || 0) +
+                (Number(snapshotTotals.accessories_total) || 0);
+            } else if (configuredProduct?.total_msrp && configuredProduct.total_msrp > 0) {
+              finalMsrp = configuredProduct.total_msrp;
+            } else if (configuredProduct?.roll_plus_bom_total && configuredProduct.roll_plus_bom_total > 0) {
+              finalMsrp = configuredProduct.roll_plus_bom_total;
+            } else {
+              finalMsrp = (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
+            }
+            if (finalUnitMsrp == null) {
+              const qty = line.quantity ?? line.qty ?? 1;
+              finalUnitMsrp = qty > 0 ? finalMsrp / qty : finalMsrp;
+            }
           }
           
           const enriched = {
             ...line,
-            // ✅ MSRP desde snapshot (fuente de verdad)
             msrp: finalMsrp,
+            unit_msrp: finalUnitMsrp,
             // Usar snapshots de costos si están disponibles
             total_cost: line.total_cost || ((line.roll_cost_snapshot || 0) + (line.bom_cost_snapshot || 0)),
             // Datos de QuoteLines (si existen)
@@ -580,6 +741,10 @@ export function useQuoteLines(quoteId: string | null) {
             // ✅ NEW: Incluir datos del ConfiguredProduct para debug/UI
             ConfiguredProduct: configuredProduct || null,
             bom_preview_snapshot: snapshot || null,
+            // Created by = del Quote (QuoteLines no tiene created_by_user_id)
+            quote_created_at: quoteCreatedAt,
+            quote_no: quoteNo,
+            quote_created_by: quoteCreatedBy,
           };
 
         // ✅ DEBUG: Log snapshot source para verificar prioridad de precios
@@ -644,44 +809,44 @@ export function useCreateQuote() {
   const [isCreating, setIsCreating] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
 
-  const createQuote = async (quoteData: Omit<Quote, 'id' | 'organization_id' | 'company_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'> & { company_id?: string | null }) => {
+  const createQuote = async (quoteData: Omit<Quote, 'id' | 'organization_id' | 'dealer_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'> & { dealer_id?: string | null }) => {
     if (!activeOrganizationId) {
       throw new Error('No organization selected');
     }
 
     setIsCreating(true);
     try {
-      let finalCompanyId = quoteData.company_id;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
 
-      // If company_id is not provided, get it from the current portal user
-      if (!finalCompanyId) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          throw new Error('User not authenticated');
+      let finalDealerId = quoteData.dealer_id;
+      let createdByPortalUserId: string | null = null;
+      let createdByUserId: string | null = null;
+
+      const { data: portalUser, error: portalError } = await supabase
+        .from('DealerUsers')
+        .select('id, dealer_id')
+        .eq('user_id', user.id)
+        .or('deleted.is.false,deleted.is.null')
+        .in('status', ['active', 'invited'])
+        .maybeSingle();
+
+      if (!portalError && portalUser) {
+        createdByPortalUserId = portalUser.id;
+        if (!finalDealerId && portalUser.dealer_id) {
+          finalDealerId = portalUser.dealer_id;
+          if (import.meta.env.DEV) {
+            console.log('[useCreateQuote] Auto-detected dealer_id from Dealer User:', finalDealerId);
+          }
         }
+      } else {
+        createdByUserId = user.id;
+      }
 
-        // Get portal user's company_id
-        const { data: portalUser, error: portalError } = await supabase
-          .from('CompanyPortalUsers')
-          .select('company_id')
-          .eq('user_id', user.id)
-          .or('deleted.is.false,deleted.is.null')
-          .in('status', ['active', 'invited'])
-          .maybeSingle();
-
-        if (portalError) {
-          console.error('Error getting portal user company:', portalError);
-          throw new Error('Unable to determine company. Please ensure you are logged in as a portal user.');
-        }
-
-        if (!portalUser?.company_id) {
-          throw new Error('company_id is required. Unable to determine your company. Please contact support.');
-        }
-
-        finalCompanyId = portalUser.company_id;
-        if (import.meta.env.DEV) {
-          console.log('[useCreateQuote] Auto-detected company_id from portal user:', finalCompanyId);
-        }
+      if (!finalDealerId && quoteData.dealer_id) {
+        finalDealerId = quoteData.dealer_id;
       }
 
       const { data, error } = await supabase
@@ -689,7 +854,9 @@ export function useCreateQuote() {
         .insert({
           ...quoteData,
           organization_id: activeOrganizationId,
-          company_id: finalCompanyId, // Auto-obtained from portal user if not provided
+          dealer_id: finalDealerId ?? null,
+          created_by_user_id: createdByUserId,
+          created_by_portal_user_id: createdByPortalUserId,
         })
         .select()
         .single();

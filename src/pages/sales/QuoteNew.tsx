@@ -3,7 +3,7 @@
  * Clean implementation from scratch
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,22 +12,27 @@ import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
-import { Plus, Edit, Trash2, X, Download } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText } from 'lucide-react';
+import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
 import ProductConfigurator from './ProductConfigurator';
 import { ProductConfig } from './product-config/types';
-import { normalizeConfiguratorConfig } from './product-config/config-contract';
+import { normalizeConfiguratorConfig, normalizeConfig } from './product-config/config-contract';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { generateQuotePDF } from '../../lib/pdf/generateQuotePDF';
+import { generateQuotePDF, type PDFVariant } from '../../lib/pdf/generateQuotePDF';
 import { useCostSettings } from '../../hooks/useCosts';
-import { calculateQuoteLinePrice } from '../../lib/pricing';
+import { useDealerTiers } from '../../hooks/useDealerTiers';
+import { calculateQuoteLinePrice, getDealerTierDiscountPct } from '../../lib/pricing';
 import { createQuoteLineFromConfiguredProduct } from '../../lib/quotes/createQuoteLineFromConfiguredProduct';
 import { finalizeQuoteLineFromConfiguredProduct } from '../../lib/quotes/finalizeQuoteLineFromConfiguredProduct';
 import { commitConfiguredProduct } from '../../lib/quotes/commitConfiguredProductToQuoteLine';
-import { recalculateConfiguredProductTotals } from '../../lib/bom/createConfiguredProductPreview';
+import { getConfigFromQuoteLine } from '../../lib/quotes/getConfigFromQuoteLine';
+import { createConfiguredProductPreview, recalculateConfiguredProductTotals } from '../../lib/bom/createConfiguredProductPreview';
+import DimensionsStackView from '../../components/DimensionsStackView';
 
 // ====================================================
 // UTILS: Error Serialization (Safe)
@@ -148,6 +153,62 @@ async function resolveProductTypeId(
   }
 
   return null;
+}
+
+/** Build config_snapshot from productConfig for create_configured_product_and_bom_preview (EDIT SAVE). */
+function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string, any> {
+  const configAny = productConfig;
+  const finalNormalizedConfig = normalizeConfig(productConfig as any) as any;
+  const panelsList = Array.isArray(configAny.panels) ? configAny.panels : (configAny.panels ? [configAny.panels] : []);
+  const panelCount = configAny.measurements?.panel_count ?? (panelsList.length || 1);
+  const widthTotalMm = configAny.measurements?.width_total_mm ?? panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0);
+  const measurements = configAny.measurements ?? {
+    height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : configAny.height_mm ?? null,
+    width_total_mm: widthTotalMm,
+    panel_count: panelCount,
+    panels: (panelsList.length ? panelsList : [{ index: 1, width_mm: configAny.width_mm || 0 }]).map((p: any, i: number) => ({ index: i + 1, width_mm: p?.width_mm ?? 0 })),
+    is_interconnected: panelCount > 1,
+  };
+  const widthMmForBom = panelCount > 1 ? widthTotalMm : (panelsList[0]?.width_mm ?? configAny.width_mm ?? null);
+  const pickSku = (cfg: any, keys: string[]): string | null => {
+    for (const k of keys) {
+      const v = cfg?.[k];
+      if (typeof v === 'string' && v.trim().length > 0) return v.trim();
+    }
+    return null;
+  };
+  return {
+    ...finalNormalizedConfig,
+    width_mm: widthMmForBom ?? (finalNormalizedConfig.width_m ? finalNormalizedConfig.width_m * 1000 : null),
+    height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : (measurements.height_mm ?? configAny.height_mm ?? null),
+    measurements,
+    hardware_color: (() => {
+      const color = finalNormalizedConfig.hardware_color || configAny.hardwareColor || configAny.operatingSystemColor;
+      if (!color) return null;
+      return String(color).charAt(0).toUpperCase() + String(color).slice(1).toLowerCase();
+    })(),
+    bottom_bar_item_id: configAny.bottom_bar_item_id || null,
+    bottom_bar_sku: pickSku(configAny, ['bottom_bar_sku', 'bottomBarSku', 'bottom_bar']) || null,
+    headbox_item_id: (configAny.headbox_item_id === 'NONE' ? null : configAny.headbox_item_id) || null,
+    headbox_sku: configAny.headbox_sku ? String(configAny.headbox_sku).trim() : null,
+    side_channel_item_id: (configAny.side_channel_item_id === 'NONE' ? null : configAny.side_channel_item_id) || null,
+    side_channel_sku: configAny.side_channel_sku ? String(configAny.side_channel_sku).trim() : null,
+    bottom_channel_item_id: (configAny.bottom_channel_item_id === 'NONE' ? null : configAny.bottom_channel_item_id) || null,
+    bottom_channel_sku: configAny.bottom_channel_sku ? String(configAny.bottom_channel_sku).trim() : null,
+    motor_item_id: configAny.motor_item_id || null,
+    motor_sku: configAny.motor_sku ? String(configAny.motor_sku).trim() : null,
+    drive_item_id: configAny.drive_item_id || null,
+    drive_sku: configAny.drive_sku ? String(configAny.drive_sku).trim() : null,
+    tube_item_id: configAny.tube_item_id || null,
+    tube_sku: pickSku(configAny, ['tube_sku', 'tubeSku', 'tube_type', 'tubeType']) || null,
+    operating_type: configAny.operation_type || configAny.drive_type || null,
+    roll_catalog_item_id: finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId || null,
+    quantity: finalNormalizedConfig.quantity || 1,
+    fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
+    installationType: configAny.installationType ?? configAny.installation_type ?? null,
+    installationLocation: configAny.installationLocation ?? configAny.installation_location ?? null,
+    accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
+  };
 }
 
 // ====================================================
@@ -331,19 +392,21 @@ const CURRENCY_OPTIONS = [
   { value: 'CAD', label: 'CAD - Canadian Dollar' },
 ] as const;
 
-// Schema for Quote - customer_id is now optional
+// Schema for Quote - customer_id optional; description and po_number for Dealer
 const quoteSchema = z.object({
   quote_no: z.string().min(1, 'Quote number is required'),
   customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
   status: z.enum(['draft', 'sent', 'approved', 'rejected']),
   currency: z.string().min(1, 'Currency is required'),
-  notes: z.string().optional(),
+  description: z.string().optional(),
+  po_number: z.string().optional(),
 });
 
 type QuoteFormValues = z.infer<typeof quoteSchema>;
 
 interface Customer {
   id: string;
+  organization_id: string;
   customer_name: string;
   customer_type_name?: string | null; // VIP, Partner, Reseller, Distributor
   primary_contact_id?: string | null;
@@ -383,6 +446,143 @@ interface QuoteLineWithRelations {
   CatalogItems?: { id: string; item_name: string; sku: string; uom: string } | null;
 }
 
+function CreateProposalButton({ quoteId }: { quoteId: string }) {
+  const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    try {
+      const result = await createProposalFromQuote(quoteId);
+      if ('error' in result) {
+        useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: result.error });
+        return;
+      }
+      useUIStore.getState().addNotification({ type: 'success', title: 'Proposal created', message: 'Redirecting...' });
+      router.navigate(`/sales/proposals/${result.proposalId}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {proposals.length > 0 && (
+        <span className="text-xs text-gray-500">
+          {proposals.length} proposal{proposals.length !== 1 ? 's' : ''}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={handleCreate}
+        disabled={creating || loading}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
+      >
+        <FileText className="w-4 h-4" />
+        {proposals.length > 0 ? 'Create New Version' : 'Create Proposal'}
+      </button>
+    </div>
+  );
+}
+
+/** Proposals for this Quote — lista y crear, dentro de la página del Quote */
+function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
+  const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
+  const [creating, setCreating] = useState(false);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    try {
+      const result = await createProposalFromQuote(quoteId);
+      if ('error' in result) {
+        useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: result.error });
+        return;
+      }
+      refetch();
+      useUIStore.getState().addNotification({ type: 'success', title: 'Proposal created', message: 'Opening...' });
+      router.navigate(`/sales/proposals/${result.proposalId}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const formatMoney = (amount: number | null | undefined, currency = 'USD') =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount ?? 0);
+
+  const formatDate = (s: string | null | undefined) => {
+    if (!s) return '—';
+    try {
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+    } catch {
+      return '—';
+    }
+  };
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Proposals for this Quote</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {loading ? 'Loading...' : `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''}`}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={creating || loading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
+        >
+          <FileText className="w-4 h-4" />
+          {proposals.length > 0 ? 'Create New Version' : 'Create Proposal'}
+        </button>
+      </div>
+      {loading ? (
+        <div className="py-8 text-center text-gray-500 text-sm">Loading proposals...</div>
+      ) : proposals.length === 0 ? (
+        <div className="py-8 text-center text-gray-500 text-sm border border-dashed border-gray-200 rounded-lg">
+          No proposals yet. Create one to send to the customer.
+        </div>
+      ) : (
+        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="py-2.5 px-4 text-left font-medium text-gray-700">Proposal No</th>
+                <th className="py-2.5 px-4 text-left font-medium text-gray-700">Status</th>
+                <th className="py-2.5 px-4 text-right font-medium text-gray-700">Total</th>
+                <th className="py-2.5 px-4 text-left font-medium text-gray-700">Date</th>
+                <th className="py-2.5 px-4 text-right font-medium text-gray-700 w-20">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {proposals.map((p) => (
+                <tr key={p.id} className="hover:bg-gray-50">
+                  <td className="py-2.5 px-4 font-medium text-gray-900">{p.proposal_no ?? p.id.slice(0, 8)}</td>
+                  <td className="py-2.5 px-4 text-gray-700 capitalize">{p.status}</td>
+                  <td className="py-2.5 px-4 text-right text-gray-900">{formatMoney(p.total_amount)}</td>
+                  <td className="py-2.5 px-4 text-gray-600">{formatDate(p.created_at)}</td>
+                  <td className="py-2.5 px-4 text-right">
+                    <button
+                      type="button"
+                      onClick={() => router.navigate(`/sales/proposals/${p.id}`)}
+                      className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                      title="View proposal"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function QuoteNew() {
   const { activeOrganizationId } = useOrganizationContext();
   const { userType, isPortal } = useAccessContext();
@@ -390,19 +590,35 @@ export default function QuoteNew() {
   const { updateQuote, isUpdating } = useUpdateQuote();
   const [quoteId, setQuoteId] = useState<string | null>(null);
   const [quoteData, setQuoteData] = useState<any>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const { customers: directoryCustomers } = useDirectoryCustomers({ organizationId: activeOrganizationId });
+  const customers: Customer[] = useMemo(
+    () =>
+      directoryCustomers.map((c) => ({
+        id: c.id,
+        organization_id: c.organization_id,
+        customer_name: c.customer_name,
+        customer_type_name: c.customer_type_name ?? null,
+        primary_contact_id: c.primary_contact_id ?? null,
+      })),
+    [directoryCustomers]
+  );
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContactId, setSelectedContactId] = useState<string>('');
+  const contactsForCustomerIdRef = useRef<string | null>(null);
   const [showConfigurator, setShowConfigurator] = useState(false);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [draggedLineId, setDraggedLineId] = useState<string | null>(null);
+  const [dragOverLineId, setDragOverLineId] = useState<string | null>(null);
+  const [previewLineId, setPreviewLineId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [initialLineConfig, setInitialLineConfig] = useState<ProductConfig | undefined>(undefined);
-  const [companyInfo, setCompanyInfo] = useState<{ id: string; name: string; number: string | null } | null>(null);
+  const [dealerInfo, setDealerInfo] = useState<{ id: string; name: string; number: string | null; dealer_tier_id: string | null } | null>(null);
   const configuratorDraftKey = quoteId ? `productConfiguratorDraft:${quoteId}` : null;
 
   const { lines: quoteLines, loading: loadingLines, refetch: refetchLines } = useQuoteLines(quoteId);
-  const { settings: costSettings } = useCostSettings(); // Get cost settings for pricing calculations
+  const { settings: costSettings } = useCostSettings();
+  const { tiers: dealerTiers } = useDealerTiers();
 
   // Form setup
   const {
@@ -416,9 +632,61 @@ export default function QuoteNew() {
     defaultValues: {
       status: 'draft',
       currency: 'USD',
-      notes: '',
+      description: '',
+      po_number: '',
     },
   });
+
+  const selectedCustomerId = watch('customer_id');
+  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+  const effectiveCustomerIdForContacts = selectedCustomerId || (quoteId && quoteData?.customer_id) || null;
+  const effectiveOrgIdForContacts = selectedCustomer?.organization_id ?? activeOrganizationId;
+
+  // Load contacts for selected customer only (single query by customer_id + organization_id; RLS applies)
+  useEffect(() => {
+    if (!effectiveCustomerIdForContacts || !effectiveOrgIdForContacts) {
+      setContacts([]);
+      contactsForCustomerIdRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('DirectoryContacts')
+        .select('id, contact_name, contact_email, contact_primary_phone, customer_id')
+        .eq('customer_id', effectiveCustomerIdForContacts)
+        .eq('organization_id', effectiveOrgIdForContacts)
+        .eq('deleted', false)
+        .order('contact_name');
+      if (cancelled) return;
+      if (error) {
+        console.error('[QuoteNew] Error loading contacts:', error);
+        setContacts([]);
+        contactsForCustomerIdRef.current = effectiveCustomerIdForContacts;
+        return;
+      }
+      contactsForCustomerIdRef.current = effectiveCustomerIdForContacts;
+      setContacts(
+        (data ?? []).map((row: { id: string; contact_name: string; contact_email?: string | null; contact_primary_phone?: string | null; customer_id?: string | null }) => ({
+          id: row.id,
+          contact_name: row.contact_name ?? '',
+          email: row.contact_email ?? null,
+          primary_phone: row.contact_primary_phone ?? null,
+          customer_id: row.customer_id ?? null,
+        }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCustomerIdForContacts, effectiveOrgIdForContacts]);
+
+  // Clear contact when customer changes and selected contact is not in the new list
+  useEffect(() => {
+    if (!selectedContactId || contactsForCustomerIdRef.current !== effectiveCustomerIdForContacts || contacts.length === 0) return;
+    const found = contacts.some((c) => c.id === selectedContactId);
+    if (!found) setSelectedContactId('');
+  }, [contacts, selectedContactId, effectiveCustomerIdForContacts]);
 
   // Check URL for quote_id (edit mode) or line_id (edit line mode)
   useEffect(() => {
@@ -522,27 +790,28 @@ export default function QuoteNew() {
           const status = data.status as QuoteStatus;
           setValue('status', (status === 'cancelled' ? 'draft' : status) || 'draft');
           setValue('currency', 'USD'); // Default for UI formatting (not stored in DB)
-          setValue('notes', ''); // Not stored in DB - only for UI
+          setValue('description', (data as any).description ?? (data as any).notes ?? '');
+          setValue('po_number', (data as any).po_number ?? '');
           // Load contact_id if it exists (contact_id DOES exist in Quotes table)
           if (data.contact_id) {
             setSelectedContactId(data.contact_id);
           }
           
-          // Load company info from quote.company_id if available
-          if (data.company_id) {
-            const { data: company, error: companyError } = await supabase
-              .from('Companies')
-              .select('id, company_name, company_no')
-              .eq('id', data.company_id)
+          if (data.dealer_id) {
+            const { data: dealer, error: dealerError } = await supabase
+              .from('Dealers')
+              .select('id, dealer_name, dealer_no, dealer_tier_id')
+              .eq('id', data.dealer_id)
               .eq('organization_id', activeOrganizationId)
               .eq('deleted', false)
               .maybeSingle();
 
-            if (!companyError && company) {
-              setCompanyInfo({
-                id: company.id,
-                name: company.company_name || 'Unknown Company',
-                number: company.company_no || null,
+            if (!dealerError && dealer) {
+              setDealerInfo({
+                id: dealer.id,
+                name: dealer.dealer_name || 'Unknown Dealer',
+                number: dealer.dealer_no || null,
+                dealer_tier_id: dealer.dealer_tier_id ?? null,
               });
             }
           }
@@ -560,143 +829,92 @@ export default function QuoteNew() {
     loadQuoteData();
   }, [quoteId, activeOrganizationId, setValue]);
 
-  // Load company info (for ALL users: portal and internal)
+  // Load dealer info (for ALL users: portal and internal)
   // Only load if not already loaded by loadQuoteData (edit mode)
   useEffect(() => {
-    const loadCompanyInfo = async () => {
+    const loadDealerInfo = async () => {
       // Skip if already loaded (e.g., from edit mode loadQuoteData)
-      if (companyInfo) return;
+      if (dealerInfo) return;
       
       if (!activeOrganizationId) {
-        setCompanyInfo(null);
+        setDealerInfo(null);
         return;
       }
 
       try {
         if (isPortal) {
-          // Portal user: get their assigned company
+          // Portal user: get their assigned dealer
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
           const { data: portalUser, error: portalError } = await supabase
-            .from('CompanyPortalUsers')
-            .select('company_id')
+            .from('DealerUsers')
+            .select('dealer_id')
             .eq('user_id', user.id)
             .eq('deleted', false)
             .in('status', ['active', 'invited'])
             .maybeSingle();
 
           if (portalError) {
-            console.error('Error loading portal user company:', portalError);
+            console.error('Error loading portal user dealer:', portalError);
             return;
           }
 
-          if (portalUser?.company_id) {
-            // Fetch full company details
-            const { data: company, error: companyError } = await supabase
-              .from('Companies')
-              .select('id, company_name, company_no')
-              .eq('id', portalUser.company_id)
+          if (portalUser?.dealer_id) {
+            const { data: dealer, error: dealerError } = await supabase
+              .from('Dealers')
+              .select('id, dealer_name, dealer_no, dealer_tier_id')
+              .eq('id', portalUser.dealer_id)
               .eq('organization_id', activeOrganizationId)
               .eq('deleted', false)
               .maybeSingle();
 
-            if (companyError) {
-              console.error('Error loading company:', companyError);
+            if (dealerError) {
+              console.error('Error loading dealer:', dealerError);
               return;
             }
 
-            if (company) {
-              setCompanyInfo({
-                id: company.id,
-                name: company.company_name || 'Unknown Company',
-                number: company.company_no || null,
+            if (dealer) {
+              setDealerInfo({
+                id: dealer.id,
+                name: dealer.dealer_name || 'Unknown Dealer',
+                number: dealer.dealer_no || null,
+                dealer_tier_id: dealer.dealer_tier_id ?? null,
               });
             }
           }
         } else {
-          // Internal user: get first active company from organization
-          const { data: companies, error: companiesError } = await supabase
-            .from('Companies')
-            .select('id, company_name, company_no')
+          const { data: dealers, error: dealersError } = await supabase
+            .from('Dealers')
+            .select('id, dealer_name, dealer_no, dealer_tier_id')
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false)
             .eq('status', 'active')
             .order('created_at', { ascending: true })
             .limit(1);
 
-          if (companiesError) {
-            console.error('Error loading companies:', companiesError);
+          if (dealersError) {
+            console.error('Error loading dealers:', dealersError);
             return;
           }
 
-          if (companies && companies.length > 0) {
-            const firstCompany = companies[0];
-            setCompanyInfo({
-              id: firstCompany.id,
-              name: firstCompany.company_name || 'Unknown Company',
-              number: firstCompany.company_no || null,
+          if (dealers && dealers.length > 0) {
+            const firstDealer = dealers[0];
+            setDealerInfo({
+              id: firstDealer.id,
+              name: firstDealer.dealer_name || 'Unknown Dealer',
+              number: firstDealer.dealer_no || null,
+              dealer_tier_id: firstDealer.dealer_tier_id ?? null,
             });
           }
         }
       } catch (err) {
-        console.error('Error loading company info:', err);
+        console.error('Error loading dealer info:', err);
       }
     };
 
-    loadCompanyInfo();
-  }, [isPortal, activeOrganizationId, companyInfo]);
-
-  // Load customers
-  useEffect(() => {
-    const loadCustomers = async () => {
-      if (!activeOrganizationId) return;
-
-      try {
-        const { data, error } = await supabase
-          .from('DirectoryCustomers')
-          .select('id, customer_name, customer_type_name, primary_contact_id')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('customer_name');
-
-        if (error) throw error;
-        if (data) setCustomers(data);
-      } catch (err) {
-        console.error('Error loading customers:', err);
-      }
-    };
-
-    loadCustomers();
-  }, [activeOrganizationId]);
-
-  // Load contacts for selected customer
-  const selectedCustomerId = watch('customer_id');
-  useEffect(() => {
-    const loadContacts = async () => {
-      if (!selectedCustomerId || !activeOrganizationId) {
-        setContacts([]);
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from('DirectoryContacts')
-          .select('id, contact_name, email, primary_phone, customer_id')
-          .eq('customer_id', selectedCustomerId)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('contact_name');
-
-        if (error) throw error;
-        if (data) setContacts(data);
-      } catch (err) {
-        console.error('Error loading contacts:', err);
-      }
-    };
-
-    loadContacts();
-  }, [selectedCustomerId, activeOrganizationId]);
+    loadDealerInfo();
+  }, [isPortal, activeOrganizationId, dealerInfo]);
 
   // Generate quote number for new quotes only (not when editing)
   useEffect(() => {
@@ -744,14 +962,12 @@ export default function QuoteNew() {
     return () => clearTimeout(timeoutId);
   }, [activeOrganizationId, quoteId, setValue, watch, quoteData]);
 
-  // Calculate totals from List Price (MSRP) × Quantity
-  // ✅ FUENTE ÚNICA: QuoteLines.msrp (ya congelado desde ConfiguredProducts por el RPC)
+  // Calculate totals from quote lines
+  // ✅ QuoteLines.msrp = total de la línea (ya incluye quantity desde ConfiguredProduct). NO multiplicar por qty de nuevo.
   const totals = useMemo(() => {
     const subtotal = quoteLines.reduce((sum, line: any) => {
-      // Usar msrp directamente, fallback a suma de snapshots para líneas legacy
-      const msrp = line.msrp || ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
-      const qty = line.quantity ?? 1;
-      return sum + (msrp * qty);
+      const lineTotal = line.msrp ?? ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+      return sum + lineTotal;
     }, 0);
     const tax = 0; // TODO: Calculate tax if needed
     const total = subtotal + tax;
@@ -795,12 +1011,12 @@ export default function QuoteNew() {
         }
       }
       
-      // ✅ REQUERIR ConfiguredProduct - NO hay flujo legacy
       const configuredProductId = (productConfig as any).configured_product_id;
       const configuredProductTotalsFromConfig = (productConfig as any).configured_product_totals;
       const draftQuoteLineId = (productConfig as any).quote_line_id;
-      
-      if (!configuredProductId) {
+
+      // EDIT: no ConfiguredProduct required (we create CP_NEW on save)
+      if (!editingLineId && !configuredProductId) {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Configuration Error',
@@ -809,7 +1025,6 @@ export default function QuoteNew() {
         return;
       }
 
-      // ✅ GUARDRAIL: No consultar ProductTypes sin organizationId
       if (!activeOrganizationId) {
         console.error("❌ Missing organizationId; cannot resolve ProductTypes.");
         useUIStore.getState().addNotification({
@@ -820,7 +1035,165 @@ export default function QuoteNew() {
         return;
       }
 
-      // ✅ OBTENER ConfiguredProduct desde DB - REQUERIDO
+      let finalLineId: string | undefined = editingLineId ?? undefined;
+      let rollItemId: string | null = null;
+      let catalogItem: any = null;
+      let collectionName: string | null = null;
+      let variantName: string | null = null;
+      let productTypeId: string | null = null;
+      let width_m: number | null = null;
+      let height_m: number | null = null;
+      let quantity = 1;
+      let normalized: ReturnType<typeof normalizeConfiguratorConfig> | undefined;
+      let shouldUseSnapshotService = false;
+
+      // ═══════════════════════════════════════════════════════════════════
+      // EDIT SAVE: same QuoteLine + new ConfiguredProduct (CP_NEW). Branch runs first and returns at end.
+      // ═══════════════════════════════════════════════════════════════════
+      if (editingLineId) {
+        // ═══════════════════════════════════════════════════════
+        // EDIT SAVE — Backend is source of truth for EVERYTHING.
+        // 1. Build snapshot → 2. Backend creates CP_NEW → 3. Read CP_NEW → 4. Copy to QuoteLine → 5. Backend prices it
+        // ═══════════════════════════════════════════════════════
+
+        // 1. Resolve product type
+        const productTypeId = productConfig.productTypeId
+          || (productConfig.productType ? await resolveProductTypeId(supabase, activeOrganizationId, productConfig.productType) : null);
+        if (!productTypeId) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Product Type not found.' });
+          return;
+        }
+
+        // 2. Build snapshot and send to backend (createConfiguredProductPreview)
+        const configSnapshot = buildConfigSnapshotFromProductConfig(productConfig);
+        const previewResult = await createConfiguredProductPreview({
+          organization_id: activeOrganizationId,
+          product_type_id: productTypeId,
+          config_snapshot: configSnapshot,
+          quote_id: quoteId || null,
+        });
+        const cpNewId = previewResult.configured_product_id;
+
+        // 3. Read CP_NEW from backend — this is the ONLY source of truth
+        const { data: cpNew } = await supabase
+          .from('ConfiguredProducts')
+          .select('width_mm, height_mm, roll_catalog_item_id, roll_collection_name, roll_variant_name')
+          .eq('id', cpNewId)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+
+        const width_m = cpNew?.width_mm ? Number(cpNew.width_mm) / 1000 : null;
+        const height_m = cpNew?.height_mm ? Number(cpNew.height_mm) / 1000 : null;
+
+        if (!width_m || !height_m) {
+          console.error('[QuoteNew EDIT] CP_NEW has no dimensions', { cpNewId, cpNew });
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Invalid Dimensions',
+            message: 'Backend returned invalid dimensions. Please check measurements.',
+          });
+          return;
+        }
+
+        // 4. Update QuoteLine — only structural fields, NO pricing
+        const updatePayload: Record<string, any> = {
+          configured_product_id: cpNewId,
+          width_m,
+          height_m,
+          area: productConfig.area ?? null,
+          position: productConfig.position != null ? String(productConfig.position) : null,
+          quantity: productConfig.quantity ?? 1,
+          fabric_drop: (productConfig as any).fabricDrop ?? (productConfig as any).drop_type ?? null,
+          installation_type: (productConfig as any).installationType ?? null,
+          installation_location: (productConfig as any).installationLocation ?? null,
+        };
+        if (cpNew?.roll_catalog_item_id) updatePayload.catalog_item_id = cpNew.roll_catalog_item_id;
+        if (cpNew?.roll_collection_name) updatePayload.collection_name = cpNew.roll_collection_name;
+        if (cpNew?.roll_variant_name) updatePayload.variant_name = cpNew.roll_variant_name;
+
+        const { error: updateError } = await supabase
+          .from('QuoteLines')
+          .update(updatePayload)
+          .eq('id', editingLineId)
+          .eq('organization_id', activeOrganizationId);
+        if (updateError) throw updateError;
+
+        // GARANTÍA: asegurar que la línea apunte SIEMPRE al CP recién creado (evita CP viejo al reabrir Edit).
+        const { error: linkError } = await supabase
+          .from('QuoteLines')
+          .update({ configured_product_id: cpNewId })
+          .eq('id', editingLineId)
+          .eq('organization_id', activeOrganizationId);
+        if (linkError) {
+          if (import.meta.env.DEV) console.error('[QuoteNew EDIT] configured_product_id update failed', linkError);
+          throw linkError;
+        }
+
+        rollItemId = cpNew?.roll_catalog_item_id ?? null;
+        finalLineId = editingLineId;
+
+        // 5. Sync accessories
+        const accessoriesForEdit = (productConfig as any).accessories || [];
+        try {
+          await supabase.from('QuoteLineComponents').update({ deleted: true }).eq('quote_line_id', editingLineId).eq('organization_id', activeOrganizationId).or('source.eq.accessory,component_role.eq.accessory');
+          if (accessoriesForEdit.length > 0) {
+            const accessoryIds = accessoriesForEdit.map((a: any) => a.id).filter(Boolean);
+            if (accessoryIds.length > 0) {
+              const { data: accessoryItems } = await supabase.from('CatalogItems').select('id, item_name, sku, cost_exw, default_margin_pct').in('id', accessoryIds).eq('organization_id', activeOrganizationId).eq('is_active', true);
+              const rows = accessoriesForEdit.map((acc: any) => {
+                const ci = accessoryItems?.find((item: any) => item.id === acc.id);
+                const unitCost = acc.price || ci?.cost_exw || 0;
+                return { organization_id: activeOrganizationId, quote_line_id: editingLineId, catalog_item_id: acc.id, qty: acc.qty || 1, unit_cost_exw: unitCost, source: 'accessory', component_role: 'accessory', uom: (ci as any)?.uom || 'ea' };
+              });
+              if (rows.length > 0) await supabase.from('QuoteLineComponents').insert(rows);
+            }
+          }
+        } catch (e) { if (import.meta.env.DEV) console.warn('Accessories sync error:', e); }
+
+        // 6. Sync pricing from CP_NEW (same source as ADD: commit_configured_product_to_quote_line)
+        try {
+          const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
+            p_quote_line_id: editingLineId,
+          });
+          if (syncErr) {
+            console.error('[QuoteNew EDIT] sync_quote_line_pricing_from_configured_product failed', syncErr);
+            throw syncErr;
+          }
+        } catch (e) {
+          if (import.meta.env.DEV) console.warn('Sync pricing RPC error (non-fatal):', e);
+        }
+
+        // 7. Optional: cost engine for QuoteLineCosts / reporting (do not rely on it for msrp)
+        try { await supabase.rpc('compute_quote_line_cost', { p_quote_line_id: editingLineId }); } catch (_) {}
+
+        // 8. Done — refetch and close
+        useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: 'Quote line updated successfully' });
+        await refetchLines();
+
+        if (import.meta.env.DEV) {
+          const { data: lineAfter } = await supabase.from('QuoteLines').select('id, configured_product_id, msrp, unit_msrp').eq('id', editingLineId).maybeSingle();
+          const cpMatch = lineAfter?.configured_product_id === cpNewId;
+          if (!cpMatch) {
+            console.error('[QuoteNew EDIT] QuoteLine.configured_product_id mismatch after save. Run: select id, configured_product_id from "QuoteLines" where id = \'' + editingLineId + '\'; expected cp.id = ' + cpNewId);
+          } else {
+            console.debug('[QuoteNew EDIT] configured_product_id verified', { quote_line_id: editingLineId, configured_product_id: lineAfter?.configured_product_id });
+          }
+          const { data: cpSnap } = await supabase.from('ConfiguredProducts').select('bom_preview_snapshot').eq('id', cpNewId).maybeSingle();
+          const totals = (cpSnap as any)?.bom_preview_snapshot?.totals;
+          const snapshotTotalMsrp = totals?.total_msrp ?? totals?.roll_msrp_total + totals?.bom_total;
+          console.debug('[QuoteNew EDIT] Pricing check', {
+            quote_line_msrp: lineAfter?.msrp,
+            quote_line_unit_msrp: lineAfter?.unit_msrp,
+            cp_snapshot_total_msrp: snapshotTotalMsrp,
+            match: lineAfter?.msrp != null && snapshotTotalMsrp != null,
+          });
+        }
+
+        setShowConfigurator(false);
+        setEditingLineId(null);
+        return;
+      } else {
+      // ✅ OBTENER ConfiguredProduct desde DB - REQUERIDO (ADD path)
       const { data: configuredProductData, error: cpError } = await supabase
         .from('ConfiguredProducts')
         .select('roll_catalog_item_id, roll_sku, roll_collection_name, roll_variant_name, roll_msrp_total, roll_width, width_mm, height_mm, quantity')
@@ -848,15 +1221,13 @@ export default function QuoteNew() {
         return;
       }
 
-      // Extract data from ConfiguredProduct
       const area = productConfig.area || null;
       const position = productConfig.position || null;
-      const width_m = (configuredProductData.width_mm ? configuredProductData.width_mm / 1000 : null) || (productConfig as any).width_m || null;
-      const height_m = (configuredProductData.height_mm ? configuredProductData.height_mm / 1000 : null) || (productConfig as any).height_m || null;
-      const quantity = configuredProductData.quantity || productConfig.quantity || 1;
+      width_m = (configuredProductData.width_mm ? configuredProductData.width_mm / 1000 : null) || (productConfig as any).width_m || null;
+      height_m = (configuredProductData.height_mm ? configuredProductData.height_mm / 1000 : null) || (productConfig as any).height_m || null;
+      quantity = configuredProductData.quantity || productConfig.quantity || 1;
 
-      // ✅ Obtener roll_catalog_item_id desde ConfiguredProduct
-      const rollItemId: string | null = configuredProductData.roll_catalog_item_id || null;
+      rollItemId = configuredProductData.roll_catalog_item_id || null;
       
       if (import.meta.env.DEV) {
         console.log('[QuoteNew] Loaded ConfiguredProduct data:', {
@@ -868,7 +1239,7 @@ export default function QuoteNew() {
       }
 
       // Obtener CatalogItem y MSRP si hay roll
-      let catalogItem: any = null;
+      catalogItem = null;
       let msrpSaleOut: number | null = null;
       
       if (rollItemId) {
@@ -901,8 +1272,7 @@ export default function QuoteNew() {
       }
 
       // Get product type ID - CRITICAL: Always try to find product_type_id
-      // ✅ (A) Usar función robusta de resolución con normalización y fallbacks
-      const productTypeId = productConfig.productType
+      productTypeId = productConfig.productType
         ? await resolveProductTypeId(supabase, activeOrganizationId, productConfig.productType)
         : null;
 
@@ -968,17 +1338,9 @@ export default function QuoteNew() {
           return;
         }
       }
-      if (rollItemId && catalogItem && (!msrpSaleOut || msrpSaleOut === 0)) {
-        useUIStore.getState().addNotification({
-          type: 'warning',
-          title: 'MSRP Missing',
-          message: `Roll ${catalogItem.sku || rollItemId} has no MSRP. Pricing will be calculated from BOM components only.`,
-        });
-      }
-
       // ✅ Usar datos del ConfiguredProduct (prioridad) o catalogItem
-      const collectionName = configuredProductData.roll_collection_name || catalogItem?.collection_name || null;
-      const variantName = configuredProductData.roll_variant_name || catalogItem?.variant_name || null;
+      collectionName = configuredProductData.roll_collection_name || catalogItem?.collection_name || null;
+      variantName = configuredProductData.roll_variant_name || catalogItem?.variant_name || null;
 
       // Determine measure_basis based on item category
       // Get category code to determine if it's area-based (FABRIC) or linear-based (tube, cassette, etc.)
@@ -1017,10 +1379,8 @@ export default function QuoteNew() {
         computedQty = width_m && height_m ? width_m * height_m : quantity;
       }
 
-      // Get customer type for pricing tier (from quote's customer)
-      const quoteCustomerId = quoteData?.customer_id || watch('customer_id');
-      const quoteCustomer = customers.find(c => c.id === quoteCustomerId);
-      const customerType = quoteCustomer?.customer_type_name || 'VIP'; // Default to VIP if not set
+      // Discount from dealer's tier (DealerTiers: Platinum/Gold/Silver/Bronze)
+      const discountPct = getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers);
       
       // ✅ Verificar si hay ConfiguredProduct
       const hasConfiguredProduct = !!configuredProductId;
@@ -1051,8 +1411,7 @@ export default function QuoteNew() {
       // ✅ Si no hay roll ni ConfiguredProduct, list_unit_price_snapshot = 0
       // El precio de roll se calcula aparte cuando exista
 
-        // Calculate net price for distributor (with tier discounts + margin floor)
-        // Si no hay roll, esto devuelve 0
+        // Calculate net price (dealer tier discount + margin floor)
         const categoryMargin: number | null = null;
       const pricingResult = calculateQuoteLinePrice(
         {
@@ -1065,7 +1424,7 @@ export default function QuoteNew() {
           import_tax_pct: null,
           default_margin_pct: catalogItem?.default_margin_pct || null,
         },
-        customerType,
+        discountPct,
         costSettings || null,
         categoryMargin
       );
@@ -1095,7 +1454,7 @@ export default function QuoteNew() {
         }
 
       // ✅ NORMALIZE CONFIG using new helper
-      const normalized = normalizeConfiguratorConfig(productConfig);
+      normalized = normalizeConfiguratorConfig(productConfig);
       
       // Debug log in development
       if (import.meta.env.DEV) {
@@ -1173,11 +1532,9 @@ export default function QuoteNew() {
         Object.entries(quoteLineData).filter(([key]) => allowedQuoteLineFields.has(key))
       );
 
-      let finalLineId = editingLineId;
+      finalLineId = undefined; // ADD path: set below (RPC result or newLine.id)
 
-      // ✅ NUEVO: Si hay configured_product_id y NO está editando, usar servicio con snapshots
-      // Nota: configuredProductId ya está declarado arriba (línea 787)
-      const shouldUseSnapshotService = configuredProductId && !editingLineId;
+      shouldUseSnapshotService = configuredProductId && !editingLineId;
 
       if (shouldUseSnapshotService) {
         // ═══════════════════════════════════════════════════════════════════
@@ -1215,7 +1572,7 @@ export default function QuoteNew() {
             organization_id: activeOrganizationId,
             quote_id: quoteId!,
             configured_product_id: configuredProductId,
-            company_id: null, // Se hereda del Quote automáticamente
+            dealer_id: null,
             position: productConfig.position != null ? String(productConfig.position) : null,
             area: productConfig.area != null ? String(productConfig.area) : null,
             fabric_drop: (productConfig as any).fabricDrop ?? (productConfig as any).drop_type ?? null,
@@ -1275,21 +1632,6 @@ export default function QuoteNew() {
           });
           return;
         }
-      } else if (editingLineId) {
-        // Update existing line
-        const { error: updateError } = await supabase
-          .from('QuoteLines')
-          .update(sanitizedQuoteLineData)
-          .eq('id', editingLineId)
-          .eq('organization_id', activeOrganizationId);
-
-        if (updateError) throw updateError;
-
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Success',
-          message: 'Quote line updated successfully',
-        });
       } else {
         // Create new line (legacy flow - sin ConfiguredProduct)
         const { data: newLine, error: insertError } = await supabase
@@ -1312,6 +1654,7 @@ export default function QuoteNew() {
           message: 'Quote line added successfully',
         });
       }
+      } // end else (ADD path)
 
       // ✅ Guardar roll como QuoteLineComponent (kind='selection', component_role='fabric')
       if (finalLineId && rollItemId) {
@@ -2269,7 +2612,7 @@ export default function QuoteNew() {
     }
   };
 
-  // Load initial config for editing a line
+  // Load initial config for Edit: usa getConfigFromQuoteLine (CP/snapshot + fallback) para que las cards muestren la selección guardada
   useEffect(() => {
     const loadLineConfig = async () => {
       if (!editingLineId || !quoteId || !activeOrganizationId) {
@@ -2278,250 +2621,25 @@ export default function QuoteNew() {
       }
 
       try {
-        // First, fetch the QuoteLine without embedded relationships (more reliable)
-        const { data: lineData, error } = await supabase
-          .from('QuoteLines')
-          .select('*')
-          .eq('id', editingLineId)
-          .eq('organization_id', activeOrganizationId)
-          .maybeSingle();
+        clearConfiguratorDraft();
 
-        if (error) throw error;
-        if (!lineData) {
+        const config = await getConfigFromQuoteLine({
+          supabase,
+          organizationId: activeOrganizationId,
+          lineId: editingLineId,
+          forEdit: true,
+        });
+        if (!config) {
           setInitialLineConfig(undefined);
           return;
         }
 
-        // Fetch CatalogItem separately (for main product)
-        let catalogItem = null;
-        if (lineData.catalog_item_id) {
-          const { data: catalogItemData } = await supabase
-            .from('CatalogItems')
-            .select('id, collection_name, variant_name, sku, name, item_name')
-            .eq('id', lineData.catalog_item_id)
-            .eq('organization_id', activeOrganizationId)
-            .eq('is_active', true)
-            .maybeSingle();
-          catalogItem = catalogItemData;
-        }
-
-        // Fetch ProductType separately
-        // Try to get product_type_id from lineData, or look it up by product_type string
-        let productType = null;
-        let productTypeId = lineData.product_type_id;
-        
-        if (!productTypeId && lineData.product_type) {
-          // If product_type_id is not stored, try to find it by product_type string
-          // ✅ FIX: Soportar registros globales (organization_id NULL)
-          // ✅ FIX: ProductTypes NO tiene columna "deleted"
-          const { data: productTypeByCode } = await supabase
-            .from('ProductTypes')
-            .select('id, code, name')
-            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
-            .ilike('code', lineData.product_type)
-            .maybeSingle();
-          
-          if (productTypeByCode) {
-            productTypeId = productTypeByCode.id;
-            productType = productTypeByCode;
-          }
-        }
-        
-        if (productTypeId && !productType) {
-          // Fetch ProductType by ID
-          // ✅ FIX: Soportar registros globales (organization_id NULL)
-          // ✅ FIX: ProductTypes NO tiene columna "deleted"
-          const { data: productTypeData } = await supabase
-            .from('ProductTypes')
-            .select('id, code, name')
-            .eq('id', productTypeId)
-            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
-            .maybeSingle();
-          productType = productTypeData;
-        }
-
-        // Load accessories (QuoteLineComponents eliminada; usar [] si error)
-        const accRes = await supabase.from('QuoteLineComponents').select('id, catalog_item_id, qty, unit_cost_exw, source, component_role').eq('quote_line_id', editingLineId).eq('deleted', false).eq('organization_id', activeOrganizationId).or('source.eq.accessory,component_role.eq.accessory');
-        const accessoriesData = accRes.error ? [] : (accRes.data || []);
-
-        // Fetch CatalogItems for accessories
-        const accessoryCatalogItemIds = (accessoriesData || [])
-          .map((acc: any) => acc.catalog_item_id)
-          .filter((id: string | null) => id);
-        
-        let accessoriesCatalogItemsMap = new Map<string, any>();
-        if (accessoryCatalogItemIds.length > 0) {
-          const { data: accessoryCatalogItems } = await supabase
-            .from('CatalogItems')
-            // ✅ FIX: CatalogItems NO tiene columna "msrp" (está en CatalogItemsMSRP)
-            .select('id, item_name, sku, name')
-            .in('id', accessoryCatalogItemIds)
-            .eq('organization_id', activeOrganizationId)
-            .eq('is_active', true);
-          
-          if (accessoryCatalogItems) {
-            accessoryCatalogItems.forEach((item: any) => {
-              accessoriesCatalogItemsMap.set(item.id, item);
-            });
-          }
-        }
-
-        const accessories = (accessoriesData || []).map((acc: any) => {
-          const catalogItem = accessoriesCatalogItemsMap.get(acc.catalog_item_id);
-          return {
-            id: acc.catalog_item_id,
-            // Use item_name from CatalogItems (same pattern as area/position from QuoteLines)
-            name: catalogItem?.item_name || catalogItem?.name || catalogItem?.sku || 'Unknown',
-            qty: acc.qty || 1,
-            price: acc.unit_cost_exw || catalogItem?.msrp || 0,
-          };
-        });
-
-        // Convert QuoteLine to ProductConfig based on product_type
-        // Use productType from DB query or fallback to lineData.product_type
-        const productTypeCode = productType?.code || lineData.product_type?.toUpperCase() || 'ROLLER';
-        // Map DB code to UI code
-        const productTypeMap: Record<string, string> = {
-          'ROLLER': 'roller-shade',
-          'DUAL': 'dual-shade',
-          'TRIPLE': 'triple-shade',
-          'DRAPERY': 'drapery',
-          'AWNING': 'awning',
-          'FILM': 'window-film',
-        };
-        const productTypeUI = productTypeMap[productTypeCode] || 'roller-shade';
-        
-        // CRITICAL: Ensure we have productTypeId - use the one we found or fallback
-        const finalProductTypeId = productTypeId || productType?.id;
-        const width_mm = lineData.width_m ? lineData.width_m * 1000 : undefined;
-        const height_mm = lineData.height_m ? lineData.height_m * 1000 : undefined;
-
-        let config: ProductConfig;
-
-        if (productTypeUI === 'roller-shade' || productTypeUI === 'triple-shade') {
-          config = {
-            productType: productTypeUI as 'roller-shade' | 'triple-shade',
-            productTypeId: finalProductTypeId || undefined,
-            quote_line_id: editingLineId,
-            area: lineData.area || undefined,
-            position: lineData.position || '',
-            quantity: lineData.qty || 1,
-            width_mm,
-            height_mm,
-            variantId: lineData.catalog_item_id,
-            catalogItemId: lineData.catalog_item_id,
-            fabric_catalog_item_id: lineData.catalog_item_id, // For VariantsStep
-            collectionName: catalogItem?.collection_name || lineData.collection_name || undefined, // For VariantsStep dropdown
-            variantName: catalogItem?.variant_name || lineData.variant_name || undefined, // For display
-            operatingSystem: lineData.drive_type === 'motor' ? 'motorized' : 'manual',
-            operation_type: lineData.drive_type || 'motor',
-            drive_type: lineData.drive_type || 'motor',
-            bom_template_id: lineData.bom_template_id || undefined,
-            operating_system_variant: lineData.operating_system_variant || undefined,
-            tube_type: lineData.tube_type || undefined,
-            bottom_rail_type: lineData.bottom_rail_type || 'standard',
-            cassette: lineData.cassette || false,
-            cassette_type: lineData.cassette_type || undefined,
-            side_channel: lineData.side_channel || false,
-            // CRITICAL: If side_channel is true but type is null, default to 'side_only'
-            side_channel_type: lineData.side_channel 
-              ? (lineData.side_channel_type || 'side_only')
-              : (lineData.side_channel_type || undefined),
-            hardware_color: lineData.hardware_color || 'white',
-            hardwareColor: lineData.hardware_color || 'white',
-            fabric_rotation: lineData.metadata?.fabric_rotation || false,
-            fabric_heatseal: lineData.metadata?.fabric_heatseal || false,
-            accessories,
-          } as ProductConfig;
-        } else if (productTypeUI === 'dual-shade') {
-          config = {
-            productType: 'dual-shade',
-            productTypeId: finalProductTypeId || undefined,
-            quote_line_id: editingLineId,
-            area: lineData.area || undefined,
-            position: lineData.position || '',
-            quantity: lineData.qty || 1,
-            width_mm,
-            height_mm,
-            frontFabric: {
-              variantId: lineData.catalog_item_id,
-            },
-            fabric_catalog_item_id: lineData.catalog_item_id, // For VariantsStep
-            collectionName: catalogItem?.collection_name || lineData.collection_name || undefined, // For VariantsStep dropdown
-            variantName: catalogItem?.variant_name || lineData.variant_name || undefined, // For display
-            operatingSystem: lineData.drive_type === 'motor' ? 'motorized' : 'manual',
-            drive_type: lineData.drive_type || 'motor',
-            bottom_rail_type: lineData.bottom_rail_type || 'standard',
-            cassette: lineData.cassette || false,
-            side_channel: lineData.side_channel || false,
-            hardware_color: lineData.hardware_color || 'white',
-            fabric_rotation: lineData.metadata?.fabric_rotation || false,
-            fabric_heatseal: lineData.metadata?.fabric_heatseal || false,
-            accessories,
-          } as ProductConfig;
-        } else {
-          // Default to roller-shade if unknown type
-          config = {
-            productType: 'roller-shade',
-            productTypeId: finalProductTypeId || undefined,
-            quote_line_id: editingLineId,
-            area: lineData.area || undefined,
-            position: lineData.position || '',
-            quantity: lineData.qty || 1,
-            width_mm,
-            height_mm,
-            variantId: lineData.catalog_item_id,
-            catalogItemId: lineData.catalog_item_id,
-            fabric_catalog_item_id: lineData.catalog_item_id, // For VariantsStep
-            collectionName: catalogItem?.collection_name || lineData.collection_name || undefined, // For VariantsStep dropdown
-            variantName: catalogItem?.variant_name || lineData.variant_name || undefined, // For display
-            operatingSystem: lineData.drive_type === 'motor' ? 'motorized' : 'manual',
-            fabric_rotation: lineData.metadata?.fabric_rotation || false,
-            fabric_heatseal: lineData.metadata?.fabric_heatseal || false,
-            accessories,
-          } as ProductConfig;
-        }
-
-        if (import.meta.env.DEV) {
-          console.log('loadLineConfig: Config loaded - FULL DEBUG', {
-            lineId: editingLineId,
-            productType: config.productType,
-            productTypeId: config.productTypeId,
-            productTypeFromDB: productType?.id,
-            finalProductTypeId: finalProductTypeId,
-            hasArea: !!config.area,
-            hasPosition: !!config.position,
-            accessoriesCount: accessories.length,
-            hasCollection: !!(config as any).collectionName || !!(config as any).collection_name,
-            hasVariant: !!(config as any).variantName || !!(config as any).variant_name,
-            width_mm: config.width_mm,
-            height_mm: config.height_mm,
-            drive_type: (config as any).drive_type,
-            hardware_color: (config as any).hardware_color,
-            fullConfig: config,
-          });
-        }
-
         setInitialLineConfig(config);
-        // Show configurator after config is loaded
-        if (editingLineId) {
-          setShowConfigurator(true);
-        }
+        if (editingLineId) setShowConfigurator(true);
       } catch (err: any) {
         const errorMessage = err?.message || 'Failed to load quote line configuration';
-        if (import.meta.env.DEV) {
-          console.error('Error loading line config:', {
-            message: errorMessage,
-            code: err?.code,
-            editingLineId,
-            quoteId,
-          });
-        }
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error loading quote line',
-          message: errorMessage + '. Please try again.',
-        });
+        if (import.meta.env.DEV) console.error('Error loading line config:', { message: errorMessage, code: err?.code, editingLineId, quoteId });
+        useUIStore.getState().addNotification({ type: 'error', title: 'Error loading quote line', message: errorMessage + '. Please try again.' });
         setInitialLineConfig(undefined);
       }
     };
@@ -2536,46 +2654,315 @@ export default function QuoteNew() {
     // The useEffect will show it after config is loaded
   };
 
-  // Handle PDF download
-  const handleDownloadPDF = async () => {
-    if (!quoteId || !quoteData || !selectedCustomer) {
+  const handleDuplicateLine = async (lineId: string) => {
+    if (!activeOrganizationId) return;
+    try {
+      clearConfiguratorDraft();
+      setEditingLineId(null);
+
+      const DEBUG_PREFILL = import.meta.env.DEV && (window as any).__DEBUG_PREFILL === true;
+      if (DEBUG_PREFILL) {
+        const lineRow = await supabase.from('QuoteLines').select('id, configured_product_id').eq('id', lineId).eq('organization_id', activeOrganizationId).maybeSingle();
+        console.log('[QuoteNew DUPLICATE] opening prefill', { quote_line_id: lineId, configured_product_id: lineRow?.data?.configured_product_id ?? null });
+      }
+
+      const config = await getConfigFromQuoteLine({
+        supabase,
+        organizationId: activeOrganizationId,
+        lineId,
+        forEdit: false,
+      });
+      if (!config) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'Could not load line to duplicate.',
+        });
+        return;
+      }
+      const { quote_line_id: _q, configured_product_id: _c, ...prefillConfig } = config as any;
+      if (DEBUG_PREFILL) {
+        console.log('[QuoteNew DUPLICATE] getConfigFromQuoteLine result keys', {
+          hardware_color: (prefillConfig as any).hardware_color,
+          bottom_bar_sku: (prefillConfig as any).bottom_bar_sku,
+          bottom_bar_item_id: (prefillConfig as any).bottom_bar_item_id,
+          _prefill_source: (prefillConfig as any)._prefill_source,
+        });
+      }
+      if (import.meta.env.DEV && !DEBUG_PREFILL) {
+        const m = (prefillConfig as any).measurements;
+        const panelsList = (prefillConfig as any).panels ?? m?.panels ?? [];
+        const sumPanels = Array.isArray(panelsList) ? panelsList.reduce((s: number, p: any) => s + (p?.width_mm ?? 0), 0) : 0;
+        console.debug('[QuoteNew] Duplicate prefill config', {
+          width_mm: (prefillConfig as any).width_mm,
+          height_mm: (prefillConfig as any).height_mm,
+          width_total_mm: m?.width_total_mm,
+          panel_count: m?.panel_count,
+          sumPanelsMm: sumPanels,
+          drive_type: (prefillConfig as any).drive_type,
+          operation_type: (prefillConfig as any).operation_type,
+          tube_item_id: (prefillConfig as any).tube_item_id,
+          drive_item_id: (prefillConfig as any).drive_item_id,
+          motor_item_id: (prefillConfig as any).motor_item_id,
+          hasMeasurements: !!m,
+          panelsLength: panelsList?.length ?? 0,
+        });
+      }
+      setInitialLineConfig(prefillConfig as ProductConfig);
+      setShowConfigurator(true);
+    } catch (e: any) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: 'Quote data is not available',
+        message: e?.message || 'Failed to load line for duplicate.',
+      });
+    }
+  };
+
+  // Reorder quote lines (drag-and-drop)
+  const handleDragStart = (_e: React.DragEvent, lineId: string) => {
+    setDraggedLineId(lineId);
+  };
+  const handleDragOver = (e: React.DragEvent, lineId: string) => {
+    e.preventDefault();
+    if (draggedLineId && draggedLineId !== lineId) setDragOverLineId(lineId);
+  };
+  const handleDragLeave = () => setDragOverLineId(null);
+  const handleDrop = async (e: React.DragEvent, targetLineId: string) => {
+    e.preventDefault();
+    setDragOverLineId(null);
+    if (!draggedLineId || draggedLineId === targetLineId || !quoteId) {
+      setDraggedLineId(null);
+      return;
+    }
+    try {
+      const draggedIndex = quoteLines.findIndex((l: any) => l.id === draggedLineId);
+      const targetIndex = quoteLines.findIndex((l: any) => l.id === targetLineId);
+      if (draggedIndex === -1 || targetIndex === -1) {
+        setDraggedLineId(null);
+        return;
+      }
+      const reordered = [...quoteLines];
+      const [removed] = reordered.splice(draggedIndex, 1);
+      if (!removed) {
+        setDraggedLineId(null);
+        return;
+      }
+      reordered.splice(targetIndex, 0, removed);
+      const updates = reordered.map((line: any, index: number) => ({
+        id: String(line.id),
+        sort_order: index,
+      }));
+      const { data, error } = await supabase.rpc('update_quote_line_sort_orders', {
+        p_quote_id: quoteId,
+        p_updates: updates,
+      });
+      if (error) {
+        if (error.code === '42883' || error.message?.includes('does not exist')) {
+          const updatePromises = updates.map((u: { id: string; sort_order: number }) =>
+            supabase.from('QuoteLines').update({ sort_order: u.sort_order }).eq('id', u.id).eq('quote_id', quoteId)
+          );
+          const results = await Promise.all(updatePromises);
+          if (results.some((r) => r.error)) throw results.find((r) => r.error)?.error ?? error;
+        } else throw error;
+      }
+      refetchLines();
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Reordered',
+        message: 'Quote line order updated.',
+      });
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Reorder failed',
+        message: err?.message ?? 'Failed to reorder lines',
+      });
+    } finally {
+      setDraggedLineId(null);
+    }
+  };
+
+  // Handle PDF download: variant 'dealer' (prices by tier) or 'client' (MSRP + optional discount)
+  const handleDownloadPDF = async (variant: PDFVariant, clientDiscountPct: number = 0) => {
+    if (!quoteId || !quoteData) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Quote data is not available. Save the quote and try again.',
       });
       return;
     }
 
     try {
-      // Get organization name
       const { data: orgData } = await supabase
         .from('Organizations')
         .select('name')
         .eq('id', activeOrganizationId)
         .maybeSingle();
-
       const organizationName = orgData?.name || 'Arquiproductos';
 
-      // Generate PDF
+      type DealerRow = {
+        logo_url?: string | null;
+        dealer_name?: string | null;
+        street_address_line_1?: string | null;
+        street_address_line_2?: string | null;
+        city?: string | null;
+        state?: string | null;
+        zip_code?: string | null;
+        country?: string | null;
+      };
+      let logoPngBase64: string | undefined;
+      let dealerName: string | undefined;
+      let dealerAddress: string | undefined;
+      const dealerId = quoteData.dealer_id ?? null;
+      if (dealerId) {
+        try {
+          const { data: dealer } = await supabase
+            .from('Dealers')
+            .select('logo_url, dealer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country')
+            .eq('id', dealerId)
+            .maybeSingle();
+          const d = dealer as DealerRow | null;
+          if (d) {
+            dealerName = d.dealer_name ?? undefined;
+            dealerAddress = [
+              d.street_address_line_1,
+              d.street_address_line_2,
+              [d.city, d.state, d.zip_code].filter(Boolean).join(', '),
+              d.country,
+            ]
+              .filter(Boolean)
+              .join('\n') || undefined;
+            const logoUrl = d.logo_url;
+            if (logoUrl) {
+              const res = await fetch(logoUrl, { mode: 'cors' });
+              const blob = await res.blob();
+              logoPngBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      // Fallback: logo from public/images (Arquiproductos) when no dealer logo
+      if (!logoPngBase64) {
+        const tryLogo = async (path: string): Promise<string | undefined> => {
+          try {
+            const res = await fetch(path, { cache: 'no-store' });
+            if (!res.ok) return undefined;
+            const blob = await res.blob();
+            return new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          } catch {
+            return undefined;
+          }
+        };
+        const logoPaths = [
+          '/images/Arquiproductos.png',
+          '/images/arquiproductos.png',
+          '/images/Arquiproductos.jpg',
+          '/images/arquiproductos.jpg',
+        ];
+        for (const path of logoPaths) {
+          logoPngBase64 = await tryLogo(path);
+          if (logoPngBase64) break;
+        }
+      }
+      if (!dealerName) dealerName = organizationName;
+
+      // Logo dimensions: fit within 18mm width preserving aspect ratio (no comprimir)
+      let logoWidthMm: number | undefined;
+      let logoHeightMm: number | undefined;
+      if (logoPngBase64) {
+        try {
+          const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              const maxW = 18;
+              const maxH = 24;
+              const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+              resolve({
+                w: img.naturalWidth * scale,
+                h: img.naturalHeight * scale,
+              });
+            };
+            img.onerror = () => resolve({ w: 18, h: 18 });
+            img.src = logoPngBase64;
+          });
+          logoWidthMm = dims.w;
+          logoHeightMm = dims.h;
+        } catch {
+          // keep undefined → PDF uses 18x18
+        }
+      }
+
+      const sellerName =
+        (quoteLines[0] as { quote_created_by?: string } | undefined)?.quote_created_by;
+
+      const qty = (line: any) => line.quantity ?? line.qty ?? 1;
+      const pdfLines = quoteLines.map((line: any) => {
+        const n = qty(line);
+        const lineTotal =
+          variant === 'dealer'
+            ? (line.net_price ?? line.unit_msrp ?? 0) * n
+            : (line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+        return {
+          id: line.id,
+          area: line.area,
+          position: line.position,
+          product_type: line.product_type ?? line.ProductType?.name,
+          collection_name: line.collection_name,
+          variant_name: line.variant_name,
+          drive_type: line.drive_type,
+          width_m: line.width_m,
+          height_m: line.height_m,
+          qty: n,
+          line_total: lineTotal,
+          CatalogItems: line.CatalogItems ?? null,
+        };
+      });
+
       const doc = generateQuotePDF(
         {
           quote_no: quoteData.quote_no || watch('quote_no'),
           customer_id: quoteData.customer_id || watch('customer_id'),
           status: quoteData.status || watch('status'),
           currency: quoteData.currency || watch('currency'),
-          notes: quoteData.notes || watch('notes'),
+          notes: quoteData.description ?? quoteData.notes ?? watch('description'),
           totals: quoteData.totals || totals,
           created_at: quoteData.created_at || new Date().toISOString(),
         },
-        selectedCustomer,
-        selectedContact || null,
-        quoteLines as any[],
-        organizationName
+        selectedCustomer ? { customer_name: selectedCustomer.customer_name } : null,
+        selectedContact
+          ? { contact_name: selectedContact.contact_name, contact_email: selectedContact.email ?? undefined }
+          : null,
+        pdfLines,
+        organizationName,
+        {
+          variant,
+          clientDiscountPct,
+          logoPngBase64,
+          logoWidthMm,
+          logoHeightMm,
+          dealerName,
+          dealerAddress,
+          sellerName,
+          description: quoteData.description ?? watch('description') ?? quoteData.notes ?? undefined,
+        }
       );
 
-      // Download PDF
-      const fileName = `Quote_${quoteData.quote_no || watch('quote_no')}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const suffix = variant === 'dealer' ? 'Dealer' : 'Cliente';
+      const fileName = `Quote_${quoteData.quote_no || watch('quote_no')}_${suffix}_${new Date().toISOString().split('T')[0]}.pdf`;
       doc.save(fileName);
 
       useUIStore.getState().addNotification({
@@ -2610,15 +2997,17 @@ export default function QuoteNew() {
     try {
       // Quotes table columns (from DB schema):
       // id, organization_id, quote_no, status, tracking_status, customer_id, contact_id,
-      // created_by_user_id, deleted, created_at, updated_at, company_id, created_by_portal_user_id
+      // created_by_user_id, deleted, created_at, updated_at, dealer_id, created_by_portal_user_id
       // NOTE: currency, notes, totals are NOT stored in Quotes table
       const quoteDataPayload: any = {
         quote_no: data.quote_no,
-        customer_id: data.customer_id || null, // Optional
-        contact_id: selectedContactId || null, // Optional - contact_id DOES exist in Quotes table
+        customer_id: data.customer_id || null,
+        contact_id: selectedContactId || null,
         status: data.status,
         organization_id: activeOrganizationId,
-        company_id: companyInfo?.id || quoteData?.company_id || null,
+        dealer_id: dealerInfo?.id || quoteData?.dealer_id || null,
+        description: data.description?.trim() || null,
+        po_number: data.po_number?.trim() || null,
       };
 
       if (quoteId) {
@@ -2651,13 +3040,7 @@ export default function QuoteNew() {
         
           // Only navigate if shouldNavigate is true
           if (shouldNavigate) {
-            // If status is 'approved', navigate to QuoteApproved view
-            if (isApproving) {
-              router.navigate('/sales/quotes/approved');
-            } else {
-              // Otherwise, navigate back to quotes list
-              router.navigate('/sales/quotes');
-            }
+            router.navigate('/sales/quotes');
           }
       } else {
         // Create new quote
@@ -2667,21 +3050,21 @@ export default function QuoteNew() {
           setQuoteId(created.id);
           setQuoteData(created);
           
-          // Update company info from created quote if available
-          if (created.company_id && !companyInfo) {
-            const { data: company } = await supabase
-              .from('Companies')
-              .select('id, company_name, company_no')
-              .eq('id', created.company_id)
+          if (created.dealer_id && !dealerInfo) {
+            const { data: dealer } = await supabase
+              .from('Dealers')
+              .select('id, dealer_name, dealer_no, dealer_tier_id')
+              .eq('id', created.dealer_id)
               .eq('organization_id', activeOrganizationId)
               .eq('deleted', false)
               .maybeSingle();
 
-            if (company) {
-              setCompanyInfo({
-                id: company.id,
-                name: company.company_name || 'Unknown Company',
-                number: company.company_no || null,
+            if (dealer) {
+              setDealerInfo({
+                id: dealer.id,
+                name: dealer.dealer_name || 'Unknown Dealer',
+                number: dealer.dealer_no || null,
+                dealer_tier_id: dealer.dealer_tier_id ?? null,
               });
             }
           }
@@ -2694,13 +3077,7 @@ export default function QuoteNew() {
           
           // Only navigate if shouldNavigate is true
           if (shouldNavigate) {
-            // If status is 'approved', navigate to QuoteApproved view
-            if (quoteDataPayload.status === 'approved') {
-              router.navigate('/sales/quotes/approved');
-            } else {
-              // Otherwise, navigate back to quotes list
-              router.navigate('/sales/quotes');
-            }
+            router.navigate('/sales/quotes');
           }
         }
       }
@@ -2725,12 +3102,11 @@ export default function QuoteNew() {
     await onSubmit(data, true); // Pass true to navigate after saving
   };
 
-  // Get selected customer name
-  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+  // Get selected contact (selectedCustomer already defined above for contacts loading)
   const selectedContact = contacts.find(c => c.id === selectedContactId);
 
   return (
-    <div className="py-6">
+    <div className="py-6 min-w-0 max-w-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -2744,20 +3120,23 @@ export default function QuoteNew() {
 
         <div className="flex items-center gap-3">
           {quoteId && (
-            <button
-              type="button"
-              onClick={handleDownloadPDF}
-              className="flex items-center gap-2 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-              title="Download PDF"
-            >
-              <Download className="w-4 h-4" />
-              Download PDF
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleDownloadPDF('dealer')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
+                title="PDF con precios Dealer (según tier)"
+              >
+                <Download className="w-4 h-4" />
+                PDF Dealer
+              </button>
+            </div>
           )}
           <button
             type="button"
             onClick={() => router.navigate('/sales/quotes')}
             className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
+            title="Close"
           >
             Close
           </button>
@@ -2779,6 +3158,7 @@ export default function QuoteNew() {
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save and Close'}
           </button>
+          {quoteId && <CreateProposalButton quoteId={quoteId} />}
         </div>
       </div>
 
@@ -2790,18 +3170,18 @@ export default function QuoteNew() {
 
       {/* Quote Form */}
       <div className="bg-white border border-gray-200 rounded-lg mb-6">
-        {/* Company Info Banner (always show if available) */}
-        {companyInfo && (
+        {/* Dealer Info Banner (always show if available) */}
+        {dealerInfo && (
           <div className="bg-gray-50 border-b border-gray-200 px-6 py-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs font-medium text-gray-500 mb-1">COMPANY</div>
-                <div className="font-semibold text-gray-900">{companyInfo.name}</div>
+                <div className="text-xs font-medium text-gray-500 mb-1">DEALER</div>
+                <div className="font-semibold text-gray-900">{dealerInfo.name}</div>
               </div>
-              {companyInfo.number && (
+              {dealerInfo.number && (
                 <div className="text-right">
-                  <div className="text-xs font-medium text-gray-500 mb-1">COMPANY NO.</div>
-                  <div className="font-semibold text-gray-900">{companyInfo.number}</div>
+                  <div className="text-xs font-medium text-gray-500 mb-1">DEALER NO.</div>
+                  <div className="font-semibold text-gray-900">{dealerInfo.number}</div>
                 </div>
               )}
             </div>
@@ -2854,7 +3234,7 @@ export default function QuoteNew() {
             <SelectShadcn
               value={selectedContactId || 'none'}
               onValueChange={(value) => setSelectedContactId(value === 'none' ? '' : value)}
-              disabled={!selectedCustomerId}
+              disabled={!effectiveCustomerIdForContacts}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select contact (optional)" />
@@ -2913,19 +3293,29 @@ export default function QuoteNew() {
             </SelectShadcn>
             </div>
 
-            {/* Notes */}
+            {/* Description */}
             <div className="col-span-12">
-              <Label htmlFor="notes">Notes</Label>
+              <Label htmlFor="description">Description</Label>
               <textarea
-                id="notes"
-                {...register('notes')}
+                id="description"
+                {...register('description')}
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                placeholder="Add any additional notes or comments..."
+                placeholder="Quote description or comments..."
               />
             </div>
 
-            {/* Summary */}
+            {/* PO: Dealer PO / order tracking number */}
+            <div className="col-span-12 md:col-span-6">
+              <Label htmlFor="po_number">PO</Label>
+              <Input
+                id="po_number"
+                {...register('po_number')}
+                placeholder="Dealer PO / order number (optional)"
+              />
+            </div>
+
+            {/* Summary + Created by (Head of Quote) */}
             {quoteId && (
               <div className="col-span-12 border-t border-gray-200 pt-4 mt-4">
               <div className="flex justify-end">
@@ -2943,6 +3333,11 @@ export default function QuoteNew() {
                       <span>Total:</span>
                       <span>{formatCurrency(totals.total, watch('currency'))}</span>
                     </div>
+                    {quoteLines.length > 0 && (quoteLines[0] as { quote_created_by?: string })?.quote_created_by && (
+                      <div className="text-sm text-gray-500 pt-1 border-t border-gray-100">
+                        Created by: {(quoteLines[0] as { quote_created_by?: string }).quote_created_by}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2954,7 +3349,7 @@ export default function QuoteNew() {
 
       {/* Quote Lines Section */}
       {quoteId && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-w-0">
           <div className="py-4 px-6 border-b border-gray-200">
             <div className="flex items-center justify-between">
               <div>
@@ -2987,31 +3382,27 @@ export default function QuoteNew() {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="py-3 px-2 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-10" title="Drag to reorder"> </th>
+                    <th className="py-3 px-2 text-center text-xs font-medium text-gray-700 uppercase tracking-wider w-12">#</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Area</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Position</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Drop</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Installation</th>
+                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Position</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Product Type</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Collection</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">System Drive</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Measurements</th>
+                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Measurements</th>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Accessories</th>
-                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Qty</th>
-                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">MSRP</th>
-                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Total</th>
+                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Qty</th>
+                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">MSRP</th>
+                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Total</th>
                     <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {quoteLines.map((line: any) => {
+                  {quoteLines.map((line: any, index: number) => {
                     // Extract data from line
                     const area = line.area ?? null;
                     const position = line.position ?? null;
-                    const fabricDrop = line.fabric_drop ?? null;
-                    const installationType = line.installation_type ?? null;
-                    const installationLocation = line.installation_location ?? null;
-                    const installationDisplay = [installationType, installationLocation].filter(Boolean).join(' / ') || null;
-                    
+
                     // Debug en DEV
                     if (import.meta.env.DEV && quoteLines.indexOf(line) === 0) {
                       console.log('[QuoteNew] Rendering line:', {
@@ -3038,19 +3429,31 @@ export default function QuoteNew() {
                     const driveType = line.drive_type;
                     const driveDisplay = driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A';
 
+                    const isDragging = draggedLineId === line.id;
+                    const isDragOver = dragOverLineId === line.id;
                     return (
-                      <tr key={line.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                      <tr
+                        key={line.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, line.id)}
+                        onDragOver={(e) => handleDragOver(e, line.id)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, line.id)}
+                        className={`border-b border-gray-100 transition-colors ${
+                          isDragging ? 'opacity-50 cursor-grabbing' : 'cursor-grab hover:bg-gray-50'
+                        } ${isDragOver ? 'ring-1 ring-inset ring-gray-900' : ''}`}
+                      >
+                        <td className="py-4 px-2 text-gray-400 w-10" title="Drag to reorder" onClick={(e) => e.stopPropagation()}>
+                          <GripVertical className="w-4 h-4" />
+                        </td>
+                        <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12">
+                          {index + 1}
+                        </td>
                         <td className="py-4 px-6 text-gray-700 text-sm">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
+                        <td className="py-4 px-6 text-gray-700 text-sm text-center">
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
-                        </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
-                          {fabricDrop != null && String(fabricDrop).trim() !== '' ? String(fabricDrop) : '—'}
-                        </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
-                          {installationDisplay ?? '—'}
                         </td>
                         <td className="py-4 px-6 text-gray-900 text-sm font-medium">
                           {productTypeName}
@@ -3061,23 +3464,34 @@ export default function QuoteNew() {
                         <td className="py-4 px-6 text-gray-700 text-sm">
                           {driveDisplay}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
-                          {line.width_m && line.height_m
-                            ? `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)} mm`
-                            : '—'}
+                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-center">
+                          <div className="w-fit mx-auto">
+                            <DimensionsStackView
+                              source={{
+                                width_m: line.width_m,
+                                height_m: line.height_m,
+                                width_mm: (line.ConfiguredProduct?.config_snapshot as any)?.width_mm,
+                                height_mm: (line.ConfiguredProduct?.config_snapshot as any)?.height_mm,
+                                measurements: (line.ConfiguredProduct?.config_snapshot as any)?.measurements,
+                                panels: (line.ConfiguredProduct?.config_snapshot as any)?.panels,
+                              }}
+                            />
+                          </div>
                         </td>
                         <td className="py-4 px-6 text-gray-700 text-sm">
                           {line.Accessories && line.Accessories.length > 0 ? (
                             <div className="flex flex-wrap gap-1 items-center">
                               {line.Accessories.map((acc: any, idx: number) => {
-                                // Get item_name from CatalogItems relationship (similar to how area/position work)
-                                const itemName = acc.CatalogItems?.item_name || 
-                                                acc.CatalogItems?.name || 
-                                                acc.CatalogItems?.sku || 
-                                                'Unknown';
+                                const itemName =
+                                  acc.item_name ??
+                                  acc.CatalogItems?.item_name ??
+                                  acc.CatalogItems?.name ??
+                                  acc.CatalogItems?.sku ??
+                                  acc.name ??
+                                  '—';
                                 return (
                                   <span key={acc.id || idx} className="text-xs bg-gray-100 px-2 py-0.5 rounded inline-block">
-                                    {itemName}
+                                    {itemName}{acc.qty > 1 ? ` ×${acc.qty}` : ''}
                                   </span>
                                 );
                               })}
@@ -3086,40 +3500,30 @@ export default function QuoteNew() {
                             <span className="text-gray-400">—</span>
                           )}
                         </td>
-                        <td className="py-4 px-6 text-right text-gray-900 text-sm">
+                        <td className="py-4 px-6 text-center text-gray-900 text-sm">
                           {/* ✅ FIX: Usar "quantity" (columna correcta en QuoteLines) */}
                           {line.quantity ? line.quantity.toFixed(0) : 'N/A'}
                         </td>
-                        {/* MSRP - Precio unitario desde QuoteLines.msrp / ConfiguredProduct */}
+                        {/* MSRP column: read unit_msrp from backend only (fallback: msrp/quantity for legacy rows) */}
                         <td className="py-4 px-6 text-right text-gray-900 text-sm font-medium">
                           {(() => {
-                            // ✅ FUENTE ÚNICA: QuoteLines.msrp (ya congelado desde ConfiguredProducts)
-                            // Fallback a snapshots individuales para líneas legacy
-                            const totalMsrp = line.msrp || 
-                              ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
-                            
-                            const qty = line.quantity || 1;
-                            const unitPrice = qty > 0 ? totalMsrp / qty : totalMsrp;
-                            
-                            // Indicador: viene de ConfiguredProduct (pricing_locked + configured_product_id)
-                            const isFromConfigurator = line.configured_product_id && line.pricing_locked;
-                            
-                            // Desglose para tooltip
+                            const qty = line.quantity ?? line.qty ?? 1;
+                            const unitPrice =
+                              line.unit_msrp != null
+                                ? Number(line.unit_msrp)
+                                : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
                             const rollMsrp = line.roll_msrp_snapshot || 0;
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
-                            
                             return (
                               <div className="relative group">
                                 <span>{formatCurrency(unitPrice, watch('currency'))}</span>
-                                {isFromConfigurator && <span className="ml-1 text-xs text-green-600" title="From ConfiguredProduct">●</span>}
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
                                     <div className="text-left">
                                       <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
                                       <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">Total: {formatCurrency(totalMsrp, watch('currency'))}</div>
-                                      {isFromConfigurator && <div className="text-green-400 text-[10px]">Frozen from ConfiguredProduct</div>}
+                                      <div className="border-t border-gray-700 mt-1 pt-1">Unit MSRP (from backend)</div>
                                     </div>
                                   </div>
                                 )}
@@ -3127,35 +3531,27 @@ export default function QuoteNew() {
                             );
                           })()}
                         </td>
-                        {/* Total = QTY × MSRP */}
+                        {/* TOTAL column: read msrp from backend only (line total; no client-side calculation) */}
                         <td className="py-4 px-6 text-right text-gray-900 text-sm font-medium">
                           {(() => {
-                            // ✅ FUENTE ÚNICA: QuoteLines.msrp × quantity
-                            const totalMsrp = line.msrp || 
-                              ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
-                            
-                            const qty = line.quantity || 1;
-                            const calculatedTotal = totalMsrp * qty;
-                            
-                            // Indicador: viene de ConfiguredProduct
-                            const isFromConfigurator = line.configured_product_id && line.pricing_locked;
-                            
-                            // Desglose para tooltip
+                            const lineTotal =
+                              line.msrp != null
+                                ? Number(line.msrp)
+                                : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
                             const rollMsrp = line.roll_msrp_snapshot || 0;
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
-                            
+                            const qty = line.quantity ?? line.qty ?? 1;
                             return (
                               <div className="relative group">
-                                <span className="font-semibold">{formatCurrency(calculatedTotal, watch('currency'))}</span>
-                                {isFromConfigurator && <span className="ml-1 text-xs text-green-600" title="Frozen from ConfiguredProduct">●</span>}
+                                <span className="font-semibold">{formatCurrency(lineTotal, watch('currency'))}</span>
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
                                     <div className="text-left">
                                       <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
                                       <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">MSRP × {qty} = {formatCurrency(calculatedTotal, watch('currency'))}</div>
-                                      {isFromConfigurator && <div className="text-green-400 text-[10px]">Frozen from ConfiguredProduct</div>}
+                                      <div className="border-t border-gray-700 mt-1 pt-1">Line total (qty={qty})</div>
+                                      <div>{formatCurrency(lineTotal, watch('currency'))}</div>
                                     </div>
                                   </div>
                                 )}
@@ -3165,6 +3561,21 @@ export default function QuoteNew() {
                         </td>
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-1 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewLineId(line.id)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              title="View configured product (customer view)"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDuplicateLine(line.id)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              title="Duplicar línea"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
                             <button
                               onClick={() => handleEditLine(line.id)}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
@@ -3188,6 +3599,13 @@ export default function QuoteNew() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Proposals for this Quote — organizar proposals dentro del quote */}
+      {quoteId && (
+        <div className="bg-white border border-gray-200 rounded-lg mb-6">
+          <QuoteProposalsSection quoteId={quoteId} />
         </div>
       )}
 
@@ -3227,6 +3645,118 @@ export default function QuoteNew() {
           </div>
         </div>
       )}
+
+      {/* Configured Product — Customer view (popup) */}
+      {previewLineId && (() => {
+        const line = quoteLines.find((l: any) => l.id === previewLineId) as any;
+        if (!line) return null;
+        const config = line.ConfiguredProduct?.config_snapshot || {};
+        const productTypeName = line.ProductType?.name || line.product_type || config.productType || '—';
+        const productTypeSlug = (productTypeName || '').toLowerCase().replace(/\s+/g, '-') || '—';
+        const driveTypeRaw = line.drive_type ?? config.operatingSystem ?? config.drive_type;
+        const driveDisplay = driveTypeRaw === 'motor' || driveTypeRaw === 'motorized' ? 'motorized' : driveTypeRaw === 'manual' ? 'manual' : driveTypeRaw || 'Not selected';
+        const dimensionsSource = {
+          width_m: line.width_m,
+          height_m: line.height_m,
+          width_mm: config.width_mm,
+          height_mm: config.height_mm,
+          measurements: config.measurements,
+          panels: config.panels,
+        };
+        const accessoryCount = line.Accessories?.length ?? 0;
+        const accessoriesLabel = accessoryCount === 0 ? '0 items' : `${accessoryCount} item${accessoryCount !== 1 ? 's' : ''}`;
+        const hardwareColor = config.hardwareColor ?? config.hardware_color ?? null;
+        const hardwareColorDisplay = hardwareColor ? String(hardwareColor).charAt(0).toUpperCase() + String(hardwareColor).slice(1) : 'Not selected';
+        const hasCassette = config.headbox_item_id != null || config.cassette === true;
+        const hasSideChannel = config.side_channel_item_id != null || config.side_channel === true;
+        const mountingParts = [config.installationType ?? line.installation_type, config.installationLocation ?? line.installation_location].filter(Boolean);
+        const mountingDisplay = mountingParts.length ? mountingParts.join(' / ') : 'Not selected';
+        const qty = line.quantity ?? line.qty ?? 1;
+        const unitPrice = line.unit_msrp != null ? Number(line.unit_msrp) : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : 0);
+        const lineTotal = line.msrp != null ? Number(line.msrp) : unitPrice * qty;
+
+        const spec = (label: string, value: string | number | React.ReactNode) => (
+          <div key={label} className="flex justify-between gap-4 py-1 text-sm">
+            <span className="text-gray-600 shrink-0">{label}</span>
+            <span className="text-gray-900 text-right font-medium">{value}</span>
+          </div>
+        );
+        const fabricM2 = (() => {
+          const snap = (line.ConfiguredProduct as any)?.bom_preview_snapshot;
+          const items = snap?.items;
+          if (!Array.isArray(items)) return null;
+          const roll = items.find((i: any) => i.kind === 'roll' || i.role === 'fabric');
+          return roll?.qty != null ? Number(roll.qty) : null;
+        })();
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setPreviewLineId(null)}>
+            <div
+              className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-foreground">Configured Product</h2>
+                <button
+                  type="button"
+                  onClick={() => setPreviewLineId(null)}
+                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                {/* FABRIC TECHNICAL DATA */}
+                <div>
+                  <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Fabric technical data</h3>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-sm">
+                    <div className="space-y-1">
+                      <div><span className="text-gray-600">SKU:</span> <span className="text-gray-900 font-medium">{line.CatalogItems?.sku ?? line.sku ?? '—'}</span></div>
+                      <div><span className="text-gray-600">Variant:</span> <span className="text-gray-900 font-medium">{line.variant_name ?? '—'}</span></div>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Collection:</span> <span className="text-gray-900 font-medium">{line.collection_name ?? '—'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* PRODUCT SPECIFICATIONS */}
+                <div>
+                  <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Product specifications</h3>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-0 text-sm">
+                    <div className="space-y-0">
+                      {spec('Position', line.position != null && String(line.position).trim() !== '' ? String(line.position).trim() : 'Not selected')}
+                      {spec('Mounting', mountingDisplay)}
+                      {spec('Film Type', 'Not selected')}
+                      {spec('Fixing', 'Not selected')}
+                      {spec('Drive Type', driveDisplay)}
+                      {spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
+                    </div>
+                    <div className="space-y-0">
+                      {spec('Product Type', productTypeSlug)}
+                      {spec('Dimensions', (
+                        <span className="block pb-2 min-h-[1.5rem]">
+                          <DimensionsStackView source={dimensionsSource} />
+                        </span>
+                      ))}
+                      {fabricM2 != null && spec('Total tela', `${fabricM2.toFixed(2)} m²`)}
+                      {spec('Accessories', accessoriesLabel)}
+                      {spec('Hardware Color', hardwareColorDisplay)}
+                      {spec('Cassette', hasCassette ? 'Yes' : 'No')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 pt-4 flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Qty {qty} × {formatCurrency(unitPrice, watch('currency'))}</span>
+                  <span className="text-lg font-semibold text-gray-900">{formatCurrency(lineTotal, watch('currency'))}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -30,8 +30,6 @@ export default function Login() {
   const [otpCode, setOtpCode] = useState("");
   const [sendingOtp, setSendingOtp] = useState(false);
   const [connectionTest, setConnectionTest] = useState<{ status: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }>({ status: 'idle' });
-  // Evitar más intentos tras error de conexión (no saturar Supabase)
-  const [connectionErrorLock, setConnectionErrorLock] = useState(false);
 
   const params = new URLSearchParams(window.location.search);
   const reason = params.get("reason");
@@ -85,7 +83,7 @@ export default function Login() {
           .maybeSingle();
 
         const { data: portalCheck } = await supabase
-          .from('CompanyPortalUsers')
+          .from('DealerUsers')
           .select('must_change_password')
           .eq('user_id', data.user.id)
           .eq('deleted', false)
@@ -125,8 +123,6 @@ export default function Login() {
       const isNetworkLike =
         isFailedToFetch ||
         /network|fetch|connection|cors|refused/i.test(raw);
-
-      if (isNetworkLike) setConnectionErrorLock(true);
 
       if (import.meta.env.DEV) {
         const url = import.meta.env.VITE_SUPABASE_URL || "";
@@ -244,7 +240,7 @@ export default function Login() {
           .maybeSingle();
 
         const { data: portalCheck } = await supabase
-          .from('CompanyPortalUsers')
+          .from('DealerUsers')
           .select('must_change_password')
           .eq('user_id', data.user.id)
           .eq('deleted', false)
@@ -371,14 +367,12 @@ export default function Login() {
 
               <button
                 type="submit"
-                disabled={isLoading || otpSent || connectionErrorLock}
+                disabled={isLoading || otpSent}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: "var(--primary-brand-hex)" }}
               >
                 {isLoading ? (
                   <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                ) : connectionErrorLock ? (
-                  "Conexión fallida — recarga la página para reintentar"
                 ) : (
                   <>
                     Sign In

@@ -17,7 +17,7 @@ export interface Company {
 export interface CompanyUser {
   id: string;
   user_id: string;
-  company_id: string;
+  dealer_id: string;
   role: 'super_admin' | 'admin' | 'supervisor' | 'employee';
   is_deleted: boolean;
   created_at: string;
@@ -75,7 +75,7 @@ export const useCompanyStore = create<CompanyState>()(
             .from('company_users')
             .select(`
               *,
-              company:companies(*)
+              company:Dealers(*)
             `)
             .eq('user_id', userId)
             .eq('is_deleted', false)
@@ -114,15 +114,19 @@ export const useCompanyStore = create<CompanyState>()(
             console.log('📦 Companies data received:', data);
           }
 
-          const companyUsers = (data || []).map((cu: any) => ({
-            id: cu.id,
-            user_id: cu.user_id,
-            company_id: cu.company_id,
-            role: cu.role,
-            is_deleted: cu.is_deleted,
-            created_at: cu.created_at,
-            company: cu.company,
-          })) as CompanyUser[];
+          const companyUsers = (data || []).map((cu: any) => {
+            const raw = cu.company;
+            const company = raw ? { ...raw, name: (raw.dealer_name ?? raw.name) || '' } : null;
+            return {
+              id: cu.id,
+              user_id: cu.user_id,
+              dealer_id: cu.dealer_id,
+              role: cu.role,
+              is_deleted: cu.is_deleted,
+              created_at: cu.created_at,
+              company,
+            };
+          }) as CompanyUser[];
 
           if (import.meta.env.DEV) {
             console.log('✅ Processed companies:', companyUsers.length, companyUsers);
@@ -168,7 +172,7 @@ export const useCompanyStore = create<CompanyState>()(
       switchCompany: async (companyId: string) => {
         const { availableCompanies } = get();
         const companyUser = availableCompanies.find(
-          (cu) => cu.company_id === companyId && cu.company
+          (cu) => cu.dealer_id === companyId && cu.company
         );
 
         if (!companyUser || !companyUser.company) {

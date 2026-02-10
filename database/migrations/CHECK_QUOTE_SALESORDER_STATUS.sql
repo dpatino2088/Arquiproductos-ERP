@@ -58,15 +58,16 @@ WHERE so.deleted = true
 ORDER BY so.updated_at DESC, so.created_at DESC
 LIMIT 20;
 
--- 4. Verificar triggers activos en Quotes
+-- 4. Verificar triggers activos en Quotes (solo los que contienen 'quote' y 'approved')
 SELECT 
     tgname as trigger_name,
     tgtype::text as trigger_type,
-    pg_get_triggerdef(oid) as trigger_definition
-FROM pg_trigger
-WHERE tgrelid = '"Quotes"'::regclass
+    tgenabled as enabled,
+    pg_get_triggerdef(t.oid) as trigger_definition
+FROM pg_trigger t
+WHERE t.tgrelid = 'public."Quotes"'::regclass
 AND tgname LIKE '%quote%approved%'
-AND NOT tgisinternal;
+AND NOT t.tgisinternal;
 
 -- 5. Verificar la función del trigger
 SELECT 
@@ -76,4 +77,20 @@ FROM pg_proc p
 JOIN pg_namespace n ON p.pronamespace = n.oid
 WHERE p.proname = 'on_quote_approved_create_operational_docs'
 AND n.nspname = 'public';
+
+-- 6. Listar TODOS los triggers en "Quotes" (para ver nombres exactos y si hay varios)
+SELECT 
+    t.tgname as trigger_name,
+    CASE t.tgenabled
+        WHEN 'O' THEN 'origin'
+        WHEN 'D' THEN 'disabled'
+        WHEN 'R' THEN 'replica'
+        WHEN 'A' THEN 'always'
+        ELSE 'unknown'
+    END as enabled,
+    pg_get_triggerdef(t.oid) as trigger_definition
+FROM pg_trigger t
+WHERE t.tgrelid = 'public."Quotes"'::regclass
+AND NOT t.tgisinternal
+ORDER BY t.tgname;
 

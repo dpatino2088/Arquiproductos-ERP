@@ -5,9 +5,13 @@
  * This provides the catalog_item_id for the QuoteLine
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { RollerBOMConfigState } from '../../../lib/bom/types';
 import { useFabricCollections, useFabricVariants } from '../../../hooks/useFabricCatalog';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { useWarehouses } from '../../../hooks/useWarehouses';
+import { useInventoryAvailability } from '../../../hooks/useInventoryAvailability';
+import { InventoryAvailabilityBadge } from '../../inventory/InventoryAvailabilityBadge';
 import Label from '../../ui/Label';
 import Input from '../../ui/Input';
 import { Image as ImageIcon } from 'lucide-react';
@@ -37,6 +41,15 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
     productTypeId,
     config.collection_name ?? ''
   );
+
+  const { activeOrganizationId } = useOrganizationContext();
+  const { defaultWarehouse } = useWarehouses(activeOrganizationId);
+  const variantCatalogIds = useMemo(() => variants.map((v) => v.id).filter(Boolean), [variants]);
+  const { map: availabilityMap } = useInventoryAvailability({
+    organizationId: activeOrganizationId ?? null,
+    warehouseId: defaultWarehouse?.id ?? null,
+    catalogItemIds: variantCatalogIds,
+  });
 
   // collections from useFabricCollections is string[]; map to { id, collection_name } for UI
   const collectionItems = collections.map((name) => ({ id: name, collection_name: name }));
@@ -153,6 +166,11 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
                       <div className="text-sm font-medium text-gray-900">{variant.variant_name}</div>
                       {variant.manufacturer && (
                         <div className="text-xs text-gray-500 mt-1">{variant.manufacturer}</div>
+                      )}
+                      {defaultWarehouse && (
+                        <div className="mt-1.5">
+                          <InventoryAvailabilityBadge row={availabilityMap[variant.id]} />
+                        </div>
                       )}
                     </div>
                   </div>

@@ -88,38 +88,18 @@ export type PricingTier =
 // Cost Engine v1 Types
 // ====================================================
 
-// CostSettings interface (Organization-level default cost settings)
-// Column names match actual DB schema (snake_case with _pct suffix)
+// CostSettings: columnas según dump V9 (sin id, sin currency_code, sin deleted; sin tiers Partner/VIP)
 export interface CostSettings {
-  id: string;
   organization_id: string;
-  // Cost Engine v1: Percentage-based defaults (DB columns)
-  labor_pct: number; // Default: 10.0000 (10%)
-  shipping_pct: number; // Default: 15.0000 (15%)
-  global_import_tax_pct: number; // Default global import tax %
-  default_msrp_pct_sale_out: number; // Global MSRP % Sale Out default (e.g., 0.65 = 65%)
-  // Customer Discounts (v1): Discount percentages by customer type (DB columns)
-  reseller_discount_pct: number; // Default: 0.00
-  distributor_discount_pct: number; // Default: 0.00
-  partner_discount_pct: number; // Default: 0.00
-  vip_discount_pct: number; // Default: 0.00
-  // Pricing guardrail (margin-on-sale) (DB column)
-  minimum_margin_pct: number; // Minimum margin percentage (margin-on-sale) used as pricing floor. Default: 35%
-  // Audit fields
-  created_at: string;
-  updated_at?: string | null;
+  labor_pct: number;            // 0-1 (e.g. 0.10 = 10%)
+  shipping_pct: number;         // 0-1 (e.g. 0.15 = 15%)
+  global_import_tax_pct: number; // 0-1
+  minimum_margin_pct: number;   // Pricing floor margin-on-sale (0-1). Default 0.35
+  default_msrp_pct: number; // 0-1 (e.g. 0.65 = 65%). Default MSRP %
+  import_tax_pct?: number;     // Generated column = global_import_tax_pct
   is_active?: boolean;
-  // Legacy fields (backward compatibility - may not exist in DB)
-  labor_percentage?: number;
-  shipping_percentage?: number;
-  import_tax_percent?: number;
-  discount_reseller_pct?: number;
-  discount_distributor_pct?: number;
-  discount_partner_pct?: number;
-  discount_vip_pct?: number;
-  min_margin_pct?: number;
-  deleted?: boolean;
-  archived?: boolean;
+  created_at?: string;
+  updated_at?: string | null;
 }
 
 // QuoteLineCosts interface (Cost breakdown per quote line)
@@ -234,14 +214,11 @@ export interface CategoryMargin {
   id: string;
   organization_id: string;
   category_id: string;
-  msrp_pct_sale_in: number; // MSRP % Sale-In (margin-on-sale) - defines distributor/internal price
-  msrp_pct_sale_out: number; // MSRP % Sale Out (margin-on-sale) - defines public price
-  // Legacy/alternative names (backward compatibility)
-  default_margin_pct?: number; // Old name for msrp_pct_sale_in
+  minimum_margin_pct: number; // Minimum margin (sale-in / dealer price)
+  msrp_pct: number; // MSRP % (margin-on-sale for public price)
   margin_percentage?: number;
   default_value_percentage?: number | null;
   is_using_default?: boolean;
-  // Audit fields
   created_at: string;
   updated_at?: string | null;
   is_active?: boolean;

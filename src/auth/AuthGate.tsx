@@ -23,7 +23,7 @@ type Props = {
  * 
  * This component wraps protected routes and ensures:
  * 1. User has a valid session
- * 2. User has active membership (OrganizationUsers or CompanyPortalUsers)
+ * 2. User has active membership (OrganizationUsers or DealerUsers)
  * 3. User has set their password (if required)
  * 
  * If any check fails, redirects appropriately.

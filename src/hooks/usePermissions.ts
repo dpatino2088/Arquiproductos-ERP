@@ -70,6 +70,10 @@ export const MODULE_PERMS = {
     view: ['catalog.read'],
     edit: ['catalog.write'],
   },
+  inventory: {
+    view: ['inventory.read'],
+    edit: ['inventory.write'],
+  },
   sales: {
     view: ['sales.read'],
     edit: ['sales.write'],

@@ -23,19 +23,6 @@ const getSupabaseConfig = () => {
 
 const { url: supabaseUrl, key: supabaseAnonKey } = getSupabaseConfig();
 
-// ✅ Cooldown on login page: after first auth failure, block further auth requests to avoid flooding Supabase
-const LOGIN_AUTH_COOLDOWN_MS = 60_000; // 1 minute
-let loginPageAuthBlockUntil = 0;
-
-function isOnLoginPage(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.location.pathname.startsWith("/login");
-}
-
-function isSupabaseAuthUrl(url: string): boolean {
-  return url.includes("/auth/v1/") || url.includes("/auth/v1");
-}
-
 // ✅ Telemetry/agent-log blocker (CSP safe)
 if (typeof window !== "undefined") {
   const originalFetch = window.fetch;
@@ -73,14 +60,6 @@ if (typeof window !== "undefined") {
 
       if (!isSupabaseRequest) return originalFetch(...args);
 
-      // ✅ On login page: block auth requests during cooldown to avoid flooding Supabase
-      if (isOnLoginPage() && isSupabaseAuthUrl(reqUrl) && Date.now() < loginPageAuthBlockUntil) {
-        if (import.meta.env.DEV) {
-          console.warn("[Supabase] Auth request blocked on login page (cooldown) to avoid flooding.");
-        }
-        return Promise.reject(new Error("Failed to fetch"));
-      }
-
       const start = Date.now();
     try {
       // Solo pasamos la petición al fetch nativo; no modificamos args. Si falla, es red/CORS/URL.
@@ -107,14 +86,6 @@ if (typeof window !== "undefined") {
 
       return res;
     } catch (err: any) {
-        // On login page, one auth failure => cooldown so we stop sending more requests
-        if (isOnLoginPage() && isSupabaseAuthUrl(reqUrl)) {
-          loginPageAuthBlockUntil = Date.now() + LOGIN_AUTH_COOLDOWN_MS;
-          if (import.meta.env.DEV) {
-            console.warn("[Supabase] Auth failed on login page; blocking further auth requests for 1 minute.");
-          }
-        }
-
         logger.error(
           "Supabase request failed",
           err instanceof Error ? err : undefined,
@@ -168,7 +139,6 @@ export const getCurrentUser = async () => {
 };
 
 export const getUserProfile = async (userId: string | null | undefined) => {
-  // ✅ Guard: si no hay userId, NO busques profile
   if (!userId) return null;
 
   try {
@@ -179,20 +149,31 @@ export const getUserProfile = async (userId: string | null | undefined) => {
       .single();
 
     if (error) {
-      // ✅ NO revientes la app por profile missing (es común que no exista)
+      // PGRST116 = no rows; 42P01 = relation does not exist; schema cache = table not in cache
       if (error.code === "PGRST116") return null;
+      const msg = (error as { message?: string }).message ?? "";
+      if (
+        msg.includes("schema cache") ||
+        msg.includes("could not find the table") ||
+        msg.includes("profiles") ||
+        error.code === "42P01"
+      ) {
+        return null;
+      }
       throw error;
     }
 
     return data ?? null;
   } catch (e) {
-    // ✅ Log only a safe string to avoid "[circular]" in console
     const msg =
       e instanceof Error
         ? e.message
         : typeof e === "object" && e !== null && "message" in e
         ? String((e as { message?: unknown }).message)
         : String(e);
+    if (msg.includes("schema cache") || msg.includes("could not find the table") || msg.includes("profiles")) {
+      return null;
+    }
     logger.warn(`Error getting user profile: ${msg.slice(0, 200)}`);
     return null;
   }

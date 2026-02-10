@@ -130,6 +130,8 @@ export interface Quote {
     total: number;
   };
   notes?: string | null;
+  description?: string | null;
+  po_number?: string | null;
   deleted: boolean;
   archived: boolean;
   created_at: string;
@@ -184,8 +186,17 @@ export interface QuoteLine {
   customer_type_snapshot?: string | null; // NEW: Customer type (VIP, Partner, Reseller, Distributor) at quote line creation time
   price_basis?: 'MSRP_TIER' | 'MARGIN_FLOOR' | 'MANUAL' | null; // NEW: Source of unit price: MSRP_TIER (from customer tier discount), MARGIN_FLOOR (from minimum margin floor), or MANUAL (manually set)
   final_unit_price?: number | null; // Final unit price after discount (unit_price - discount_amount)
-  // Line total
+  // Line total and MSRP from backend (no client-side calculation)
   line_total: number;
+  /** Unit MSRP (precio unitario). Set by backend; UI only reads. */
+  unit_msrp?: number | null;
+  /** Line total MSRP (unit_msrp * quantity). Set by backend; UI only reads. */
+  msrp?: number | null;
+  quantity?: number | null;
+  roll_msrp_snapshot?: number | null;
+  bom_msrp_snapshot?: number | null;
+  configured_product_id?: string | null;
+  pricing_locked?: boolean | null;
   // Metadata for additional data (e.g., panel information for multi-panel configurations)
   metadata?: Record<string, any> | null;
   // Audit fields
@@ -266,6 +277,8 @@ export interface BOMTemplate {
   name?: string | null;
   description?: string | null;
   hardware_color?: string | null; // Hardware color (White, Black, Silver, Bronze, etc.) to differentiate templates. NULL means template applies to all colors.
+  panel_count_min?: number; // Min number of panels (1-3). Default 1.
+  panel_count_max?: number; // Max number of panels (1-3). Default 1.
   metadata?: Record<string, any> | null; // Template metadata: { drive, cassette, hardware_color, system, notes }
   deleted: boolean;
   archived: boolean;

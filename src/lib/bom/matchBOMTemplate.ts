@@ -35,17 +35,17 @@ function normalizeSkuForMatch(sku: string | null | undefined): string {
 export interface MatchConfig {
   organization_id: string;
   product_type_id: string;
+  /** Número de paños (1-3). Filtro aplicado ANTES de color. Default 1. */
+  panel_count?: number | null;
   hardware_color?: string | null;
   bottom_bar_sku?: string | null;
   tube_sku?: string | null;
   operation_type?: 'motor' | 'manual' | null;
-  // Opcionales (filtran si existen)
   headbox_sku?: string | null;
   side_channel_sku?: string | null;
   bottom_channel_sku?: string | null;
   motor_sku?: string | null;
   drive_sku?: string | null;
-  // Templates pre-filtrados desde el configurador
   preFilteredTemplateIds?: string[] | null;
 }
 
@@ -91,6 +91,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
   const {
     organization_id,
     product_type_id,
+    panel_count: configPanelCount,
     hardware_color,
     bottom_bar_sku,
     tube_sku,
@@ -102,6 +103,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     drive_sku,
     preFilteredTemplateIds,
   } = config;
+  const panel_count = Math.min(3, Math.max(1, configPanelCount ?? 1));
 
   const uniquePreFiltered = preFilteredTemplateIds
     ? Array.from(new Set(preFilteredTemplateIds.filter(Boolean)))
@@ -208,9 +210,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       }
     }
 
-    // Si no hay pre-filtrados o no se encontraron, buscar por product_type
     if (templates.length === 0) {
-      // DUMP v7: BOMTemplates tiene is_active, archived, deleted, hardware_color.
       let templatesQuery = supabase
         .from('BOMTemplates')
         .select('id, name, code, product_type_id, hardware_color')
@@ -218,7 +218,9 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         .eq('product_type_id', product_type_id)
         .eq('is_active', true)
         .eq('archived', false)
-        .eq('deleted', false);
+        .eq('deleted', false)
+        .lte('panel_count_min', panel_count)
+        .gte('panel_count_max', panel_count);
 
       const { data: templatesRaw, error: templatesError } = await templatesQuery;
 

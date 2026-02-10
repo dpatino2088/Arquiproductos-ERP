@@ -8,7 +8,7 @@ export type AuthContextRow = {
   is_org_user: boolean;
   is_portal_user: boolean;
   organization_id: string | null;
-  company_id: string | null;
+  dealer_id: string | null;
   needs_password: boolean;
   access_allowed: boolean;
 };
@@ -45,7 +45,7 @@ export async function fetchAuthContext(supabase: SupabaseClient): Promise<AuthCo
       is_org_user: false,
       is_portal_user: false,
       organization_id: null,
-      company_id: null,
+      dealer_id: null,
       needs_password: false,
       access_allowed: false,
     }

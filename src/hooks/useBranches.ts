@@ -57,7 +57,7 @@ export const useBranches = (): UseBranchesResult => {
       const { data, error: fetchError } = await supabase
         .from('branches')
         .select('id, branch_name, branch_address, latitude, longitude, country, timezone, radius_meters, type, is_active, created_at')
-        .eq('company_id', currentCompany.id)
+        .eq('dealer_id', currentCompany.id)
         .eq('is_deleted', false)
         .eq('archived', false)
         .order('created_at', { ascending: false });

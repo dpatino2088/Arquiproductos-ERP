@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useCompanyPortalUsers, type CompanyPortalUser } from '../../hooks/useCompanyPortalUsers';
+import { useDealerUsers, type DealerUser } from '../../hooks/useDealerUsers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
+import { fetchRolesByType, useRolesForUserType, type AppUserRole } from '../../lib/roles';
 import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check, Search, Filter, List, Grid3X3 } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
@@ -17,7 +18,7 @@ interface StatusBadgeProps {
 
 function StatusBadge({ status }: StatusBadgeProps) {
   // Normalize legacy 'invited'/'draft' to 'active' for display
-  // Portal users only use 'active' or 'disabled'
+  // Dealer users only use 'active' or 'disabled'
   const normalizedStatus = (() => {
     const s = (status || '').toLowerCase().trim();
     if (s === 'invited' || s === 'draft') {
@@ -50,81 +51,83 @@ function StatusBadge({ status }: StatusBadgeProps) {
   );
 }
 
-interface CreatePortalUserModalProps {
+interface CreateDealerUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   organizationId: string;
 }
 
-interface EditPortalUserModalProps {
+interface EditDealerUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   organizationId: string;
-  user: CompanyPortalUser | null;
+  user: DealerUser | null;
 }
 
 
-function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: CreatePortalUserModalProps) {
+function CreateDealerUserModal({ isOpen, onClose, onSuccess, organizationId }: CreateDealerUserModalProps) {
   const { user } = useAuthStore();
   const { addNotification } = useUIStore();
-  
+
+  const { roles: dealerRoles, loading: loadingRoles } = useRolesForUserType('dealer');
+
   // Form state
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
-  const [company_id, setCompany_id] = useState<string>('');
-  const [role, setRole] = useState<CompanyPortalRole>('member');
+  const [dealer_id, setDealer_id] = useState<string>('');
+  const [role, setRole] = useState<string>('member');
   const [status, setStatus] = useState<string>('authorized');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Dropdown data: Companies (NO DirectoryCustomers)
-  const [companies, setCompanies] = useState<Array<{ id: string; company_name: string }>>([]);
-  
-  // Loading states
-  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  // Dropdown data: Dealers
+  const [dealers, setDealers] = useState<Array<{ id: string; dealer_name: string }>>([]);
 
-  // Load companies (de la organization actual)
-  const loadCompanies = useCallback(async () => {
+  // Loading states
+  const [loadingDealers, setLoadingDealers] = useState(false);
+
+  // Load dealers (de la organization actual)
+  const loadDealers = useCallback(async () => {
     if (!organizationId) return;
     
-    setLoadingCompanies(true);
+    setLoadingDealers(true);
     try {
       const { data, error } = await supabase
-        .from('Companies')
-        .select('id, company_name')
+        .from('Dealers')
+        .select('id, dealer_name')
         .eq('organization_id', organizationId)
         .eq('deleted', false)
-        .order('company_name', { ascending: true });
+        .order('dealer_name', { ascending: true });
 
       if (error) {
-        console.error('Error loading companies:', error);
-        setCompanies([]);
+        console.error('Error loading dealers:', error);
+        setDealers([]);
       } else {
-        setCompanies(data || []);
+        setDealers(data || []);
       }
     } catch (err) {
-      console.error('Error loading companies:', err);
-      setCompanies([]);
+      console.error('Error loading dealers:', err);
+      setDealers([]);
     } finally {
-      setLoadingCompanies(false);
+      setLoadingDealers(false);
     }
   }, [organizationId]);
 
   // Load data when modal opens
   useEffect(() => {
     if (isOpen) {
-      loadCompanies();
+      loadDealers();
       // Reset form
       setUser_name('');
       setUser_email('');
-      setCompany_id('');
+      setDealer_id('');
       setRole('member');
       setStatus('authorized');
       setSubmitError(null);
     }
-  }, [isOpen, loadCompanies]);
+  }, [isOpen, loadDealers]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,7 +154,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
     }
 
     if (!user?.id) {
-      setSubmitError('You must be logged in to create portal users');
+      setSubmitError('You must be logged in to create dealer users');
       return;
     }
 
@@ -160,8 +163,8 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
 
     try {
       // Validate required fields
-      if (!company_id) {
-        setSubmitError('Company is required');
+      if (!dealer_id) {
+        setSubmitError('Dealer is required');
         setIsSubmitting(false);
         return;
       }
@@ -173,22 +176,22 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
         body: {
           kind: 'portal',
           organization_id: organizationId,
-          company_id: company_id,
+          dealer_id: dealer_id,
           email: normalizedEmail,
           name: trimmedName || null,
           role: role,
         },
       });
 
-      console.log('[CreatePortalUserModal] create-temp-user response:', { data, error: createError });
+      console.log('[CreateDealerUserModal] create-temp-user response:', { data, error: createError });
 
       if (createError) {
-        console.error('[CreatePortalUserModal] createError:', createError);
+        console.error('[CreateDealerUserModal] createError:', createError);
         throw new Error(createError.message || 'Failed to create user');
       }
 
       if (!data?.ok) {
-        console.error('[CreatePortalUserModal] Response not ok:', data);
+        console.error('[CreateDealerUserModal] Response not ok:', data);
         throw new Error(data?.error || 'Edge Function failed');
       }
 
@@ -200,11 +203,11 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       
       if (data?.temp_password) {
         message += `\n\n🔑 Contraseña temporal: ${data.temp_password}\n\nCopia esta contraseña y compártela con el usuario.`;
-        console.log('[CreatePortalUserModal] Temp password:', data.temp_password);
+        console.log('[CreateDealerUserModal] Temp password:', data.temp_password);
       }
 
       if (data?.email_error) {
-        console.warn('[CreatePortalUserModal] Email error:', data.email_error);
+        console.warn('[CreateDealerUserModal] Email error:', data.email_error);
         message += `\n\n⚠️ Error de email: ${data.email_error}`;
       }
 
@@ -217,7 +220,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       onSuccess();
       onClose();
     } catch (err: any) {
-      const errorMessage = err.message || 'Error creating portal user';
+      const errorMessage = err.message || 'Error creating dealer user';
       setSubmitError(errorMessage);
       addNotification({
         type: 'error',
@@ -236,7 +239,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Add Portal User</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Add Dealer User</h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -284,50 +287,65 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
 
           {/* Company Selection (Required) */}
           <div>
-            <Label htmlFor="company_id">Company *</Label>
-            {loadingCompanies ? (
-              <div className="text-sm text-gray-500 py-2">Loading companies...</div>
+            <Label htmlFor="dealer_id">Dealer *</Label>
+            {loadingDealers ? (
+              <div className="text-sm text-gray-500 py-2">Loading dealers...</div>
             ) : (
               <select
-                id="company_id"
-                value={company_id}
+                id="dealer_id"
+                value={dealer_id}
                 onChange={(e) => {
-                  setCompany_id(e.target.value);
+                  setDealer_id(e.target.value);
                 }}
                 required
                 disabled={isSubmitting}
                 className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select a company</option>
-                {companies.map((c) => (
+                <option value="">Select a dealer</option>
+                {dealers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.company_name}
+                    {c.dealer_name}
                   </option>
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
-              <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
+            {dealers.length === 0 && !loadingDealers && (
+              <p className="text-xs text-gray-500 mt-1">No dealers available. Create a dealer first.</p>
             )}
           </div>
 
-          {/* Role */}
+          {/* Role: from AppUserRoles (user_type=dealer) */}
           <div>
             <Label htmlFor="role">Role *</Label>
             <select
               id="role"
               value={role}
-              onChange={(e) => setRole(e.target.value as CompanyPortalRole)}
+              onChange={(e) => setRole(e.target.value)}
               required
-              disabled={isSubmitting}
+              disabled={isSubmitting || loadingRoles}
               className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
             >
-              <option value="member_manager">Member Manager</option>
-              <option value="member">Member</option>
+              {loadingRoles && <option value="">Loading roles…</option>}
+              {!loadingRoles && dealerRoles.length === 0 && (
+                <option value="">No roles configured for this user type</option>
+              )}
+              {!loadingRoles && dealerRoles.length > 0 && (
+                <>
+                  {!dealerRoles.some((r) => r.code === role) && role && (
+                    <option value={role} disabled>Unknown role: {role}</option>
+                  )}
+                  {dealerRoles.map((r) => (
+                    <option key={r.code} value={r.code}>{r.name}</option>
+                  ))}
+                </>
+              )}
             </select>
-            <p className="text-xs text-gray-500 mt-1">
-              {getRoleDescription(role)}
-            </p>
+            {!loadingRoles && dealerRoles.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">No roles configured for this user type. Configure roles in Settings → Roles.</p>
+            )}
+            {dealerRoles.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">{getRoleDescription(role as CompanyPortalRole)}</p>
+            )}
           </div>
 
           {/* Status */}
@@ -345,7 +363,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
               <option value="disabled">Disabled</option>
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              Active: User can access portal. Disabled: Access blocked.
+              Active: User can access. Disabled: Access blocked.
             </p>
           </div>
 
@@ -361,11 +379,11 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !user_name.trim() || !user_email.trim()}
+              disabled={isSubmitting || !user_name.trim() || !user_email.trim() || dealerRoles.length === 0}
               className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
-              {isSubmitting ? 'Creating...' : 'Create Portal User'}
+              {isSubmitting ? 'Creating...' : 'Create Dealer User'}
             </button>
           </div>
         </form>
@@ -374,71 +392,67 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
   );
 }
 
-function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user }: EditPortalUserModalProps) {
+function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user }: EditDealerUserModalProps) {
   const { user: currentUser } = useAuthStore();
   const { addNotification } = useUIStore();
-  
+
+  const { roles: dealerRoles, loading: loadingRoles } = useRolesForUserType('dealer');
+
   // Form state
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
-  const [company_id, setCompany_id] = useState<string>('');
-  const [role, setRole] = useState<CompanyPortalRole>('member');
+  const [dealer_id, setDealer_id] = useState<string>('');
+  const [role, setRole] = useState<string>('member');
   const [status, setStatus] = useState<string>('active');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Dropdown data: Companies (NO DirectoryCustomers)
-  const [companies, setCompanies] = useState<Array<{ id: string; company_name: string }>>([]);
-  
-  // Loading states
-  const [loadingCompanies, setLoadingCompanies] = useState(false);
+  // Dropdown data: Dealers
+  const [dealers, setDealers] = useState<Array<{ id: string; dealer_name: string }>>([]);
 
-  // Load companies (de la organization actual)
-  const loadCompanies = useCallback(async () => {
+  // Loading states
+  const [loadingDealers, setLoadingDealers] = useState(false);
+
+  // Load dealers (de la organization actual)
+  const loadDealers = useCallback(async () => {
     if (!organizationId) return;
     
-    setLoadingCompanies(true);
+    setLoadingDealers(true);
     try {
       const { data, error } = await supabase
-        .from('Companies')
-        .select('id, company_name')
+        .from('Dealers')
+        .select('id, dealer_name')
         .eq('organization_id', organizationId)
         .eq('deleted', false)
-        .order('company_name', { ascending: true });
+        .order('dealer_name', { ascending: true });
 
       if (error) {
-        console.error('Error loading companies:', error);
-        setCompanies([]);
+        console.error('Error loading dealers:', error);
+        setDealers([]);
       } else {
-        setCompanies(data || []);
+        setDealers(data || []);
       }
     } catch (err) {
-      console.error('Error loading companies:', err);
-      setCompanies([]);
+      console.error('Error loading dealers:', err);
+      setDealers([]);
     } finally {
-      setLoadingCompanies(false);
+      setLoadingDealers(false);
     }
   }, [organizationId]);
 
   // Load data when modal opens or user changes
   useEffect(() => {
     if (isOpen && user) {
-      loadCompanies();
-      // Populate form with user data - use CompanyPortalUser fields directly
+      loadDealers();
+      // Populate form with user data - use DealerUser fields directly
       setUser_name(user.portal_user_name || '');
       setUser_email(user.portal_user_email || '');
-      setCompany_id(user.company_id || '');
-      // Load role directly from user - normalize to handle legacy values
+      setDealer_id(user.dealer_id || '');
+      // Load role from user (role_code); keep legacy value if not in AppUserRoles
       const currentRole = (user.portal_user_role ?? (user as { role?: string }).role) || 'member';
-      // Normalize the role to handle any legacy values (e.g., 'manager' -> 'member_manager')
-      // But preserve the exact value if it's already valid
-      const validRoles: CompanyPortalRole[] = ['member_manager', 'member'];
-      const isRoleValid = validRoles.includes(currentRole as CompanyPortalRole);
-      const normalizedRole = isRoleValid 
-        ? (currentRole as CompanyPortalRole) 
-        : normalizeRole(currentRole);
+      const normalizedRole = normalizeRole(currentRole);
       setRole(normalizedRole);
-      // Portal users only use 'active' or 'disabled' status
+      // Dealer users only use 'active' or 'disabled' status
       const currentStatus = (user.portal_user_status ?? (user as { status?: string }).status)?.toString().toLowerCase().trim() || 'active';
       // Normalize legacy 'invited'/'draft' to 'active'
       const normalizedStatus = currentStatus === 'invited' || currentStatus === 'draft' ? 'active' : currentStatus;
@@ -447,14 +461,14 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       setSubmitError(null);
       
       if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Loading user data:', {
+        console.log('[EditDealerUserModal] Loading user data:', {
           role: user.role || user.portal_user_role,
           normalizedRole: normalizedRole,
           status: user.status || user.portal_user_status,
         });
       }
     }
-  }, [isOpen, user, loadCompanies]);
+  }, [isOpen, user, loadDealers]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -486,7 +500,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     }
 
     if (!currentUser?.id) {
-      setSubmitError('You must be logged in to edit portal users');
+      setSubmitError('You must be logged in to edit dealer users');
       return;
     }
 
@@ -494,28 +508,25 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     setSubmitError(null);
 
     try {
-      // Portal users only use 'active' or 'disabled'
+      // Dealer users only use 'active' or 'disabled'
       const normalizedStatus = (status || '').toLowerCase().trim();
       const validStatuses = ['active', 'disabled'];
       const finalStatus = validStatuses.includes(normalizedStatus) ? normalizedStatus : 'active';
 
-      // Validar que company_id existe (requerido en nuevo schema)
-      if (!company_id) {
-        setSubmitError('Company is required');
+      // Validar que dealer_id existe (requerido en nuevo schema)
+      if (!dealer_id) {
+        setSubmitError('Dealer is required');
         setIsSubmitting(false);
         return;
       }
 
-      // SOLO columnas explícitas: portal_user_email, portal_user_name, status, company_id, role
-      // IMPORTANT: Use 'role' column name (matches actual DB schema), not 'portal_user_role'
-      // Ensure role is valid: member_manager or member - validate directly (don't normalize to avoid issues)
-      const validRoles: CompanyPortalRole[] = ['member_manager', 'member'];
-      const finalRole: CompanyPortalRole = validRoles.includes(role) ? role : 'member';
+      // Persist role_code (from AppUserRoles or legacy); column is DealerUsers.role
+      const finalRole = role?.trim() || 'member';
       
       // Only update organization_id if it's currently null (migration case)
       // Don't update it if it already has a value
       const updatePayload: any = {
-        company_id: company_id,
+        dealer_id: dealer_id,
         portal_user_email: trimmedEmail,
         portal_user_name: trimmedName || null,
         role: finalRole, // Use 'role' column name (not 'portal_user_role')
@@ -524,13 +535,13 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       };
       
       // Only include organization_id in UPDATE if it's null in the DB (for migration)
-      // Otherwise, let the DB constraint handle it via company_id relationship
+      // Otherwise, let the DB constraint handle it via dealer_id relationship
       if (!user.organization_id && organizationId) {
         updatePayload.organization_id = organizationId;
       }
       
       if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Saving role:', {
+        console.log('[EditDealerUserModal] Saving role:', {
           roleFromState: role,
           finalRole: finalRole,
           updatePayload: updatePayload.portal_user_role,
@@ -538,7 +549,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       }
 
       if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Updating portal user with payload:', updatePayload);
+        console.log('[EditDealerUserModal] Updating dealer user with payload:', updatePayload);
       }
 
       // Build update query - only filter by id (organization_id may be null in DB)
@@ -547,7 +558,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       // If updateError is null, the update was successful
       
       if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] About to update with payload:', {
+        console.log('[EditDealerUserModal] About to update with payload:', {
           userId: user.id,
           organizationId: organizationId,
           updatePayload,
@@ -559,23 +570,23 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       // Use SELECT to get back the updated row for verification
       // This helps us confirm the update worked and see the actual saved values
       const { error: updateError, data: updateData } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update(updatePayload)
         .eq('id', user.id)
         .select('id, role, status, organization_id')
         .maybeSingle();
 
       if (updateError) {
-        const errorMsg = updateError.message || 'Failed to update portal user';
+        const errorMsg = updateError.message || 'Failed to update dealer user';
         if (import.meta.env.DEV) {
-          console.error('[EditPortalUserModal] Update error:', updateError);
-          console.error('[EditPortalUserModal] Error details:', {
+          console.error('[EditDealerUserModal] Update error:', updateError);
+          console.error('[EditDealerUserModal] Error details:', {
             code: updateError.code,
             details: updateError.details,
             hint: updateError.hint,
             message: updateError.message,
           });
-          console.error('[EditPortalUserModal] Update query details:', {
+          console.error('[EditDealerUserModal] Update query details:', {
             userId: user.id,
             organizationId: organizationId,
             updatePayload,
@@ -585,7 +596,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       }
 
       if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Update completed without errors:', {
+        console.log('[EditDealerUserModal] Update completed without errors:', {
           roleFromState: role,
           finalRole: finalRole,
           userId: user.id,
@@ -602,19 +613,19 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
         // Check role from returned data (may be 'role' or 'portal_user_role' depending on DB schema)
         const returnedRole = (updateData as { role?: string; portal_user_role?: string }).role || (updateData as { portal_user_role?: string }).portal_user_role;
         if (returnedRole !== finalRole) {
-          console.warn('[EditPortalUserModal] ⚠️ WARNING: Role mismatch in returned data!', {
+          console.warn('[EditDealerUserModal] ⚠️ WARNING: Role mismatch in returned data!', {
             expected: finalRole,
             returned: returnedRole,
             userId: user.id,
           });
         } else {
           if (import.meta.env.DEV) {
-            console.log('[EditPortalUserModal] ✅ Role matches in returned data:', returnedRole);
+            console.log('[EditDealerUserModal] ✅ Role matches in returned data:', returnedRole);
           }
         }
       } else {
         if (import.meta.env.DEV) {
-          console.warn('[EditPortalUserModal] ⚠️ No data returned from UPDATE (RLS might be blocking SELECT)');
+          console.warn('[EditDealerUserModal] ⚠️ No data returned from UPDATE (RLS might be blocking SELECT)');
         }
       }
       
@@ -622,14 +633,14 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       // We do this in a try-catch to avoid breaking the flow if RLS prevents read
       try {
         const { data: verifyData, error: verifyError } = await supabase
-          .from('CompanyPortalUsers')
+          .from('DealerUsers')
           .select('id, role, status')
           .eq('id', user.id)
           .maybeSingle();
         
         if (verifyError) {
           if (import.meta.env.DEV) {
-            console.warn('[EditPortalUserModal] Could not verify update (RLS might prevent read):', {
+            console.warn('[EditDealerUserModal] Could not verify update (RLS might prevent read):', {
               error: verifyError,
               code: (verifyError as { code?: string }).code,
               message: verifyError.message,
@@ -642,7 +653,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
           const verifiedRole = verifyData.role || verifyData.portal_user_role;
           const verifiedStatus = verifyData.status || verifyData.portal_user_status;
           if (import.meta.env.DEV) {
-            console.log('[EditPortalUserModal] Update verified - current DB values:', {
+            console.log('[EditDealerUserModal] Update verified - current DB values:', {
               role: verifiedRole,
               status: verifiedStatus,
               expectedRole: finalRole,
@@ -652,7 +663,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
           
           // If the role doesn't match what we tried to save, there might be a constraint issue
           if (verifiedRole !== finalRole) {
-            console.warn('[EditPortalUserModal] WARNING: Role mismatch after update!', {
+            console.warn('[EditDealerUserModal] WARNING: Role mismatch after update!', {
               expected: finalRole,
               actual: verifiedRole,
               userId: user.id,
@@ -660,20 +671,20 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
           }
         } else {
           if (import.meta.env.DEV) {
-            console.warn('[EditPortalUserModal] Could not verify update - record not found or RLS blocked');
+            console.warn('[EditDealerUserModal] Could not verify update - record not found or RLS blocked');
           }
         }
       } catch (verifyErr) {
         // Silently continue if verification fails - RLS might be blocking
         if (import.meta.env.DEV) {
-          console.warn('[EditPortalUserModal] Verification failed:', verifyErr);
+          console.warn('[EditDealerUserModal] Verification failed:', verifyErr);
         }
       }
 
       addNotification({
         type: 'success',
-        title: 'Portal User Updated',
-        message: 'The portal user has been updated successfully.',
+        title: 'Dealer User Updated',
+        message: 'The dealer user has been updated successfully.',
       });
 
       // Close modal first
@@ -683,7 +694,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       // The verification above should have confirmed the update worked
       onSuccess();
     } catch (err: any) {
-      const errorMessage = err.message || 'Error updating portal user';
+      const errorMessage = err.message || 'Error updating dealer user';
       setSubmitError(errorMessage);
       addNotification({
         type: 'error',
@@ -702,7 +713,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Edit Portal User</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Edit Dealer User</h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -750,58 +761,63 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
 
           {/* Company Selection (Required) */}
           <div>
-            <Label htmlFor="edit_company_id">Company *</Label>
-            {loadingCompanies ? (
-              <div className="text-sm text-gray-500 py-2">Loading companies...</div>
+            <Label htmlFor="edit_dealer_id">Dealer *</Label>
+            {loadingDealers ? (
+              <div className="text-sm text-gray-500 py-2">Loading dealers...</div>
             ) : (
               <select
-                id="edit_company_id"
-                value={company_id}
-                onChange={(e) => setCompany_id(e.target.value)}
+                id="edit_dealer_id"
+                value={dealer_id}
+                onChange={(e) => setDealer_id(e.target.value)}
                 required
                 disabled={isSubmitting}
                 className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
               >
-                <option value="">Select a company</option>
-                {companies.map((c) => (
+                <option value="">Select a dealer</option>
+                {dealers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.company_name}
+                    {c.dealer_name}
                   </option>
                 ))}
               </select>
             )}
-            {companies.length === 0 && !loadingCompanies && (
-              <p className="text-xs text-gray-500 mt-1">No companies available. Create a company first.</p>
+            {dealers.length === 0 && !loadingDealers && (
+              <p className="text-xs text-gray-500 mt-1">No dealers available. Create a dealer first.</p>
             )}
           </div>
 
-          {/* Role */}
+          {/* Role: from AppUserRoles (user_type=dealer) */}
           <div>
             <Label htmlFor="edit_role">Role *</Label>
             <select
               id="edit_role"
               value={role}
-              onChange={(e) => {
-                const newRole = e.target.value as CompanyPortalRole;
-                if (import.meta.env.DEV) {
-                  console.log('[EditPortalUserModal] Role changed:', {
-                    oldRole: role,
-                    newRole: newRole,
-                    rawValue: e.target.value,
-                  });
-                }
-                setRole(newRole);
-              }}
+              onChange={(e) => setRole(e.target.value)}
               required
-              disabled={isSubmitting}
+              disabled={isSubmitting || loadingRoles}
               className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
             >
-              <option value="member_manager">Member Manager</option>
-              <option value="member">Member</option>
+              {loadingRoles && <option value="">Loading roles…</option>}
+              {!loadingRoles && dealerRoles.length === 0 && (
+                <option value="">No roles configured for this user type</option>
+              )}
+              {!loadingRoles && dealerRoles.length > 0 && (
+                <>
+                  {!dealerRoles.some((r) => r.code === role) && role && (
+                    <option value={role} disabled>Unknown role: {role}</option>
+                  )}
+                  {dealerRoles.map((r) => (
+                    <option key={r.code} value={r.code}>{r.name}</option>
+                  ))}
+                </>
+              )}
             </select>
-            <p className="text-xs text-gray-500 mt-1">
-              {getRoleDescription(role)}
-            </p>
+            {!loadingRoles && dealerRoles.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">No roles configured for this user type.</p>
+            )}
+            {dealerRoles.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">{getRoleDescription(role as CompanyPortalRole)}</p>
+            )}
           </div>
 
           {/* Status */}
@@ -837,7 +853,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
               className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
-              {isSubmitting ? 'Updating...' : 'Update Portal User'}
+              {isSubmitting ? 'Updating...' : 'Update Dealer User'}
             </button>
           </div>
         </form>
@@ -846,14 +862,19 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
   );
 }
 
-export default function CompanyPortalUsers() {
+export default function DealerUsers() {
   // ✅ Hooks at the TOP (React rules)
   const { activeOrganizationId } = useOrganizationContext();
-  const { users, isLoading: loading, error, refetch } = useCompanyPortalUsers();
+  const { users, isLoading: loading, error, refetch } = useDealerUsers();
   const { user: currentUser } = useAuthStore();
-  const { addNotification } = useUIStore();
+  const { addNotification, setGlobalLoading } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
-  
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
+
   // Search and view state
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -861,7 +882,7 @@ export default function CompanyPortalUsers() {
   
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<CompanyPortalUser | null>(null);
+  const [editingUser, setEditingUser] = useState<DealerUser | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -876,7 +897,7 @@ export default function CompanyPortalUsers() {
     return users.filter(user => 
       (user.portal_user_name?.toLowerCase() || '').includes(search) ||
       (user.portal_user_email?.toLowerCase() || '').includes(search) ||
-      (user.company_name?.toLowerCase() || '').includes(search)
+      (user.dealer_name?.toLowerCase() || '').includes(search)
     );
   }, [users, searchTerm]);
 
@@ -888,7 +909,7 @@ export default function CompanyPortalUsers() {
       setAuthorizingId(userId);
 
       const { error } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update({ status: 'active' }) // Use 'status' column name (not 'portal_user_status')
         .eq('id', userId)
         .eq('organization_id', activeOrganizationId);
@@ -900,7 +921,7 @@ export default function CompanyPortalUsers() {
       addNotification({
         type: 'success',
         title: 'User Authorized',
-        message: 'Portal user has been authorized successfully.',
+        message: 'Dealer user has been authorized successfully.',
       });
 
       refetch();
@@ -916,17 +937,17 @@ export default function CompanyPortalUsers() {
   };
 
   // Handle Edit action
-  const handleEdit = (user: CompanyPortalUser) => {
+  const handleEdit = (user: DealerUser) => {
     setEditingUser(user);
     setIsEditOpen(true);
   };
 
   // Handle Archive action
-  const handleArchive = async (user: CompanyPortalUser) => {
+  const handleArchive = async (user: DealerUser) => {
     if (!activeOrganizationId) return;
 
     const confirmed = await showConfirm({
-      title: 'Archive Portal User',
+      title: 'Archive Dealer User',
       message: `Are you sure you want to archive "${user.portal_user_name || user.portal_user_email || 'this user'}"? The user will be disabled and can be restored later.`,
       variant: 'warning',
       confirmText: 'Archive',
@@ -940,7 +961,7 @@ export default function CompanyPortalUsers() {
 
     try {
       const { error } = await supabase
-        .from('CompanyPortalUsers')
+        .from('DealerUsers')
         .update({ status: 'disabled', updated_at: new Date().toISOString() })
         .eq('id', user.id)
         .eq('organization_id', activeOrganizationId);
@@ -950,7 +971,7 @@ export default function CompanyPortalUsers() {
       addNotification({
         type: 'success',
         title: 'User Archived',
-        message: 'Portal user has been archived successfully.',
+        message: 'Dealer user has been archived successfully.',
       });
 
       refetch();
@@ -967,11 +988,11 @@ export default function CompanyPortalUsers() {
   };
 
   // Handle Delete action
-  const handleDelete = async (user: CompanyPortalUser) => {
+  const handleDelete = async (user: DealerUser) => {
     if (!activeOrganizationId) return;
 
     const confirmed = await showConfirm({
-      title: 'Delete Portal User',
+      title: 'Delete Dealer User',
       message: `Are you sure you want to permanently delete "${user.portal_user_name || user.portal_user_email || 'this user'}"? This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
@@ -985,13 +1006,13 @@ export default function CompanyPortalUsers() {
 
     try {
       // Use RPC to bypass RLS (same approach as OrganizationUser)
-      const { data, error } = await supabase.rpc('delete_company_portal_user', {
+      const { data, error } = await supabase.rpc('delete_dealer_user', {
         p_portal_user_id: user.id,
         p_organization_id: activeOrganizationId,
       });
 
       if (error) {
-        console.error('[CompanyPortalUsers] Delete RPC error:', error);
+        console.error('[DealerUsers] Delete RPC error:', error);
         throw error;
       }
 
@@ -999,19 +1020,19 @@ export default function CompanyPortalUsers() {
       if (!data || (typeof data === 'object' && 'success' in data && !data.success)) {
         const errorMsg = (data && typeof data === 'object' && 'error' in data) 
           ? data.error 
-          : 'Could not delete portal user. User not found or already deleted.';
+          : 'Could not delete dealer user. User not found or already deleted.';
         throw new Error(errorMsg);
       }
 
       addNotification({
         type: 'success',
         title: 'User Deleted',
-        message: 'Portal user has been deleted successfully.',
+        message: 'Dealer user has been deleted successfully.',
       });
 
       refetch();
     } catch (err: any) {
-      console.error('[CompanyPortalUsers] Error in handleDelete:', err);
+      console.error('[DealerUsers] Error in handleDelete:', err);
       addNotification({
         type: 'error',
         title: 'Delete Error',
@@ -1039,7 +1060,7 @@ export default function CompanyPortalUsers() {
   };
 
   // Handle Resend Invite action
-  const handleResendInvite = async (user: CompanyPortalUser) => {
+  const handleResendInvite = async (user: DealerUser) => {
     if (!activeOrganizationId || !user.portal_user_email || !currentUser) return;
     
     setInvitingId(user.id);
@@ -1102,26 +1123,14 @@ export default function CompanyPortalUsers() {
     }
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="py-6 px-6">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Loading portal users...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="py-6 px-6" />;
 
   // Show error state
   if (error) {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error loading portal users</p>
+          <p className="text-sm text-red-800 font-medium mb-2">Error loading dealer users</p>
           <p className="text-sm text-red-700">{error}</p>
         </div>
       </div>
@@ -1134,7 +1143,7 @@ export default function CompanyPortalUsers() {
       <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No organization selected</p>
-          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view portal users.</p>
+          <p className="text-sm text-yellow-700 mt-1">Please select an organization to view dealer users.</p>
         </div>
       </div>
     );
@@ -1145,9 +1154,9 @@ export default function CompanyPortalUsers() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Company Portal Users</h1>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Dealer Users</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage company portal access and permissions ({filteredUsers.length} total)
+            Manage dealer user access and permissions ({filteredUsers.length} total)
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -1158,7 +1167,7 @@ export default function CompanyPortalUsers() {
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
               <Plus className="w-4 h-4" />
-              Add Portal User
+              Add Dealer User
             </button>
           )}
         </div>
@@ -1175,11 +1184,11 @@ export default function CompanyPortalUsers() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search portal users by name, email, company..."
+                placeholder="Search dealer users by name, email, company..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                aria-label="Search portal users"
+                aria-label="Search dealer users"
               />
             </div>
             
@@ -1241,7 +1250,7 @@ export default function CompanyPortalUsers() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Name</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Company</th>
+                <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Dealer</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Email</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Role</th>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Status</th>
@@ -1254,14 +1263,14 @@ export default function CompanyPortalUsers() {
                 <tr>
                   <td colSpan={7} className="py-12 px-6 text-center">
                   <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600 mb-2">No portal users found</p>
+                  <p className="text-gray-600 mb-2">No dealer users found</p>
                   <p className="text-sm text-gray-500">
-                    {searchTerm ? 'No users match your search criteria.' : 'Portal users will appear here once they are created.'}
+                    {searchTerm ? 'No users match your search criteria.' : 'Dealer users will appear here once they are created.'}
                   </p>
                 </td>
               </tr>
             ) : (
-              filteredUsers.map((user: CompanyPortalUser) => (
+              filteredUsers.map((user: DealerUser) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer">
                     {/* Name */}
                     <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
@@ -1275,9 +1284,9 @@ export default function CompanyPortalUsers() {
                       </div>
                     </td>
                     
-                    {/* Company */}
+                    {/* Dealer */}
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
-                      {user.company_name || '-'}
+                      {user.dealer_name || '-'}
                     </td>
                     
                     {/* Email */}
@@ -1430,13 +1439,13 @@ export default function CompanyPortalUsers() {
       {/* Summary */}
       {users.length > 0 && (
         <div className="mt-4 text-sm text-gray-600">
-          Showing {users.length} portal user{users.length !== 1 ? 's' : ''}
+          Showing {users.length} dealer user{users.length !== 1 ? 's' : ''}
         </div>
       )}
 
       {/* Create Modal */}
       {activeOrganizationId && (
-        <CreatePortalUserModal
+        <CreateDealerUserModal
           isOpen={isCreateOpen}
           onClose={() => setIsCreateOpen(false)}
           onSuccess={() => {
@@ -1448,7 +1457,7 @@ export default function CompanyPortalUsers() {
 
       {/* Edit Modal */}
       {activeOrganizationId && editingUser && (
-        <EditPortalUserModal
+        <EditDealerUserModal
           isOpen={isEditOpen}
           onClose={() => {
             setIsEditOpen(false);

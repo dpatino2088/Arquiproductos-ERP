@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { router } from '../../lib/router';
 import { useAuthStore } from '../../stores/auth-store';
+import { useUIStore } from '../../stores/ui-store';
 import {
   canEditQuote,
   canApproveQuote,
@@ -22,7 +23,7 @@ import { Edit, CheckCircle, XCircle, ArrowLeft, Loader2 } from 'lucide-react';
 
 interface PortalUser {
   id: string;
-  company_id: string;
+  dealer_id: string;
   portal_user_role: CompanyPortalRole | null;
 }
 
@@ -35,6 +36,12 @@ export default function PortalQuoteDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  useEffect(() => {
+    setGlobalLoading(loading);
+    return () => setGlobalLoading(false);
+  }, [loading, setGlobalLoading]);
 
   // Load portal user info
   useEffect(() => {
@@ -47,15 +54,15 @@ export default function PortalQuoteDetail() {
       try {
         // IMPORTANT: Use 'role' and 'status' columns (matches actual DB schema)
         const { data, error: userError } = await supabase
-          .from('CompanyPortalUsers')
-          .select('id, company_id, role, status')
+          .from('DealerUsers')
+          .select('id, dealer_id, role, status')
           .eq('user_id', user.id)
           .eq('deleted', false)
           .in('status', ['active', 'invited'])
           .maybeSingle();
 
         if (userError) {
-          console.error('[PortalQuoteDetail] CompanyPortalUsers lookup error', {
+          console.error('[PortalQuoteDetail] DealerUsers lookup error', {
             message: userError.message,
             details: userError.details,
             hint: userError.hint,
@@ -69,7 +76,7 @@ export default function PortalQuoteDetail() {
           const rawRole = data.role;
           setPortalUser({
             id: data.id,
-            company_id: data.company_id,
+            dealer_id: data.dealer_id,
             portal_user_role: normalizeRole(rawRole || 'member'),
           });
         }
@@ -175,18 +182,7 @@ export default function PortalQuoteDetail() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-sm text-gray-500">Loading quote...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="p-6" />;
 
   if (error) {
     return (

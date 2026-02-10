@@ -52,10 +52,10 @@ async function resolveBomTemplateIdStrict(args: {
   const p_config: any = {
     tube_id,
     bottom_bar_id,
-    // Optional extra discriminators (if DB matcher uses them)
-    headbox_id: config_snapshot?.headbox_item_id ?? null,
-    side_channel_id: config_snapshot?.side_channel_item_id ?? null,
-    bottom_channel_id: config_snapshot?.bottom_channel_item_id ?? null,
+    // Optional extra discriminators (if DB matcher uses them) — skip 'NONE' (UI tri-state for "Not Included")
+    headbox_id: config_snapshot?.headbox_item_id === 'NONE' ? null : (config_snapshot?.headbox_item_id ?? null),
+    side_channel_id: config_snapshot?.side_channel_item_id === 'NONE' ? null : (config_snapshot?.side_channel_item_id ?? null),
+    bottom_channel_id: config_snapshot?.bottom_channel_item_id === 'NONE' ? null : (config_snapshot?.bottom_channel_item_id ?? null),
     hardware_color: config_snapshot?.hardware_color ?? null,
   };
 
@@ -112,10 +112,16 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   setIf('tube', config_snapshot?.tube_item_id);
   setIf('motor', config_snapshot?.motor_item_id);
   setIf('drive', config_snapshot?.drive_item_id);
-  // ✅ Optional discriminators (only if user selected them)
-  setIf('headbox', config_snapshot?.headbox_item_id);
-  setIf('side_channel', config_snapshot?.side_channel_item_id);
-  setIf('bottom_channel', config_snapshot?.bottom_channel_item_id);
+  // ✅ Optional discriminators (only if user selected a real item, NOT 'NONE')
+  if (config_snapshot?.headbox_item_id && config_snapshot.headbox_item_id !== 'NONE') {
+    setIf('headbox', config_snapshot.headbox_item_id);
+  }
+  if (config_snapshot?.side_channel_item_id && config_snapshot.side_channel_item_id !== 'NONE') {
+    setIf('side_channel', config_snapshot.side_channel_item_id);
+  }
+  if (config_snapshot?.bottom_channel_item_id && config_snapshot.bottom_channel_item_id !== 'NONE') {
+    setIf('bottom_channel', config_snapshot.bottom_channel_item_id);
+  }
 
   // Enforce strict required fields (same spirit as v2_strict)
   if (!selections.get('tube')) throw new Error('Missing tube_item_id in config');
@@ -451,12 +457,16 @@ export async function createConfiguredProductPreview(
     }
 
     // ✅ Solo columnas que existen: componentes y operating_type están en config_snapshot (JSON)
+    // Multi-panel: use total width (sum of all paños) for BOM calculations
+    const measurements = config_snapshot?.measurements;
+    const widthTotalMm = measurements?.width_total_mm ?? (Array.isArray(measurements?.panels) ? (measurements.panels as any[]).reduce((s, p) => s + (p?.width_mm || 0), 0) : null);
+    const widthMmForRow = (widthTotalMm != null && widthTotalMm > 0) ? widthTotalMm : (config_snapshot.width_mm ?? null);
     const insertPayload: any = {
       organization_id,
       quote_id: quote_id || null,
       bom_template_id: preResolvedTemplateId,
       product_type_id,
-      width_mm: config_snapshot.width_mm ?? null,
+      width_mm: widthMmForRow ?? config_snapshot.width_mm ?? null,
       height_mm: config_snapshot.height_mm ?? null,
       quantity,
       hardware_color: config_snapshot.hardware_color ?? null,

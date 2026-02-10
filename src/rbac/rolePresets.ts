@@ -21,6 +21,8 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'directory.write',
     'catalog.read',
     'catalog.write',
+    'inventory.read',
+    'inventory.write',
     'sales.read',
     'sales.write',
     'quotes.edit',
@@ -39,6 +41,8 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'directory.write',
     'catalog.read',
     'catalog.write',
+    'inventory.read',
+    'inventory.write',
     'sales.read',
     'sales.write',
     'quotes.edit',
@@ -55,6 +59,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'dashboard.read',
     'catalog.read',
     'catalog.write',
+    'inventory.read',
     'manufacturing.read',
     'manufacturing.write',
     // NO directory.*, NO sales.*, NO settings.*, NO finance.*, NO org.*
@@ -64,6 +69,8 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'directory.read',
     'catalog.read',
     // catalog.write is OPTIONAL - prefer OFF initially
+    'inventory.read',
+    'inventory.write',
     'sales.read',
     'manufacturing.read', // view only
     'finance.read', // optional if needs costs; default ON

@@ -6,7 +6,7 @@ import { router } from '../../lib/router';
  * AccessDenied - Page shown when user doesn't have membership
  * 
  * This page is displayed when:
- * - User has a valid Supabase session but no active membership in OrganizationUsers or CompanyPortalUsers
+ * - User has a valid Supabase session but no active membership in OrganizationUsers or DealerUsers
  * - User's membership status is 'disabled' or 'deleted'
  */
 export default function AccessDenied() {

@@ -9,10 +9,10 @@ export type CompanyPortalRole = 'member_manager' | 'member';
 
 export interface PortalQuote {
   id: string;
-  company_id: string;
+  dealer_id: string;
   created_by_portal_user_id: string | null;
   status: 'draft' | 'sent' | 'approved' | 'rejected' | 'cancelled';
-  [key: string]: any; // Allow additional quote fields
+  [key: string]: any;
 }
 
 /**
@@ -130,11 +130,11 @@ export function getRoleLabel(role: CompanyPortalRole | string | null | undefined
   
   switch (normalized) {
     case 'member_manager':
-      return 'Member Manager';
+      return 'Dealer Manager';
     case 'member':
-      return 'Member';
+      return 'Dealer Member';
     default:
-      return 'Member';
+      return 'Dealer Member';
   }
 }
 
@@ -146,10 +146,10 @@ export function getRoleDescription(role: CompanyPortalRole | string | null | und
   
   switch (normalized) {
     case 'member_manager':
-      return 'Can view all company quotes and approve/reject';
+      return 'Can view all dealer quotes, approve/reject, and delete quotes/proposals/directory.';
     case 'member':
-      return 'Can create/edit their own quotes; cannot approve';
+      return 'Can create/edit/delete their own quotes and proposals; delete directory (contacts/customers). Cannot approve quotes.';
     default:
-      return 'Can create/edit their own quotes; cannot approve';
+      return 'Can create/edit/delete their own quotes and proposals; delete directory. Cannot approve quotes.';
   }
 }

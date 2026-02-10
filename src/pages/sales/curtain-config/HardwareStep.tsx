@@ -16,9 +16,13 @@
  * IMPORTANT:
  * - Colors in DB are CAPITALIZED: 'White', 'Black', 'Silver'
  * - Cada opción incluye templateIds para filtrado progresivo
+ * 
+ * E) Edit prefill: Do NOT clear *_item_id or *_sku when options are still loading.
+ * Only clear selection when options have loaded AND the itemId is not in the list.
+ * (Avoids losing headbox/side_channel/bottom_channel selection on Edit open.)
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
@@ -99,6 +103,17 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   // Get current selections (CAPITALIZED)
   const currentHardwareColor = (config as any).hardwareColor || (config as any).hardware_color || (config as any).operatingSystemColor || null;
   const cassetteShape = (config as any).cassette_shape || 'none';
+
+  // Helpers
+  const normSku = (v: unknown): string => String(v ?? '').trim().toLowerCase();
+
+  // Log solo primitivos (evitar [circular] en consola)
+  const cfg = config as any;
+  console.log('[HardwareStep] config', String(cfg.hardware_color ?? 'MISSING'), String(cfg.bottom_bar_sku ?? 'MISSING'), String(cfg.bottom_bar_item_id ?? 'MISSING'));
+
+  const DEBUG_PREFILL = import.meta.env.DEV && (typeof window !== 'undefined' && (window as any).__DEBUG_PREFILL === true);
+  const userInteractedRef = useRef(false);
+  const prefillAppliedRef = useRef(false);
   
   // ✅ Helpers para RoleSelection
   const headboxSelection: RoleSelection = toRoleSelection(
@@ -225,21 +240,82 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     } as any);
   };
   
-  // ✅ FILTRADO PROGRESIVO: Calcular templates disponibles basado en selecciones
+  // Panel count (1-3) for BOM template filtering (before color)
+  const panelCount = (config as any).measurements?.panel_count ?? (config as any).panels?.length ?? 1;
   const hasHardwareColor = !!currentHardwareColor;
   
-  // ✅ Bottom Bar: desde TODOS los templates del ProductType + Color (primer filtro)
+  // ✅ Bottom Bar: desde TODOS los templates del ProductType + panel_count + Color (primer filtro)
   const { options: bottomBarOptions, loading: loadingBottomBar, error: bottomBarError } = useBOMTemplateOptionsSimple(
     productTypeId,
     currentHardwareColor,
     'bottom_bar',
-    filteredTemplateIds // Puede venir pre-filtrado del paso anterior
+    filteredTemplateIds,
+    panelCount
   );
   
   // ✅ Calcular templates filtrados por bottom_bar seleccionado
-  const selectedBottomBar = bottomBarOptions.find(
-    opt => opt.id === (config as any).bottom_bar_item_id
-  );
+  const selectedBottomBar =
+    bottomBarOptions.find((opt) => opt.id === (config as any).bottom_bar_item_id) ||
+    // Fallback: legacy/mixed IDs (global vs org). If SKU matches, treat as selected.
+    (normSku((config as any).bottom_bar_sku) ? bottomBarOptions.find((opt) => normSku(opt.sku) === normSku((config as any).bottom_bar_sku)) : undefined);
+
+  // Prefill robusto (race-safe): aplicar UNA sola vez cuando options cargaron y hay bottom_bar_sku guardado.
+  useEffect(() => {
+    if (userInteractedRef.current) return;
+    if (prefillAppliedRef.current) return;
+    if (loadingBottomBar) return;
+    if (!bottomBarOptions || bottomBarOptions.length === 0) return;
+    const cfg: any = config as any;
+    const cfgSku = normSku(cfg.bottom_bar_sku);
+    if (!cfgSku) return;
+
+    const hasId = typeof cfg.bottom_bar_item_id === 'string' && cfg.bottom_bar_item_id.trim().length > 0;
+    const idMatches = hasId && bottomBarOptions.some((opt) => opt.id === cfg.bottom_bar_item_id);
+    if (idMatches) {
+      prefillAppliedRef.current = true;
+      return;
+    }
+
+    const bySku = bottomBarOptions.find((opt) => normSku(opt.sku) === cfgSku);
+    if (!bySku) return;
+
+    prefillAppliedRef.current = true;
+    if (DEBUG_PREFILL || import.meta.env.DEV) {
+      console.debug('[HardwareStep] Prefill applied (once): bottom_bar from SKU', { bottom_bar_sku: cfg.bottom_bar_sku, bottom_bar_item_id: bySku.id });
+    }
+    onUpdate({
+      bottom_bar_item_id: String(bySku.id),
+      bottom_bar_sku: (bySku.sku || '').trim() || cfg.bottom_bar_sku,
+    } as any);
+  }, [loadingBottomBar, bottomBarOptions, config, onUpdate]);
+
+  const savedSku = (config as any).bottom_bar_sku;
+  const savedId = (config as any).bottom_bar_item_id;
+  const bottomBarSkuInOptions = bottomBarOptions.some((o) => normSku(o.sku) === normSku(savedSku));
+  const pinnedOption: RoleOption | null =
+    savedSku && !bottomBarSkuInOptions
+      ? {
+          id: savedId ?? `pinned:${(savedSku || '').trim()}`,
+          sku: typeof savedSku === 'string' ? savedSku.trim() : String(savedSku ?? ''),
+          name: 'Bottom Bar (Saved)',
+          image_url: null,
+          color: null,
+          cost_exw: null,
+          category_id: null,
+          templateIds: undefined,
+          virtual: true,
+        }
+      : null;
+  if (pinnedOption) (pinnedOption as any).__pinned = true;
+  const optionsToRender: RoleOption[] = pinnedOption ? [pinnedOption, ...bottomBarOptions] : bottomBarOptions;
+
+  if (DEBUG_PREFILL && pinnedOption) {
+    console.log('[HardwareStep] bottom_bar_sku saved but not in options', {
+      bottom_bar_sku: savedSku,
+      available_skus: bottomBarOptions.slice(0, 10).map((o) => o.sku),
+    });
+  }
+
   const templatesAfterBottomBar = useMemo(() => {
     if (!selectedBottomBar || !selectedBottomBar.templateIds) {
       // Si no hay selección, usar todos los templates disponibles
@@ -258,12 +334,30 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     productTypeId,
     currentHardwareColor,
     'headbox',
-    templatesAfterBottomBar
+    templatesAfterBottomBar,
+    panelCount
   );
   
   // ✅ Tri-state: UNSET (null/undefined) | NONE ('NONE') | SELECTED (uuid)
   const headboxItemId = (config as any).headbox_item_id;
-  const selectedHeadbox = headboxOptions.find(opt => opt.id === headboxItemId);
+  const selectedHeadbox = headboxOptions.find(opt => String(opt.id) === String(headboxItemId));
+  const headboxItemIdInOptions = headboxOptions.some((o) => String(o.id) === String(headboxItemId));
+  const pinnedHeadbox: RoleOption | null =
+    headboxItemId && String(headboxItemId) !== 'NONE' && !headboxItemIdInOptions
+      ? {
+          id: String(headboxItemId),
+          sku: (config as any).headbox_sku ?? '',
+          name: 'Headbox (Saved)',
+          image_url: null,
+          color: null,
+          cost_exw: null,
+          category_id: null,
+          templateIds: undefined,
+          virtual: true,
+        }
+      : null;
+  if (pinnedHeadbox) (pinnedHeadbox as any).__pinned = true;
+  const headboxOptionsToRender: RoleOption[] = pinnedHeadbox ? [pinnedHeadbox, ...headboxOptions] : headboxOptions;
   
   const templatesWithHeadbox = useMemo(() => {
     const allTemplateIds = new Set<string>();
@@ -296,11 +390,29 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     productTypeId,
     currentHardwareColor,
     'side_channel',
-    templatesAfterHeadbox
+    templatesAfterHeadbox,
+    panelCount
   );
   
   const sideChannelItemId = (config as any).side_channel_item_id;
-  const selectedSideChannel = sideChannelOptions.find(opt => opt.id === sideChannelItemId);
+  const selectedSideChannel = sideChannelOptions.find(opt => String(opt.id) === String(sideChannelItemId));
+  const sideChannelItemIdInOptions = sideChannelOptions.some((o) => String(o.id) === String(sideChannelItemId));
+  const pinnedSideChannel: RoleOption | null =
+    sideChannelItemId && String(sideChannelItemId) !== 'NONE' && !sideChannelItemIdInOptions
+      ? {
+          id: String(sideChannelItemId),
+          sku: (config as any).side_channel_sku ?? '',
+          name: 'Side Channel (Saved)',
+          image_url: null,
+          color: null,
+          cost_exw: null,
+          category_id: null,
+          templateIds: undefined,
+          virtual: true,
+        }
+      : null;
+  if (pinnedSideChannel) (pinnedSideChannel as any).__pinned = true;
+  const sideChannelOptionsToRender: RoleOption[] = pinnedSideChannel ? [pinnedSideChannel, ...sideChannelOptions] : sideChannelOptions;
   
   const templatesWithSideChannel = useMemo(() => {
     const allTemplateIds = new Set<string>();
@@ -330,11 +442,29 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     productTypeId,
     currentHardwareColor,
     'bottom_channel',
-    templatesAfterSideChannel
+    templatesAfterSideChannel,
+    panelCount
   );
   
   const bottomChannelItemId = (config as any).bottom_channel_item_id;
-  const selectedBottomChannel = bottomChannelOptions.find(opt => opt.id === bottomChannelItemId);
+  const selectedBottomChannel = bottomChannelOptions.find(opt => String(opt.id) === String(bottomChannelItemId));
+  const bottomChannelItemIdInOptions = bottomChannelOptions.some((o) => String(o.id) === String(bottomChannelItemId));
+  const pinnedBottomChannel: RoleOption | null =
+    bottomChannelItemId && String(bottomChannelItemId) !== 'NONE' && !bottomChannelItemIdInOptions
+      ? {
+          id: String(bottomChannelItemId),
+          sku: (config as any).bottom_channel_sku ?? '',
+          name: 'Bottom Channel (Saved)',
+          image_url: null,
+          color: null,
+          cost_exw: null,
+          category_id: null,
+          templateIds: undefined,
+          virtual: true,
+        }
+      : null;
+  if (pinnedBottomChannel) (pinnedBottomChannel as any).__pinned = true;
+  const bottomChannelOptionsToRender: RoleOption[] = pinnedBottomChannel ? [pinnedBottomChannel, ...bottomChannelOptions] : bottomChannelOptions;
   
   const templatesWithBottomChannel = useMemo(() => {
     const allTemplateIds = new Set<string>();
@@ -409,7 +539,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-8">
         {selectionDisabled && (
           <div className="bg-amber-50 border border-amber-200 rounded p-3">
             <p className="text-xs text-amber-800">
@@ -417,19 +547,17 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
             </p>
           </div>
         )}
-        <div className={selectionDisabled ? 'pointer-events-none opacity-50' : ''}>
+        <div className={`space-y-8 ${selectionDisabled ? 'pointer-events-none opacity-50' : ''}`}>
         {/* Hardware Color */}
         {showHardwareColor && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">
+            <Label className="text-sm font-medium mb-5 block">
               HARDWARE COLOR
-              {!currentHardwareColor && (
-                <span className="ml-2 text-sm font-normal text-red-600">(Required - Please select)</span>
-              )}
             </Label>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {HARDWARE_COLOR_OPTIONS.map((option) => {
-                const isSelected = currentHardwareColor === option.id;
+                const isSelected =
+                  (currentHardwareColor && option.id && (currentHardwareColor === option.id || String(currentHardwareColor).trim().toLowerCase() === String(option.id).toLowerCase()));
                 return (
                   <div
                     key={option.id}
@@ -472,7 +600,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                     }}
                     className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
                       isSelected
-                        ? 'border-2 border-primary shadow-lg'
+                        ? 'border-2 border-gray-900 shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                     } ${selectionDisabled ? 'opacity-50 pointer-events-none cursor-not-allowed' : ''}`}
                   >
@@ -514,16 +642,16 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                       </button>
                     )}
                     <div 
-                      className="aspect-square relative flex items-center justify-center overflow-hidden border-b border-gray-200"
+                      className="aspect-square relative flex items-center justify-center overflow-hidden bg-white border-b border-gray-200"
                       style={{ backgroundColor: option.color }}
                     >
                       {option.id === 'Silver' && (
                         <div className="absolute inset-0 opacity-20 bg-gradient-to-br from-white to-gray-400" />
                       )}
                     </div>
-                    <div className="p-4">
+                    <div className="p-4 bg-gray-100">
                       <h3 className={`font-semibold text-sm text-center ${
-                        isSelected ? 'text-primary' : 'text-gray-900'
+                        isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                       }`}>
                         {option.name}
                       </h3>
@@ -538,19 +666,22 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         {/* Bottom Bar - Dynamic from CatalogItems */}
         {currentHardwareColor && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">BOTTOM BAR</Label>
+            <Label className="text-sm font-medium mb-5 block">BOTTOM BAR</Label>
             {loadingBottomBar ? (
               <div className="text-sm text-gray-500 mt-2">Loading bottom bar options...</div>
-            ) : bottomBarOptions.length > 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {bottomBarOptions.map((item) => {
-                const isSelected = (config as any).bottom_bar_item_id === item.id;
+            ) : optionsToRender.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {optionsToRender.map((item) => {
+                const isSelected =
+                  (savedId != null && String(item.id) === String(savedId)) ||
+                  (savedSku != null && savedSku !== '' && normSku(item.sku) === normSku(savedSku));
+                const isPinned = !!(item as any).__pinned;
                 return (
                   <div
                     key={item.id}
                     className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
                       isSelected
-                        ? 'border-2 border-primary shadow-lg'
+                        ? 'border-2 border-gray-900 shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                     } ${selectionDisabled ? 'opacity-50' : ''}`}
                   >
@@ -559,6 +690,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         type="button"
                         onClick={async (e) => {
                           e.stopPropagation();
+                          userInteractedRef.current = true;
                           const okBottomBar = await removeSelection('bottom_bar');
                           const okHeadbox = await removeSelection('headbox');
                           const okSide = await removeSelection('side_channel');
@@ -586,6 +718,15 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                     <div
                       onClick={async () => {
                         if (selectionDisabled) return;
+                        if (isPinned) {
+                          useUIStore.getState().addNotification({
+                            type: 'info',
+                            title: 'Bottom Bar guardado',
+                            message: 'Este Bottom Bar está guardado, pero no aparece en las opciones actuales. Ajusta color o filtros.',
+                          });
+                          return;
+                        }
+                        userInteractedRef.current = true;
                         const sku = (item.sku || "").trim();
                         const id = String(item.id);
                         const isVirtual = id.startsWith('sku:');
@@ -596,37 +737,31 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         if (!ensurePersistable()) return;
                         const ok = await persistSelection('bottom_bar', id);
                         if (!ok) return;
-                        
-                        // ✅ Guardar templates filtrados inmediatamente (dedupe)
+
                         const newFilteredTemplates = uniq(item.templateIds) || [];
-                        
                         if (import.meta.env.DEV) {
-                          console.debug('[HardwareStep] Bottom bar selected:', {
-                            sku,
-                            id,
-                            templateIds: newFilteredTemplates.length,
-                          });
+                          console.debug('[HardwareStep] Bottom bar selected:', { sku, id, templateIds: newFilteredTemplates.length });
                         }
-                        
+
                         onUpdate({
                           bottom_bar_item_id: isVirtual ? null : id,
                           bottom_bar_sku: sku,
                           bottom_rail_type: 'standard',
-                          // Limpiar selecciones dependientes cuando cambia bottom_bar
                           headbox_item_id: null,
                           headbox_sku: null,
                           side_channel_item_id: null,
                           side_channel_sku: null,
                           bottom_channel_item_id: null,
                           bottom_channel_sku: null,
-                          // ✅ Guardar templates filtrados (dedupe)
                           _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : null,
                         } as any);
                       }}
                       className="cursor-pointer"
                     >
-                      <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
-                        {item.image_url ? (
+                      <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
+                        {isPinned ? (
+                          <span className="text-xs text-gray-500">Saved</span>
+                        ) : item.image_url ? (
                           <img
                             src={item.image_url}
                             alt={item.name || item.sku}
@@ -646,16 +781,11 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4">
-                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                      <div className="p-4 bg-gray-100">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>
                         <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
-                        {import.meta.env.DEV && item.templateIds && (
-                          <p className="text-xs text-blue-500 mt-1">
-                            {item.templateIds.length} template(s)
-                          </p>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -665,11 +795,6 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
             ) : (
               <div className="text-sm text-gray-500">
                 No bottom bar options available for selected color.
-                {import.meta.env.DEV && (
-                  <div className="text-xs text-red-500 mt-1">
-                    Debug: productTypeId={productTypeId}, hardwareColor={currentHardwareColor}, loading={String(loadingBottomBar)}, error={bottomBarError}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -678,63 +803,46 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         {/* Headbox / Cassette */}
         {showCassette && currentHardwareColor && (config as any).bottom_bar_item_id && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">HEADBOX / CASSETTE</Label>
-            {loadingHeadbox ? (
-              <div className="text-sm text-gray-500 mt-2">Loading headbox options...</div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* None card: explicit "No Headbox" → filters to templates WITHOUT headbox */}
-                <div
-                  className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
-                    (config as any).headbox_item_id === 'NONE'
-                      ? 'border-2 border-primary shadow-lg'
-                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                  } ${selectionDisabled ? 'opacity-50' : ''}`}
-                >
-                  {(config as any).headbox_item_id === 'NONE' && (
-                    <button
-                      type="button"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await clearHeadboxSelection();
-                      }}
-                      className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
-                      title="Clear (UNSET)"
-                    >
-                      <X className="w-4 h-4 text-gray-600" />
-                    </button>
-                  )}
-                  <div
-                    onClick={() => {
-                      if (selectionDisabled) return;
-                      onUpdate({
-                        headbox_item_id: 'NONE',
-                        headbox_sku: null,
-                        cassette: false,
-                        cassette_shape: 'none',
-                      } as any);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
-                      <ImageIcon className="w-12 h-12 text-gray-400" />
-                    </div>
-                    <div className="p-4">
-                      <h3 className={`font-semibold text-sm ${(config as any).headbox_item_id === 'NONE' ? 'text-primary' : 'text-gray-900'}`}>
-                        No Headbox / None
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">None</p>
-                    </div>
-                  </div>
-                </div>
-                {headboxOptions.map((item) => {
-                  const isSelected = (config as any).headbox_item_id === item.id;
+            <div className="flex items-center gap-3 mb-5">
+              <Label className="text-sm font-medium block min-w-[12rem]">HEADBOX / CASSETTE</Label>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (selectionDisabled) return;
+                  if ((config as any).headbox_item_id === 'NONE') {
+                    await clearHeadboxSelection();
+                  } else {
+                    onUpdate({
+                      headbox_item_id: 'NONE',
+                      headbox_sku: null,
+                      cassette: false,
+                      cassette_shape: 'none',
+                    } as any);
+                  }
+                }}
+                className={`shrink-0 w-[7.5rem] px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                  String((config as any).headbox_item_id) === 'NONE'
+                    ? 'border-2 border-gray-900 bg-gray-100 text-gray-900'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
+                } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                Not Included
+              </button>
+            </div>
+            {String((config as any).headbox_item_id) !== 'NONE' && (
+              <>
+                {loadingHeadbox ? (
+                  <div className="text-sm text-gray-500 mt-2">Loading headbox options...</div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {headboxOptionsToRender.map((item) => {
+                  const isSelected = String((config as any).headbox_item_id) === String(item.id);
                   return (
                     <div
                       key={item.id}
                       className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
                         isSelected
-                          ? 'border-2 border-primary shadow-lg'
+                          ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                       } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
@@ -759,7 +867,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         }}
                         className="cursor-pointer"
                       >
-                        <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                        <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                           {item.image_url ? (
                             <img
                               src={item.image_url}
@@ -770,22 +878,19 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             <ImageIcon className="w-12 h-12 text-gray-400" />
                           )}
                         </div>
-                        <div className="p-4">
-                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                        <div className="p-4 bg-gray-100">
+                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                             {item.name || item.sku}
                           </h3>
                           <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
-                          {import.meta.env.DEV && item.templateIds && (
-                            <p className="text-xs text-blue-500 mt-1">
-                              {item.templateIds.length} template(s)
-                            </p>
-                          )}
                         </div>
                       </div>
                     </div>
                   );
                 })}
-              </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -793,66 +898,49 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         {/* Side Channel Items */}
         {showSideChannel && currentHardwareColor && (config as any).bottom_bar_item_id && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">SIDE CHANNEL ITEMS</Label>
-            {loadingSideChannel ? (
-              <div className="text-sm text-gray-500 mt-2">Loading side channel options...</div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* None card: explicit "No Side Channel" */}
-                <div
-                  className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
-                    (config as any).side_channel_item_id === 'NONE'
-                      ? 'border-2 border-primary shadow-lg'
-                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                  } ${selectionDisabled ? 'opacity-50' : ''}`}
-                >
-                  {(config as any).side_channel_item_id === 'NONE' && (
-                    <button
-                      type="button"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        onUpdate({
-                          side_channel_item_id: null,
-                          side_channel_sku: null,
-                          side_channel: false,
-                        } as any);
-                      }}
-                      className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
-                      title="Clear (UNSET)"
-                    >
-                      <X className="w-4 h-4 text-gray-600" />
-                    </button>
-                  )}
-                  <div
-                    onClick={() => {
-                      if (selectionDisabled) return;
-                      onUpdate({
-                        side_channel_item_id: 'NONE',
-                        side_channel_sku: null,
-                        side_channel: false,
-                      } as any);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
-                      <ImageIcon className="w-12 h-12 text-gray-400" />
-                    </div>
-                    <div className="p-4">
-                      <h3 className={`font-semibold text-sm ${(config as any).side_channel_item_id === 'NONE' ? 'text-primary' : 'text-gray-900'}`}>
-                        No Side Channel / None
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">None</p>
-                    </div>
-                  </div>
-                </div>
-                {sideChannelOptions.map((item) => {
-                  const isSelected = (config as any).side_channel_item_id === item.id;
+            <div className="flex items-center gap-3 mb-5">
+              <Label className="text-sm font-medium block min-w-[12rem]">SIDE CHANNEL ITEMS</Label>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectionDisabled) return;
+                  if ((config as any).side_channel_item_id === 'NONE') {
+                    onUpdate({
+                      side_channel_item_id: null,
+                      side_channel_sku: null,
+                      side_channel: false,
+                    } as any);
+                  } else {
+                    onUpdate({
+                      side_channel_item_id: 'NONE',
+                      side_channel_sku: null,
+                      side_channel: false,
+                    } as any);
+                  }
+                }}
+                className={`shrink-0 w-[7.5rem] px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                  String((config as any).side_channel_item_id) === 'NONE'
+                    ? 'border-2 border-gray-900 bg-gray-100 text-gray-900'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
+                } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                Not Included
+              </button>
+            </div>
+            {String((config as any).side_channel_item_id) !== 'NONE' && (
+              <>
+                {loadingSideChannel ? (
+                  <div className="text-sm text-gray-500 mt-2">Loading side channel options...</div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {sideChannelOptionsToRender.map((item) => {
+                  const isSelected = String((config as any).side_channel_item_id) === String(item.id);
                   return (
                     <div
                       key={item.id}
                       className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
                         isSelected
-                          ? 'border-2 border-primary shadow-lg'
+                          ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                       } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
@@ -903,7 +991,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         }}
                         className="cursor-pointer"
                       >
-                        <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                        <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                           {item.image_url ? (
                             <img
                               src={item.image_url}
@@ -914,8 +1002,8 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             <ImageIcon className="w-12 h-12 text-gray-400" />
                           )}
                         </div>
-                        <div className="p-4">
-                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                        <div className="p-4 bg-gray-100">
+                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                             {item.name || item.sku}
                           </h3>
                           <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
@@ -924,7 +1012,9 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                     </div>
                   );
                 })}
-              </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -932,66 +1022,49 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         {/* Add Bottom Channel */}
         {currentHardwareColor && (config as any).bottom_bar_item_id && (
           <div>
-            <Label className="text-sm font-medium mb-4 block">ADD BOTTOM CHANNEL</Label>
-            {loadingBottomChannel ? (
-              <div className="text-sm text-gray-500 mt-2">Loading bottom channel options...</div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* None card: explicit "No Bottom Channel" */}
-                <div
-                  className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
-                    (config as any).bottom_channel_item_id === 'NONE'
-                      ? 'border-2 border-primary shadow-lg'
-                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                  } ${selectionDisabled ? 'opacity-50' : ''}`}
-                >
-                  {(config as any).bottom_channel_item_id === 'NONE' && (
-                    <button
-                      type="button"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        onUpdate({
-                          bottom_channel_item_id: null,
-                          bottom_channel_sku: null,
-                          bottom_channel: false,
-                        } as any);
-                      }}
-                      className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
-                      title="Clear (UNSET)"
-                    >
-                      <X className="w-4 h-4 text-gray-600" />
-                    </button>
-                  )}
-                  <div
-                    onClick={() => {
-                      if (selectionDisabled) return;
-                      onUpdate({
-                        bottom_channel_item_id: 'NONE',
-                        bottom_channel_sku: null,
-                        bottom_channel: false,
-                      } as any);
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
-                      <ImageIcon className="w-12 h-12 text-gray-400" />
-                    </div>
-                    <div className="p-4">
-                      <h3 className={`font-semibold text-sm ${(config as any).bottom_channel_item_id === 'NONE' ? 'text-primary' : 'text-gray-900'}`}>
-                        No Bottom Channel / None
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">None</p>
-                    </div>
-                  </div>
-                </div>
-                {bottomChannelOptions.map((item) => {
-                  const isSelected = (config as any).bottom_channel_item_id === item.id;
+            <div className="flex items-center gap-3 mb-5">
+              <Label className="text-sm font-medium block min-w-[12rem]">ADD BOTTOM CHANNEL</Label>
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectionDisabled) return;
+                  if ((config as any).bottom_channel_item_id === 'NONE') {
+                    onUpdate({
+                      bottom_channel_item_id: null,
+                      bottom_channel_sku: null,
+                      bottom_channel: false,
+                    } as any);
+                  } else {
+                    onUpdate({
+                      bottom_channel_item_id: 'NONE',
+                      bottom_channel_sku: null,
+                      bottom_channel: false,
+                    } as any);
+                  }
+                }}
+                className={`shrink-0 w-[7.5rem] px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                  String((config as any).bottom_channel_item_id) === 'NONE'
+                    ? 'border-2 border-gray-900 bg-gray-100 text-gray-900'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
+                } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
+              >
+                Not Included
+              </button>
+            </div>
+            {String((config as any).bottom_channel_item_id) !== 'NONE' && (
+              <>
+                {loadingBottomChannel ? (
+                  <div className="text-sm text-gray-500 mt-2">Loading bottom channel options...</div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {bottomChannelOptionsToRender.map((item) => {
+                  const isSelected = String((config as any).bottom_channel_item_id) === String(item.id);
                   return (
                     <div
                       key={item.id}
                       className={`bg-white border rounded-lg overflow-hidden transition-all relative ${
                         isSelected
-                          ? 'border-2 border-primary shadow-lg'
+                          ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
                       } ${selectionDisabled ? 'opacity-50' : ''}`}
                     >
@@ -1042,7 +1115,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         }}
                         className="cursor-pointer"
                       >
-                        <div className="aspect-square flex items-center justify-center bg-gray-50 border-b border-gray-200">
+                        <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                           {item.image_url ? (
                             <img
                               src={item.image_url}
@@ -1053,8 +1126,8 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             <ImageIcon className="w-12 h-12 text-gray-400" />
                           )}
                         </div>
-                        <div className="p-4">
-                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-primary' : 'text-gray-900'}`}>
+                        <div className="p-4 bg-gray-100">
+                          <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                             {item.name || item.sku}
                           </h3>
                           <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
@@ -1063,17 +1136,10 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                     </div>
                   );
                 })}
-              </div>
+                  </div>
+                )}
+              </>
             )}
-          </div>
-        )}
-        
-        {/* Debug: Templates filtrados */}
-        {import.meta.env.DEV && finalFilteredTemplates && (
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-xs text-blue-700">
-              <strong>Templates after Hardware step:</strong> {finalFilteredTemplates.length} template(s) match current selection
-            </p>
           </div>
         )}
         </div>
