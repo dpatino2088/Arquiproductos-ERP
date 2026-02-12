@@ -48,7 +48,6 @@ export interface CreateDealerInput {
   billing_country?: string;
   notes?: string;
   logo_url?: string | null;
-  primary_contact_app_user_id?: string | null;
 }
 
 /**

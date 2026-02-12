@@ -1014,7 +1014,7 @@ export default function DealerUsers() {
 
     const confirmed = await showConfirm({
       title: 'Archive Dealer User',
-      message: `Are you sure you want to archive "${user.user_name || ((user as any).portal_user_email ?? user.user_email)}"?`,
+      message: `Are you sure you want to archive "${user.display_name ?? user.email}"?`,
       variant: 'warning',
       confirmText: 'Archive',
       cancelText: 'Cancel',

@@ -1,6 +1,6 @@
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
-interface ResolvedStorageImgProps extends React.ImgHTMLAttributes<HTMLImageElement> {
+interface ResolvedStorageImgProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
   src: string | null | undefined;
 }
 
