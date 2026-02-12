@@ -434,7 +434,7 @@ export async function createConfiguredProductPreview(
 
     const quantity = Number(config_snapshot.quantity ?? 1) || 1;
 
-    // ✅ Completar snapshot de roll si existe (para que totals no queden en 0)
+    // Roll from catalog variant only
     let roll_sku: string | null = null;
     let roll_collection_name: string | null = null;
     let roll_variant_name: string | null = null;
@@ -570,7 +570,8 @@ export async function recalculateConfiguredProductTotals(
   );
 
   if (error) {
-    console.error('[recalculateConfiguredProductTotals] RPC error:', error);
+    const msg = error?.message ?? String(error?.code ?? error);
+    console.error('[recalculateConfiguredProductTotals] RPC error:', msg);
     throw new Error(
       error.message || 'Failed to recalculate configured product totals'
     );

@@ -25,3 +25,10 @@ To show a default logo in the Quote PDF when the dealer has no logo set, place y
 - `Arquiproductos.png`
 
 The PDF will use it in the top-left header. If the file is missing, a placeholder box is shown.
+
+## Product type cards (configurator)
+
+Images for product type selection (Roller Shade, Dual Shade, Accessories, etc.):
+
+- `Roller Shade.png`, `Dual Shade.png`, `Triple Shade.png`, `Drapery.png`, `Awning.png`, `Window Film.png`
+- **Accessories:** add `Accessories.png` (or `Accesories.png`) so the Accessories card shows the image instead of the placeholder.

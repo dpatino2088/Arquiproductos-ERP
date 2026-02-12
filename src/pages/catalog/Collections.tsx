@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase/client';
 import { router } from '../../lib/router';
 import { Search, Eye, Plus, Package, ChevronLeft, ChevronRight, Image as ImageIcon, X, Filter } from 'lucide-react';
 import ImageModal from '../../components/ui/ImageModal';
+import ResolvedStorageImg from '../../components/ui/ResolvedStorageImg';
 
 export default function Collections() {
   const { activeOrganizationId } = useOrganizationContext();
@@ -405,7 +406,7 @@ export default function Collections() {
                       {/* Image */}
                       <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
                         {variant.image_url ? (
-                          <img
+                          <ResolvedStorageImg
                             src={variant.image_url}
                             alt={`${variant.variant_name} - ${variant.sku}`}
                             className="w-full h-full object-cover"

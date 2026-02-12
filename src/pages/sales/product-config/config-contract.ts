@@ -9,7 +9,7 @@ export interface UnifiedProductConfig {
   // Core identifiers
   product_type_id: string | null;
   bom_template_id: string | null;
-  productType?: 'roller-shade' | 'dual-shade' | 'triple-shade' | 'drapery' | 'awning' | 'window-film'; // UI code for compatibility
+  productType?: 'roller-shade' | 'dual-shade' | 'triple-shade' | 'drapery' | 'awning' | 'window-film' | 'accessories'; // UI code for compatibility
   
   // Measurements (always required)
   width_m: number | null;

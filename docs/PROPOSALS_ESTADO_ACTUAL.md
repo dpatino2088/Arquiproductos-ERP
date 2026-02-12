@@ -104,8 +104,9 @@ El módulo **Sales → Proposals** permite generar propuestas comerciales a part
 
 ### 3.5 Logo del dealer
 
-- **Dealer Detail (Settings):** después de "Dealer Users", sección **Dealer Logo** con componente **ImageUpload** (mismo que Items): drag and drop o clic, subida a Supabase Storage bucket `catalog-images`, path `dealer-logos/{organizationId}/{dealerId}/{timestamp}.{ext}`. La URL se guarda en `Dealers.logo_url`.
+- **Dealer Detail (Settings):** después de "Dealer Users", sección **Dealer Logo** con componente **ImageUpload** (mismo que Items): drag and drop o clic, subida a Supabase Storage **bucket `catalog-images`**, path `dealer-logos/{organizationId}/{dealerId}/{timestamp}-{random}.{ext}`. La URL se guarda en `Dealers.logo_url`.
 - **Proposal:** en detalle y en print se carga `Dealers.logo_url` por `proposal.dealer_id` y se muestra en la esquina superior izquierda.
+- **Dónde está guardada la imagen:** ver [DEALER_LOGO_STORAGE.md](./DEALER_LOGO_STORAGE.md) (bucket, path, CORS, políticas).
 
 ---
 

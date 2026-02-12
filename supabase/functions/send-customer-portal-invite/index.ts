@@ -1,18 +1,12 @@
 // Supabase Edge Function: send-customer-portal-invite
-// Invites company portal users via Supabase Auth SMTP (PKCE)
-// - Upserts public."CompanyPortalUsers" (status=invited)
-// - Sends invite email with redirect to your frontend /auth/callback?next=/set-password
-// - Returns ok + redirect_to (and invite meta for debugging)
+// Invites dealer portal users via Supabase Auth (inviteUserByEmail).
+// - Upserts public."DealerUsers" (status=invited)
+// - Sends invite email via Auth with redirect to /auth/callback?next=/set-password
 //
-// REQUIRED SECRETS (Supabase Dashboard → Edge Functions → Secrets):
-// - SUPABASE_URL
-// - SUPABASE_SERVICE_ROLE_KEY
-// - APP_ORIGIN   (e.g. http://localhost:5173  |  https://your-domain.com)
+// Use dealer_id (Dealer ID). company_id is accepted as alias for backward compatibility.
+// Frontend: { dealer_id, organization_id, portal_user_email, role?, portal_user_name?, redirect_to? }
 //
-// Frontend should call:
-// supabase.functions.invoke('send-customer-portal-invite', { body: { company_id, portal_user_email, role, redirect_to }})
-//
-// NOTE: redirect_to is optional; if not provided, APP_ORIGIN is used.
+// REQUIRED SECRETS: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, APP_ORIGIN
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -20,12 +14,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 type PortalRole = "member" | "member_manager";
 
 type Payload = {
-  organization_id: string;
-  company_id: string;
-  portal_user_email: string;
+  organization_id?: string | null;
+  dealer_id?: string | null;
+  company_id?: string | null; // alias for dealer_id
+  portal_user_email?: string | null;
   portal_user_name?: string | null;
-  role: PortalRole;
-  redirect_to?: string;
+  role?: PortalRole | null;
+  redirect_to?: string | null;
 };
 
 function json(body: unknown, status = 200) {
@@ -113,36 +108,30 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  const { organization_id, company_id, portal_user_email, portal_user_name, role, redirect_to } = payload;
+  const { organization_id, dealer_id, company_id, portal_user_email, portal_user_name, role, redirect_to } = payload;
 
-  // Validate company_id
-  if (!company_id || typeof company_id !== "string") {
-    return json({ error: "Missing or invalid company_id" }, 400);
+  // dealer_id is the correct param (Dealer ID). company_id accepted as alias.
+  const dealerIdRaw = dealer_id ?? company_id;
+  if (!dealerIdRaw || typeof dealerIdRaw !== "string") {
+    return json({ error: "Missing dealer_id (or company_id)" }, 400);
   }
-  if (!isUuid(company_id)) {
-    return json(
-      { error: "Invalid company_id format. Must be a valid UUID." },
-      400
-    );
+  if (!isUuid(dealerIdRaw)) {
+    return json({ error: "Invalid dealer_id format. Must be a valid UUID." }, 400);
   }
+  const dealerId = dealerIdRaw;
 
-  // Validate portal_user_email
-  if (!portal_user_email || typeof portal_user_email !== "string") {
-    return json({ error: "Missing or invalid portal_user_email" }, 400);
+  // Email: support portal_user_email or email
+  const rawEmail = portal_user_email ?? (payload as any).email;
+  if (!rawEmail || typeof rawEmail !== "string") {
+    return json({ error: "Missing portal_user_email or email" }, 400);
   }
-  const normalizedEmail = portal_user_email.trim().toLowerCase();
+  const normalizedEmail = rawEmail.trim().toLowerCase();
   if (!isEmail(normalizedEmail)) {
     return json({ error: "Invalid email format" }, 400);
   }
 
-  // Validate role
   const allowedRoles: PortalRole[] = ["member", "member_manager"];
-  if (!role || !allowedRoles.includes(role)) {
-    return json(
-      { error: `Invalid role. Must be one of: ${allowedRoles.join(", ")}` },
-      400
-    );
-  }
+  const portalRole: PortalRole = role && allowedRoles.includes(role) ? role : "member";
 
   // ✅ Redirect MUST be your frontend callback
   const safeOverride = safeRedirectTo(redirect_to);
@@ -171,11 +160,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 1) Upsert/insert CompanyPortalUsers (status=invited, using 'status' column)
+    // 1) Upsert DealerUsers (status=invited); table uses dealer_id (Dealer ID)
     const { data: existingUser, error: existingErr } = await admin
-      .from("CompanyPortalUsers")
+      .from("DealerUsers")
       .select("id, deleted, user_id")
-      .eq("company_id", company_id)
+      .eq("dealer_id", dealerId)
       .eq("portal_user_email", normalizedEmail)
       .maybeSingle();
 
@@ -185,17 +174,17 @@ Deno.serve(async (req) => {
         { error: `Failed checking existing portal user: ${existingErr.message}` },
         500
       );
-  }
+    }
 
     const nowIso = new Date().toISOString();
 
     if (existingUser && !existingUser.deleted) {
       const { error: updateError } = await admin
-        .from("CompanyPortalUsers")
-    .update({
+        .from("DealerUsers")
+        .update({
           portal_user_name: portal_user_name ?? null,
-          role,
-          status: "invited", // ✅ Use 'status' column, not 'portal_user_status'
+          role: portalRole,
+          status: "invited",
           invited_at: nowIso,
           invited_by_user_id: invitedByUserId,
           updated_at: nowIso,
@@ -203,55 +192,50 @@ Deno.serve(async (req) => {
         .eq("id", existingUser.id);
 
       if (updateError) {
-        console.error("send-customer-portal-invite: update CompanyPortalUsers error:", updateError);
+        console.error("send-customer-portal-invite: update DealerUsers error:", updateError);
         return json(
           { error: `Failed to update portal user: ${updateError.message}` },
           500
         );
-  }
+      }
     } else if (existingUser && existingUser.deleted) {
       const { error: reactivateError } = await admin
-        .from("CompanyPortalUsers")
+        .from("DealerUsers")
         .update({
           portal_user_name: portal_user_name ?? null,
-          role,
-          status: "invited", // ✅ Use 'status' column
+          role: portalRole,
+          status: "invited",
           deleted: false,
           invited_at: nowIso,
           invited_by_user_id: invitedByUserId,
-          user_id: null, // reset for fresh accept
+          user_id: null,
           updated_at: nowIso,
         })
         .eq("id", existingUser.id);
 
       if (reactivateError) {
-        console.error(
-          "send-customer-portal-invite: reactivate CompanyPortalUsers error:",
-          reactivateError
-        );
+        console.error("send-customer-portal-invite: reactivate DealerUsers error:", reactivateError);
         return json(
-          {
-            error: `Failed to reactivate portal user: ${reactivateError.message}`,
-          },
+          { error: `Failed to reactivate portal user: ${reactivateError.message}` },
           500
         );
       }
     } else {
-      const { error: insertError } = await admin.from("CompanyPortalUsers").insert({
+      const { error: insertError } = await admin.from("DealerUsers").insert({
         organization_id: organization_id ?? null,
-        company_id,
+        dealer_id: dealerId,
         portal_user_email: normalizedEmail,
         portal_user_name: portal_user_name ?? null,
-        role,
-        status: "invited", // ✅ Use 'status' column
+        role: portalRole,
+        status: "invited",
         deleted: false,
         invited_at: nowIso,
         invited_by_user_id: invitedByUserId,
-        user_id: null, // will link on accept
+        user_id: null,
       });
 
       if (insertError) {
-        console.error("send-customer-portal-invite: insert CompanyPortalUsers error:", insertError);
+        console.error("send-customer-portal-invite: insert DealerUsers error:", insertError);
         return json(
           { error: `Failed to create portal user: ${insertError.message}` },
           500
@@ -259,13 +243,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2) Send Supabase Auth invite email (SMTP) with correct redirect
+    // 2) Send invite email via Supabase Auth (SMTP / inviteUserByEmail)
     const { data: inviteData, error: inviteError } =
       await admin.auth.admin.inviteUserByEmail(normalizedEmail, {
         redirectTo: finalRedirectTo,
         data: {
-          company_id,
-          role,
+          dealer_id: dealerId,
+          role: portalRole,
         },
       });
 
@@ -275,14 +259,13 @@ Deno.serve(async (req) => {
         { error: `Failed to send invitation: ${inviteError.message}` },
         500
       );
-  }
+    }
 
-    // ✅ Return useful info for debugging
-  return json({
-    ok: true,
+    return json({
+      ok: true,
       email: normalizedEmail,
-      company_id,
-      role,
+      dealer_id: dealerId,
+      role: portalRole,
       redirect_to: finalRedirectTo,
       invite: inviteData ?? null,
     });

@@ -26,6 +26,9 @@ export interface Proposal {
   version_no: number;
   currency: string | null;
   valid_until: string | null;
+  /** Short proposal description (header). */
+  description: string | null;
+  /** Notes / Terms and Conditions. */
   notes: string | null;
   global_discount_pct: number | null;
   global_fee_amount: number | null;
@@ -33,6 +36,7 @@ export interface Proposal {
   installation_amount?: number | null;
   discount_amount: number | null;
   itbms_amount: number | null;
+  itbms_pct?: number | null;
   total_amount: number | null;
   sent_at: string | null;
   snapshot_version?: number;

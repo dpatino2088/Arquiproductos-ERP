@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -19,7 +19,15 @@ import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useDealers } from '../../hooks/useDealers';
 import { useDealerTiers } from '../../hooks/useDealerTiers';
-import { useDealerUsers, type DealerUser } from '../../hooks/useDealerUsers';
+import { useProductTypes } from '../../hooks/useProductTypes';
+import {
+  useAppUsersByDealer,
+  type DealerAppUser,
+  roleCodeToPortalLabel,
+  portalRoleToRoleCode,
+  roleCodeToPortalRole,
+} from '../../hooks/useAppUsersByDealer';
+import { Settings2 } from 'lucide-react';
 
 // Schema for Dealer
 const dealerSchema = z.object({
@@ -39,6 +47,7 @@ const dealerSchema = z.object({
   dealer_phone: z.string().optional(),
   alt_phone: z.string().optional(),
   primary_contact_id: z.string().optional(),
+  primary_contact_app_user_id: z.string().uuid().optional().or(z.literal('')),
   street_address_line_1: z.string().optional(),
   street_address_line_2: z.string().optional(),
   city: z.string().optional(),
@@ -60,29 +69,48 @@ const dealerSchema = z.object({
 
 type DealerFormValues = z.infer<typeof dealerSchema>;
 
-interface Contact {
-  id: string;
-  contact_name: string;
-  contact_id_number?: string | null;
-  contact_type?: string | null;
-}
-
 export default function DealerProfileForm() {
-  const [activeTab, setActiveTab] = useState<'details' | 'billing'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'billing' | 'configurator-permissions'>('details');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [dealerId, setDealerId] = useState<string | null>(null);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loadingContacts, setLoadingContacts] = useState(true);
   const { activeOrganizationId } = useOrganizationContext();
   const { isSuperAdmin, isOwner, isAdmin, isMember, isViewer, loading: roleLoading } = useCurrentOrgRole();
   const { createDealer, updateDealer } = useDealers();
   const { tiers: dealerTiers } = useDealerTiers();
+  const { productTypes } = useProductTypes();
 
-  // Load dealer users when in edit mode
-  const { users: dealerUsers, isLoading: loadingDealerUsers, refetch: refetchDealerUsers } = useDealerUsers(dealerId || null, { onlyWhenDealerId: true });
+  // Configurator Permissions tab: policy state (only when editing a dealer)
+  const [configuratorPolicyLoading, setConfiguratorPolicyLoading] = useState(false);
+  const [configuratorPolicySaving, setConfiguratorPolicySaving] = useState(false);
+  const [configuratorPolicyError, setConfiguratorPolicyError] = useState<string | null>(null);
+  const [configuratorPolicy, setConfiguratorPolicy] = useState<{
+    allowed_product_type_codes: string[];
+    allow_variants_catalog: boolean;
+    allow_accessories_only: boolean;
+    allow_hardware: boolean;
+    allow_operating_system: boolean;
+  } | null>(null);
 
-  // Add Dealer User modal (create user for this dealer only)
+  // Editable form state for Configurator Permissions (synced from policy or defaults when no policy)
+  const [configuratorForm, setConfiguratorForm] = useState<{
+    allowed_product_type_codes: string[];
+    allow_variants_catalog: boolean;
+    allow_accessories_only: boolean;
+    allow_hardware: boolean;
+    allow_operating_system: boolean;
+  }>({
+    allowed_product_type_codes: [],
+    allow_variants_catalog: true,
+    allow_accessories_only: false,
+    allow_hardware: true,
+    allow_operating_system: true,
+  });
+
+  // Dealer users from AppUsers (source of truth); only when editing a dealer
+  const { users: dealerUsers, isLoading: loadingDealerUsers, refetch: refetchDealerUsers } = useAppUsersByDealer(dealerId || null, { onlyWhenDealerId: true });
+
+  // Add Dealer User modal (create user for this dealer only; create-temp-user writes to AppUsers + DealerUsers)
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [addUserName, setAddUserName] = useState('');
   const [addUserEmail, setAddUserEmail] = useState('');
@@ -91,8 +119,8 @@ export default function DealerProfileForm() {
   const [addUserSubmitting, setAddUserSubmitting] = useState(false);
   const [addUserError, setAddUserError] = useState<string | null>(null);
 
-  // Edit Dealer User modal
-  const [editingUser, setEditingUser] = useState<DealerUser | null>(null);
+  // Edit Dealer User modal (edits AppUsers row)
+  const [editingUser, setEditingUser] = useState<DealerAppUser | null>(null);
   const [editUserName, setEditUserName] = useState('');
   const [editUserEmail, setEditUserEmail] = useState('');
   const [editUserRole, setEditUserRole] = useState<CompanyPortalRole>('member');
@@ -118,6 +146,7 @@ export default function DealerProfileForm() {
       billing_same_as_location: true,
       status: 'active',
       primary_contact_id: '',
+      primary_contact_app_user_id: '',
       dealer_tier_id: '',
       logo_url: '',
     },
@@ -131,6 +160,68 @@ export default function DealerProfileForm() {
       setDealerId(match[1]);
     }
   }, []);
+
+  // Load DealerConfiguratorPolicies when editing a dealer (for Configurator Permissions tab)
+  useEffect(() => {
+    if (!dealerId || !activeOrganizationId) {
+      setConfiguratorPolicy(null);
+      return;
+    }
+    let mounted = true;
+    setConfiguratorPolicyLoading(true);
+    setConfiguratorPolicyError(null);
+    (async () => {
+      const { data, error } = await supabase
+        .from('DealerConfiguratorPolicies')
+        .select('allowed_product_type_codes, allow_variants_catalog, allow_accessories_only, allow_hardware, allow_operating_system')
+        .eq('organization_id', activeOrganizationId)
+        .eq('dealer_id', dealerId)
+        .maybeSingle();
+      if (!mounted) return;
+      setConfiguratorPolicyLoading(false);
+      if (error) {
+        setConfiguratorPolicyError(error.message || 'Failed to load configurator policy');
+        setConfiguratorPolicy(null);
+        return;
+      }
+      if (data) {
+        const codes = Array.isArray(data.allowed_product_type_codes) ? data.allowed_product_type_codes : [];
+        const policy = {
+          allowed_product_type_codes: codes.map((c: string) => String(c).trim().toLowerCase()).filter(Boolean),
+          allow_variants_catalog: data.allow_variants_catalog ?? true,
+          allow_accessories_only: data.allow_accessories_only ?? false,
+          allow_hardware: data.allow_hardware ?? true,
+          allow_operating_system: data.allow_operating_system ?? true,
+        };
+        setConfiguratorPolicy(policy);
+        setConfiguratorForm(policy);
+      } else {
+        setConfiguratorPolicy(null);
+        // No policy: defaults (all product types allowed = all codes from productTypes when they load)
+        setConfiguratorForm(prev => ({
+          ...prev,
+          allowed_product_type_codes: [], // will be synced below when productTypes available
+          allow_variants_catalog: true,
+          allow_accessories_only: false,
+          allow_hardware: true,
+          allow_operating_system: true,
+        }));
+      }
+    })();
+    return () => { mounted = false; };
+  }, [dealerId, activeOrganizationId]);
+
+  // When no policy and productTypes load, default form to "all product types" (all codes)
+  useEffect(() => {
+    if (configuratorPolicy !== null || !productTypes.length) return;
+    const allCodes = productTypes
+      .map(pt => (pt.code || '').trim().toLowerCase())
+      .filter(Boolean);
+    setConfiguratorForm(prev => ({
+      ...prev,
+      allowed_product_type_codes: allCodes,
+    }));
+  }, [configuratorPolicy, productTypes]);
 
   // Load dealer data when in edit mode
   useEffect(() => {
@@ -164,6 +255,7 @@ export default function DealerProfileForm() {
           setValue('dealer_phone', data.dealer_phone || '');
           setValue('alt_phone', data.alt_phone || '');
           setValue('primary_contact_id', data.primary_contact_id || '');
+          setValue('primary_contact_app_user_id', data.primary_contact_app_user_id || '');
           setValue('street_address_line_1', data.street_address_line_1 || '');
           setValue('street_address_line_2', data.street_address_line_2 || '');
           setValue('city', data.city || '');
@@ -216,65 +308,11 @@ export default function DealerProfileForm() {
     }
   }, [billingSame, street1, street2, city, state, zip, country, setValue]);
 
-  // Load Contacts from Supabase for primary_contact_id dropdown
-  useEffect(() => {
-    const loadContacts = async () => {
-      if (!activeOrganizationId) {
-        setLoadingContacts(false);
-        return;
-      }
-
-      try {
-        setLoadingContacts(true);
-        
-        const { data: orgDealers } = await supabase
-          .from('Dealers')
-          .select('id')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        const dealerIds = (orgDealers || []).map((c: { id: string }) => c.id);
-
-        let query = supabase
-          .from('DirectoryContacts')
-          .select('id, contact_name, contact_id_number, contact_type')
-          .eq('deleted', false)
-          .order('contact_name', { ascending: true });
-
-        if (dealerIds.length > 0) {
-          query = query.in('dealer_id', dealerIds);
-          const { data: dealerData } = await query;
-          const { data: orgData } = await supabase
-            .from('DirectoryContacts')
-            .select('id, contact_name, contact_id_number, contact_type')
-            .eq('organization_id', activeOrganizationId)
-            .is('dealer_id', null)
-            .eq('deleted', false)
-            .order('contact_name', { ascending: true });
-
-          const all = [...(dealerData || []), ...(orgData || [])];
-          const unique = Array.from(new Map(all.map(item => [item.id, item])).values());
-          setContacts(unique);
-        } else {
-          const { data, error } = await query.eq('organization_id', activeOrganizationId);
-          
-          if (error) {
-            console.error('Error loading contacts', error);
-            setContacts([]);
-          } else if (data) {
-            setContacts(data);
-          }
-        }
-      } catch (err) {
-        console.error('Error loading contacts', err);
-        setContacts([]);
-      } finally {
-        setLoadingContacts(false);
-      }
-    };
-
-    loadContacts();
-  }, [activeOrganizationId]);
+  // Primary Contact options: AppUsers of this dealer with role Dealer Manager
+  const primaryContactOptions = useMemo(
+    () => dealerUsers.filter((u) => u.role_code === 'dealer_manager'),
+    [dealerUsers]
+  );
 
   if (!activeOrganizationId) {
     return (
@@ -344,6 +382,7 @@ export default function DealerProfileForm() {
         website: normalizeWebsite(values.website),
         alt_phone: values.alt_phone || null,
         primary_contact_id: values.primary_contact_id || null,
+        primary_contact_app_user_id: values.primary_contact_app_user_id?.trim() || null,
         street_address_line_1: values.street_address_line_1 || null,
         street_address_line_2: values.street_address_line_2 || null,
         city: values.city || null,
@@ -365,6 +404,24 @@ export default function DealerProfileForm() {
 
       if (dealerId) {
         await updateDealer(dealerId, dealerData);
+        // Save configurator permissions with the same Save and Close (so tab Configurator Permissions is persisted)
+        const { error: rpcError } = await supabase.rpc('upsert_dealer_configurator_policy', {
+          p_org_id: activeOrganizationId,
+          p_dealer_id: dealerId,
+          p_allowed_product_type_codes: configuratorForm.allowed_product_type_codes,
+          p_allow_variants_catalog: configuratorForm.allow_variants_catalog,
+          p_allow_accessories_only: configuratorForm.allow_accessories_only,
+          p_allow_hardware: configuratorForm.allow_hardware,
+          p_allow_operating_system: configuratorForm.allow_operating_system,
+        });
+        if (rpcError) {
+          console.error('[DealerProfileForm] Configurator policy save failed', rpcError);
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Dealer saved, permissions failed',
+            message: rpcError.message || 'Configurator permissions could not be saved.',
+          });
+        }
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Dealer updated successfully',
@@ -421,8 +478,18 @@ export default function DealerProfileForm() {
     setAddUserSubmitting(true);
     setAddUserError(null);
     try {
-      const { data, error: createError } = await supabase.functions.invoke('create-temp-user', {
-        body: {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const { data: session } = await supabase.auth.getSession();
+      if (!supabaseUrl || !anonKey) throw new Error('Supabase URL or anon key not configured');
+      const res = await fetch(`${supabaseUrl}/functions/v1/create-temp-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.session?.access_token ?? anonKey}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({
           kind: 'portal',
           organization_id: activeOrganizationId,
           dealer_id: dealerId,
@@ -430,10 +497,18 @@ export default function DealerProfileForm() {
           name: trimmedName || null,
           role: addUserRole,
           status: addUserStatus,
-        },
+        }),
       });
-      if (createError) throw new Error(createError.message || 'Failed to create user');
-      if (!data?.ok) throw new Error(data?.error || 'Edge Function failed');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof data?.error === 'string' ? data.error : data?.message ?? `HTTP ${res.status}`;
+        if (import.meta.env.DEV) console.error('[create-temp-user]', res.status, data);
+        throw new Error(msg);
+      }
+      if (!data?.ok) {
+        const msg = typeof data?.error === 'string' ? data.error : 'Edge Function failed';
+        throw new Error(msg);
+      }
       const emailSent = data?.email_sent === true;
       let message = emailSent
         ? `User created. An email with temporary credentials was sent to ${trimmedEmail}.`
@@ -461,14 +536,13 @@ export default function DealerProfileForm() {
     }
   };
 
-  // Populate edit form when opening
+  // Populate edit form when opening (DealerAppUser from AppUsers)
   useEffect(() => {
     if (editingUser) {
-      setEditUserName(editingUser.portal_user_name || '');
-      setEditUserEmail(editingUser.portal_user_email || '');
-      const role = editingUser.portal_user_role || 'member';
-      setEditUserRole((role === 'member_manager' ? 'member_manager' : 'member') as CompanyPortalRole);
-      const st = (editingUser.portal_user_status || 'active').toLowerCase();
+      setEditUserName(editingUser.display_name || '');
+      setEditUserEmail(editingUser.email || '');
+      setEditUserRole(roleCodeToPortalRole(editingUser.role_code));
+      const st = (editingUser.status || 'active').toLowerCase();
       setEditUserStatus(st === 'disabled' ? 'disabled' : 'active');
       setEditUserError(null);
     }
@@ -487,16 +561,18 @@ export default function DealerProfileForm() {
     setEditUserError(null);
     try {
       const { error } = await supabase
-        .from('DealerUsers')
+        .from('AppUsers')
         .update({
-          portal_user_name: trimmedName,
-          portal_user_email: trimmedEmail,
-          dealer_id: dealerId,
-          role: editUserRole,
+          display_name: trimmedName,
+          email: trimmedEmail,
+          role_code: portalRoleToRoleCode(editUserRole),
           status: editUserStatus,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', editingUser.id);
+        .eq('id', editingUser.id)
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer')
+        .eq('dealer_id', dealerId);
       if (error) throw error;
       useUIStore.getState().addNotification({ type: 'success', title: 'User updated', message: 'Dealer user has been updated.' });
       refetchDealerUsers();
@@ -509,11 +585,11 @@ export default function DealerProfileForm() {
     }
   };
 
-  const handleDeleteDealerUser = async (user: DealerUser) => {
+  const handleDeleteDealerUser = async (user: DealerAppUser) => {
     if (!activeOrganizationId) return;
     const confirmed = await showConfirm({
       title: 'Delete user',
-      message: `Are you sure you want to delete "${user.portal_user_name || user.portal_user_email || 'this user'}"? This action cannot be undone.`,
+      message: `Are you sure you want to delete "${user.display_name || user.email || 'this user'}"? This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
       cancelText: 'Cancel',
@@ -521,14 +597,14 @@ export default function DealerProfileForm() {
     if (!confirmed) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('delete_dealer_user', {
-        p_portal_user_id: user.id,
-        p_organization_id: activeOrganizationId,
-      });
+      const { error } = await supabase
+        .from('AppUsers')
+        .update({ deleted: true, updated_at: new Date().toISOString() })
+        .eq('id', user.id)
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer')
+        .eq('dealer_id', user.dealer_id);
       if (error) throw error;
-      if (!data || (typeof data === 'object' && 'success' in data && !(data as any).success)) {
-        throw new Error((data && typeof data === 'object' && 'error' in data) ? (data as any).error : 'Could not delete user.');
-      }
       useUIStore.getState().addNotification({ type: 'success', title: 'User deleted', message: 'Dealer user has been deleted.' });
       refetchDealerUsers();
     } catch (err: any) {
@@ -616,7 +692,7 @@ export default function DealerProfileForm() {
             </button>
             <button
               onClick={() => setActiveTab('billing')}
-              className={`transition-colors flex items-center justify-start ${
+              className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'billing'
                   ? 'bg-white font-semibold'
                   : 'hover:bg-white/50 font-normal'
@@ -628,6 +704,7 @@ export default function DealerProfileForm() {
                 minWidth: '140px',
                 width: 'auto',
                 color: 'var(--graphite-black-hex)',
+                borderColor: 'var(--gray-250)',
                 borderBottom: activeTab === 'billing' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
@@ -635,6 +712,30 @@ export default function DealerProfileForm() {
             >
               Billing
             </button>
+            {dealerId && (
+              <button
+                onClick={() => setActiveTab('configurator-permissions')}
+                className={`transition-colors flex items-center justify-start ${
+                  activeTab === 'configurator-permissions'
+                    ? 'bg-white font-semibold'
+                    : 'hover:bg-white/50 font-normal'
+                }`}
+                style={{
+                  fontSize: '12px',
+                  padding: '0 48px',
+                  height: '100%',
+                  minWidth: '140px',
+                  width: 'auto',
+                  color: 'var(--graphite-black-hex)',
+                  borderColor: 'var(--gray-250)',
+                  borderBottom: activeTab === 'configurator-permissions' ? '2px solid var(--tab-active-underline)' : 'none'
+                }}
+                role="tab"
+                aria-selected={activeTab === 'configurator-permissions'}
+              >
+                Configurator Permissions
+              </button>
+            )}
           </div>
         </div>
 
@@ -741,6 +842,113 @@ export default function DealerProfileForm() {
                 </div>
               </div>
             </>
+          ) : activeTab === 'configurator-permissions' ? (
+            <div className="space-y-6">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Settings2 className="w-4 h-4" />
+                Configurator Permissions
+              </h3>
+              <p className="text-xs text-gray-600">
+                Restrict what this dealer can configure. If no policy is saved, the dealer has full access.
+              </p>
+              {configuratorPolicyError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                  {configuratorPolicyError}
+                </div>
+              )}
+              {configuratorPolicyLoading ? (
+                <div className="text-sm text-gray-500 py-4">Loading permissions…</div>
+              ) : (
+                <>
+                  <div>
+                    <Label className="text-xs font-medium text-gray-700 mb-2 block">Product Types</Label>
+                    <p className="text-xs text-gray-500 mb-3">Select which product types this dealer can offer.</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {productTypes.map((pt) => {
+                        const code = (pt.code || '').trim().toLowerCase();
+                        if (!code) return null;
+                        const checked = configuratorForm.allowed_product_type_codes.includes(code);
+                        return (
+                          <label key={pt.id} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setConfiguratorForm(prev => ({
+                                  ...prev,
+                                  allowed_product_type_codes: checked
+                                    ? prev.allowed_product_type_codes.filter(c => c !== code)
+                                    : [...prev.allowed_product_type_codes, code],
+                                }));
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                              disabled={isReadOnly}
+                            />
+                            <span className="text-sm text-gray-800">{pt.name || code}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {productTypes.length === 0 && (
+                      <p className="text-xs text-gray-500">No product types in this organization.</p>
+                    )}
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-gray-700 mb-2 block">Variant Permissions</Label>
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={configuratorForm.allow_variants_catalog}
+                          onChange={(e) => setConfiguratorForm(prev => ({ ...prev, allow_variants_catalog: e.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-800">Allow Catalog Variants</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-medium text-gray-700 mb-2 block">Steps Control</Label>
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={configuratorForm.allow_hardware}
+                          onChange={(e) => setConfiguratorForm(prev => ({ ...prev, allow_hardware: e.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-800">Allow Hardware Step</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={configuratorForm.allow_operating_system}
+                          onChange={(e) => setConfiguratorForm(prev => ({ ...prev, allow_operating_system: e.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-800">Allow Operating System Step</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={configuratorForm.allow_accessories_only}
+                          onChange={(e) => setConfiguratorForm(prev => ({ ...prev, allow_accessories_only: e.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-800">Accessories Only Mode</span>
+                      </label>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 pt-2">
+                    Use &quot;Save and Close&quot; at the top to save these permissions.
+                  </p>
+                </>
+              )}
+            </div>
           ) : (
             <div className="grid grid-cols-12 gap-x-4 gap-y-4">
               {/* Top Section */}
@@ -850,26 +1058,37 @@ export default function DealerProfileForm() {
 
               <div className="col-span-12 grid grid-cols-12 gap-x-4 gap-y-3">
                 <div className="col-span-6">
-                  <Label htmlFor="primary_contact_id" className="text-xs">Primary Contact</Label>
+                  <Label htmlFor="primary_contact_app_user_id" className="text-xs">Primary Contact</Label>
                   <SelectShadcn
-                    value={watch('primary_contact_id') || ''}
-                    onValueChange={(value) => setValue('primary_contact_id', value || '')}
-                    disabled={loadingContacts || isReadOnly}
+                    value={watch('primary_contact_app_user_id') || ''}
+                    onValueChange={(value) => setValue('primary_contact_app_user_id', value || '')}
+                    disabled={!dealerId || loadingDealerUsers || isReadOnly}
                   >
                     <SelectTrigger className="py-1 text-xs">
-                      <SelectValue placeholder={loadingContacts ? "Loading contacts..." : contacts.length === 0 ? "No contacts found" : "Select primary contact"} />
+                      <SelectValue
+                        placeholder={
+                          !dealerId
+                            ? 'Save dealer first to set primary contact'
+                            : loadingDealerUsers
+                              ? 'Loading users...'
+                              : primaryContactOptions.length === 0
+                                ? 'No Dealer Managers yet. Add a user with role Manager.'
+                                : 'Select primary contact'
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
-                      {contacts.filter(c => c.id).map((contact) => (
-                        <SelectItem key={contact.id} value={contact.id}>
-                          {contact.contact_name || 'Unnamed Contact'}
-                          {contact.contact_id_number && (
-                            <span className="text-xs text-gray-500 ml-2">({contact.contact_id_number})</span>
+                      {primaryContactOptions.map((appUser) => (
+                        <SelectItem key={appUser.id} value={appUser.id}>
+                          {appUser.display_name || appUser.email || 'Unnamed'}
+                          {appUser.email && (
+                            <span className="text-xs text-gray-500 ml-2">({appUser.email})</span>
                           )}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </SelectShadcn>
+                  <p className="text-xs text-gray-500 mt-0.5">AppUser with role Dealer Manager for this dealer.</p>
                 </div>
                 <div className="col-span-6">
                   <Label htmlFor="notes" className="text-xs">Notes</Label>
@@ -1030,44 +1249,44 @@ export default function DealerProfileForm() {
                                     <User className="w-4 h-4" style={{ color: 'var(--primary-brand-hex)' }} />
                                   </div>
                                   <span className="font-medium">
-                                    {user.portal_user_name || 'No name'}
+                                    {user.display_name || 'No name'}
                                   </span>
                                 </div>
                               </td>
                               <td className="py-2 px-3 text-xs text-gray-600">
                                 <div className="flex items-center gap-1.5">
                                   <Mail className="w-3 h-3 text-gray-400" />
-                                  {user.portal_user_email}
+                                  {user.email}
                                 </div>
                               </td>
                               <td className="py-2 px-3 text-xs">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                  user.portal_user_role === 'member_manager'
+                                  user.role_code === 'dealer_manager'
                                     ? 'bg-blue-50 text-blue-700 border border-blue-200'
                                     : 'bg-gray-50 text-gray-700 border border-gray-200'
                                 }`}>
                                   <Shield className="w-3 h-3 mr-1" />
-                                  {user.portal_user_role === 'member_manager' ? 'Manager' : 'Member'}
+                                  {roleCodeToPortalLabel(user.role_code)}
                                 </span>
                               </td>
                               <td className="py-2 px-3 text-xs">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                  user.portal_user_status === 'active'
+                                  user.status === 'active'
                                     ? 'bg-green-50 text-green-700 border border-green-200'
-                                    : user.portal_user_status === 'invited'
+                                    : user.status === 'invited'
                                     ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
                                     : 'bg-gray-50 text-gray-700 border border-gray-200'
                                 }`}>
-                                  {user.portal_user_status === 'active' ? 'Active' : 
-                                   user.portal_user_status === 'invited' ? 'Invited' : 
-                                   user.portal_user_status === 'disabled' ? 'Disabled' : 'Draft'}
+                                  {user.status === 'active' ? 'Active' : 
+                                   user.status === 'invited' ? 'Invited' : 
+                                   user.status === 'disabled' ? 'Disabled' : user.status}
                                 </span>
                               </td>
                               <td className="py-2 px-3 text-xs text-gray-500">
-                                {user.invited_at ? (
+                                {user.created_at ? (
                                   <div className="flex items-center gap-1.5">
                                     <Calendar className="w-3 h-3 text-gray-400" />
-                                    {new Date(user.invited_at).toLocaleDateString()}
+                                    {new Date(user.created_at).toLocaleDateString()}
                                   </div>
                                 ) : (
                                   <span className="text-gray-400">—</span>

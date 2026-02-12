@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useEffect } from 'react';
+import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
 interface ImageModalProps {
   imageUrl: string;
@@ -8,12 +9,11 @@ interface ImageModalProps {
 }
 
 export default function ImageModal({ imageUrl, alt, onClose }: ImageModalProps) {
-  // Close on Escape key
+  const resolvedUrl = useResolvedStorageUrl(imageUrl);
+
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
@@ -35,12 +35,14 @@ export default function ImageModal({ imageUrl, alt, onClose }: ImageModalProps) 
         >
           <X className="w-5 h-5 text-gray-700" />
         </button>
-        <img
-          src={imageUrl}
-          alt={alt}
-          className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
-        />
+        {(resolvedUrl || imageUrl) && (
+          <img
+            src={resolvedUrl || imageUrl}
+            alt={alt}
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
       </div>
     </div>
   );

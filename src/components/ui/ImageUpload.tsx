@@ -3,6 +3,7 @@ import { Upload, X, Image as ImageIcon } from 'lucide-react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
+import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
 interface ImageUploadProps {
   currentImageUrl?: string | null;
@@ -10,10 +11,19 @@ interface ImageUploadProps {
   disabled?: boolean;
   /** Storage bucket (default: catalog-images) */
   bucket?: string;
+  /** If upload fails with "bucket not found", try this bucket name (e.g. dealer_logo when bucket is dealer-logo) */
+  bucketFallback?: string;
   /** Custom storage path. If not provided, uses {organizationId}/{timestamp}-{random}.{ext} */
   uploadPath?: (file: File) => string;
   /** Label above the drop zone (default: Item Image) */
   label?: string;
+}
+
+function isBucketNotFoundError(err: { message?: string; error?: string }): boolean {
+  const m = (err?.message || err?.error || '').toLowerCase();
+  return (
+    m.includes('bucket') && (m.includes('not found') || m.includes('not exist') || m.includes('404') || m.includes('does not exist'))
+  ) || m.includes('resource was not found') || m === 'not found';
 }
 
 export default function ImageUpload({
@@ -21,6 +31,7 @@ export default function ImageUpload({
   onImageUploaded,
   disabled,
   bucket = 'catalog-images',
+  bucketFallback,
   uploadPath,
   label = 'Item Image',
 }: ImageUploadProps) {
@@ -29,6 +40,7 @@ export default function ImageUpload({
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { activeOrganizationId } = useOrganizationContext();
+  const resolvedUrl = useResolvedStorageUrl(currentImageUrl);
 
   const handleFileSelect = async (file: File) => {
     // Validate file type
@@ -69,21 +81,23 @@ export default function ImageUpload({
       };
       reader.readAsDataURL(file);
 
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-
+      // Upload to Supabase Storage (try bucketFallback if bucket not found)
+      let bucketToUse = bucket;
+      let uploadError = (await supabase.storage.from(bucket).upload(fileName, file, { cacheControl: '3600', upsert: false })).error;
+      if (uploadError && bucketFallback && isBucketNotFoundError(uploadError)) {
+        const fallbackResult = await supabase.storage.from(bucketFallback).upload(fileName, file, { cacheControl: '3600', upsert: false });
+        if (!fallbackResult.error) {
+          uploadError = null;
+          bucketToUse = bucketFallback;
+        }
+      }
       if (uploadError) {
         throw uploadError;
       }
 
       // Get public URL
       const { data: urlData } = supabase.storage
-        .from(bucket)
+        .from(bucketToUse)
         .getPublicUrl(fileName);
 
       console.log('🔍 ImageUpload - URL Data:', {
@@ -106,10 +120,13 @@ export default function ImageUpload({
       }
     } catch (error: any) {
       console.error('Error uploading image:', error);
+      const isBucketErr = isBucketNotFoundError(error);
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Upload failed',
-        message: error.message || 'Failed to upload image. Please try again.',
+        message: isBucketErr
+          ? `Bucket "${bucket}" not found. Create it in Supabase: Storage → New bucket → name "${bucket}" (or "${bucketFallback || bucket}").`
+          : (error?.message || 'Failed to upload image. Please try again.'),
       });
       setPreview(currentImageUrl || null);
     } finally {
@@ -147,18 +164,13 @@ export default function ImageUpload({
     if (!currentImageUrl) return;
 
     try {
-      // Extract storage path from public URL: .../object/public/{bucket}/{path}
-      const segment = `/object/public/${bucket}/`;
-      const idx = currentImageUrl.indexOf(segment);
-      const path = idx >= 0 ? currentImageUrl.slice(idx + segment.length) : null;
-      if (!path) return;
-
-      const { error } = await supabase.storage
-        .from(bucket)
-        .remove([path]);
-
-      if (error) {
-        console.error('Error deleting image:', error);
+      // Extract bucket and path from any Supabase storage public URL: .../storage/v1/object/public/{bucket}/{path}
+      const storageMatch = currentImageUrl.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+      if (storageMatch) {
+        const urlBucket = storageMatch[1];
+        const path = decodeURIComponent(storageMatch[2]);
+        const { error } = await supabase.storage.from(urlBucket).remove([path]);
+        if (error) console.error('Error deleting image:', error);
       }
     } catch (error) {
       console.error('Error deleting image:', error);
@@ -168,12 +180,11 @@ export default function ImageUpload({
     onImageUploaded(null);
   };
 
-  // Update preview when currentImageUrl changes externally
+  // Show resolved (signed) URL for storage URLs so old images load; keep preview in sync after upload
   useEffect(() => {
-    if (currentImageUrl !== preview) {
-      setPreview(currentImageUrl || null);
-    }
-  }, [currentImageUrl]);
+    if (resolvedUrl !== null) setPreview(resolvedUrl);
+    else if (!currentImageUrl) setPreview(null);
+  }, [currentImageUrl, resolvedUrl]);
 
   return (
     <div className="space-y-2">
@@ -186,10 +197,7 @@ export default function ImageUpload({
               src={preview}
               alt="Preview"
               className="w-full h-full object-contain"
-              onError={() => {
-                setPreview(null);
-                onImageUploaded(null);
-              }}
+              onError={() => setPreview(null)}
             />
             {!disabled && (
               <button

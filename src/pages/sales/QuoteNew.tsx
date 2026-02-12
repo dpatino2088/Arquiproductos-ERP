@@ -17,6 +17,7 @@ import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeS
 import { QuoteStatus } from '../../types/catalog';
 import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import ProductConfigurator from './ProductConfigurator';
 import { ProductConfig } from './product-config/types';
 import { normalizeConfiguratorConfig, normalizeConfig } from './product-config/config-contract';
@@ -448,12 +449,13 @@ interface QuoteLineWithRelations {
 
 function CreateProposalButton({ quoteId }: { quoteId: string }) {
   const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
+  const { activeDealerId } = useActiveDealer();
   const [creating, setCreating] = useState(false);
 
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const result = await createProposalFromQuote(quoteId);
+      const result = await createProposalFromQuote(quoteId, { actingDealerId: activeDealerId ?? null });
       if ('error' in result) {
         useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: result.error });
         return;
@@ -467,11 +469,6 @@ function CreateProposalButton({ quoteId }: { quoteId: string }) {
 
   return (
     <div className="flex items-center gap-2">
-      {proposals.length > 0 && (
-        <span className="text-xs text-gray-500">
-          {proposals.length} proposal{proposals.length !== 1 ? 's' : ''}
-        </span>
-      )}
       <button
         type="button"
         onClick={handleCreate}
@@ -479,7 +476,7 @@ function CreateProposalButton({ quoteId }: { quoteId: string }) {
         className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
       >
         <FileText className="w-4 h-4" />
-        {proposals.length > 0 ? 'Create New Version' : 'Create Proposal'}
+        Create Proposal
       </button>
     </div>
   );
@@ -488,12 +485,13 @@ function CreateProposalButton({ quoteId }: { quoteId: string }) {
 /** Proposals for this Quote — lista y crear, dentro de la página del Quote */
 function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
   const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
+  const { activeDealerId } = useActiveDealer();
   const [creating, setCreating] = useState(false);
 
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const result = await createProposalFromQuote(quoteId);
+      const result = await createProposalFromQuote(quoteId, { actingDealerId: activeDealerId ?? null });
       if ('error' in result) {
         useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: result.error });
         return;
@@ -535,7 +533,7 @@ function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
           className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
         >
           <FileText className="w-4 h-4" />
-          {proposals.length > 0 ? 'Create New Version' : 'Create Proposal'}
+          Create Proposal
         </button>
       </div>
       {loading ? (
@@ -962,18 +960,34 @@ export default function QuoteNew() {
     return () => clearTimeout(timeoutId);
   }, [activeOrganizationId, quoteId, setValue, watch, quoteData]);
 
-  // Calculate totals from quote lines
-  // ✅ QuoteLines.msrp = total de la línea (ya incluye quantity desde ConfiguredProduct). NO multiplicar por qty de nuevo.
+  // Dealer tier discount: aplicado a Quote Lines (mostrar dealer price); Proposals siguen con MSRP
+  const dealerDiscountPctForDisplay = useMemo(
+    () => getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers),
+    [dealerInfo?.dealer_tier_id, dealerTiers]
+  );
+  const useDealerPrice = !!dealerInfo;
+
+  // ITBMS % from CostSettings (DB); default 7% if not set
+  const itbmsPct = costSettings?.itbms_pct ?? 0.07;
+
+  // Calculate totals from quote lines: unit × qty (misma lógica que la tabla para que no varíe el unitario al cambiar qty)
   const totals = useMemo(() => {
     const subtotal = quoteLines.reduce((sum, line: any) => {
-      const lineTotal = line.msrp ?? ((line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+      const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
+      const unitMsrp =
+        line.unit_msrp != null && Number(line.unit_msrp) >= 0
+          ? Number(line.unit_msrp)
+          : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+      const lineTotal = useDealerPrice
+        ? unitMsrp * qty * (1 - dealerDiscountPctForDisplay / 100)
+        : unitMsrp * qty;
       return sum + lineTotal;
     }, 0);
-    const tax = 0; // TODO: Calculate tax if needed
-    const total = subtotal + tax;
+    const itbmsAmount = Math.round(subtotal * itbmsPct * 100) / 100;
+    const total = subtotal + itbmsAmount;
 
-    return { subtotal, tax, total };
-  }, [quoteLines]);
+    return { subtotal, tax: itbmsAmount, total };
+  }, [quoteLines, useDealerPrice, dealerDiscountPctForDisplay, itbmsPct]);
 
   // Handle product configuration completion
   const handleProductConfigComplete = async (productConfig: ProductConfig) => {
@@ -1014,9 +1028,10 @@ export default function QuoteNew() {
       const configuredProductId = (productConfig as any).configured_product_id;
       const configuredProductTotalsFromConfig = (productConfig as any).configured_product_totals;
       const draftQuoteLineId = (productConfig as any).quote_line_id;
+      const isAccessoriesOnly = productConfig.productType === 'accessories';
 
-      // EDIT: no ConfiguredProduct required (we create CP_NEW on save)
-      if (!editingLineId && !configuredProductId) {
+      // EDIT: no ConfiguredProduct required (we create CP_NEW on save). Accessories-only lines don't use ConfiguredProduct.
+      if (!editingLineId && !configuredProductId && !isAccessoriesOnly) {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Configuration Error',
@@ -1048,6 +1063,65 @@ export default function QuoteNew() {
       let shouldUseSnapshotService = false;
 
       // ═══════════════════════════════════════════════════════════════════
+      // ACCESSORIES-ONLY: create QuoteLine without ConfiguredProduct (no width, height, fabric, etc.)
+      // ═══════════════════════════════════════════════════════════════════
+      if (isAccessoriesOnly && !editingLineId && quoteId) {
+        const accessoriesList = Array.isArray((productConfig as any).accessories) ? (productConfig as any).accessories : [];
+        const totalMsrp = accessoriesList.reduce((sum: number, item: { qty?: number; price?: number }) => {
+          const qty = Number(item?.qty) || 1;
+          const price = Number(item?.price) || 0;
+          return sum + qty * price;
+        }, 0);
+        const { data: quoteRow } = await supabase
+          .from('Quotes')
+          .select('dealer_id')
+          .eq('id', quoteId)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+        // Solo columnas que existen en todas las versiones de QuoteLines (sin metadata si no existe la columna)
+        const insertPayload: Record<string, unknown> = {
+          organization_id: activeOrganizationId,
+          quote_id: quoteId,
+          dealer_id: quoteRow?.dealer_id ?? null,
+          product_type: 'accessories',
+          configured_product_id: null,
+          product_type_id: null,
+          quantity: 1,
+          msrp: totalMsrp > 0 ? totalMsrp : null,
+          unit_msrp: totalMsrp > 0 ? totalMsrp : null,
+          name: 'Accessories',
+          sku: null,
+          position: productConfig.position != null ? String(productConfig.position) : null,
+          area: productConfig.area ?? null,
+        };
+        if (accessoriesList.length > 0) {
+          insertPayload.metadata = { accessories: accessoriesList };
+        }
+        let insertResult = await supabase.from('QuoteLines').insert(insertPayload).select('id').single();
+        if (insertResult.error && insertResult.error.message?.includes('metadata')) {
+          delete insertPayload.metadata;
+          insertResult = await supabase.from('QuoteLines').insert(insertPayload).select('id').single();
+        }
+        const { data: newLine, error: insertError } = insertResult;
+        if (insertError) {
+          console.error('[QuoteNew] Accessories-only line insert failed', insertError);
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error',
+            message: insertError.message || 'Failed to add accessories line.',
+          });
+          return;
+        }
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Success',
+          message: 'Accessories line added successfully.',
+        });
+        refetchLines();
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
       // EDIT SAVE: same QuoteLine + new ConfiguredProduct (CP_NEW). Branch runs first and returns at end.
       // ═══════════════════════════════════════════════════════════════════
       if (editingLineId) {
@@ -1055,6 +1129,18 @@ export default function QuoteNew() {
         // EDIT SAVE — Backend is source of truth for EVERYTHING.
         // 1. Build snapshot → 2. Backend creates CP_NEW → 3. Read CP_NEW → 4. Copy to QuoteLine → 5. Backend prices it
         // ═══════════════════════════════════════════════════════
+
+        // 0. Guardar unit_msrp y quantity actuales por si solo cambia cantidad (mantener precio unitario)
+        const { data: lineBeforeEdit } = await supabase
+          .from('QuoteLines')
+          .select('quantity, unit_msrp, width_m, height_m')
+          .eq('id', editingLineId)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+        const prevQuantity = lineBeforeEdit?.quantity ?? 1;
+        const prevUnitMsrp = lineBeforeEdit?.unit_msrp != null ? Number(lineBeforeEdit.unit_msrp) : null;
+        const prevWidth = lineBeforeEdit?.width_m;
+        const prevHeight = lineBeforeEdit?.height_m;
 
         // 1. Resolve product type
         const productTypeId = productConfig.productTypeId
@@ -1152,12 +1238,41 @@ export default function QuoteNew() {
 
         // 6. Sync pricing from CP_NEW (same source as ADD: commit_configured_product_to_quote_line)
         try {
-          const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
-            p_quote_line_id: editingLineId,
-          });
-          if (syncErr) {
-            console.error('[QuoteNew EDIT] sync_quote_line_pricing_from_configured_product failed', syncErr);
-            throw syncErr;
+          const newQty = Math.max(1, productConfig.quantity ?? 1);
+          const onlyQuantityChanged =
+            prevUnitMsrp != null &&
+            prevUnitMsrp > 0 &&
+            newQty !== prevQuantity &&
+            prevWidth != null &&
+            prevHeight != null &&
+            Math.abs((width_m ?? 0) - prevWidth) < 1e-6 &&
+            Math.abs((height_m ?? 0) - prevHeight) < 1e-6;
+
+          if (onlyQuantityChanged) {
+            // Mantener precio unitario: total = unit_msrp × qty (no recalcular desde BOM)
+            const newMsrp = prevUnitMsrp * newQty;
+            const { error: overrideErr } = await supabase
+              .from('QuoteLines')
+              .update({ msrp: newMsrp, unit_msrp: prevUnitMsrp, net_price: newMsrp })
+              .eq('id', editingLineId)
+              .eq('organization_id', activeOrganizationId);
+            if (overrideErr && import.meta.env.DEV) {
+              console.warn('[QuoteNew EDIT] Override msrp by unit_msrp×qty failed', overrideErr);
+            }
+          } else {
+            const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
+              p_quote_line_id: editingLineId,
+            });
+            if (syncErr) {
+              console.error('[QuoteNew EDIT] sync_quote_line_pricing_from_configured_product failed', syncErr);
+              throw syncErr;
+            }
+            // Persistir unit_msrp tras el sync para que la UI lo use
+            const { data: afterSync } = await supabase.from('QuoteLines').select('msrp').eq('id', editingLineId).eq('organization_id', activeOrganizationId).maybeSingle();
+            const totalAfter = afterSync?.msrp != null ? Number(afterSync.msrp) : null;
+            if (totalAfter != null && totalAfter > 0 && newQty > 0) {
+              await supabase.from('QuoteLines').update({ unit_msrp: totalAfter / newQty }).eq('id', editingLineId).eq('organization_id', activeOrganizationId);
+            }
           }
         } catch (e) {
           if (import.meta.env.DEV) console.warn('Sync pricing RPC error (non-fatal):', e);
@@ -1582,26 +1697,40 @@ export default function QuoteNew() {
 
           finalLineId = result.quote_line_id;
 
-          // ✅ Asegurar MSRP en DB = valor del breakdown (preview); evita $0.00 en UI
+          // ✅ Precio en QuoteLine: 1) sync desde ConfiguredProduct 2) fallback con valor del Review
           const snapshot = (productConfig as any).bom_preview_snapshot;
           const totalsFromConfig = (productConfig as any).configured_product_totals;
-          const totalMsrp =
+          const totalMsrpFromReview =
             (snapshot?.totals?.total_msrp != null && Number(snapshot.totals.total_msrp) > 0)
               ? Number(snapshot.totals.total_msrp)
               : (totalsFromConfig?.total_msrp != null && Number(totalsFromConfig.total_msrp) > 0)
                 ? Number(totalsFromConfig.total_msrp)
                 : null;
-          if (finalLineId && totalMsrp != null && totalMsrp > 0) {
-            const { error: patchErr } = await supabase
-              .from('QuoteLines')
-              .update({
-                msrp: totalMsrp,
-                last_priced_at: new Date().toISOString(),
-              })
-              .eq('id', finalLineId)
-              .eq('organization_id', activeOrganizationId);
-            if (patchErr && import.meta.env.DEV) {
-              console.warn('[QuoteNew] Patch QuoteLine msrp after commit:', patchErr);
+
+          if (finalLineId) {
+            const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
+              p_quote_line_id: finalLineId,
+            });
+            if (syncErr) {
+              if (import.meta.env.DEV) {
+                console.warn('[QuoteNew] sync_quote_line_pricing_from_configured_product:', syncErr);
+              }
+              // Si sync falla, intentar fallback con el total que vimos en Review
+              if (totalMsrpFromReview != null && totalMsrpFromReview > 0) {
+                const { error: setErr } = await supabase.rpc('set_quote_line_msrp_from_value', {
+                  p_quote_line_id: finalLineId,
+                  p_total_msrp: totalMsrpFromReview,
+                });
+                if (setErr && import.meta.env.DEV) {
+                  console.warn('[QuoteNew] set_quote_line_msrp_from_value fallback:', setErr);
+                }
+              }
+            } else if (totalMsrpFromReview != null && totalMsrpFromReview > 0) {
+              // Asegurar que el valor del Review quede guardado (por si sync escribió 0)
+              await supabase.rpc('set_quote_line_msrp_from_value', {
+                p_quote_line_id: finalLineId,
+                p_total_msrp: totalMsrpFromReview,
+              });
             }
           }
 
@@ -1615,7 +1744,6 @@ export default function QuoteNew() {
             console.log('[QuoteNew] QuoteLine created via RPC:', {
               quoteLineId: result.quote_line_id,
               bomInstanceId: result.bom_instance_id,
-              totalMsrp,
             });
           }
 
@@ -2415,9 +2543,14 @@ export default function QuoteNew() {
                 // ✅ NUEVO: Si viene de ConfiguredProduct, usar sus totals (ya calculados)
                 // ✅ total_cost = costo base total (solo para referencia/márgenes, NO precio de venta)
                 
+                // ✅ Precio unitario estable: guardar para que no varíe al cambiar solo cantidad
+                const savedQty = Math.max(1, savedQuantity || 1);
+                const unitMsrpValue = totalMSRP / savedQty;
+
                 // ✅ NUEVO: Si existe configured_product_id, actualizar metadata
                 const updateData: Record<string, any> = {
                   msrp: totalMSRP, // ✅ Precio final de venta al cliente = Fabric + (BOM × labor_pct)
+                  unit_msrp: unitMsrpValue, // ✅ Precio unitario (igual para qty 1 o 2)
                   net_price: totalMSRP, // ✅ Precio neto (igual a MSRP en este caso)
                   total_cost: totalCostValue, // ✅ Costo total base (solo para referencia/márgenes, NO precio de venta)
                 };
@@ -2802,120 +2935,110 @@ export default function QuoteNew() {
         .maybeSingle();
       const organizationName = orgData?.name || 'Arquiproductos';
 
-      type DealerRow = {
-        logo_url?: string | null;
-        dealer_name?: string | null;
-        street_address_line_1?: string | null;
-        street_address_line_2?: string | null;
-        city?: string | null;
-        state?: string | null;
-        zip_code?: string | null;
-        country?: string | null;
-      };
-      let logoPngBase64: string | undefined;
-      let dealerName: string | undefined;
-      let dealerAddress: string | undefined;
-      const dealerId = quoteData.dealer_id ?? null;
-      if (dealerId) {
+      // PDF uses Proposal format; logo is always Arquiproducto from /images (no dealer logo link)
+      const tryLogo = async (path: string): Promise<string | undefined> => {
         try {
-          const { data: dealer } = await supabase
-            .from('Dealers')
-            .select('logo_url, dealer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country')
-            .eq('id', dealerId)
-            .maybeSingle();
-          const d = dealer as DealerRow | null;
-          if (d) {
-            dealerName = d.dealer_name ?? undefined;
-            dealerAddress = [
-              d.street_address_line_1,
-              d.street_address_line_2,
-              [d.city, d.state, d.zip_code].filter(Boolean).join(', '),
-              d.country,
-            ]
-              .filter(Boolean)
-              .join('\n') || undefined;
-            const logoUrl = d.logo_url;
-            if (logoUrl) {
-              const res = await fetch(logoUrl, { mode: 'cors' });
-              const blob = await res.blob();
-              logoPngBase64 = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-              });
-            }
-          }
+          const res = await fetch(path, { cache: 'no-store' });
+          if (!res.ok) return undefined;
+          const blob = await res.blob();
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
         } catch {
-          // ignore
+          return undefined;
         }
+      };
+      const logoPaths = [
+        '/images/Arquiproductos.png',
+        '/images/arquiproductos.png',
+        '/images/Arquiproductos.jpg',
+        '/images/arquiproductos.jpg',
+      ];
+      let logoPngBase64: string | undefined;
+      for (const path of logoPaths) {
+        logoPngBase64 = await tryLogo(path);
+        if (logoPngBase64) break;
       }
-      // Fallback: logo from public/images (Arquiproductos) when no dealer logo
-      if (!logoPngBase64) {
-        const tryLogo = async (path: string): Promise<string | undefined> => {
-          try {
-            const res = await fetch(path, { cache: 'no-store' });
-            if (!res.ok) return undefined;
-            const blob = await res.blob();
-            return new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          } catch {
-            return undefined;
-          }
-        };
-        const logoPaths = [
-          '/images/Arquiproductos.png',
-          '/images/arquiproductos.png',
-          '/images/Arquiproductos.jpg',
-          '/images/arquiproductos.jpg',
-        ];
-        for (const path of logoPaths) {
-          logoPngBase64 = await tryLogo(path);
-          if (logoPngBase64) break;
-        }
-      }
-      if (!dealerName) dealerName = organizationName;
-
-      // Logo dimensions: fit within 18mm width preserving aspect ratio (no comprimir)
-      let logoWidthMm: number | undefined;
-      let logoHeightMm: number | undefined;
+      let logoWidthPx = 100;
+      let logoHeightPx = 100;
       if (logoPngBase64) {
         try {
           const dims = await new Promise<{ w: number; h: number }>((resolve) => {
             const img = new Image();
-            img.onload = () => {
-              const maxW = 18;
-              const maxH = 24;
-              const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
-              resolve({
-                w: img.naturalWidth * scale,
-                h: img.naturalHeight * scale,
-              });
-            };
-            img.onerror = () => resolve({ w: 18, h: 18 });
-            img.src = logoPngBase64;
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => resolve({ w: 100, h: 100 });
+            img.src = logoPngBase64!;
           });
-          logoWidthMm = dims.w;
-          logoHeightMm = dims.h;
+          logoWidthPx = dims.w;
+          logoHeightPx = dims.h;
         } catch {
-          // keep undefined → PDF uses 18x18
+          // keep defaults
         }
       }
 
       const sellerName =
         (quoteLines[0] as { quote_created_by?: string } | undefined)?.quote_created_by;
 
+      // Dealer data for PDF left block (Dealer, Dealer User, Phone, Address) and header Dealer No
+      let dealerName: string | undefined;
+      let dealerNo: string | null = null;
+      let dealerUser: string | null = null;
+      let dealerPhone: string | null = null;
+      let dealerAddress: string | null = null;
+      const dealerId = quoteData.dealer_id ?? null;
+      if (dealerId) {
+        const { data: dealer } = await supabase
+          .from('Dealers')
+          .select('dealer_name, dealer_no, dealer_phone, street_address_line_1, street_address_line_2, city, state, zip_code, country, primary_contact_id')
+          .eq('id', dealerId)
+          .maybeSingle();
+        if (dealer) {
+          dealerName = dealer.dealer_name ?? undefined;
+          dealerNo = (dealer as { dealer_no?: string | null }).dealer_no ?? null;
+          dealerPhone = dealer.dealer_phone ?? null;
+          dealerAddress = [
+            dealer.street_address_line_1,
+            dealer.street_address_line_2,
+            [dealer.city, dealer.state, dealer.zip_code].filter(Boolean).join(', '),
+            dealer.country,
+          ]
+            .filter(Boolean)
+            .join('\n') || null;
+          if (dealer.primary_contact_id) {
+            const { data: pc } = await supabase
+              .from('DirectoryContacts')
+              .select('contact_name')
+              .eq('id', dealer.primary_contact_id)
+              .maybeSingle();
+            dealerUser = (pc as { contact_name?: string } | null)?.contact_name ?? null;
+          }
+          if (!dealerUser) dealerUser = sellerName ?? null;
+        }
+      }
+      if (!dealerName) dealerName = organizationName;
+
       const qty = (line: any) => line.quantity ?? line.qty ?? 1;
+      const dealerDiscountPct = variant === 'dealer'
+        ? getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers)
+        : 0;
+
       const pdfLines = quoteLines.map((line: any) => {
         const n = qty(line);
+        const msrpLineTotal = line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
         const lineTotal =
           variant === 'dealer'
-            ? (line.net_price ?? line.unit_msrp ?? 0) * n
+            ? msrpLineTotal * (1 - dealerDiscountPct / 100)
             : (line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+        const accessoriesStr =
+          line.Accessories && Array.isArray(line.Accessories) && line.Accessories.length > 0
+            ? line.Accessories.map((acc: any) => {
+                const name = acc.item_name ?? acc.CatalogItems?.item_name ?? acc.name ?? '—';
+                return acc.qty > 1 ? `${name} ×${acc.qty}` : name;
+              }).join(', ')
+            : null;
         return {
           id: line.id,
           area: line.area,
@@ -2928,6 +3051,7 @@ export default function QuoteNew() {
           height_m: line.height_m,
           qty: n,
           line_total: lineTotal,
+          accessories: accessoriesStr,
           CatalogItems: line.CatalogItems ?? null,
         };
       });
@@ -2939,7 +3063,11 @@ export default function QuoteNew() {
           status: quoteData.status || watch('status'),
           currency: quoteData.currency || watch('currency'),
           notes: quoteData.description ?? quoteData.notes ?? watch('description'),
-          totals: quoteData.totals || totals,
+          totals: quoteData.totals ?? {
+            subtotal: totals.subtotal,
+            tax_total: totals.tax,
+            total: totals.total,
+          },
           created_at: quoteData.created_at || new Date().toISOString(),
         },
         selectedCustomer ? { customer_name: selectedCustomer.customer_name } : null,
@@ -2952,12 +3080,17 @@ export default function QuoteNew() {
           variant,
           clientDiscountPct,
           logoPngBase64,
-          logoWidthMm,
-          logoHeightMm,
+          logoWidthPx,
+          logoHeightPx,
           dealerName,
+          dealerNo: dealerNo ?? undefined,
+          dealerUser,
+          dealerPhone,
           dealerAddress,
           sellerName,
           description: quoteData.description ?? watch('description') ?? quoteData.notes ?? undefined,
+          projectName: quoteData.description ?? quoteData.notes ?? watch('description') ?? undefined,
+          itbms_pct: costSettings?.itbms_pct ?? 0.07,
         }
       );
 
@@ -2976,6 +3109,179 @@ export default function QuoteNew() {
         type: 'error',
         title: 'Error',
         message: err.message || 'Failed to generate PDF',
+      });
+    }
+  };
+
+  // Preview PDF in new tab (same as Proposal)
+  const handlePreviewPDF = async () => {
+    if (!quoteId || !quoteData) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Quote data is not available. Save the quote and try again.',
+      });
+      return;
+    }
+    try {
+      const { data: orgData } = await supabase
+        .from('Organizations')
+        .select('name')
+        .eq('id', activeOrganizationId)
+        .maybeSingle();
+      const organizationName = orgData?.name || 'Arquiproductos';
+
+      const tryLogo = async (path: string): Promise<string | undefined> => {
+        try {
+          const res = await fetch(path, { cache: 'no-store' });
+          if (!res.ok) return undefined;
+          const blob = await res.blob();
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch {
+          return undefined;
+        }
+      };
+      let logoPngBase64: string | undefined;
+      for (const path of ['/images/Arquiproductos.png', '/images/arquiproductos.png', '/images/Arquiproductos.jpg']) {
+        logoPngBase64 = await tryLogo(path);
+        if (logoPngBase64) break;
+      }
+      let logoWidthPx = 100;
+      let logoHeightPx = 100;
+      if (logoPngBase64) {
+        try {
+          const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => resolve({ w: 100, h: 100 });
+            img.src = logoPngBase64!;
+          });
+          logoWidthPx = dims.w;
+          logoHeightPx = dims.h;
+        } catch {}
+      }
+
+      const sellerName = (quoteLines[0] as { quote_created_by?: string } | undefined)?.quote_created_by;
+      let dealerName: string | undefined;
+      let dealerNo: string | null = null;
+      let dealerUser: string | null = null;
+      let dealerPhone: string | null = null;
+      let dealerAddress: string | null = null;
+      const dealerId = quoteData.dealer_id ?? null;
+      if (dealerId) {
+        const { data: dealer } = await supabase
+          .from('Dealers')
+          .select('dealer_name, dealer_no, dealer_phone, street_address_line_1, street_address_line_2, city, state, zip_code, country, primary_contact_id')
+          .eq('id', dealerId)
+          .maybeSingle();
+        if (dealer) {
+          dealerName = dealer.dealer_name ?? undefined;
+          dealerNo = (dealer as { dealer_no?: string | null }).dealer_no ?? null;
+          dealerPhone = dealer.dealer_phone ?? null;
+          dealerAddress = [
+            dealer.street_address_line_1,
+            dealer.street_address_line_2,
+            [dealer.city, dealer.state, dealer.zip_code].filter(Boolean).join(', '),
+            dealer.country,
+          ]
+            .filter(Boolean)
+            .join('\n') || null;
+          if (dealer.primary_contact_id) {
+            const { data: pc } = await supabase
+              .from('DirectoryContacts')
+              .select('contact_name')
+              .eq('id', dealer.primary_contact_id)
+              .maybeSingle();
+            dealerUser = (pc as { contact_name?: string } | null)?.contact_name ?? null;
+          }
+          if (!dealerUser) dealerUser = sellerName ?? null;
+        }
+      }
+      if (!dealerName) dealerName = organizationName;
+
+      const qty = (line: any) => line.quantity ?? line.qty ?? 1;
+      const dealerDiscountPct = getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers);
+      const pdfLines = quoteLines.map((line: any) => {
+        const n = qty(line);
+        const msrpLineTotal = line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
+        const lineTotal = msrpLineTotal * (1 - dealerDiscountPct / 100);
+        const accessoriesStr =
+          line.Accessories && Array.isArray(line.Accessories) && line.Accessories.length > 0
+            ? line.Accessories.map((acc: any) => {
+                const name = acc.item_name ?? acc.CatalogItems?.item_name ?? acc.name ?? '—';
+                return acc.qty > 1 ? `${name} ×${acc.qty}` : name;
+              }).join(', ')
+            : null;
+        return {
+          id: line.id,
+          area: line.area,
+          position: line.position,
+          product_type: line.product_type ?? line.ProductType?.name,
+          collection_name: line.collection_name,
+          variant_name: line.variant_name,
+          drive_type: line.drive_type,
+          width_m: line.width_m,
+          height_m: line.height_m,
+          qty: n,
+          line_total: lineTotal,
+          accessories: accessoriesStr,
+          CatalogItems: line.CatalogItems ?? null,
+        };
+      });
+
+      const doc = generateQuotePDF(
+        {
+          quote_no: quoteData.quote_no || watch('quote_no'),
+          customer_id: quoteData.customer_id || watch('customer_id'),
+          status: quoteData.status || watch('status'),
+          currency: quoteData.currency || watch('currency'),
+          notes: quoteData.description ?? quoteData.notes ?? watch('description'),
+          totals: quoteData.totals ?? { subtotal: totals.subtotal, tax_total: totals.tax, total: totals.total },
+          created_at: quoteData.created_at || new Date().toISOString(),
+        },
+        selectedCustomer ? { customer_name: selectedCustomer.customer_name } : null,
+        selectedContact
+          ? { contact_name: selectedContact.contact_name, contact_email: selectedContact.email ?? undefined }
+          : null,
+        pdfLines,
+        organizationName,
+        {
+          variant: 'dealer',
+          logoPngBase64,
+          logoWidthPx,
+          logoHeightPx,
+          dealerName,
+          dealerNo: dealerNo ?? undefined,
+          dealerUser,
+          dealerPhone,
+          dealerAddress,
+          sellerName,
+          description: quoteData.description ?? watch('description') ?? quoteData.notes ?? undefined,
+          projectName: quoteData.description ?? quoteData.notes ?? watch('description') ?? undefined,
+          itbms_pct: costSettings?.itbms_pct ?? 0.07,
+        }
+      );
+
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Preview',
+        message: 'PDF opened in new tab. You can download from the browser if needed.',
+      });
+    } catch (err: any) {
+      console.error('Error generating PDF preview:', err);
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: (err as Error)?.message || 'Failed to generate PDF preview',
       });
     }
   };
@@ -3120,17 +3426,15 @@ export default function QuoteNew() {
 
         <div className="flex items-center gap-3">
           {quoteId && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handleDownloadPDF('dealer')}
-                className="flex items-center gap-2 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-                title="PDF con precios Dealer (según tier)"
-              >
-                <Download className="w-4 h-4" />
-                PDF Dealer
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handlePreviewPDF}
+              className="flex items-center gap-2 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
+              title="Abrir PDF en el navegador"
+            >
+              <Eye className="w-4 h-4" />
+              PDF Dealer
+            </button>
           )}
           <button
             type="button"
@@ -3158,7 +3462,7 @@ export default function QuoteNew() {
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save and Close'}
           </button>
-          {quoteId && <CreateProposalButton quoteId={quoteId} />}
+          {quoteId && !dealerInfo && <CreateProposalButton quoteId={quoteId} />}
         </div>
       </div>
 
@@ -3170,18 +3474,24 @@ export default function QuoteNew() {
 
       {/* Quote Form */}
       <div className="bg-white border border-gray-200 rounded-lg mb-6">
-        {/* Dealer Info Banner (always show if available) */}
+        {/* Dealer Info Banner: DEALER name, Create Proposal (si quoteId), DEALER NO. a la derecha */}
         {dealerInfo && (
           <div className="bg-gray-50 border-b border-gray-200 px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-medium text-gray-500 mb-1">DEALER</div>
-                <div className="font-semibold text-gray-900">{dealerInfo.name}</div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-gray-500">Dealer:</span>
+                <span className="font-semibold text-gray-900">{dealerInfo.name}</span>
+                {dealerInfo.number && (
+                  <>
+                    <span className="text-gray-400" aria-hidden>|</span>
+                    <span className="text-gray-500">Dealer No:</span>
+                    <span className="font-semibold text-gray-900">{dealerInfo.number}</span>
+                  </>
+                )}
               </div>
-              {dealerInfo.number && (
-                <div className="text-right">
-                  <div className="text-xs font-medium text-gray-500 mb-1">DEALER NO.</div>
-                  <div className="font-semibold text-gray-900">{dealerInfo.number}</div>
+              {quoteId && (
+                <div className="flex-shrink-0">
+                  <CreateProposalButton quoteId={quoteId} />
                 </div>
               )}
             </div>
@@ -3315,18 +3625,17 @@ export default function QuoteNew() {
               />
             </div>
 
-            {/* Summary + Created by (Head of Quote) */}
+            {/* Summary + Created by — lado derecho del Head Form */}
             {quoteId && (
-              <div className="col-span-12 border-t border-gray-200 pt-4 mt-4">
-              <div className="flex justify-end">
-                <div className="w-64">
+              <div className="col-span-12 md:col-span-4 md:col-start-9 md:row-span-1">
+                <div className="w-full max-w-xs ml-auto">
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Subtotal:</span>
                       <span className="font-medium">{formatCurrency(totals.subtotal, watch('currency'))}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Tax:</span>
+                      <span className="text-gray-600">ITBMS{itbmsPct > 0 ? ` (${Math.round(itbmsPct * 100)}%)` : ''}:</span>
                       <span className="font-medium">{formatCurrency(totals.tax, watch('currency'))}</span>
                     </div>
                     <div className="flex justify-between text-lg font-semibold border-t border-gray-200 pt-2">
@@ -3341,7 +3650,6 @@ export default function QuoteNew() {
                   </div>
                 </div>
               </div>
-              </div>
             )}
           </div>
         </div>
@@ -3353,7 +3661,7 @@ export default function QuoteNew() {
           <div className="py-4 px-6 border-b border-gray-200">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-foreground">Quote Lines</h2>
+                <h2 className="text-xl font-semibold text-gray-900">Quote Lines</h2>
                 <p className="text-sm text-gray-500 mt-1">{quoteLines.length} {quoteLines.length === 1 ? 'line' : 'lines'}</p>
               </div>
               <div className="flex items-center gap-2">
@@ -3379,22 +3687,28 @@ export default function QuoteNew() {
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+              <table className="w-full min-w-[1000px]">
+                <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="py-3 px-2 text-left text-xs font-medium text-gray-700 uppercase tracking-wider w-10" title="Drag to reorder"> </th>
-                    <th className="py-3 px-2 text-center text-xs font-medium text-gray-700 uppercase tracking-wider w-12">#</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Area</th>
-                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Position</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Product Type</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Collection</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">System Drive</th>
-                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Measurements</th>
-                    <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Accessories</th>
-                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Qty</th>
-                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">MSRP</th>
-                    <th className="py-3 px-6 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Total</th>
-                    <th className="py-3 px-6 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Action</th>
+                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" title="Drag to reorder"> </th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs w-12 whitespace-nowrap">#</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[80px] whitespace-nowrap">
+                      <span style={{ display: 'inline-block', width: 50, minWidth: 50 }} aria-hidden="true" />
+                      <span style={{ display: 'inline-block', transform: 'translateX(-20px)' }}>Area</span>
+                    </th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs min-w-[60px] whitespace-nowrap">Position</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">
+                      <span style={{ display: 'inline-block', transform: 'translateX(8px)' }}>Product type</span>
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[180px] whitespace-nowrap">
+                      <span style={{ display: 'inline-block', transform: 'translateX(8px)' }}>Description</span>
+                    </th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs min-w-[90px] whitespace-nowrap">System Drive</th>
+                    <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">Measurements</th>
+                    <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs w-16 whitespace-nowrap">Qty</th>
+                    <th className="py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] text-center whitespace-nowrap">{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
+                    <th className="py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] text-center whitespace-nowrap">Total</th>
+                    <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs whitespace-nowrap">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -3449,23 +3763,23 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12">
                           {index + 1}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
+                        <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm text-center">
+                        <td className="py-4 px-6 text-gray-700 text-sm text-center whitespace-nowrap">
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                        <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap">
                           {productTypeName}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
+                        <td className="py-4 px-6 text-gray-700 text-sm min-w-[180px] whitespace-nowrap">
                           {collectionDisplay}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
+                        <td className="py-4 px-6 text-gray-700 text-sm text-center whitespace-nowrap">
                           {driveDisplay}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-center">
-                          <div className="w-fit mx-auto">
+                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-center whitespace-nowrap">
+                          <div className="w-fit mx-auto" style={{ transform: 'translateX(-8px)' }}>
                             <DimensionsStackView
                               source={{
                                 width_m: line.width_m,
@@ -3478,52 +3792,33 @@ export default function QuoteNew() {
                             />
                           </div>
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm">
-                          {line.Accessories && line.Accessories.length > 0 ? (
-                            <div className="flex flex-wrap gap-1 items-center">
-                              {line.Accessories.map((acc: any, idx: number) => {
-                                const itemName =
-                                  acc.item_name ??
-                                  acc.CatalogItems?.item_name ??
-                                  acc.CatalogItems?.name ??
-                                  acc.CatalogItems?.sku ??
-                                  acc.name ??
-                                  '—';
-                                return (
-                                  <span key={acc.id || idx} className="text-xs bg-gray-100 px-2 py-0.5 rounded inline-block">
-                                    {itemName}{acc.qty > 1 ? ` ×${acc.qty}` : ''}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="py-4 px-6 text-center text-gray-900 text-sm">
+                        <td className="py-4 px-6 text-center text-gray-900 text-sm tabular-nums whitespace-nowrap">
                           {/* ✅ FIX: Usar "quantity" (columna correcta en QuoteLines) */}
                           {line.quantity ? line.quantity.toFixed(0) : 'N/A'}
                         </td>
-                        {/* MSRP column: read unit_msrp from backend only (fallback: msrp/quantity for legacy rows) */}
-                        <td className="py-4 px-6 text-right text-gray-900 text-sm font-medium">
+                        {/* Dealer price / MSRP: precio unitario estable (unit_msrp); no debe variar al cambiar solo qty */}
+                        <td className="py-4 px-6 text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap text-center">
                           {(() => {
-                            const qty = line.quantity ?? line.qty ?? 1;
-                            const unitPrice =
-                              line.unit_msrp != null
+                            const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
+                            const unitMsrp =
+                              line.unit_msrp != null && Number(line.unit_msrp) >= 0
                                 ? Number(line.unit_msrp)
                                 : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+                            const unitPrice = useDealerPrice
+                              ? unitMsrp * (1 - dealerDiscountPctForDisplay / 100)
+                              : unitMsrp;
                             const rollMsrp = line.roll_msrp_snapshot || 0;
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
-                              <div className="relative group">
+                              <div className="relative group w-full whitespace-nowrap text-center">
                                 <span>{formatCurrency(unitPrice, watch('currency'))}</span>
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
                                     <div className="text-left">
                                       <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
                                       <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">Unit MSRP (from backend)</div>
+                                      <div className="border-t border-gray-700 mt-1 pt-1">{useDealerPrice ? 'Dealer unit price (MSRP − tier)' : 'Unit MSRP (from backend)'}</div>
                                     </div>
                                   </div>
                                 )}
@@ -3531,26 +3826,29 @@ export default function QuoteNew() {
                             );
                           })()}
                         </td>
-                        {/* TOTAL column: read msrp from backend only (line total; no client-side calculation) */}
-                        <td className="py-4 px-6 text-right text-gray-900 text-sm font-medium">
+                        {/* TOTAL column: siempre unit_price × qty para que sea consistente con el unitario */}
+                        <td className="py-4 px-6 text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap text-center">
                           {(() => {
-                            const lineTotal =
-                              line.msrp != null
-                                ? Number(line.msrp)
-                                : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
+                            const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
+                            const unitMsrp =
+                              line.unit_msrp != null && Number(line.unit_msrp) >= 0
+                                ? Number(line.unit_msrp)
+                                : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+                            const lineTotal = useDealerPrice
+                              ? unitMsrp * qty * (1 - dealerDiscountPctForDisplay / 100)
+                              : unitMsrp * qty;
                             const rollMsrp = line.roll_msrp_snapshot || 0;
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
-                            const qty = line.quantity ?? line.qty ?? 1;
                             return (
-                              <div className="relative group">
+                              <div className="relative group w-full whitespace-nowrap text-center">
                                 <span className="font-semibold">{formatCurrency(lineTotal, watch('currency'))}</span>
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
                                     <div className="text-left">
                                       <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
                                       <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">Line total (qty={qty})</div>
+                                      <div className="border-t border-gray-700 mt-1 pt-1">{useDealerPrice ? `Dealer line total (qty=${qty})` : `Line total (qty=${qty})`}</div>
                                       <div>{formatCurrency(lineTotal, watch('currency'))}</div>
                                     </div>
                                   </div>
@@ -3559,7 +3857,7 @@ export default function QuoteNew() {
                             );
                           })()}
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6 whitespace-nowrap">
                           <div className="flex items-center gap-1 justify-end">
                             <button
                               type="button"
@@ -3716,7 +4014,7 @@ export default function QuoteNew() {
                       <div><span className="text-gray-600">Variant:</span> <span className="text-gray-900 font-medium">{line.variant_name ?? '—'}</span></div>
                     </div>
                     <div>
-                      <span className="text-gray-600">Collection:</span> <span className="text-gray-900 font-medium">{line.collection_name ?? '—'}</span>
+                      <span className="text-gray-600">Description:</span> <span className="text-gray-900 font-medium">{line.collection_name ?? '—'}</span>
                     </div>
                   </div>
                 </div>

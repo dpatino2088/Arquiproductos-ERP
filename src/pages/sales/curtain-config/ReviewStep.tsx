@@ -170,7 +170,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     if (!hasValidSnapshot || !bomPreviewSnapshot) return [];
 
     const lines: BOMBreakdownLine[] = [];
-    
+    const configAny = config as any;
+
     const processItem = (item: BOMSnapshotItem, isChild = false, parentRole?: string) => {
       lines.push({
         role: item.role,
@@ -192,8 +193,9 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     };
 
     bomPreviewSnapshot.items.forEach(item => processItem(item));
+
     return lines;
-  }, [hasValidSnapshot, bomPreviewSnapshot]);
+  }, [hasValidSnapshot, bomPreviewSnapshot, config]);
 
   // Calculate total from snapshot or legacy breakdown
   const snapshotTotal = useMemo(() => {
@@ -438,18 +440,50 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     loadBreakdown();
   }, [bomTemplateId, activeOrganizationId, config, fabricData, hasValidSnapshot, snapshotBreakdownLines]);
 
-  // Calculate totals - prefer snapshot total if available
-  const breakdownTotal = useMemo(() => {
-    // Use snapshot total if available (more accurate, includes all costs)
-    if (snapshotTotal !== null) {
-      return snapshotTotal;
-    }
-    // Fallback: sum of breakdown lines
-    return breakdownLines.reduce((sum, line) => sum + line.totalPrice, 0);
-  }, [breakdownLines, snapshotTotal]);
-
   // Get snapshot totals breakdown for display
   const snapshotTotals = hasValidSnapshot ? bomPreviewSnapshot?.totals : null;
+
+  // BOM sum from snapshot items (fallback when totals.bom_total is 0 - e.g. fallback path or backend not persisting)
+  const bomSumFromItems = useMemo(() => {
+    if (!bomPreviewSnapshot?.items?.length) return 0;
+    return bomPreviewSnapshot.items.reduce((sum: number, item: any) => {
+      if (item.kind === 'roll' || item.role === 'fabric') return sum;
+      const lineTotal = Number(item.line_total) || 0;
+      const childrenTotal = Array.isArray(item.children)
+        ? item.children.reduce((s: number, c: any) => s + (Number(c?.line_total) || 0), 0)
+        : 0;
+      return sum + lineTotal + childrenTotal;
+    }, 0);
+  }, [bomPreviewSnapshot?.items]);
+
+  // Effective totals for display: Roll + BOM + Labor = Total MSRP
+  type TotalsShape = { roll_msrp_total: number; bom_total: number; accessories_total: number; labor_pct: number; labor_amount: number; total_msrp: number };
+  const effectiveTotals: TotalsShape = useMemo(() => {
+    const base = (snapshotTotals ?? {}) as Record<string, number>;
+    const rollTotal = Number(base.roll_msrp_total) || 0;
+    const bomFromTotals = Number(base.bom_total) || 0;
+    const bomTotal = bomFromTotals > 0 ? bomFromTotals : bomSumFromItems;
+    const accessoriesTotal = Number(base.accessories_total) || 0;
+    const laborPct = Number(base.labor_pct) || 0;
+    const rollPlusBom = rollTotal + bomTotal;
+    const laborAmount = rollPlusBom * (laborPct / 100);
+    const totalMsrp = rollPlusBom + laborAmount + accessoriesTotal;
+    return {
+      roll_msrp_total: rollTotal,
+      bom_total: bomTotal,
+      accessories_total: accessoriesTotal,
+      labor_pct: laborPct,
+      labor_amount: laborAmount,
+      total_msrp: totalMsrp,
+    };
+  }, [snapshotTotals, bomSumFromItems]);
+
+  // Calculate totals - prefer effective total or snapshot total
+  const breakdownTotal = useMemo(() => {
+    if (effectiveTotals.total_msrp > 0) return effectiveTotals.total_msrp;
+    if (snapshotTotal !== null) return snapshotTotal;
+    return breakdownLines.reduce((sum, line) => sum + line.totalPrice, 0);
+  }, [breakdownLines, snapshotTotal, effectiveTotals.total_msrp]);
 
   const dimensionsSource = {
     width_mm: (config as any).width_mm,
@@ -529,8 +563,28 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                   <span className="ml-2 text-gray-900">{config.productType || 'Not selected'}</span>
                 </div>
                 <div>
-                  <span className="font-medium text-gray-700">Mounting:</span>
-                  <span className="ml-2 text-gray-900">{(config as any).mountingCassette || (config as any).mountingType || 'Not selected'}</span>
+                  <span className="font-medium text-gray-700">Fabric Drop:</span>
+                  <span className="ml-2 text-gray-900">
+                    {(() => {
+                      const v = (config as any).fabricDrop ?? (config as any).fabric_drop;
+                      if (!v) return 'Not selected';
+                      return String(v).charAt(0).toUpperCase() + String(v).slice(1).toLowerCase();
+                    })()}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Installation type & location:</span>
+                  <span className="ml-2 text-gray-900">
+                    {(() => {
+                      const type = (config as any).installationType ?? (config as any).installation_type;
+                      const location = (config as any).installationLocation ?? (config as any).installation_location;
+                      const parts = [
+                        type ? String(type).charAt(0).toUpperCase() + String(type).slice(1).toLowerCase() : null,
+                        location ? String(location).charAt(0).toUpperCase() + String(location).slice(1).toLowerCase() : null,
+                      ].filter(Boolean);
+                      return parts.length ? parts.join(' / ') : 'Not selected';
+                    })()}
+                  </span>
                 </div>
                 <div className="col-span-2">
                   <span className="font-medium text-gray-700">Dimensions (mm):</span>
@@ -781,42 +835,44 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                       )}
                     </tbody>
                     <tfoot className="bg-gray-100">
-                      {/* Show detailed breakdown if snapshot totals available */}
+                      {/* Show detailed breakdown: Roll/Fabric + BOM = Total */}
                       {snapshotTotals ? (
                         <>
-                          <tr className="border-t border-gray-300">
-                            <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
-                              Roll/Fabric:
-                            </td>
-                            <td className="px-3 py-1 text-right text-gray-700">
-                              ${(snapshotTotals.roll_msrp_total || 0).toFixed(2)}
-                            </td>
-                          </tr>
+                          {(effectiveTotals.roll_msrp_total || 0) > 0 && (
+                            <tr className="border-t border-gray-300">
+                              <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
+                                Roll/Fabric:
+                              </td>
+                              <td className="px-3 py-1 text-right text-gray-700">
+                                ${(effectiveTotals.roll_msrp_total || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          )}
                           <tr>
                             <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
                               BOM Components:
                             </td>
                             <td className="px-3 py-1 text-right text-gray-700">
-                              ${(snapshotTotals.bom_total || 0).toFixed(2)}
+                              ${(effectiveTotals.bom_total || 0).toFixed(2)}
                             </td>
                           </tr>
-                          {(snapshotTotals.accessories_total || 0) > 0 && (
+                          {(effectiveTotals.accessories_total || 0) > 0 && (
                             <tr>
                               <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
                                 Accessories:
                               </td>
                               <td className="px-3 py-1 text-right text-gray-700">
-                                ${snapshotTotals.accessories_total.toFixed(2)}
+                                ${effectiveTotals.accessories_total.toFixed(2)}
                               </td>
                             </tr>
                           )}
-                          {(snapshotTotals.labor_amount || 0) > 0 && (
+                          {(effectiveTotals.labor_amount || 0) > 0 && (
                             <tr>
                               <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
-                                Labor ({snapshotTotals.labor_pct || 0}%):
+                                Labor ({effectiveTotals.labor_pct ?? 0}%):
                               </td>
                               <td className="px-3 py-1 text-right text-gray-700">
-                                ${snapshotTotals.labor_amount.toFixed(2)}
+                                ${effectiveTotals.labor_amount.toFixed(2)}
                               </td>
                             </tr>
                           )}
@@ -825,7 +881,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                               Total MSRP:
                             </td>
                             <td className="px-3 py-2 text-right font-bold text-gray-900">
-                              ${(snapshotTotals.total_msrp || 0).toFixed(2)}
+                              ${(effectiveTotals.total_msrp || breakdownTotal || 0).toFixed(2)}
                             </td>
                           </tr>
                         </>

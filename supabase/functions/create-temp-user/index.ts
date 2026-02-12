@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
 
     const portalDealerId = (body as any).dealer_id ?? (body as any).company_id;
     if (body.kind === "portal" && !portalDealerId) {
-      return json({ ok: false, error: "Missing dealer_id (or company_id)" }, 400);
+      return json({ ok: false, error: "Missing dealer_id" }, 400);
     }
 
     const email = normalizeEmail(rawEmail);
@@ -184,26 +184,86 @@ Deno.serve(async (req) => {
       const portalStatus = (body as any).status && ["invited", "active", "disabled"].includes((body as any).status)
         ? (body as any).status
         : "invited";
-      const { error } = await admin
+      const portalRole = (body as any).role;
+      const roleCode = portalRole === "member_manager" ? "dealer_manager" : "dealer_member";
+
+      // Manual upsert: DB has unique index on (dealer_id, lower(portal_user_email)), not (dealer_id, portal_user_email)
+      const { data: existingDu } = await admin
         .from("DealerUsers")
-        .upsert(
-          {
-            organization_id: (body as any).organization_id,
-            dealer_id: portalDealerId,
-            user_id: userId,
-            portal_user_email: email,
-            portal_user_name: (body as any).name ?? null,
-            role: (body as any).role,
+        .select("id")
+        .eq("dealer_id", portalDealerId)
+        .ilike("portal_user_email", email)
+        .eq("deleted", false)
+        .maybeSingle();
+
+      const duRow = {
+        organization_id: (body as any).organization_id,
+        dealer_id: portalDealerId,
+        user_id: userId,
+        portal_user_email: email,
+        portal_user_name: (body as any).name ?? null,
+        role: portalRole,
+        status: portalStatus,
+        must_change_password: true,
+        temp_password_set_at: now,
+        deleted: false,
+        updated_at: now,
+      };
+
+      if (existingDu?.id) {
+        const { error: duError } = await admin
+          .from("DealerUsers")
+          .update(duRow)
+          .eq("id", existingDu.id);
+        if (duError) throw new Error(`DealerUsers update failed: ${duError.message}`);
+      } else {
+        const { error: duError } = await admin.from("DealerUsers").insert(duRow);
+        if (duError) throw new Error(`DealerUsers insert failed: ${duError.message}`);
+      }
+
+      // AppUsers is source of truth for dealer portal users (Settings / Dealer Profile).
+      const orgId = (body as any).organization_id;
+      const { data: existing } = await admin
+        .from("AppUsers")
+        .select("id")
+        .eq("organization_id", orgId)
+        .eq("user_type", "dealer")
+        .eq("dealer_id", portalDealerId)
+        .eq("email", email)
+        .eq("deleted", false)
+        .maybeSingle();
+
+      if (existing?.id) {
+        await admin
+          .from("AppUsers")
+          .update({
+            auth_user_id: userId,
+            display_name: (body as any).name ?? null,
+            role_code: roleCode,
             status: portalStatus,
+            updated_at: now,
             must_change_password: true,
             temp_password_set_at: now,
-            deleted: false,
-            updated_at: now,
-          },
-          { onConflict: "dealer_id,portal_user_email" },
-        );
-
-      if (error) throw new Error(`DealerUsers upsert failed: ${error.message}`);
+          })
+          .eq("id", existing.id);
+      } else {
+        const { error: auError } = await admin.from("AppUsers").insert({
+          organization_id: orgId,
+          user_type: "dealer",
+          dealer_id: portalDealerId,
+          auth_user_id: userId,
+          email,
+          display_name: (body as any).name ?? null,
+          role_code: roleCode,
+          status: portalStatus,
+          invited_by_app_user_id: null,
+          deleted: false,
+          updated_at: now,
+          must_change_password: true,
+          temp_password_set_at: now,
+        });
+        if (auError) throw new Error(`AppUsers insert failed: ${auError.message}`);
+      }
     }
 
     // 3) Send email via Resend (only if secrets are configured)

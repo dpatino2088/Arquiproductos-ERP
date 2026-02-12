@@ -13,10 +13,12 @@ import { useProposalDetail } from '../../hooks/useProposals';
 import type { Proposal, ProposalLine, ProposalCustomCategory, ProposalLineAddOn, ProposalLineAddOnPricingMode } from '../../types/proposals';
 import { generateProposalPDF, type ProposalPDFLine } from '../../lib/pdf/generateProposalPDF';
 import { formatDimensionsDisplayCompact } from '../../lib/formatDimensions';
+import { getLogoPathFromUrl } from '../../lib/dealerLogo';
+import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -78,10 +80,11 @@ function formatCurrency(amount: number, currency = 'USD') {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(amount || 0);
 }
 
-/** Compute base amount for a quote line: msrp or unit_msrp * quantity */
+/** Compute base amount (line total) for a quote line: unit_msrp * quantity when both exist, else msrp as line total */
 function getQuoteLineBase(ql: { quantity: number; msrp: number | null; unit_msrp: number | null }): number {
+  const qty = Number(ql.quantity) || 0;
+  if (qty > 0 && ql.unit_msrp != null) return ql.unit_msrp * qty;
   if (ql.msrp != null && ql.msrp > 0) return ql.msrp;
-  if (ql.unit_msrp != null && ql.quantity) return ql.unit_msrp * ql.quantity;
   return 0;
 }
 
@@ -117,7 +120,7 @@ function getProposalIdFromPath(): string | null {
 
 export default function ProposalDetail() {
   const proposalId = getProposalIdFromPath();
-  const { proposal, lines, addonsMap, quoteLinesMap, configuredProductsMap, quote, customer, contact, loading, error, refetch, setCanWrite, canWrite } =
+  const { proposal, lines, addonsMap, quoteLinesMap, configuredProductsMap, quote, customer, contact, dealerLogoUrl, loading, error, refetch, setCanWrite, canWrite } =
     useProposalDetail(proposalId);
 
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
@@ -128,10 +131,23 @@ export default function ProposalDetail() {
 
   const [saving, setSaving] = useState(false);
   const [headerDirty, setHeaderDirty] = useState(false);
-  const [dealerLogoUrl, setDealerLogoUrl] = useState<string | null>(null);
+  const [printDropdownOpen, setPrintDropdownOpen] = useState(false);
+  const printDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!printDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (printDropdownRef.current && !printDropdownRef.current.contains(e.target as Node)) {
+        setPrintDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [printDropdownOpen]);
   const [headerForm, setHeaderForm] = useState<{
     proposal_no: string;
     status: Proposal['status'];
+    description: string;
     notes: string;
     valid_until: string;
     global_discount_pct: string;
@@ -139,35 +155,30 @@ export default function ProposalDetail() {
   }>({
     proposal_no: '',
     status: 'draft',
+    description: '',
     notes: '',
     valid_until: '',
     global_discount_pct: '',
     global_fee_amount: '',
   });
 
+  const resolvedLogoUrl = useResolvedStorageUrl(dealerLogoUrl ?? null);
+  const [logoError, setLogoError] = useState(false);
+  const showLogo = Boolean(resolvedLogoUrl) && !logoError;
+  const handleLogoError = useCallback(() => {
+    if (import.meta.env.DEV) console.error('Dealer logo failed to load', resolvedLogoUrl);
+    setLogoError(true);
+  }, [resolvedLogoUrl]);
   useEffect(() => {
-    if (!proposal?.dealer_id) {
-      setDealerLogoUrl(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from('Dealers')
-        .select('logo_url')
-        .eq('id', proposal.dealer_id)
-        .maybeSingle();
-      if (!cancelled && data?.logo_url) setDealerLogoUrl((data as { logo_url: string }).logo_url);
-      else if (!cancelled) setDealerLogoUrl(null);
-    })();
-    return () => { cancelled = true; };
-  }, [proposal?.dealer_id]);
+    if (!resolvedLogoUrl) setLogoError(false);
+  }, [resolvedLogoUrl]);
 
   useEffect(() => {
     if (!proposal) return;
     setHeaderForm({
       proposal_no: proposal.proposal_no ?? '',
       status: proposal.status,
+      description: proposal.description ?? '',
       notes: proposal.notes ?? '',
       valid_until: proposal.valid_until ? proposal.valid_until.slice(0, 10) : '',
       global_discount_pct: proposal.global_discount_pct != null ? String(proposal.global_discount_pct) : '',
@@ -175,15 +186,16 @@ export default function ProposalDetail() {
     });
   }, [proposal]);
 
-  const saveHeader = useCallback(async () => {
-    if (!proposal || !headerDirty || saving || !canWrite) return;
+  const saveHeader = useCallback(async (): Promise<boolean> => {
+    if (!proposal || !headerDirty || saving || !canWrite) return false;
     setSaving(true);
     try {
       const feePct = headerForm.global_fee_amount ? parseFloat(headerForm.global_fee_amount) : null;
       const payload: Record<string, unknown> = {
         proposal_no: headerForm.proposal_no || null,
         status: headerForm.status,
-        notes: headerForm.notes || null,
+        description: headerForm.description?.trim() || null,
+        notes: headerForm.notes?.trim() || null,
         valid_until: headerForm.valid_until || null,
         global_discount_pct: headerForm.global_discount_pct ? parseFloat(headerForm.global_discount_pct) : null,
         global_fee_amount: feePct,
@@ -196,7 +208,7 @@ export default function ProposalDetail() {
         } else {
           useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessage(e) });
         }
-        return;
+        return false;
       }
       // Apply global fee % to Fee field of each from_quote line (preserve Discount per line)
       if (feePct != null && !Number.isNaN(feePct)) {
@@ -209,6 +221,7 @@ export default function ProposalDetail() {
       }
       setHeaderDirty(false);
       refetch();
+      return true;
     } finally {
       setSaving(false);
     }
@@ -234,6 +247,11 @@ export default function ProposalDetail() {
     },
     [proposal, canWrite, setCanWrite, refetch]
   );
+
+  const handleSave = useCallback(async () => {
+    const saved = await saveHeader();
+    if (saved) useUIStore.getState().addNotification({ type: 'success', title: 'Saved', message: 'Proposal saved.' });
+  }, [saveHeader]);
 
   const handleSaveAndClose = useCallback(async () => {
     await saveHeader();
@@ -386,33 +404,46 @@ export default function ProposalDetail() {
 
   const totals = useMemo(() => {
     const lineTotals: number[] = [];
-    let subtotal = 0;
+    let totalProduct = 0; // Sum of all line totals only (no installation)
     let installationTotal = 0;
     lines.forEach((line) => {
       const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
       const material = computeLineTotal(line, qlInfo, proposal?.status);
       lineTotals.push(material);
-      subtotal += material;
+      totalProduct += material;
       const installationAddons = (addonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
       installationTotal += installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
     });
-    if (proposal?.subtotal_amount != null && proposal?.discount_amount != null && proposal?.itbms_amount != null && proposal?.total_amount != null) {
-      const instAmount = proposal?.installation_amount ?? installationTotal;
+
+    const discountPct = proposal?.global_discount_pct ?? 0;
+    const discountAmount = totalProduct * (discountPct / 100);
+    const installationAmount = proposal?.installation_amount ?? installationTotal;
+    // Subtotal = Total Product - Discount + Installation (before tax)
+    const subtotal = Math.max(totalProduct - discountAmount, 0) + installationAmount;
+
+    if (proposal?.itbms_amount != null && proposal?.total_amount != null) {
       return {
-        subtotal: proposal.subtotal_amount,
-        installationAmount: instAmount,
-        discountAmount: proposal.discount_amount,
+        totalProduct,
+        discountAmount,
+        installationAmount,
+        subtotal,
         itbmsAmount: proposal.itbms_amount,
         total: proposal.total_amount,
         lineTotals,
       };
     }
-    const discountPct = proposal?.global_discount_pct ?? 0;
-    const discountAmount = subtotal * (discountPct / 100);
-    const taxableBase = Math.max(subtotal - discountAmount, 0) + installationTotal;
-    const itbmsAmount = 0;
-    const total = taxableBase + itbmsAmount;
-    return { subtotal, installationAmount: installationTotal, discountAmount, itbmsAmount, total, lineTotals };
+    const itbmsPct = 0.07; // Default 7% ITBMS when not from server
+    const itbmsAmount = subtotal * itbmsPct;
+    const total = subtotal + itbmsAmount;
+    return {
+      totalProduct,
+      discountAmount,
+      installationAmount,
+      subtotal,
+      itbmsAmount,
+      total,
+      lineTotals,
+    };
   }, [lines, quoteLinesMap, addonsMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.itbms_amount, proposal?.total_amount, proposal?.global_discount_pct]);
 
   const customLinesInvalid = useMemo(() => {
@@ -443,122 +474,238 @@ export default function ProposalDetail() {
     return String(acc) || '—';
   }, []);
 
-  const handleDownloadPDF = useCallback(
+  const buildProposalPDFDoc = useCallback(
     async (variant: 'internal' | 'customer') => {
-      if (!proposal || !proposalId) return;
-      try {
-        const { data: orgData } = await supabase
-          .from('Organizations')
-          .select('name')
-          .eq('id', proposal.organization_id)
-          .maybeSingle();
-        const organizationName = (orgData as { name?: string } | null)?.name ?? 'Arquiproductos';
+      if (!proposal || !proposalId) return null;
+      const { data: orgData } = await supabase
+        .from('Organizations')
+        .select('name')
+        .eq('id', proposal.organization_id)
+        .maybeSingle();
+      const organizationName = (orgData as { name?: string } | null)?.name ?? 'Arquiproductos';
 
-        let logoPngBase64: string | undefined;
-        if (dealerLogoUrl) {
-          try {
-            const res = await fetch(dealerLogoUrl, { mode: 'cors' });
+      let logoPngBase64: string | undefined;
+      let logoWidthPx: number | undefined;
+      let logoHeightPx: number | undefined;
+      // Resolve logo: use state first; if empty, fetch dealer logo_url so PDF has it even before UI state updates
+      let logoUrlForPdf = dealerLogoUrl;
+      if (!logoUrlForPdf && proposal?.dealer_id) {
+        const { data: dealerData } = await supabase
+          .from('Dealers')
+          .select('logo_url')
+          .eq('id', proposal.dealer_id)
+          .maybeSingle();
+        logoUrlForPdf = (dealerData as { logo_url?: string } | null)?.logo_url ?? null;
+      }
+      const logoPath = getLogoPathFromUrl(logoUrlForPdf);
+      const cleanPath = logoPath ? logoPath.replace(/^\/+/, '') : null;
+      const logoUrlToLoad =
+        cleanPath
+          ? supabase.storage.from('catalog-images').getPublicUrl(cleanPath).data.publicUrl
+          : /^https?:\/\//i.test(logoUrlForPdf ?? '')
+            ? logoUrlForPdf!
+            : null;
+
+      if (logoUrlToLoad) {
+        try {
+          let dataUrl: string | null = null;
+          const res = await fetch(logoUrlToLoad, { mode: 'cors', credentials: 'omit' });
+          if (res.ok) {
             const blob = await res.blob();
-            logoPngBase64 = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
+            if (blob.type.startsWith('image/')) {
+              dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+          if (import.meta.env.DEV && !res.ok) {
+            console.warn('Proposal PDF: logo fetch failed', { status: res.status, statusText: res.statusText, url: logoUrlToLoad });
+          }
+          if (!dataUrl) {
+            const fromImage = await new Promise<string | null>((resolve) => {
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = () => {
+                try {
+                  const c = document.createElement('canvas');
+                  c.width = img.naturalWidth;
+                  c.height = img.naturalHeight;
+                  const ctx = c.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(img, 0, 0);
+                    resolve(c.toDataURL('image/png'));
+                  } else resolve(null);
+                } catch {
+                  resolve(null);
+                }
+              };
+              img.onerror = () => resolve(null);
+              img.src = logoUrlToLoad;
             });
-          } catch {
-            // ignore; PDF will render without logo
+            if (fromImage) dataUrl = fromImage;
+          }
+          if (dataUrl) {
+            logoPngBase64 = dataUrl;
+            const dims = await new Promise<{ w: number; h: number } | null>((resolve) => {
+              const img2 = new Image();
+              img2.onload = () => resolve({ w: img2.naturalWidth, h: img2.naturalHeight });
+              img2.onerror = () => resolve(null);
+              img2.src = dataUrl!;
+            });
+            if (dims) {
+              logoWidthPx = dims.w;
+              logoHeightPx = dims.h;
+            }
+          }
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            console.warn('Proposal PDF: logo failed to load', { url: logoUrlToLoad, error: e });
           }
         }
+      }
 
-        const pdfLines: ProposalPDFLine[] = lines.map((line, index) => {
-          const lineTotal = totals.lineTotals[index] ?? 0;
-          const installationAddon = (addonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
-          if (line.line_type === 'custom') {
-            const qty = Number(line.qty) || 0;
-            const up = Number(line.unit_price) || 0;
-            return {
-              area: null,
-              position: null,
-              description: (line.description || '—') + (line.custom_category ? ` (${line.custom_category})` : ''),
-              qty,
-              unit_price: up,
-              line_total: lineTotal,
-            };
-          }
-          const snapFrozen = line.quote_line_snapshot;
-          const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
-          const snap =
-            snapFrozen
-              ? { measurements: snapFrozen.measurements, accessories: snapFrozen.accessories }
-              : qlInfo?.config_snapshot ??
-                (qlInfo?.configured_product_id ? (configuredProductsMap ?? {})[qlInfo.configured_product_id]?.config_snapshot : undefined);
-          const dimensionsSource =
-            snap?.measurements && typeof snap.measurements === 'object'
-              ? snap.measurements
-              : snapFrozen
-                ? { width_m: snapFrozen.width_m, height_m: snapFrozen.height_m }
+      const pdfLines: ProposalPDFLine[] = lines.map((line, index) => {
+        const lineTotal = totals.lineTotals[index] ?? 0;
+        const installationAddon = (addonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
+        if (line.line_type === 'custom') {
+          const qty = Number(line.qty) || 0;
+          const up = Number(line.unit_price) || 0;
+          return {
+            area: null,
+            position: null,
+            description: (line.description || '—') + (line.custom_category ? ` (${line.custom_category})` : ''),
+            qty,
+            unit_price: up,
+            line_total: lineTotal,
+          };
+        }
+        const snapFrozen = line.quote_line_snapshot;
+        const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
+        const snap =
+          snapFrozen
+            ? { measurements: snapFrozen.measurements, accessories: snapFrozen.accessories }
+            : qlInfo?.config_snapshot ??
+              (qlInfo?.configured_product_id ? (configuredProductsMap ?? {})[qlInfo.configured_product_id]?.config_snapshot : undefined);
+        // Same source as UI Description column: prefer qlInfo.width_m × qlInfo.height_m ("1.2 × 2 m"), then snapshot, then formatDimensions for panels
+        const hasSimpleDims = qlInfo && (qlInfo.width_m != null || qlInfo.height_m != null);
+        const dimensionsSimple =
+          hasSimpleDims
+            ? `${qlInfo!.width_m ?? '—'} × ${qlInfo!.height_m ?? '—'} m`
+            : null;
+        const dimensionsSource =
+          dimensionsSimple
+            ? null
+            : snapFrozen && (snapFrozen.width_m != null || snapFrozen.height_m != null)
+              ? {
+                  ...(typeof snapFrozen.measurements === 'object' && snapFrozen.measurements ? snapFrozen.measurements : {}),
+                  width_m: snapFrozen.width_m,
+                  height_m: snapFrozen.height_m,
+                }
+              : snap?.measurements && typeof snap.measurements === 'object'
+                ? snap.measurements
                 : qlInfo
                   ? { width_m: qlInfo.width_m, height_m: qlInfo.height_m }
                   : null;
-          const dimensions =
-            dimensionsSource
-              ? formatDimensionsDisplayCompact(dimensionsSource).replace(/\s*mm\s*$/i, '').trim()
-              : null;
-          const qty = snapFrozen?.qty ?? qlInfo?.quantity ?? 1;
-          const unitPrice = qty > 0 ? lineTotal / qty : 0;
-          return {
-            area: snapFrozen?.area ?? qlInfo?.area ?? null,
-            position: snapFrozen?.position ?? qlInfo?.position ?? null,
-            product_type: snapFrozen?.product_type ?? qlInfo?.product_type ?? null,
-            collection_name: snapFrozen?.collection_name ?? qlInfo?.collection_name ?? null,
-            variant_name: snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null,
-            drive_type: snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null,
-            description: snapFrozen?.name || snapFrozen?.sku || qlInfo?.name || qlInfo?.sku || null,
-            sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
-            dimensions: dimensions ?? null,
-            install_included: !!installationAddon,
-            qty,
-            unit_price: unitPrice,
-            line_total: lineTotal,
-          };
-        });
+        const dimensionsFormatted =
+          dimensionsSource
+            ? formatDimensionsDisplayCompact(dimensionsSource as Parameters<typeof formatDimensionsDisplayCompact>[0]).replace(/\s*mm\s*$/i, '').trim()
+            : null;
+        const dimensions = dimensionsSimple ?? (dimensionsFormatted && dimensionsFormatted !== '—' ? dimensionsFormatted : null);
+        const qty = snapFrozen?.qty ?? qlInfo?.quantity ?? 1;
+        const unitPrice = qty > 0 ? lineTotal / qty : 0;
+        return {
+          area: snapFrozen?.area ?? qlInfo?.area ?? null,
+          position: snapFrozen?.position ?? qlInfo?.position ?? null,
+          product_type: snapFrozen?.product_type ?? qlInfo?.product_type ?? null,
+          collection_name: snapFrozen?.collection_name ?? qlInfo?.collection_name ?? null,
+          variant_name: snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null,
+          drive_type: snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null,
+          description: snapFrozen?.name || snapFrozen?.sku || qlInfo?.name || qlInfo?.sku || null,
+          sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
+          dimensions: dimensions ?? null,
+          install_included: !!installationAddon,
+          accessories: formatAccessoriesForPDF(
+            (snapFrozen as { accessories?: unknown } | null)?.accessories ??
+            (snap as { accessories?: unknown } | undefined)?.accessories
+          ),
+          qty,
+          unit_price: unitPrice,
+          line_total: lineTotal,
+        };
+      });
 
-        const doc = generateProposalPDF(
-          {
-            proposal_no: proposal.proposal_no || proposal.id.slice(0, 8),
-            status: proposal.status,
-            currency: proposal.currency || 'USD',
-            valid_until: proposal.valid_until,
-            notes: proposal.notes,
-            global_discount_pct: proposal.global_discount_pct,
-            global_fee_amount: proposal.global_fee_amount,
-            subtotal_amount: proposal.subtotal_amount ?? undefined,
-            installation_amount: proposal.installation_amount ?? undefined,
-            discount_amount: proposal.discount_amount ?? undefined,
-            itbms_amount: proposal.itbms_amount ?? undefined,
-            total_amount: proposal.total_amount ?? undefined,
-            created_at: proposal.created_at,
+      const doc = generateProposalPDF(
+        {
+          proposal_no: proposal.proposal_no || proposal.id.slice(0, 8),
+          status: proposal.status,
+          currency: proposal.currency || 'USD',
+          valid_until: proposal.valid_until,
+          description: proposal.description ?? undefined,
+          notes: proposal.notes,
+          global_discount_pct: proposal.global_discount_pct,
+          global_fee_amount: proposal.global_fee_amount,
+          subtotal_amount: proposal.subtotal_amount ?? undefined,
+          installation_amount: proposal.installation_amount ?? undefined,
+          discount_amount: proposal.discount_amount ?? undefined,
+          itbms_amount: proposal.itbms_amount ?? undefined,
+          total_amount: proposal.total_amount ?? undefined,
+          created_at: proposal.created_at,
+        },
+        customer,
+        contact
+          ? {
+              contact_name: contact.contact_name ?? contact.contact_email ?? undefined,
+              contact_email: contact.contact_email ?? undefined,
+            }
+          : null,
+        pdfLines,
+        {
+          variant,
+          organizationName,
+          logoPngBase64,
+          logoWidthPx,
+          logoHeightPx,
+          customerAddress: customer?.address ?? undefined,
+          customerEmail: customer?.customer_email ?? undefined,
+          customerPhone: customer?.customer_phone ?? undefined,
+          overrideTotals: {
+            totalProduct: totals.totalProduct ?? 0,
+            discountAmount: totals.discountAmount ?? 0,
+            installationAmount: totals.installationAmount ?? 0,
+            subtotal: totals.subtotal ?? 0,
+            itbmsAmount: totals.itbmsAmount ?? 0,
+            total: totals.total ?? 0,
           },
-          customer,
-          contact
-            ? {
-                contact_name: contact.contact_name ?? contact.contact_email ?? undefined,
-                contact_email: contact.contact_email ?? undefined,
-              }
-            : null,
-          pdfLines,
-          { variant, organizationName, logoPngBase64 }
-        );
+          global_discount_pct: proposal.global_discount_pct ?? undefined,
+          itbms_pct: proposal.itbms_pct ?? undefined,
+        }
+      );
 
-        const suffix = variant === 'internal' ? 'Interno' : 'Cliente';
-        const fileName = `Proposal_${proposal.proposal_no || proposal.id.slice(0, 8)}_${suffix}_${new Date().toISOString().split('T')[0]}.pdf`;
-        doc.save(fileName);
+      const suffix = variant === 'internal' ? 'Internal' : 'Customer';
+      const fileName = `Proposal_${proposal.proposal_no || proposal.id.slice(0, 8)}_${suffix}_${new Date().toISOString().split('T')[0]}.pdf`;
+      return { doc, fileName };
+    },
+    [proposal, proposalId, lines, quoteLinesMap, configuredProductsMap, customer, contact, totals, formatAccessoriesForPDF, dealerLogoUrl]
+  );
 
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Success',
-          message: 'PDF downloaded successfully',
-        });
+  const handlePreviewPDF = useCallback(
+    async (variant: 'internal' | 'customer') => {
+      try {
+        const result = await buildProposalPDFDoc(variant);
+        if (result) {
+          const blob = result.doc.output('blob');
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Preview',
+            message: 'PDF opened in new tab. You can download from the browser if needed.',
+          });
+        }
       } catch (err: any) {
         console.error('Error generating PDF:', err);
         useUIStore.getState().addNotification({
@@ -568,7 +715,7 @@ export default function ProposalDetail() {
         });
       }
     },
-    [proposal, proposalId, lines, quoteLinesMap, configuredProductsMap, customer, contact, totals.lineTotals, formatAccessoriesForPDF, dealerLogoUrl]
+    [buildProposalPDFDoc]
   );
 
   if (!proposalId) {
@@ -599,18 +746,61 @@ export default function ProposalDetail() {
 
   const readOnly = !canWrite;
 
+  const contactDisplay = contact
+    ? [contact.contact_name, contact.contact_email].filter(Boolean).join(' · ')
+    : '';
+
   return (
     <div className="py-6 px-6 max-w-6xl mx-auto">
-      {/* Top action bar: Close | Save | Save and Close (catálogo de diseño) */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Proposal</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {proposal.proposal_no || proposal.id.slice(0, 8)}
-            {quote && ` · Quote ${quote.quote_no}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      {/* Top row: "Proposal" title + Print dropdown (right) + Close + Save and Close */}
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-xl font-semibold text-foreground">Proposal</h1>
+        <div className="flex items-center gap-2">
+          <div className="relative" ref={printDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setPrintDropdownOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50"
+              title="Print"
+              aria-expanded={printDropdownOpen}
+              aria-haspopup="true"
+            >
+              <Printer className="w-4 h-4 shrink-0 text-gray-600" />
+              <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+            </button>
+            {printDropdownOpen && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                role="menu"
+              >
+                <div className="px-3 py-1.5 text-xs font-medium text-gray-500 border-b border-gray-100">Preview in browser</div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  onClick={() => {
+                    handlePreviewPDF('internal');
+                    setPrintDropdownOpen(false);
+                  }}
+                >
+                  <Eye className="w-4 h-4 shrink-0 text-gray-500" />
+                  Full Detail
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  onClick={() => {
+                    handlePreviewPDF('customer');
+                    setPrintDropdownOpen(false);
+                  }}
+                >
+                  <Eye className="w-4 h-4 shrink-0 text-gray-500" />
+                  Without Measurements
+                </button>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => router.navigate('/sales/proposals')}
@@ -621,10 +811,10 @@ export default function ProposalDetail() {
           </button>
           <button
             type="button"
-            onClick={() => saveHeader()}
-            disabled={saving || !headerDirty || readOnly}
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            onClick={handleSave}
+            disabled={saving || readOnly || !headerDirty}
+            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Save"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
@@ -640,8 +830,9 @@ export default function ProposalDetail() {
         </div>
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-gray-500">
-        <button onClick={() => router.navigate('/sales/proposals')} className="hover:text-gray-700">
+      {/* Breadcrumb: Proposals / no · Quote · Customer · Contact · email */}
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-gray-500" style={{ marginTop: '4mm' }}>
+        <button onClick={() => router.navigate('/sales/proposals')} className="hover:text-gray-700 whitespace-nowrap">
           Proposals
         </button>
         <span>/</span>
@@ -651,7 +842,7 @@ export default function ProposalDetail() {
             <span>·</span>
             <button
               onClick={() => router.navigate(`/sales/quotes/${quote.id}/edit`)}
-              className="text-blue-600 hover:underline"
+              className="text-blue-600 hover:underline whitespace-nowrap"
             >
               Quote {quote.quote_no}
             </button>
@@ -663,26 +854,34 @@ export default function ProposalDetail() {
             <span className="text-gray-700">{customer.customer_name}</span>
           </>
         )}
-        {contact && (contact.contact_name || contact.contact_email) && (
+        {contactDisplay && (
           <>
             <span>·</span>
-            <span className="text-gray-600">
-              {[contact.contact_name, contact.contact_email].filter(Boolean).join(' · ')}
+            <span className="text-gray-600 truncate max-w-[200px] sm:max-w-none" title={contactDisplay}>
+              {contactDisplay}
             </span>
           </>
         )}
       </div>
 
-      {/* Header card: mismo estilo que Quotes/ERP */}
+      {/* Header card: mismo estilo que Quotes/ERP; logo alineado con la P de Proposal No */}
       <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-        <div className="flex items-start gap-4 mb-4">
-          {dealerLogoUrl && (
-            <div className="flex-shrink-0">
-              <img src={dealerLogoUrl} alt="Dealer logo" className="h-12 max-w-[180px] object-contain object-left" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <h2 className="text-xl font-semibold text-gray-900">Proposal</h2>
+        <div className="flex items-start gap-4 mb-4 -ml-0">
+          <div className="logo-slot flex-shrink-0 self-start">
+            {showLogo ? (
+              <img
+                id="dealerLogoDetail"
+                src={resolvedLogoUrl ?? ''}
+                alt="Dealer logo"
+                crossOrigin="anonymous"
+                onError={handleLogoError}
+                className="max-w-full max-h-full object-contain"
+              />
+            ) : (
+              <div className="flex items-center justify-center w-full h-full text-gray-400 text-xs" aria-hidden>
+                Dealer logo
+              </div>
+            )}
           </div>
         </div>
         <div className="grid grid-cols-12 gap-4">
@@ -721,13 +920,14 @@ export default function ProposalDetail() {
             />
           </div>
           <div className="col-span-12">
-            <Label>Notes</Label>
+            <Label>Description</Label>
             <textarea
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
               rows={2}
-              value={headerForm.notes}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
+              value={headerForm.description}
+              onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
               disabled={readOnly}
+              placeholder="Short proposal description"
             />
           </div>
           <div className="col-span-6 md:col-span-2">
@@ -801,15 +1001,17 @@ export default function ProposalDetail() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs uppercase w-10" title="Drag to reorder"></th>
-                <th className="text-center py-3 px-1 font-medium text-gray-700 text-xs uppercase w-8"></th>
-                <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs uppercase w-12">#</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs uppercase w-24">Area</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs uppercase w-24">Position</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs uppercase">Description / Product</th>
-                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs uppercase">Qty</th>
-                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs uppercase">Base / Unit price</th>
-                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs uppercase">Line total</th>
+                <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10" title="Drag to reorder"></th>
+                <th className="text-center py-3 px-1 font-medium text-gray-700 text-xs w-8"></th>
+                <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs w-12">#</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs w-24">Area</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs w-24">Position</th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">Description</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs w-28">Product type</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[120px]">Accessories</th>
+                <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs">Qty</th>
+                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs">Unit Price</th>
+                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs">Line total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -835,13 +1037,17 @@ export default function ProposalDetail() {
                 const installationAddon = (addonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
                 const addonsTotal = (addonsMap?.get(line.id) || []).reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
                 const materialTotal = computeLineTotal(line, qlInfo, proposal?.status);
+                const qtyForLine = line.line_type === 'from_quote'
+                  ? (Number((line.quote_line_snapshot as { qty?: number } | null)?.qty) || qlInfo?.quantity || 1)
+                  : (Number(line.qty) || 0);
+                const unitPriceForDisplay = qtyForLine > 0 ? lineTotal / qtyForLine : lineTotal;
                 return (
                   <>
                   <SortableRow
                     key={line.id}
                     id={line.id}
                     renderFirstCell={({ attributes, listeners }) => (
-                      <td className="py-4 px-2 text-gray-400 w-10" title="Drag to reorder">
+                      <td className="py-4 px-2 text-gray-400 w-10 align-middle" title="Drag to reorder">
                         {!readOnly ? (
                           <span
                             {...attributes}
@@ -857,7 +1063,7 @@ export default function ProposalDetail() {
                       </td>
                     )}
                   >
-                    <td className="py-4 px-1 text-center w-8">
+                    <td className="py-4 px-1 text-center w-8 align-middle">
                       <button
                         type="button"
                         onClick={() => setExpandedLineId(isExpanded ? null : line.id)}
@@ -867,20 +1073,20 @@ export default function ProposalDetail() {
                         {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
                       </button>
                     </td>
-                    <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12">{index + 1}</td>
-                    <td className="py-4 px-4 text-gray-700 text-sm w-24">
+                    <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12 align-middle">{index + 1}</td>
+                    <td className="py-4 px-4 text-gray-700 text-sm w-24 align-middle">
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { area?: string } | null)?.area ?? qlInfo?.area ?? '—'
                         : '—'}
                     </td>
-                    <td className="py-4 px-4 text-gray-700 text-sm w-24">
+                    <td className="py-4 px-4 text-gray-700 text-sm w-24 align-middle">
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { position?: string } | null)?.position ?? qlInfo?.position ?? '—'
                         : '—'}
                     </td>
-                    <td className="py-4 px-6">
+                    <td className="py-4 px-6 align-middle">
                       {line.line_type === 'from_quote' && qlInfo ? (
-                          <div className="min-h-[3.5rem] flex flex-col justify-start gap-0.5 flex-1 min-w-0">
+                          <div className="min-h-[3.5rem] flex flex-col justify-center gap-0.5 flex-1 min-w-0">
                             <span className="font-medium text-gray-900">{qlInfo.name || qlInfo.sku || '—'}</span>
                             {qlInfo.sku && <span className="text-gray-500 text-xs ml-1">({qlInfo.sku})</span>}
                             {dims && <div className="text-xs text-gray-500 mt-0.5">{dims}</div>}
@@ -924,13 +1130,26 @@ export default function ProposalDetail() {
                           </div>
                         )}
                     </td>
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-4 px-4 text-gray-700 text-sm align-middle w-28">
+                      {line.line_type === 'from_quote'
+                        ? (line.quote_line_snapshot as { product_type?: string } | null)?.product_type ?? qlInfo?.product_type ?? '—'
+                        : '—'}
+                    </td>
+                    <td className="py-4 px-4 text-gray-700 text-sm align-middle min-w-[120px]">
+                      {line.line_type === 'from_quote'
+                        ? formatAccessoriesForPDF(
+                            (line.quote_line_snapshot as { accessories?: unknown } | null)?.accessories ??
+                            (qlInfo?.config_snapshot as { accessories?: unknown } | undefined)?.accessories
+                          )
+                        : '—'}
+                    </td>
+                    <td className="py-4 px-6 text-center align-middle">
                       {line.line_type === 'custom' ? (
                         <input
                           type="number"
                           step="0.01"
                           min="0"
-                          className={`w-20 border rounded px-2 py-1 text-sm text-right ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
+                          className={`w-20 border rounded px-2 py-1 text-sm text-center mx-auto ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
                           value={line.qty ?? ''}
                           onChange={(e) => updateCustomLine(line.id, { qty: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
                           disabled={readOnly}
@@ -939,7 +1158,7 @@ export default function ProposalDetail() {
                         qlInfo?.quantity ?? '—'
                       )}
                     </td>
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-4 px-6 text-right align-middle">
                       {line.line_type === 'custom' ? (
                         <input
                           type="number"
@@ -953,7 +1172,7 @@ export default function ProposalDetail() {
                       ) : (
                         <span>
                           {hasBasePrice ? (
-                            formatCurrency(materialTotal, currency)
+                            formatCurrency(unitPriceForDisplay, currency)
                           ) : (
                             <span className="inline-flex items-center gap-1">
                               <span>—</span>
@@ -965,11 +1184,11 @@ export default function ProposalDetail() {
                         </span>
                       )}
                     </td>
-                    <td className="py-4 px-6 text-right font-medium text-gray-900 text-sm">{formatCurrency(lineTotal, currency)}</td>
+                    <td className="py-4 px-6 text-right font-medium text-gray-900 text-sm align-middle">{formatCurrency(lineTotal, currency)}</td>
                   </SortableRow>
                   {line.line_type === 'from_quote' && isExpanded && (
                     <tr key={`${line.id}-addons`} className="bg-gray-50/80">
-                      <td colSpan={9} className="py-4 px-6">
+                      <td colSpan={11} className="py-4 px-6">
                         <div className="rounded-lg border border-gray-200 bg-white p-4">
                           <h4 className="text-sm font-semibold text-gray-700 mb-3">Add-ons</h4>
                           <div className="flex flex-wrap items-end gap-4">
@@ -1156,7 +1375,7 @@ export default function ProposalDetail() {
                           </div>
                           {addonsTotal > 0 && (
                             <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600">
-                              Material: {formatCurrency(materialTotal, currency)} (shown above). Instalación: {formatCurrency(addonsTotal, currency)} → global Instalación line
+                              Material: {formatCurrency(materialTotal, currency)} (shown above). Installation: {formatCurrency(addonsTotal, currency)} → global Installation line
                             </div>
                           )}
                         </div>
@@ -1181,69 +1400,49 @@ export default function ProposalDetail() {
         </div>
       )}
 
-      {/* Totals: Subtotal (material), Discount, Instalación, ITBMS, Total */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6 max-w-sm ml-auto">
-        <div className="flex justify-between py-1 text-sm">
-          <span className="text-gray-600">Subtotal (lines)</span>
-          <span>{formatCurrency(totals.subtotal, currency)}</span>
+      {/* Notes / Terms and Conditions (left) + Totals (right, same size as before) */}
+      <div className="flex flex-col md:flex-row gap-6 items-stretch mb-6">
+        <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg p-6">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Notes / Terms and Conditions</h3>
+          <textarea
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm min-h-[120px]"
+            rows={4}
+            value={headerForm.notes}
+            onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
+            disabled={readOnly}
+            placeholder="Notes and terms and conditions..."
+          />
         </div>
-        {(totals.discountAmount ?? 0) > 0 && (
+        <div className="bg-white border border-gray-200 rounded-lg p-6 w-full md:w-auto shrink-0 md:min-w-[284px] md:max-w-[284px]">
           <div className="flex justify-between py-1 text-sm">
-            <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
-            <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+            <span className="text-gray-600">Total Product</span>
+            <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
           </div>
-        )}
-        {(totals.installationAmount ?? 0) > 0 && (
+          {(totals.discountAmount ?? 0) > 0 && (
+            <div className="flex justify-between py-1 text-sm">
+              <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
+              <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+            </div>
+          )}
+          {(totals.installationAmount ?? 0) > 0 && (
+            <div className="flex justify-between py-1 text-sm">
+              <span className="text-gray-600">Installation</span>
+              <span>{formatCurrency(totals.installationAmount ?? 0, currency)}</span>
+            </div>
+          )}
           <div className="flex justify-between py-1 text-sm">
-            <span className="text-gray-600">Instalación</span>
-            <span>{formatCurrency(totals.installationAmount ?? 0, currency)}</span>
+            <span className="text-gray-600">Subtotal</span>
+            <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
           </div>
-        )}
-        <div className="flex justify-between py-1 text-sm">
-          <span className="text-gray-600">ITBMS</span>
-          <span>{formatCurrency(totals.itbmsAmount ?? 0, currency)}</span>
+          <div className="flex justify-between py-1 text-sm">
+            <span className="text-gray-600">ITBMS</span>
+            <span>{formatCurrency(totals.itbmsAmount ?? 0, currency)}</span>
+          </div>
+          <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
+            <span>Total {currency ? `(${currency})` : ''}</span>
+            <span>{formatCurrency(totals.total, currency)}</span>
+          </div>
         </div>
-        <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
-          <span>Total {currency ? `(${currency})` : ''}</span>
-          <span>{formatCurrency(totals.total, currency)}</span>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        {!readOnly && (
-          <>
-            <button
-              onClick={() => setStatus('sent')}
-              disabled={saving || proposal.status === 'sent'}
-              className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-sm text-gray-700 disabled:opacity-50"
-            >
-              Mark as Sent
-            </button>
-            <button
-              onClick={() => setStatus('accepted')}
-              disabled={saving || proposal.status === 'accepted'}
-              className="flex items-center gap-2 px-3 py-2 border border-green-600 rounded-lg bg-white hover:bg-green-50 text-sm text-green-700 disabled:opacity-50"
-            >
-              Mark as Accepted
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => handleDownloadPDF('internal')}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm bg-blue-600 hover:bg-blue-700"
-          title="Download PDF (detail with measurements)"
-        >
-          <Printer className="w-4 h-4" />
-          PDF - Interno (Detalle)
-        </button>
-        <button
-          onClick={() => handleDownloadPDF('customer')}
-          className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-sm text-gray-700"
-          title="Download PDF (simplified for customer)"
-        >
-          <Printer className="w-4 h-4" />
-          PDF - Cliente (Simplificado)
-        </button>
       </div>
     </div>
   );

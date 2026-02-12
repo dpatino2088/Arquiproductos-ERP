@@ -181,12 +181,13 @@ export default function Login() {
     setError(null);
 
     try {
-      // ✅ OTP sin emailRedirectTo (envía código, no magic link)
+      // signInWithOtp envía un email; si recibes Magic Link en vez de código OTP,
+      // cambia en Supabase: Authentication → Email Templates → "Magic Link":
+      // usa {{ .Token }} (código 6 dígitos) en lugar de {{ .ConfirmationURL }} (link).
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           shouldCreateUser: true,
-          // NO incluir emailRedirectTo - esto envía OTP numérico
         },
       });
 

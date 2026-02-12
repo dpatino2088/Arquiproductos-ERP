@@ -23,7 +23,7 @@ const WINDOW_FILM_STEPS: ProductStep[] = [
   { id: 'opacity', label: 'OPACITY & PROPERTIES', component: () => <PlaceholderStep title="Opacity & Properties" /> },
   { id: 'measurements', label: 'GLASS MEASUREMENTS', component: () => <PlaceholderStep title="Glass Measurements" /> },
   { id: 'installation', label: 'INSTALLATION TYPE', component: () => <PlaceholderStep title="Installation Type" /> },
-  { id: 'review', label: 'QUOTE', component: () => <PlaceholderStep title="Review" /> },
+  { id: 'review', label: 'REVIEW', component: () => <PlaceholderStep title="Review" /> },
 ];
 
 function validateStep(stepId: string, config: ProductConfig): boolean {

@@ -95,14 +95,15 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         },
       });
 
-      if (createError) {
-        console.error('[OrganizationUserNew] Edge Function error:', createError);
-        throw new Error(createError.message || 'Failed to create user');
-      }
-
-      if (!createData?.ok) {
-        console.error('[OrganizationUserNew] Response not ok:', createData);
-        throw new Error(createData?.error || 'Edge Function failed');
+      const errStr =
+        (typeof createData?.error === 'string' && createData.error) ||
+        (typeof (createError as any)?.context === 'string' && (createError as any).context) ||
+        (typeof createError?.message === 'string' && createError.message) ||
+        (createData?.ok === false ? 'Edge Function failed' : null);
+      const realMessage = typeof errStr === 'string' ? errStr : 'Failed to create user';
+      if (createError || !createData?.ok) {
+        if (import.meta.env.DEV) console.error('[OrganizationUserNew] create-temp-user', { createData, createError, realMessage });
+        throw new Error(realMessage);
       }
 
       console.log('[OrganizationUserNew] User created:', createData);

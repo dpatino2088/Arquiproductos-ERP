@@ -476,9 +476,8 @@ export function useQuoteLines(quoteId: string | null) {
         setLoading(true);
         setError(null);
 
-        // Query: obtener todos los campos de QuoteLines
+        // Query: obtener todos los campos de QuoteLines por quote_id (no filtrar por dealer; las líneas son de la cotización)
         // Note: QuoteLines does NOT have a 'deleted' column in the schema
-        // ✅ OPTIMIZED: Solo seleccionar campos necesarios para reducir carga
         const { data, error: queryError } = await supabase
           .from('QuoteLines')
           .select('*')
@@ -617,7 +616,7 @@ export function useQuoteLines(quoteId: string | null) {
             .select('id, roll_plus_bom_total, total_msrp, bom_preview_snapshot, config_snapshot')
             .in('id', Array.from(configuredProductIds))
             .eq('organization_id', activeOrganizationId)
-            .or('deleted.is.false,deleted.is.null');
+            .or('deleted.eq.false,deleted.is.null');
 
           if (cpData) {
             configuredProductsMap = new Map(
@@ -689,11 +688,11 @@ export function useQuoteLines(quoteId: string | null) {
           const cpId = line.configured_product_id || line.metadata?.configured_product_id;
           const configuredProduct = cpId ? configuredProductsMap.get(cpId) : null;
           const snapshot = configuredProduct?.bom_preview_snapshot;
-          const snapshotTotals = snapshot?.version === '1' ? snapshot?.totals : null;
+          const snapshotTotals = snapshot?.totals ?? null;
           
           const hasLineMsrp = line.msrp != null && Number(line.msrp) > 0;
           let finalMsrp: number;
-          let finalUnitMsrp: number | null = line.unit_msrp != null ? Number(line.unit_msrp) : null;
+          let finalUnitMsrp: number | null = line.unit_msrp != null && Number(line.unit_msrp) >= 0 ? Number(line.unit_msrp) : null;
           if (hasLineMsrp) {
             finalMsrp = Number(line.msrp);
             if (finalUnitMsrp == null) {
@@ -701,21 +700,25 @@ export function useQuoteLines(quoteId: string | null) {
               finalUnitMsrp = qty > 0 ? finalMsrp / qty : finalMsrp;
             }
           } else {
-            if (snapshotTotals?.total_msrp && snapshotTotals.total_msrp > 0) {
-              finalMsrp = Number(snapshotTotals.total_msrp);
-            } else if (snapshotTotals) {
-              finalMsrp =
-                (Number(snapshotTotals.roll_msrp_total) || 0) +
+            // Orden: snapshot total_msrp → suma de partes del snapshot → CP total_msrp → CP roll_plus_bom_total → columnas de línea
+            const fromSnapshotTotal = snapshotTotals?.total_msrp != null && Number(snapshotTotals.total_msrp) > 0
+              ? Number(snapshotTotals.total_msrp)
+              : 0;
+            const fromSnapshotSum = snapshotTotals
+              ? (Number(snapshotTotals.roll_msrp_total) || 0) +
                 (Number(snapshotTotals.bom_total) || 0) +
                 (Number(snapshotTotals.labor_amount) || 0) +
-                (Number(snapshotTotals.accessories_total) || 0);
-            } else if (configuredProduct?.total_msrp && configuredProduct.total_msrp > 0) {
-              finalMsrp = configuredProduct.total_msrp;
-            } else if (configuredProduct?.roll_plus_bom_total && configuredProduct.roll_plus_bom_total > 0) {
-              finalMsrp = configuredProduct.roll_plus_bom_total;
-            } else {
-              finalMsrp = (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
-            }
+                (Number(snapshotTotals.accessories_total) || 0)
+              : 0;
+            const fromCpTotal = configuredProduct?.total_msrp != null && Number(configuredProduct.total_msrp) > 0
+              ? Number(configuredProduct.total_msrp)
+              : 0;
+            const fromCpRollPlusBom = configuredProduct?.roll_plus_bom_total != null && Number(configuredProduct.roll_plus_bom_total) > 0
+              ? Number(configuredProduct.roll_plus_bom_total)
+              : 0;
+            const fromLineSnapshots = (Number(line.roll_msrp_snapshot) || 0) + (Number(line.bom_msrp_snapshot) || 0);
+
+            finalMsrp = fromSnapshotTotal || fromSnapshotSum || fromCpTotal || fromCpRollPlusBom || fromLineSnapshots;
             if (finalUnitMsrp == null) {
               const qty = line.quantity ?? line.qty ?? 1;
               finalUnitMsrp = qty > 0 ? finalMsrp / qty : finalMsrp;

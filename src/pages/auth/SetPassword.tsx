@@ -74,44 +74,40 @@ export default function SetPasswordPage() {
         throw new Error('No hay sesión activa');
       }
 
-      // ✅ Update password in Supabase Auth
-      console.log('[SetPassword] Updating password...');
+      const now = new Date().toISOString();
+      const clearFlags = {
+        must_change_password: false,
+        temp_password_set_at: null,
+        updated_at: now,
+      };
+
+      // ✅ IMPORTANT: Clear must_change_password in DB *before* updating password.
+      // Otherwise onAuthStateChange (after updateUser) can run AuthGate while DB still has
+      // needs_password=true, causing redirect back to /set-password.
+      console.log('[SetPassword] Clearing must_change_password flags in DB first...');
+      const { error: orgErr } = await supabase
+        .from('OrganizationUsers')
+        .update(clearFlags)
+        .eq('user_id', userId);
+      if (orgErr) console.warn('[SetPassword] OrganizationUsers update warning:', orgErr);
+
+      const { error: portalErr } = await supabase
+        .from('DealerUsers')
+        .update(clearFlags)
+        .eq('user_id', userId);
+      if (portalErr) console.warn('[SetPassword] DealerUsers update warning:', portalErr);
+
+      const { error: appErr } = await supabase
+        .from('AppUsers')
+        .update(clearFlags)
+        .eq('auth_user_id', userId);
+      if (appErr) console.warn('[SetPassword] AppUsers update warning:', appErr);
+
+      console.log('[SetPassword] Flags cleared, now updating password in Auth...');
       const { error: passwordError } = await supabase.auth.updateUser({ password });
       if (passwordError) throw passwordError;
 
-      console.log('[SetPassword] Password updated, clearing must_change_password flags...');
-      
-      // ✅ Clear must_change_password flags in both tables
-      // One of these will affect 0 rows (depending on user type) and that's OK
-      const { error: orgErr } = await supabase
-        .from('OrganizationUsers')
-          .update({
-          must_change_password: false,
-          temp_password_set_at: null,
-          updated_at: new Date().toISOString()
-          })
-          .eq('user_id', userId);
-
-      if (orgErr) {
-        console.warn('[SetPassword] OrganizationUsers update warning:', orgErr);
-      }
-
-      const { error: portalErr } = await supabase
-            .from('DealerUsers')
-        .update({ 
-          must_change_password: false,
-          temp_password_set_at: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId);
-
-      if (portalErr) {
-        console.warn('[SetPassword] DealerUsers update warning:', portalErr);
-      }
-
-      console.log('[SetPassword] Flags cleared successfully');
-
-      // ✅ Success - redirect to dashboard
+      console.log('[SetPassword] Password and flags updated successfully');
       setMsg('✅ Contraseña establecida correctamente');
       setTimeout(() => router.navigate('/dashboard', true), 800);
     } catch (error: any) {

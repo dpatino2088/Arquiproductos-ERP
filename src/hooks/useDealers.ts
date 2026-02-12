@@ -32,6 +32,7 @@ export interface CreateDealerInput {
   website?: string;
   alt_phone?: string;
   primary_contact_id?: string;
+  primary_contact_app_user_id?: string | null;
   street_address_line_1?: string;
   street_address_line_2?: string;
   city?: string;
@@ -46,6 +47,8 @@ export interface CreateDealerInput {
   billing_zip_code?: string;
   billing_country?: string;
   notes?: string;
+  logo_url?: string | null;
+  primary_contact_app_user_id?: string | null;
 }
 
 /**
@@ -61,6 +64,7 @@ export interface UpdateDealerInput {
   website?: string;
   alt_phone?: string;
   primary_contact_id?: string;
+  primary_contact_app_user_id?: string | null;
   street_address_line_1?: string;
   street_address_line_2?: string;
   city?: string;
@@ -148,6 +152,7 @@ export function useDealers() {
       website: input.website?.trim() || null,
       alt_phone: input.alt_phone?.trim() || null,
       primary_contact_id: input.primary_contact_id || null,
+      primary_contact_app_user_id: input.primary_contact_app_user_id ?? null,
       street_address_line_1: input.street_address_line_1?.trim() || null,
       street_address_line_2: input.street_address_line_2?.trim() || null,
       city: input.city?.trim() || null,
@@ -163,6 +168,7 @@ export function useDealers() {
       billing_country: input.billing_country?.trim() || null,
       notes: input.notes?.trim() || null,
     };
+    if (input.logo_url !== undefined) payload.logo_url = input.logo_url?.trim() || null;
 
     const { data, error: insertError } = await supabase
       .from('Dealers')
@@ -201,6 +207,7 @@ export function useDealers() {
     if (input.website !== undefined) payload.website = input.website?.trim() || null;
     if (input.alt_phone !== undefined) payload.alt_phone = input.alt_phone?.trim() || null;
     if (input.primary_contact_id !== undefined) payload.primary_contact_id = input.primary_contact_id || null;
+    if (input.primary_contact_app_user_id !== undefined) payload.primary_contact_app_user_id = input.primary_contact_app_user_id ?? null;
     if (input.street_address_line_1 !== undefined) payload.street_address_line_1 = input.street_address_line_1?.trim() || null;
     if (input.street_address_line_2 !== undefined) payload.street_address_line_2 = input.street_address_line_2?.trim() || null;
     if (input.city !== undefined) payload.city = input.city?.trim() || null;
@@ -215,6 +222,7 @@ export function useDealers() {
     if (input.billing_zip_code !== undefined) payload.billing_zip_code = input.billing_zip_code?.trim() || null;
     if (input.billing_country !== undefined) payload.billing_country = input.billing_country?.trim() || null;
     if (input.notes !== undefined) payload.notes = input.notes?.trim() || null;
+    if (input.logo_url !== undefined) payload.logo_url = input.logo_url?.trim() || null;
 
     const { data, error: updateError } = await supabase
       .from('Dealers')

@@ -22,7 +22,7 @@ export const VIEW_MODE_COLORS = {
       active: {
         background: SIDEBAR_ACTIVE_HOVER,
         color: '#ffffff',
-        border: SIDEBAR_ACCENT
+        border: '#ffffff'
       },
       inactive: {
         color: SIDEBAR_TEXT_INACTIVE

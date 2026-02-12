@@ -1,5 +1,10 @@
+/**
+ * @deprecated Esta página no está montada en el router. La ruta /settings/dealer-users
+ * (y /settings/company-portal-users) cargan DealerUsers.tsx. No usar "CustomerPortalUser(s)";
+ * el modelo correcto es AppUsers + DealerUsers con dealer_id. Ver docs/DEALER_PROFILE_APPUSERS_MIGRATION.md
+ */
 import React, { useState, useEffect, useCallback } from 'react';
-import { useDealerUsers, type DealerUser } from '../../hooks/useDealerUsers';
+import { useDealerAppUsersForOrg, type DealerAppUserWithDealer, roleCodeToPortalRole } from '../../hooks/useAppUsersByDealer';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -62,7 +67,7 @@ interface EditPortalUserModalProps {
   onClose: () => void;
   onSuccess: () => void;
   organizationId: string;
-  user: PortalUser | null;
+  user: DealerAppUserWithDealer | null;
 }
 
 interface InvitePortalUserModalProps {
@@ -180,23 +185,27 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
         return;
       }
 
-      const insertPayload = {
-        dealer_id: dealer_id, // Cambiado: dealer_id (requerido, NO nullable)
-        portal_user_email: trimmedEmail,
-        portal_user_status: finalStatus,
-        invited_by_user_id: user.id,
-        deleted: false,
-      };
+      const { data: createData, error: createError } = await supabase.functions.invoke('create-temp-user', {
+        body: {
+          kind: 'portal',
+          organization_id: organizationId,
+          dealer_id,
+          email: trimmedEmail,
+          name: trimmedName || null,
+          role: 'member',
+          status: finalStatus,
+        },
+      });
 
-      const { error: insertError } = await supabase
-        .from('DealerUsers')
-        .insert(insertPayload);
-
-      if (insertError) {
-        // Enhanced error message showing what was sent
-        const errorMsg = insertError.message || 'Failed to create dealer user';
-        const statusInfo = `Status sent: "${status}" (normalized to "${finalStatus}")`;
-        throw new Error(`${errorMsg}. ${statusInfo}. Payload: ${JSON.stringify(insertPayload)}`);
+      const errStr =
+        (typeof createData?.error === 'string' && createData.error) ||
+        (typeof (createError as any)?.context === 'string' && (createError as any).context) ||
+        (typeof createError?.message === 'string' && createError.message) ||
+        (createData?.ok === false ? 'Edge Function failed' : null);
+      const realMessage = typeof errStr === 'string' ? errStr : 'Failed to create dealer user';
+      if (createError || !createData?.ok) {
+        if (import.meta.env.DEV) console.error('[CreatePortalUserModal] create-temp-user', { createData, createError, realMessage });
+        throw new Error(realMessage);
       }
 
       addNotification({
@@ -389,15 +398,13 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     }
   }, [organizationId]);
 
-  // Load data when modal opens or user changes
   useEffect(() => {
     if (isOpen && user) {
       loadDealers();
-      // Populate form with user data
-      setUser_name(user.user_name || '');
-      setUser_email((user as any).portal_user_email ?? user.user_email ?? '');
-      setDealer_id((user as any).dealer_id || ''); // Cambiado: dealer_id
-      setStatus((user as any).portal_user_status ?? user.status ?? 'invited');
+      setUser_name(user.display_name || '');
+      setUser_email(user.email || '');
+      setDealer_id(user.dealer_id || '');
+      setStatus(user.status ?? 'invited');
       setSubmitError(null);
     }
   }, [isOpen, user, loadDealers]);
@@ -451,23 +458,21 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
         return;
       }
 
-      // SOLO columnas explícitas: portal_user_email, portal_user_status, dealer_id
-      const updatePayload = {
-        dealer_id: dealer_id, // Cambiado: dealer_id (requerido, NO nullable)
-        portal_user_email: trimmedEmail,
-        portal_user_status: finalStatus,
-        updated_at: new Date().toISOString(),
-      };
-
       const { error: updateError } = await supabase
-        .from('DealerUsers')
-        .update(updatePayload)
+        .from('AppUsers')
+        .update({
+          display_name: trimmedName || null,
+          email: trimmedEmail,
+          dealer_id,
+          status: finalStatus,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', user.id)
-        .eq('organization_id', organizationId);
+        .eq('organization_id', organizationId)
+        .eq('user_type', 'dealer');
 
       if (updateError) {
-        const errorMsg = updateError.message || 'Failed to update dealer user';
-        throw new Error(`${errorMsg}. Payload: ${JSON.stringify(updatePayload)}`);
+        throw new Error(updateError.message || 'Failed to update dealer user');
       }
 
       addNotification({
@@ -702,48 +707,57 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
         return;
       }
 
-      // First, create or find DealerUser record
       let portalUserId: string;
 
-      // Check if dealer user already exists
-      const { data: existingUser, error: checkError } = await supabase
-        .from('DealerUsers')
+      const { data: existingAppUser, error: checkError } = await supabase
+        .from('AppUsers')
         .select('id')
         .eq('organization_id', organizationId)
-        .eq('portal_user_email', trimmedEmail)
+        .eq('user_type', 'dealer')
+        .eq('email', trimmedEmail)
         .eq('deleted', false)
         .maybeSingle();
 
-      if (checkError && checkError.code !== 'PGRST116') {
+      if (checkError) {
         throw new Error(`Failed to check existing user: ${checkError.message}`);
       }
 
-      if (existingUser) {
-        portalUserId = existingUser.id;
+      if (existingAppUser?.id) {
+        portalUserId = existingAppUser.id;
       } else {
-        // Create new dealer user record
-        const { data: newUser, error: createError } = await supabase
-          .from('DealerUsers')
-          .insert({
-            // SOLO columnas explícitas: portal_user_email, portal_user_status, dealer_id
-            dealer_id: dealer_id,
-            portal_user_email: trimmedEmail,
-            portal_user_status: 'invited',
-            invited_by_user_id: currentUser.id,
-            deleted: false,
-          })
+        const { data: createData, error: createError } = await supabase.functions.invoke('create-temp-user', {
+          body: {
+            kind: 'portal',
+            organization_id: organizationId,
+            dealer_id,
+            email: trimmedEmail,
+            name: trimmedName || null,
+            role: 'member',
+            status: 'invited',
+          },
+        });
+        const errStr =
+          (typeof createData?.error === 'string' && createData.error) ||
+          (typeof (createError as any)?.context === 'string' && (createError as any).context) ||
+          (typeof createError?.message === 'string' && createError.message) ||
+          (createData?.ok === false ? 'Edge Function failed' : null);
+        const realMsg = typeof errStr === 'string' ? errStr : 'Failed to create dealer user';
+        if (createError || !createData?.ok) {
+          if (import.meta.env.DEV) console.error('[InvitePortalUserModal] create-temp-user', { createData, createError, realMsg });
+          throw new Error(realMsg);
+        }
+        const { data: newAppUser } = await supabase
+          .from('AppUsers')
           .select('id')
-          .single();
-
-        if (createError) {
-          throw new Error(`Failed to create dealer user: ${createError.message}`);
+          .eq('organization_id', organizationId)
+          .eq('user_type', 'dealer')
+          .eq('email', trimmedEmail)
+          .eq('deleted', false)
+          .maybeSingle();
+        if (!newAppUser?.id) {
+          throw new Error('User was created but could not be found. Please refresh and try again.');
         }
-
-        if (!newUser?.id) {
-          throw new Error('Failed to create dealer user: No ID returned');
-        }
-
-        portalUserId = newUser.id;
+        portalUserId = newAppUser.id;
       }
 
       // Call Edge Function to send invite
@@ -759,7 +773,6 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
 
       const functionUrl = `${supabaseUrl}/functions/v1/send-customer-portal-invite`;
       const redirectUrl = `${window.location.origin}/auth/callback`;
-      
       const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
@@ -769,9 +782,10 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
         },
         body: JSON.stringify({
           organization_id: organizationId,
-          portal_user_id: portalUserId,
-          email: trimmedEmail, // Edge Function espera 'email' en body
-          name: trimmedName || null,
+          dealer_id,
+          portal_user_email: trimmedEmail,
+          portal_user_name: trimmedName || null,
+          role: 'member',
           redirect_to: redirectUrl,
         }),
       });
@@ -908,9 +922,8 @@ function InvitePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: I
 }
 
 export default function DealerUsers() {
-  // ✅ Hooks at the TOP (React rules)
   const { activeOrganizationId } = useOrganizationContext();
-  const { users, isLoading: loading, error, refetch } = useDealerUsers();
+  const { users, isLoading: loading, error, refetch } = useDealerAppUsersForOrg(activeOrganizationId);
   const { user: currentUser } = useAuthStore();
   const { addNotification, setGlobalLoading } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
@@ -923,7 +936,7 @@ export default function DealerUsers() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<PortalUser | null>(null);
+  const [editingUser, setEditingUser] = useState<DealerAppUserWithDealer | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -931,71 +944,50 @@ export default function DealerUsers() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
 
-  // Handle Authorize action
   const handleAuthorize = async (userId: string) => {
     if (!activeOrganizationId) return;
-    
     try {
       setAuthorizingId(userId);
-
       const { error } = await supabase
-        .from('DealerUsers')
-        .update({ portal_user_status: 'active' })
+        .from('AppUsers')
+        .update({ status: 'active' })
         .eq('id', userId)
-        .eq('organization_id', activeOrganizationId);
-
-      if (error) {
-        throw error;
-      }
-
-      addNotification({
-        type: 'success',
-        title: 'User Authorized',
-        message: 'Dealer user has been authorized successfully.',
-      });
-
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer');
+      if (error) throw error;
+      addNotification({ type: 'success', title: 'User Authorized', message: 'Dealer user has been authorized successfully.' });
       refetch();
     } catch (err: any) {
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err.message || 'Failed to authorize user',
-      });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to authorize user' });
     } finally {
       setAuthorizingId(null);
     }
   };
 
-  // Handle Edit action
-  const handleEdit = (user: PortalUser) => {
+  const handleEdit = (user: DealerAppUserWithDealer) => {
     setEditingUser(user);
     setIsEditOpen(true);
   };
 
-  // Handle Delete action
-  const handleDelete = async (user: PortalUser) => {
+  const handleDelete = async (user: DealerAppUserWithDealer) => {
     if (!activeOrganizationId) return;
-
     const confirmed = await showConfirm({
       title: 'Delete Dealer User',
-      message: `Are you sure you want to delete "${user.user_name || ((user as any).portal_user_email ?? user.user_email)}"? This action cannot be undone.`,
+      message: `Are you sure you want to delete "${user.display_name || user.email}"? This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
       cancelText: 'Cancel',
     });
-
     if (!confirmed) return;
-
     setDeletingId(user.id);
     setLoading(true);
-
     try {
       const { error } = await supabase
-        .from('DealerUsers')
+        .from('AppUsers')
         .update({ deleted: true, updated_at: new Date().toISOString() })
         .eq('id', user.id)
-        .eq('organization_id', activeOrganizationId);
-
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer');
       if (error) throw error;
 
       addNotification({
@@ -1017,8 +1009,7 @@ export default function DealerUsers() {
     }
   };
 
-  // Handle Archive action
-  const handleArchive = async (user: PortalUser) => {
+  const handleArchive = async (user: DealerAppUserWithDealer) => {
     if (!activeOrganizationId) return;
 
     const confirmed = await showConfirm({
@@ -1036,11 +1027,11 @@ export default function DealerUsers() {
 
     try {
       const { error } = await supabase
-        .from('DealerUsers')
-        .update({ portal_user_status: 'disabled', updated_at: new Date().toISOString() })
+        .from('AppUsers')
+        .update({ status: 'disabled', updated_at: new Date().toISOString() })
         .eq('id', user.id)
-        .eq('organization_id', activeOrganizationId);
-
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer');
       if (error) throw error;
 
       addNotification({
@@ -1077,25 +1068,17 @@ export default function DealerUsers() {
     }
   };
 
-  // Handle Resend Invite action
-  const handleResendInvite = async (user: PortalUser) => {
-    if (!activeOrganizationId || !((user as any).portal_user_email ?? user.user_email) || !currentUser) return;
-    
+  const handleResendInvite = async (user: DealerAppUserWithDealer) => {
+    if (!activeOrganizationId || !user.email || !user.dealer_id || !currentUser) return;
     setInvitingId(user.id);
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('VITE_SUPABASE_URL is not configured');
-      }
-
+      if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not configured');
       const { data: session } = await supabase.auth.getSession();
-      if (!session?.session) {
-        throw new Error('You must be logged in to send invites');
-      }
-
+      if (!session?.session) throw new Error('You must be logged in to send invites');
       const functionUrl = `${supabaseUrl}/functions/v1/send-customer-portal-invite`;
       const redirectUrl = `${window.location.origin}/auth/callback`;
-      
+      const portalRole = roleCodeToPortalRole(user.role_code);
       const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
@@ -1105,9 +1088,10 @@ export default function DealerUsers() {
         },
         body: JSON.stringify({
           organization_id: activeOrganizationId,
-          portal_user_id: user.id,
-          email: (user as any).portal_user_email ?? user.user_email ?? '',
-          name: user.user_name || null,
+          dealer_id: user.dealer_id,
+          portal_user_email: user.email,
+          portal_user_name: user.display_name || null,
+          role: portalRole,
           redirect_to: redirectUrl,
         }),
       });
@@ -1235,36 +1219,20 @@ export default function DealerUsers() {
                   </td>
                 </tr>
               ) : (
-                users.map((user: DealerUser) => (
+                users.map((user: DealerAppUserWithDealer) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                    {/* User Name (ALWAYS from user) */}
                     <td className="py-4 px-6 text-gray-900 text-sm">
-                      {(user as { user_name?: string }).user_name ?? user.portal_user_name ?? '—'}
+                      {user.display_name ?? '—'}
                     </td>
-                    
-                    {/* User Email (ALWAYS from user) */}
                     <td className="py-4 px-6 text-gray-700 text-sm">
-                      {user.portal_user_email ?? (user as { user_email?: string }).user_email ?? '—'}
+                      {user.email ?? '—'}
                     </td>
+                    <td className="py-4 px-6 text-gray-600 text-sm">—</td>
+                    <td className="py-4 px-6 text-gray-600 text-sm">—</td>
                     
-                    {/* Contact Name (OPTIONAL - nullable) */}
-                    <td className="py-4 px-6 text-gray-600 text-sm">
-                      {(user as { contact_name?: string }).contact_name ?? '—'}
-                    </td>
-                    
-                    {/* Contact Email (OPTIONAL - nullable) */}
-                    <td className="py-4 px-6 text-gray-600 text-sm">
-                      {user.contact_email ?? '—'}
-                    </td>
-                    
-                    {/* Contact Phone (OPTIONAL - nullable) */}
-                    <td className="py-4 px-6 text-gray-600 text-sm">
-                      {user.contact_phone ?? '—'}
-                    </td>
-                    
-                    {/* Status */}
+                    <td className="py-4 px-6 text-gray-600 text-sm">—</td>
                     <td className="py-4 px-6">
-                      <StatusBadge status={(user as any).portal_user_status ?? user.status ?? 'unknown'} />
+                      <StatusBadge status={user.status ?? 'unknown'} />
                     </td>
                     
                     {/* Created */}
@@ -1277,8 +1245,7 @@ export default function DealerUsers() {
                     {/* Actions */}
                     <td className="py-4 px-6">
                       <div className="flex items-center justify-end gap-2">
-                        {/* Authorize button - show if status is 'invited' */}
-                        {((user as any).portal_user_status ?? user.status ?? '') === 'invited' && (
+                        {user.status === 'invited' && (
                           <button
                             onClick={() => handleAuthorize(user.id)}
                             disabled={authorizingId === user.id}
@@ -1289,11 +1256,10 @@ export default function DealerUsers() {
                           </button>
                         )}
                         
-                        {/* Resend Invite button - show if status is 'invited' */}
-                        {((user as any).portal_user_status ?? user.status ?? '') === 'invited' && ((user as any).portal_user_email ?? user.user_email) && (
+                        {user.status === 'invited' && user.email && (
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => handleResendInvite(user as unknown as PortalUser)}
+                              onClick={() => handleResendInvite(user)}
                               disabled={invitingId === user.id}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
                               title="Resend invitation email"
@@ -1329,18 +1295,16 @@ export default function DealerUsers() {
                           </div>
                         )}
 
-                        {/* Edit button */}
                         <button
-                          onClick={() => handleEdit(user as unknown as PortalUser)}
+                          onClick={() => handleEdit(user)}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                           title="Edit user"
                         >
                           <Edit className="w-4 h-4" />
                         </button>
 
-                        {/* Archive button */}
                         <button
-                          onClick={() => handleArchive(user as unknown as PortalUser)}
+                          onClick={() => handleArchive(user)}
                           disabled={archivingId === user.id || user.status === 'disabled'}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
                           title="Archive user"
@@ -1348,9 +1312,8 @@ export default function DealerUsers() {
                           <Archive className="w-4 h-4" />
                         </button>
 
-                        {/* Delete button */}
                         <button
-                          onClick={() => handleDelete(user as unknown as PortalUser)}
+                          onClick={() => handleDelete(user)}
                           disabled={deletingId === user.id}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50"
                           title="Delete user"

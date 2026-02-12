@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useAccessContext } from '../../hooks/useAccessContext';
-import { Building2, ChevronDown, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Building2, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { router } from '../../lib/router';
 
 export function OrganizationSwitcher() {
@@ -177,10 +177,6 @@ export function OrganizationSwitcher() {
           }
           return getRoleBadge(displayRole);
         })()}
-        <ChevronDown
-          className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-          style={{ color: 'var(--gray-950)' }}
-        />
       </button>
 
       {/* Dropdown Menu */}
@@ -191,7 +187,9 @@ export function OrganizationSwitcher() {
           aria-label="Organization list"
         >
           <div className="px-3 py-2 border-b border-gray-100">
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">Organizations</div>
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+              {userType === 'portal' ? 'Dealer' : 'Organizations'}
+            </div>
           </div>
 
           <div className="max-h-64 overflow-y-auto">

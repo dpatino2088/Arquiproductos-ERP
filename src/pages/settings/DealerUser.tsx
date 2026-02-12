@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useDealerUsers, type DealerUser } from '../../hooks/useDealerUsers';
+import {
+  useDealerAppUsersForOrg,
+  type DealerAppUserWithDealer,
+  roleCodeToPortalRole,
+  portalRoleToRoleCode,
+} from '../../hooks/useAppUsersByDealer';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -63,7 +68,7 @@ interface EditPortalUserModalProps {
   onClose: () => void;
   onSuccess: () => void;
   organizationId: string;
-  user: DealerUser | null;
+  user: DealerAppUserWithDealer | null;
 }
 
 
@@ -181,16 +186,15 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
         },
       });
 
-      console.log('[CreatePortalUserModal] create-temp-user response:', { data, error: createError });
-
-      if (createError) {
-        console.error('[CreatePortalUserModal] createError:', createError);
-        throw new Error(createError.message || 'Failed to create user');
-      }
-
-      if (!data?.ok) {
-        console.error('[CreatePortalUserModal] Response not ok:', data);
-        throw new Error(data?.error || 'Edge Function failed');
+      const errStr =
+        (typeof data?.error === 'string' && data.error) ||
+        (typeof (createError as any)?.context === 'string' && (createError as any).context) ||
+        (typeof createError?.message === 'string' && createError.message) ||
+        (data?.ok === false ? 'Edge Function failed' : null);
+      const realMessage = typeof errStr === 'string' ? errStr : 'Failed to create user';
+      if (createError || !data?.ok) {
+        if (import.meta.env.DEV) console.error('[CreatePortalUserModal] create-temp-user', { data, createError, realMessage });
+        throw new Error(realMessage);
       }
 
       // ✅ Success message - mostrar password temporal si está disponible
@@ -421,39 +425,16 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     }
   }, [organizationId]);
 
-  // Load data when modal opens or user changes
   useEffect(() => {
     if (isOpen && user) {
       loadCompanies();
-      // Populate form with user data - use DealerUser fields directly
-      setUser_name(user.portal_user_name || '');
-      setUser_email(user.portal_user_email || '');
+      setUser_name(user.display_name || '');
+      setUser_email(user.email || '');
       setDealer_id(user.dealer_id || '');
-      // Load role directly from user - normalize to handle legacy values
-      const currentRole = user.portal_user_role || 'member';
-      // Normalize the role to handle any legacy values (e.g., 'manager' -> 'member_manager')
-      // But preserve the exact value if it's already valid
-      const validRoles: CompanyPortalRole[] = ['member_manager', 'member'];
-      const isRoleValid = validRoles.includes(currentRole as CompanyPortalRole);
-      const normalizedRole = isRoleValid 
-        ? (currentRole as CompanyPortalRole) 
-        : normalizeRole(currentRole);
-      setRole(normalizedRole);
-      // Dealer users only use 'active' or 'disabled' status
-      const currentStatus = user.portal_user_status?.toLowerCase().trim() || 'active';
-      // Normalize legacy 'invited'/'draft' to 'active'
-      const normalizedStatus = currentStatus === 'invited' || currentStatus === 'draft' ? 'active' : currentStatus;
-      const validStatuses = ['active', 'disabled'];
-      setStatus(validStatuses.includes(normalizedStatus) ? normalizedStatus : 'active');
+      setRole(roleCodeToPortalRole(user.role_code));
+      const st = (user.status ?? 'active').toLowerCase();
+      setStatus(st === 'disabled' ? 'disabled' : st === 'invited' ? 'active' : st);
       setSubmitError(null);
-      
-      if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Loading user data:', {
-          role: user.role || user.portal_user_role,
-          normalizedRole: normalizedRole,
-          status: user.status || user.portal_user_status,
-        });
-      }
     }
   }, [isOpen, user, loadCompanies]);
 
@@ -500,175 +481,30 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       const validStatuses = ['active', 'disabled'];
       const finalStatus = validStatuses.includes(normalizedStatus) ? normalizedStatus : 'active';
 
-      // Validar que dealer_id existe (requerido en nuevo schema)
       if (!dealer_id) {
         setSubmitError('Company is required');
         setIsSubmitting(false);
         return;
       }
 
-      // SOLO columnas explícitas: portal_user_email, portal_user_name, status, dealer_id, role
-      // IMPORTANT: Use 'role' column name (matches actual DB schema), not 'portal_user_role'
-      // Ensure role is valid: member_manager or member - validate directly (don't normalize to avoid issues)
-      const validRoles: CompanyPortalRole[] = ['member_manager', 'member'];
-      const finalRole: CompanyPortalRole = validRoles.includes(role) ? role : 'member';
-      
-      // Only update organization_id if it's currently null (migration case)
-      // Don't update it if it already has a value
-      const updatePayload: any = {
-        dealer_id: dealer_id,
-        portal_user_email: trimmedEmail,
-        portal_user_name: trimmedName || null,
-        role: finalRole, // Use 'role' column name (not 'portal_user_role')
-        status: finalStatus, // Use 'status' column name (not 'portal_user_status')
-        updated_at: new Date().toISOString(),
-      };
-      
-      // Only include organization_id in UPDATE if it's null in the DB (for migration)
-      // Otherwise, let the DB constraint handle it via dealer_id relationship
-      if (!user.organization_id && organizationId) {
-        updatePayload.organization_id = organizationId;
-      }
-      
-      if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Saving role:', {
-          roleFromState: role,
-          finalRole: finalRole,
-          updatePayload: updatePayload.portal_user_role,
-        });
-      }
+      const finalRoleCode = portalRoleToRoleCode((role?.trim() || 'member') as 'member' | 'member_manager');
 
-      if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Updating dealer user with payload:', updatePayload);
-      }
-
-      // Build update query - only filter by id (organization_id may be null in DB)
-      // Don't filter by organization_id as it may be NULL in existing records
-      // Note: We don't use .select() after UPDATE because RLS might prevent returning data
-      // If updateError is null, the update was successful
-      
-      if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] About to update with payload:', {
-          userId: user.id,
-          organizationId: organizationId,
-          updatePayload,
-          roleState: role,
-          finalRole: finalRole,
-        });
-      }
-      
-      // Use SELECT to get back the updated row for verification
-      // This helps us confirm the update worked and see the actual saved values
-      const { error: updateError, data: updateData } = await supabase
-        .from('DealerUsers')
-        .update(updatePayload)
+      const { error: updateError } = await supabase
+        .from('AppUsers')
+        .update({
+          display_name: trimmedName || null,
+          email: trimmedEmail,
+          dealer_id,
+          role_code: finalRoleCode,
+          status: finalStatus,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', user.id)
-        .select('id, role, status, organization_id')
-        .maybeSingle();
+        .eq('organization_id', organizationId)
+        .eq('user_type', 'dealer');
 
       if (updateError) {
-        const errorMsg = updateError.message || 'Failed to update dealer user';
-        if (import.meta.env.DEV) {
-          console.error('[EditPortalUserModal] Update error:', updateError);
-          console.error('[EditPortalUserModal] Error details:', {
-            code: updateError.code,
-            details: updateError.details,
-            hint: updateError.hint,
-            message: updateError.message,
-          });
-          console.error('[EditPortalUserModal] Update query details:', {
-            userId: user.id,
-            organizationId: organizationId,
-            updatePayload,
-          });
-        }
-        throw new Error(`${errorMsg}. Payload: ${JSON.stringify(updatePayload)}`);
-      }
-
-      if (import.meta.env.DEV) {
-        console.log('[EditPortalUserModal] Update completed without errors:', {
-          roleFromState: role,
-          finalRole: finalRole,
-          userId: user.id,
-          updatePayload: {
-            role: updatePayload.role,
-            status: updatePayload.status,
-          },
-          returnedData: updateData,
-        });
-      }
-      
-      // If we got data back from the UPDATE, verify it matches what we sent
-      if (updateData) {
-        // Check role from returned data (may be 'role' or 'portal_user_role' depending on DB schema)
-        const returnedRole = updateData.role || updateData.portal_user_role;
-        if (returnedRole !== finalRole) {
-          console.warn('[EditPortalUserModal] ⚠️ WARNING: Role mismatch in returned data!', {
-            expected: finalRole,
-            returned: returnedRole,
-            userId: user.id,
-          });
-        } else {
-          if (import.meta.env.DEV) {
-            console.log('[EditPortalUserModal] ✅ Role matches in returned data:', returnedRole);
-          }
-        }
-      } else {
-        if (import.meta.env.DEV) {
-          console.warn('[EditPortalUserModal] ⚠️ No data returned from UPDATE (RLS might be blocking SELECT)');
-        }
-      }
-      
-      // Verify the update by fetching the record (this helps debug if RLS is blocking)
-      // We do this in a try-catch to avoid breaking the flow if RLS prevents read
-      try {
-        const { data: verifyData, error: verifyError } = await supabase
-          .from('DealerUsers')
-          .select('id, role, status')
-          .eq('id', user.id)
-          .maybeSingle();
-        
-        if (verifyError) {
-          if (import.meta.env.DEV) {
-            console.warn('[EditPortalUserModal] Could not verify update (RLS might prevent read):', {
-              error: verifyError,
-              code: verifyError.code,
-              message: verifyError.message,
-              details: verifyError.details,
-              hint: verifyError.hint,
-            });
-          }
-        } else if (verifyData) {
-          // Check role from returned data (may be 'role' or 'portal_user_role' depending on DB schema)
-          const verifiedRole = verifyData.role || verifyData.portal_user_role;
-          const verifiedStatus = verifyData.status || verifyData.portal_user_status;
-          if (import.meta.env.DEV) {
-            console.log('[EditPortalUserModal] Update verified - current DB values:', {
-              role: verifiedRole,
-              status: verifiedStatus,
-              expectedRole: finalRole,
-              rolesMatch: verifiedRole === finalRole,
-            });
-          }
-          
-          // If the role doesn't match what we tried to save, there might be a constraint issue
-          if (verifiedRole !== finalRole) {
-            console.warn('[EditPortalUserModal] WARNING: Role mismatch after update!', {
-              expected: finalRole,
-              actual: verifiedRole,
-              userId: user.id,
-            });
-          }
-        } else {
-          if (import.meta.env.DEV) {
-            console.warn('[EditPortalUserModal] Could not verify update - record not found or RLS blocked');
-          }
-        }
-      } catch (verifyErr) {
-        // Silently continue if verification fails - RLS might be blocking
-        if (import.meta.env.DEV) {
-          console.warn('[EditPortalUserModal] Verification failed:', verifyErr);
-        }
+        throw new Error(updateError.message || 'Failed to update dealer user');
       }
 
       addNotification({
@@ -848,10 +684,9 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
 }
 
 export default function DealerUser() {
-  // ✅ Hooks at the TOP (React rules)
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
-  const { users, isLoading: loading, error, refetch } = useDealerUsers();
+  const { users, isLoading: loading, error, refetch } = useDealerAppUsersForOrg(activeOrganizationId);
   const { user: currentUser } = useAuthStore();
   const { addNotification, setGlobalLoading } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
@@ -860,23 +695,20 @@ export default function DealerUser() {
     setGlobalLoading(loading);
     return () => setGlobalLoading(false);
   }, [loading, setGlobalLoading]);
-  
-  // Search and view state
+
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  
-  // Register tabs for Dealer Profile module (similar to Directory)
   useEffect(() => {
     registerSubmodules('Settings', [
       { id: 'dealer-list', label: 'Dealer List', href: '/settings/dealer-profile' },
       { id: 'dealer-user', label: 'Dealer User', href: '/settings/dealer-profile/user' },
     ]);
   }, [registerSubmodules]);
-  
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<DealerUser | null>(null);
+  const [editingUser, setEditingUser] = useState<DealerAppUserWithDealer | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -884,154 +716,95 @@ export default function DealerUser() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
 
-  // Filter users by search term
   const filteredUsers = useMemo(() => {
     if (!searchTerm) return users;
     const search = searchTerm.toLowerCase();
-    return users.filter(user => 
-      (user.portal_user_name?.toLowerCase() || '').includes(search) ||
-      (user.portal_user_email?.toLowerCase() || '').includes(search) ||
+    return users.filter(user =>
+      (user.display_name?.toLowerCase() || '').includes(search) ||
+      (user.email?.toLowerCase() || '').includes(search) ||
       (user.dealer_name?.toLowerCase() || '').includes(search)
     );
   }, [users, searchTerm]);
 
-  // Handle Authorize action
   const handleAuthorize = async (userId: string) => {
     if (!activeOrganizationId) return;
-    
     try {
       setAuthorizingId(userId);
-
       const { error } = await supabase
-        .from('DealerUsers')
-        .update({ status: 'active' }) // Use 'status' column name (not 'portal_user_status')
+        .from('AppUsers')
+        .update({ status: 'active' })
         .eq('id', userId)
-        .eq('organization_id', activeOrganizationId);
-
-      if (error) {
-        throw error;
-      }
-
-      addNotification({
-        type: 'success',
-        title: 'User Authorized',
-        message: 'Dealer user has been authorized successfully.',
-      });
-
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer');
+      if (error) throw error;
+      addNotification({ type: 'success', title: 'User Authorized', message: 'Dealer user has been authorized successfully.' });
       refetch();
     } catch (err: any) {
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err.message || 'Failed to authorize user',
-      });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to authorize user' });
     } finally {
       setAuthorizingId(null);
     }
   };
 
-  // Handle Edit action
-  const handleEdit = (user: DealerUser) => {
+  const handleEdit = (user: DealerAppUserWithDealer) => {
     setEditingUser(user);
     setIsEditOpen(true);
   };
 
-  // Handle Archive action
-  const handleArchive = async (user: DealerUser) => {
+  const handleArchive = async (user: DealerAppUserWithDealer) => {
     if (!activeOrganizationId) return;
-
     const confirmed = await showConfirm({
       title: 'Archive Dealer User',
-      message: `Are you sure you want to archive "${user.portal_user_name || user.portal_user_email || 'this user'}"? The user will be disabled and can be restored later.`,
+      message: `Are you sure you want to archive "${user.display_name || user.email || 'this user'}"? The user will be disabled and can be restored later.`,
       variant: 'warning',
       confirmText: 'Archive',
       cancelText: 'Cancel',
     });
-
     if (!confirmed) return;
-
     setArchivingId(user.id);
     setLoading(true);
-
     try {
       const { error } = await supabase
-        .from('DealerUsers')
+        .from('AppUsers')
         .update({ status: 'disabled', updated_at: new Date().toISOString() })
         .eq('id', user.id)
-        .eq('organization_id', activeOrganizationId);
-
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer');
       if (error) throw error;
-
-      addNotification({
-        type: 'success',
-        title: 'User Archived',
-        message: 'Dealer user has been archived successfully.',
-      });
-
+      addNotification({ type: 'success', title: 'User Archived', message: 'Dealer user has been archived successfully.' });
       refetch();
     } catch (err: any) {
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err.message || 'Failed to archive user',
-      });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to archive user' });
     } finally {
       setArchivingId(null);
       setLoading(false);
     }
   };
 
-  // Handle Delete action
-  const handleDelete = async (user: DealerUser) => {
+  const handleDelete = async (user: DealerAppUserWithDealer) => {
     if (!activeOrganizationId) return;
-
     const confirmed = await showConfirm({
       title: 'Delete Dealer User',
-      message: `Are you sure you want to permanently delete "${user.portal_user_name || user.portal_user_email || 'this user'}"? This action cannot be undone.`,
+      message: `Are you sure you want to permanently delete "${user.display_name || user.email || 'this user'}"? This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
       cancelText: 'Cancel',
     });
-
     if (!confirmed) return;
-
     setDeletingId(user.id);
     setLoading(true);
-
     try {
-      // Use RPC to bypass RLS (same approach as OrganizationUser)
-      const { data, error } = await supabase.rpc('delete_dealer_user', {
-        p_portal_user_id: user.id,
-        p_organization_id: activeOrganizationId,
-      });
-
-      if (error) {
-        console.error('[DealerUsers] Delete RPC error:', error);
-        throw error;
-      }
-
-      // Check RPC response
-      if (!data || (typeof data === 'object' && 'success' in data && !data.success)) {
-        const errorMsg = (data && typeof data === 'object' && 'error' in data) 
-          ? data.error 
-          : 'Could not delete dealer user. User not found or already deleted.';
-        throw new Error(errorMsg);
-      }
-
-      addNotification({
-        type: 'success',
-        title: 'User Deleted',
-        message: 'Dealer user has been deleted successfully.',
-      });
-
+      const { error } = await supabase
+        .from('AppUsers')
+        .update({ deleted: true, updated_at: new Date().toISOString() })
+        .eq('id', user.id)
+        .eq('organization_id', activeOrganizationId)
+        .eq('user_type', 'dealer');
+      if (error) throw error;
+      addNotification({ type: 'success', title: 'User Deleted', message: 'Dealer user has been deleted successfully.' });
       refetch();
     } catch (err: any) {
-      console.error('[DealerUsers] Error in handleDelete:', err);
-      addNotification({
-        type: 'error',
-        title: 'Delete Error',
-        message: err.message || 'Failed to delete user',
-      });
+      addNotification({ type: 'error', title: 'Delete Error', message: err.message || 'Failed to delete user' });
     } finally {
       setDeletingId(null);
       setLoading(false);
@@ -1053,25 +826,17 @@ export default function DealerUser() {
     }
   };
 
-  // Handle Resend Invite action
-  const handleResendInvite = async (user: DealerUser) => {
-    if (!activeOrganizationId || !user.portal_user_email || !currentUser) return;
-    
+  const handleResendInvite = async (user: DealerAppUserWithDealer) => {
+    if (!activeOrganizationId || !user.email || !user.dealer_id || !currentUser) return;
     setInvitingId(user.id);
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('VITE_SUPABASE_URL is not configured');
-      }
-
+      if (!supabaseUrl) throw new Error('VITE_SUPABASE_URL is not configured');
       const { data: session } = await supabase.auth.getSession();
-      if (!session?.session) {
-        throw new Error('You must be logged in to send invites');
-      }
-
+      if (!session?.session) throw new Error('You must be logged in to send invites');
       const functionUrl = `${supabaseUrl}/functions/v1/send-customer-portal-invite`;
       const redirectUrl = `${window.location.origin}/auth/callback`;
-      
+      const portalRole = roleCodeToPortalRole(user.role_code);
       const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
@@ -1081,9 +846,10 @@ export default function DealerUser() {
         },
         body: JSON.stringify({
           organization_id: activeOrganizationId,
-          portal_user_id: user.id,
-          email: user.portal_user_email || '',
-          name: user.portal_user_name || null,
+          dealer_id: user.dealer_id,
+          portal_user_email: user.email,
+          portal_user_name: user.display_name || null,
+          role: portalRole,
           redirect_to: redirectUrl,
         }),
       });
@@ -1264,7 +1030,7 @@ export default function DealerUser() {
                 </td>
               </tr>
             ) : (
-              filteredUsers.map((user: DealerUser) => (
+              filteredUsers.map((user: DealerAppUserWithDealer) => (
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer">
                     {/* Name */}
                     <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
@@ -1273,7 +1039,7 @@ export default function DealerUser() {
                           <User className="w-4 h-4 text-gray-600" />
                         </div>
                         <span className="font-medium text-gray-900 truncate">
-                          {user.portal_user_name || 'No name'}
+                          {user.display_name || 'No name'}
                         </span>
                       </div>
                     </td>
@@ -1285,13 +1051,13 @@ export default function DealerUser() {
                     
                     {/* Email */}
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
-                      {user.portal_user_email || '-'}
+                      {user.email || '-'}
                     </td>
                     
                     {/* Role */}
                     <td className="py-4 px-6 whitespace-nowrap">
                       {(() => {
-                        const role = normalizeRole(user.portal_user_role || 'member');
+                        const role = roleCodeToPortalRole(user.role_code);
                         const roleColors: Record<string, { bg: string; text: string; border: string }> = {
                           member_manager: {
                             bg: 'bg-purple-50',
@@ -1315,7 +1081,7 @@ export default function DealerUser() {
                     
                     {/* Status */}
                     <td className="py-4 px-6 whitespace-nowrap">
-                      <StatusBadge status={user.portal_user_status || 'disabled'} />
+                      <StatusBadge status={user.status || 'disabled'} />
                     </td>
                     
                     {/* Date Added */}
@@ -1329,7 +1095,7 @@ export default function DealerUser() {
                     <td className="py-4 px-6">
                       <div className="flex items-center justify-end gap-2">
                         {/* Authorize button - show if status is 'invited' */}
-                        {user.portal_user_status === 'invited' && (
+                        {user.status === 'invited' && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1344,7 +1110,7 @@ export default function DealerUser() {
                         )}
                         
                         {/* Resend Invite button - show if status is 'invited' */}
-                        {user.portal_user_status === 'invited' && user.portal_user_email && (
+                        {user.status === 'invited' && user.email && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleResendInvite(user)}

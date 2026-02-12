@@ -13,6 +13,8 @@ import { UnifiedProductConfig, normalizeConfig } from './product-config/config-c
 import { useUIStore } from '../../stores/ui-store';
 import { createConfiguredProductPreview } from '../../lib/bom/createConfiguredProductPreview';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useDealerConfiguratorPolicy } from '../../hooks/useDealerConfiguratorPolicy';
+import { ConfiguratorPolicyProvider } from '../../context/ConfiguratorPolicyContext';
 import { RoleSelection, isUnset, isNone, isSelected, toRoleSelection, getSelectionSku } from '../../lib/bom/selection';
 import { 
   getProductTypeId, 
@@ -42,6 +44,7 @@ interface ProductConfiguratorProps {
 export default function ProductConfigurator({ quoteId, onComplete, onClose, initialConfig }: ProductConfiguratorProps) {
   const draftKey = `productConfiguratorDraft:${quoteId}`;
   const { activeOrganizationId } = useOrganizationContext();
+  const { policy, loading: policyLoading } = useDealerConfiguratorPolicy();
   
   // ✅ SOLUCIÓN DEFINITIVA: Ref para evitar loops en auto-commit
   const autoCommittedRef = useRef<string | null>(null);
@@ -105,10 +108,18 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   const [config, setConfig] = useState<Partial<ProductConfig>>(initialState.config);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const configRef = useRef<Partial<ProductConfig>>(initialState.config);
+  const productTypeRef = useRef<ProductType | null>(initialState.productType);
+  const currentStepIndexRef = useRef(initialState.currentStepIndex);
 
   useEffect(() => {
     configRef.current = config;
   }, [config]);
+  useEffect(() => {
+    productTypeRef.current = productType;
+  }, [productType]);
+  useEffect(() => {
+    currentStepIndexRef.current = currentStepIndex;
+  }, [currentStepIndex]);
 
   // ✅ Garantizar que el config del snapshot (Edit/Duplicate) se aplica al estado para que las cards salgan seleccionadas
   const SNAPSHOT_KEYS = [
@@ -215,27 +226,44 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     }
   }, [draftKey, productType, currentStepIndex, config, isEditingMode]);
 
-  // ✅ Restore state when tab becomes visible (prevents loss on tab switch)
+  // ✅ Persist on tab hide + restore when tab visible (prevents loss on tab switch)
   useEffect(() => {
-    if (isEditingMode) return; // Don't restore for edit mode
+    if (isEditingMode) return; // Don't persist/restore for edit mode
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'hidden') {
+        // Flush current state to sessionStorage when user leaves the tab (refs have latest)
+        try {
+          const payload = {
+            productType: productTypeRef.current,
+            currentStepIndex: currentStepIndexRef.current,
+            config: configRef.current,
+            timestamp: Date.now(),
+          };
+          window.sessionStorage.setItem(draftKey, JSON.stringify(payload));
+          if (import.meta.env.DEV) {
+            console.log('[ProductConfigurator] SAVED to sessionStorage on tab hide', {
+              draftKey,
+              stepIndex: payload.currentStepIndex,
+            });
+          }
+        } catch (err) {
+          console.warn('[ProductConfigurator] Failed to save draft on tab hide', err);
+        }
+      } else if (document.visibilityState === 'visible') {
+        // Restore when user comes back (in case component remounted or state was lost)
         try {
           const raw = window.sessionStorage.getItem(draftKey);
           if (raw) {
             const parsed = JSON.parse(raw);
-            // Only restore if timestamp is recent (within last hour) to avoid stale data
             const age = Date.now() - (parsed.timestamp || 0);
-            if (age < 3600000) { // 1 hour
-              setProductType(parsed.productType || null);
-              setCurrentStepIndex(parsed.currentStepIndex || 0);
-              setConfig(parsed.config || { position: '' });
-              
+            if (age < 3600000) {
+              setProductType(parsed.productType ?? null);
+              setCurrentStepIndex(parsed.currentStepIndex ?? 0);
+              setConfig(parsed.config ?? { position: '' });
               if (import.meta.env.DEV) {
-                console.log('[ProductConfigurator] RESTORED from sessionStorage on visibility', {
+                console.log('[ProductConfigurator] RESTORED from sessionStorage on tab visible', {
                   draftKey,
-                  productType: parsed.productType,
                   stepIndex: parsed.currentStepIndex,
                 });
               }
@@ -394,33 +422,44 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   // Por eso, para decidir pasos, usamos defaults (bomTemplateId = null).
   const questions = useBOMTemplateQuestions(null);
 
+  const allowHardware = !policy || policy.allow_hardware;
+  const allowOperatingSystem = !policy || policy.allow_operating_system;
+  const accessoriesOnlyMode = !!policy && policy.allow_accessories_only === true;
+
   const steps = useMemo(() => {
     if (!productType) return [];
 
-    // Mantener el orden estable que ya funciona en el configurador
     const dynamicSteps: Array<{ id: string; label: string; component: any }> = [];
+
+    // Accessories as product type: only ACCESSORIES step then REVIEW (no measurements/variants/hardware)
+    if (productType === 'accessories') {
+      dynamicSteps.push({ id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent });
+      dynamicSteps.push({ id: 'review', label: 'REVIEW', component: ReviewStepComponent });
+      return dynamicSteps;
+    }
+
     dynamicSteps.push({ id: 'measurements', label: 'MEASUREMENTS', component: MeasurementsStepComponent });
     dynamicSteps.push({ id: 'variants', label: 'VARIANTS', component: VariantsStepComponent });
 
-    if (questions.requiredSteps.hardware) {
+    if (questions.requiredSteps.hardware && allowHardware) {
       dynamicSteps.push({ id: 'hardware', label: 'HARDWARE', component: HardwareStepComponent });
     }
-    if (questions.requiredSteps.operatingSystem) {
+    if (questions.requiredSteps.operatingSystem && allowOperatingSystem) {
       dynamicSteps.push({ id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent });
     }
 
-    dynamicSteps.push({ id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent });
-    dynamicSteps.push({ id: 'review', label: 'QUOTE', component: ReviewStepComponent });
+    dynamicSteps.push({ id: 'review', label: 'REVIEW', component: ReviewStepComponent });
 
     if (import.meta.env.DEV) {
-      console.log('[ProductConfigurator] Steps built (no template filtering)', {
+      console.log('[ProductConfigurator] Steps built (policy filtering)', {
         stepsCount: dynamicSteps.length,
         stepIds: dynamicSteps.map((s) => s.id),
+        policy: policy ? { allow_hardware: policy.allow_hardware, allow_operating_system: policy.allow_operating_system, allow_accessories_only: policy.allow_accessories_only } : null,
       });
     }
 
     return dynamicSteps;
-  }, [productType, questions.requiredSteps.hardware, questions.requiredSteps.operatingSystem]);
+  }, [productType, questions.requiredSteps.hardware, questions.requiredSteps.operatingSystem, policy, allowHardware, allowOperatingSystem, accessoriesOnlyMode]);
   
   // currentStepIndex 0 = product selection, 1+ = product steps (steps[0], steps[1], etc.)
   const currentStep = productType && currentStepIndex > 0 ? steps[currentStepIndex - 1] : null;
@@ -784,13 +823,20 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
                          configAny.productType === 'ROLLER';
     
     // ✅ NO inicializar hardware_color automáticamente - usuario debe seleccionar
-    
-    // Core validations
+
+    // Accessories-only: no validations for width, height, fabric, hardware, operating system
+    const isAccessoriesOnly = productType === 'accessories' || configAny.productType === 'accessories';
+    if (isAccessoriesOnly) {
+      // Only ensure we have productType; no product_type_id required (no DB ProductType for accessories-only)
+      if (!productType && !configAny.productType) {
+        errors.push('Product Type is required');
+      }
+    } else {
+    // Core validations (full products)
     if (!normalizedConfig.product_type_id) {
       errors.push('Product Type is required');
     }
     // ✅ BOM Template is NOT required in validation - it's derived automatically
-    // The template will be resolved when saving QuoteLine or generating BOM
     // ✅ Derive width/height from multiple sources (config.width_m, config.width_mm, panels sum, measurements)
     const panelsForValidation = Array.isArray(configAny.panels) ? configAny.panels : (configAny.measurements?.panels ?? []);
     const panelsSumMm = panelsForValidation.reduce((s: number, p: any) => s + (Number(p?.width_mm) || 0), 0);
@@ -808,8 +854,6 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         normalizedHeight: normalizedConfig.height_m,
         configWidth_mm: configAny.width_mm,
         configHeight_mm: configAny.height_mm,
-        measurementsWidth: configAny.measurements?.width_total_mm,
-        measurementsHeight: configAny.measurements?.height_mm,
         panelsSumMm,
         effectiveWidthM,
         effectiveHeightM,
@@ -824,19 +868,15 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     }
     
     // FASE 3: Validate based on BOMTemplate questions (if template is available)
-    // ✅ If no BOM Template, skip template-specific validations
-    // The template will be resolved later when saving QuoteLine or generating BOM
       if (questions) {
-      if (questions.requiredSteps.variants && !normalizedConfig.fabric_variant_id && !normalizedConfig.variantId) {
+      const hasVariant = !!(normalizedConfig.fabric_variant_id || normalizedConfig.variantId);
+      if (questions.requiredSteps.variants && !hasVariant) {
         errors.push('Fabric variant is required');
       }
       if (questions.requiredSteps.operatingSystem) {
         if (!normalizedConfig.drive_type) {
           errors.push('Operating system type is required (Manual or Motor)');
         } else {
-          // ✅ CRÍTICO: Validar que se haya seleccionado un drive/motor específico
-          // normalizedConfig.drive_type puede ser 'manual' o 'motorized'
-          // configAny.operation_type puede ser 'motor' o 'manual'
           const operationType = (configAny as any).operation_type || normalizedConfig.drive_type;
           const isMotorized = operationType === 'motor' || operationType === 'motorized';
           const isManual = operationType === 'manual';
@@ -847,62 +887,26 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
               isMotorized,
               isManual,
               motor_sku: configAny.motor_sku,
-              motorSku: configAny.motorSku,
-              motor_item_id: configAny.motor_item_id,
               drive_sku: configAny.drive_sku,
-              driveSku: configAny.driveSku,
-              drive_item_id: configAny.drive_item_id,
               tube_sku: configAny.tube_sku,
-              tubeSku: configAny.tubeSku,
-              tube_type: configAny.tube_type,
-              tube_item_id: configAny.tube_item_id,
             });
           }
           
           if (isMotorized) {
-            // Buscar motor_sku o motor_item_id
-            const hasMotor = !!(
-              configAny.motor_sku || 
-              configAny.motorSku || 
-              configAny.motor_item_id ||
-              configAny.motorItemId
-            );
-            if (!hasMotor) {
-              errors.push('Motor selection is required');
-            }
+            const hasMotor = !!(configAny.motor_sku || configAny.motorSku || configAny.motor_item_id || configAny.motorItemId);
+            if (!hasMotor) errors.push('Motor selection is required');
           } else if (isManual) {
-            // Buscar drive_sku o drive_item_id
-            const hasDrive = !!(
-              configAny.drive_sku || 
-              configAny.driveSku || 
-              configAny.drive_item_id ||
-              configAny.driveItemId ||
-              configAny.manual_drive
-            );
-            if (!hasDrive) {
-              errors.push('Manual drive selection is required');
-            }
+            const hasDrive = !!(configAny.drive_sku || configAny.driveSku || configAny.drive_item_id || configAny.driveItemId || configAny.manual_drive);
+            if (!hasDrive) errors.push('Manual drive selection is required');
           }
-          
-          // ✅ Validar tube (obligatorio para ambos tipos)
-          const hasTube = !!(
-            configAny.tube_sku || 
-            configAny.tubeSku || 
-            configAny.tube_type || 
-            configAny.tubeType ||
-            configAny.tube_item_id ||
-            configAny.tubeItemId
-          );
-          if (!hasTube) {
-            errors.push('Tube selection is required');
-          }
+          const hasTube = !!(configAny.tube_sku || configAny.tubeSku || configAny.tube_type || configAny.tubeType || configAny.tube_item_id || configAny.tubeItemId);
+          if (!hasTube) errors.push('Tube selection is required');
         }
       }
-      // ✅ Validar hardware_color solo si el template lo requiere explícitamente
-      // NO inicializar automáticamente - usuario debe seleccionar
       if (questions.selectQuestions.hardware_color && !normalizedConfig.hardware_color && !configAny.hardwareColor && !configAny.operatingSystemColor) {
         errors.push('Hardware color is required');
       }
+    }
     }
     
     // ✅ If no BOM Template available but user has completed basic fields, allow to proceed
@@ -923,9 +927,24 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
 
     setIsSubmitting(true);
     try {
-      // ✅ NUEVA ARQUITECTURA: ConfiguredProduct es la base.
-      // El matching de bom_template_id se resuelve de forma estricta al crear el ConfiguredProduct
-      // (usando select_best_bom_template_v2_strict) y luego QuoteLine se genera desde ese snapshot.
+      const finalNormalizedConfig = normalizedConfig as any;
+      const panelsForValidation = Array.isArray((config as any).panels) ? (config as any).panels : ((config as any).measurements?.panels ?? []);
+      const panelsSumMm = panelsForValidation.reduce((s: number, p: any) => s + (Number(p?.width_mm) || 0), 0);
+
+      // ✅ Accessories-only: no ConfiguredProduct; pass minimal config and let QuoteNew create line with metadata
+      if (isAccessoriesOnly) {
+        const accessoriesPayload = {
+          ...finalNormalizedConfig,
+          productType: 'accessories' as const,
+          position: (config as any).position ?? '',
+          quantity: (config as any).quantity ?? 1,
+          accessories: Array.isArray((config as any).accessories) ? (config as any).accessories : [],
+        } as ProductConfig;
+        await onComplete(accessoriesPayload);
+        clearDraft();
+        onClose();
+        return;
+      }
 
       // Helpers
       const pickSku = (cfg: any, keys: string[]): string | null => {
@@ -935,10 +954,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         }
         return null;
       };
-      const finalNormalizedConfig = normalizedConfig as any;
 
       // ✅ NUEVO: Crear ConfiguredProduct preview antes de llamar onComplete
-      // Esto genera BOM preview y calcula totals (fabric + bom) ANTES de crear QuoteLine
       if (activeOrganizationId && finalNormalizedConfig.product_type_id) {
         try {
           // Preparar config_snapshot con todos los datos necesarios
@@ -987,7 +1004,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             tube_item_id: configAny.tube_item_id || null,
             tube_sku: pickSku(configAny, ['tube_sku', 'tubeSku', 'tube_type', 'tubeType']) || null,
             operating_type: configAny.operation_type || configAny.drive_type || null,
-            roll_catalog_item_id: finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId || null,
+            roll_catalog_item_id: (finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId) || null,
             quantity: finalNormalizedConfig.quantity || 1,
             // ✅ Drop e instalación (para QuoteLines vía commit y config_snapshot)
             fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
@@ -1178,8 +1195,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     const newProductTypeId = (updates as any).productTypeId;
     
     if (newProductType) {
-      // Validate that it's a valid ProductType
-      const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'window-film'];
+      // Validate that it's a valid ProductType (including 'accessories' for accessories-only flow)
+      const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'window-film', 'accessories'];
       if (validTypes.includes(newProductType)) {
         handleProductTypeSelect(newProductType as ProductType, newProductTypeId);
       }
@@ -1206,9 +1223,13 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     if (!productType || currentStepIndex === 0) {
       // Show product selection
       return (
-        <ProductStep 
-          config={config as any} 
+        <ProductStep
+          config={config as any}
           onUpdate={productStepOnUpdate as any}
+          onNavigateToStep={(stepId) => {
+            const idx = steps.findIndex((s) => s.id === stepId);
+            if (idx >= 0) setCurrentStepIndex(idx + 1);
+          }}
         />
       );
     }
@@ -1243,13 +1264,12 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     if (step.id === 'review') {
       stepProps.quoteId = quoteId;
     }
-    
-    return (
-      <StepComponent {...stepProps} />
-    );
+
+    return <StepComponent {...stepProps} />;
   };
 
   return (
+    <ConfiguratorPolicyProvider value={{ policy, loading: policyLoading }}>
     <div className="flex h-screen bg-gray-50">
       {/* Left Navigation Sidebar */}
       <div className="w-64 bg-white border-r border-gray-200 p-4 overflow-y-auto">
@@ -1274,40 +1294,35 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
 
           {/* Product-specific steps */}
           {steps.map((step, index) => {
-            const stepIndex = index + 1; // +1 because product selection is step 0
-            const isActive = currentStepIndex === stepIndex;
-            
-            // When editing (has initialConfig), all steps are accessible and show as completed
-            const hasInitialConfig = initialConfig && Object.keys(initialConfig).length > 0;
-            const isAccessible = productType && (hasInitialConfig || stepIndex <= currentStepIndex);
-            
-            // When editing, show all steps as completed (green) except the active one
-            const isCompleted = hasInitialConfig ? !isActive : stepIndex < currentStepIndex;
-            
-            return (
-              <button
-                key={step.id}
-                onClick={() => isAccessible && handleStepClick(stepIndex)}
-                disabled={!isAccessible}
-                className={`w-full text-left px-4 py-3 mb-1 rounded transition-colors ${
-                  isActive
-                    ? 'bg-gray-900 text-white shadow-md'
-                    : isCompleted
-                    ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                    : isAccessible
-                    ? 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                    : 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{step.label}</span>
-                  {isCompleted && !isActive && (
-                    <span className="text-green-600">✓</span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+              const stepIndex = steps.findIndex((s) => s.id === step.id) + 1; // +1 because product selection is step 0
+              const isActive = currentStepIndex === stepIndex;
+              const hasInitialConfig = initialConfig && Object.keys(initialConfig).length > 0;
+              const isAccessible = productType && (hasInitialConfig || stepIndex <= currentStepIndex);
+              const isCompleted = hasInitialConfig ? !isActive : stepIndex < currentStepIndex;
+              return (
+                <button
+                  key={step.id}
+                  onClick={() => isAccessible && handleStepClick(stepIndex)}
+                  disabled={!isAccessible}
+                  className={`w-full text-left px-4 py-3 mb-1 rounded transition-colors ${
+                    isActive
+                      ? 'bg-gray-900 text-white shadow-md'
+                      : isCompleted
+                      ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                      : isAccessible
+                      ? 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                      : 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{step.label}</span>
+                    {isCompleted && !isActive && (
+                      <span className="text-green-600">✓</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
         </div>
       </div>
 
@@ -1365,6 +1380,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         </div>
       </div>
     </div>
+    </ConfiguratorPolicyProvider>
   );
 }
 

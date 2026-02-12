@@ -2,7 +2,8 @@
 -- Migration: Add metadata column to QuoteLines
 -- ====================================================
 -- This migration adds a JSONB metadata column to QuoteLines
--- to store panel configuration and other flexible data.
+-- to store panel configuration, accessories list (product_type='accessories'), and other flexible data.
+-- REQUIRED for "Accessories" quote lines to persist the list of selected accessories.
 
 -- Step 1: Add metadata column as JSONB (nullable)
 ALTER TABLE "QuoteLines"

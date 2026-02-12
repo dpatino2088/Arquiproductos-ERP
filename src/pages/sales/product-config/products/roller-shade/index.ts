@@ -18,7 +18,7 @@ const ROLLER_SHADE_STEPS: ProductStep[] = [
   { id: 'hardware', label: 'HARDWARE', component: HardwareStepComponent },
   { id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent },
   { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
-  { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
+  { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
 ];
 
 function validateStep(stepId: string, config: ProductConfig): boolean {
@@ -29,9 +29,8 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
     case 'measurements':
       return !!(rollerConfig.width_mm && rollerConfig.height_mm);
 
-    case 'variants':
-      // VariantsStep usa collectionName/collection_name + variantId (CatalogItem id).
-      // Aceptar también collectionId legacy para compatibilidad.
+    case 'variants': {
+      // Catalog path: collection + variantId
       const hasCollection = !!(
         (rollerConfig as any).collectionName ||
         (rollerConfig as any).collection_name ||
@@ -43,6 +42,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
         (rollerConfig as any).fabric_variant_id
       );
       return hasCollection && hasVariant;
+    }
 
     case 'hardware':
       // Requiere color + bottom bar + headbox explícito + side channel explícito (no avanzar si falta alguna elección)

@@ -16,7 +16,7 @@ const DRAPERY_STEPS: ProductStep[] = [
   { id: 'variants', label: 'VARIANTS', component: VariantsStepComponent },
   { id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent },
   { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
-  { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
+  { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
 ];
 
 function validateStep(stepId: string, config: ProductConfig): boolean {

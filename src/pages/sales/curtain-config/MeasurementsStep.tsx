@@ -10,47 +10,35 @@ interface MeasurementsStepProps {
   onUpdate: (updates: Partial<CurtainConfiguration>) => void;
 }
 
-// Definir las opciones con sus imágenes
+// Base URL for static images (works with Vite base path in dev and production)
+const getImageUrl = (path: string) => {
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+  return `${base}${path.startsWith('/') ? path : '/' + path}`;
+};
+
+// Definir las opciones con sus imágenes (paths; URLs se construyen en el componente con getImageUrl)
 const FABRIC_DROP_OPTIONS = [
-  {
-    id: 'normal' as const,
-    name: 'Normal',
-    imageUrl: '/images/Normal.png',
-  },
-  {
-    id: 'inverted' as const,
-    name: 'Inverted',
-    imageUrl: '/images/Inverted.png',
-  }
+  { id: 'normal' as const, name: 'Normal', imagePath: '/images/Normal.png' },
+  { id: 'inverted' as const, name: 'Inverted', imagePath: '/images/Inverted.png' },
 ];
 
 const INSTALLATION_TYPE_OPTIONS = [
-  {
-    id: 'inside' as const,
-    name: 'Inside',
-    imageUrl: '/images/Inside.png',
-  },
-  {
-    id: 'outside' as const,
-    name: 'Outside',
-    imageUrl: '/images/Outside.png',
-  }
+  { id: 'inside' as const, name: 'Inside', imagePath: '/images/Inside.png' },
+  { id: 'outside' as const, name: 'Outside', imagePath: '/images/Outside.png' },
 ];
 
 const INSTALLATION_LOCATION_OPTIONS = [
-  {
-    id: 'ceiling' as const,
-    name: 'Ceiling',
-    imageUrl: '/images/Ceilling.png',
-  },
-  {
-    id: 'wall' as const,
-    name: 'Wall',
-    imageUrl: '/images/Wall.png',
-  }
+  { id: 'ceiling' as const, name: 'Ceiling', imagePath: '/images/Ceilling.png' },
+  { id: 'wall' as const, name: 'Wall', imagePath: '/images/Wall.png' },
 ];
 
 export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepProps) {
+  // Track which option images failed to load so we can show fallback icon
+  const [imageLoadErrors, setImageLoadErrors] = React.useState<Set<string>>(new Set());
+  const markImageError = React.useCallback((key: string) => {
+    setImageLoadErrors((prev) => new Set(prev).add(key));
+  }, []);
+
   // Check if product type is Triple Shade (no Fabric Drop for Triple Shade)
   const isTripleShade = (config as any).productType === 'triple-shade';
   const productType = (config as any).productType;
@@ -207,9 +195,22 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                   <Input
                     id="quantity"
                     type="number"
-                    min="1"
-                    value={(config as any).quantity || ''}
-                    onChange={(e) => onUpdate({ quantity: parseInt(e.target.value) || 1 } as any)}
+                    min={1}
+                    value={(config as any).quantity != null ? String((config as any).quantity) : ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        onUpdate({ quantity: undefined } as any);
+                        return;
+                      }
+                      const n = parseInt(raw, 10);
+                      if (!Number.isNaN(n)) onUpdate({ quantity: Math.max(1, n) } as any);
+                    }}
+                    onBlur={() => {
+                      if ((config as any).quantity == null || (config as any).quantity === '') {
+                        onUpdate({ quantity: 1 } as any);
+                      }
+                    }}
                     placeholder="1"
                     autoComplete="off"
                     data-lpignore="true"
@@ -337,11 +338,24 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                 <div>
                   <Label htmlFor="quantity" className="text-xs mb-1">Quantity</Label>
                   <Input
-                    id="quantity"
+                    id="quantity-single"
                     type="number"
-                    min="1"
-                    value={(config as any).quantity || ''}
-                    onChange={(e) => onUpdate({ quantity: parseInt(e.target.value) || 1 } as any)}
+                    min={1}
+                    value={(config as any).quantity != null ? String((config as any).quantity) : ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        onUpdate({ quantity: undefined } as any);
+                        return;
+                      }
+                      const n = parseInt(raw, 10);
+                      if (!Number.isNaN(n)) onUpdate({ quantity: Math.max(1, n) } as any);
+                    }}
+                    onBlur={() => {
+                      if ((config as any).quantity == null || (config as any).quantity === '') {
+                        onUpdate({ quantity: 1 } as any);
+                      }
+                    }}
                     placeholder="1"
                     autoComplete="off"
                     data-lpignore="true"
@@ -409,14 +423,12 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                   >
                     {/* Image */}
                     <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                      {option.imageUrl ? (
+                      {option.imagePath && !imageLoadErrors.has(option.id) ? (
                         <img
-                          src={option.imageUrl}
+                          src={getImageUrl(option.imagePath)}
                           alt={option.name}
                           className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
+                          onError={() => markImageError(option.id)}
                         />
                       ) : (
                         <ImageIcon className="w-16 h-16 text-gray-300" />
@@ -458,14 +470,12 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                 >
                   {/* Image */}
                   <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                    {option.imageUrl ? (
+                    {option.imagePath && !imageLoadErrors.has(option.id) ? (
                       <img
-                        src={option.imageUrl}
+                        src={getImageUrl(option.imagePath)}
                         alt={option.name}
                         className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
+                        onError={() => markImageError(option.id)}
                       />
                     ) : (
                       <ImageIcon className="w-16 h-16 text-gray-300" />
@@ -500,14 +510,12 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                 >
                   {/* Image */}
                   <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                    {option.imageUrl ? (
+                    {option.imagePath && !imageLoadErrors.has(option.id) ? (
                       <img
-                        src={option.imageUrl}
+                        src={getImageUrl(option.imagePath)}
                         alt={option.name}
                         className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
+                        onError={() => markImageError(option.id)}
                       />
                     ) : (
                       <ImageIcon className="w-16 h-16 text-gray-300" />

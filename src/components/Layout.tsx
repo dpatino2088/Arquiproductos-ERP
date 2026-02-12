@@ -1,4 +1,5 @@
-import React, { ReactNode, useState, useCallback, useMemo, useEffect, memo } from 'react';
+import React, { ReactNode, useState, useCallback, useMemo, useEffect, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useCompany } from '../hooks/useCompany';
 import { useCompanyStore } from '../stores/company-store';
@@ -27,7 +28,6 @@ import {
   getDashboardButtonProps,
   getSettingsButtonState,
   createNavItemContent,
-  createCollapseExpandContent
 } from '../utils/viewModeStyles';
 import { 
   Users, 
@@ -38,8 +38,6 @@ import {
   Bell, 
   Search, 
   HelpCircle,
-  ChevronLeft, 
-  ChevronRight, 
   Building, 
   Building2,
   Printer,
@@ -58,6 +56,41 @@ import {
 interface LayoutProps {
   children: ReactNode;
 }
+
+/** Tabs por módulo para el menú flotante del sidebar (sidebar siempre colapsado) */
+const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
+  '/dashboard': [],
+  '/directory': [
+    { label: 'Contacts', href: '/directory/contacts' },
+    { label: 'Customers', href: '/directory/customers' },
+  ],
+  '/sales/quotes': [
+    { label: 'Quotes', href: '/sales/quotes' },
+    { label: 'Proposals', href: '/sales/proposals' },
+  ],
+  '/sale-orders': [
+    { label: 'Sales Orders', href: '/sale-orders' },
+  ],
+  '/catalog': [
+    { label: 'Items', href: '/catalog/items' },
+    { label: 'BOM', href: '/catalog/bom' },
+  ],
+  '/inventory': [
+    { label: 'Warehouse', href: '/inventory/warehouse' },
+    { label: 'Purchase Orders', href: '/inventory/purchase-orders' },
+    { label: 'Receipts', href: '/inventory/receipts' },
+    { label: 'Transactions', href: '/inventory/transactions' },
+    { label: 'Adjustments', href: '/inventory/adjustments' },
+  ],
+  '/manufacturing': [
+    { label: 'Order List', href: '/manufacturing/order-list' },
+    { label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
+    { label: 'Material', href: '/manufacturing/material' },
+  ],
+  '/financials': [
+    { label: 'Financials', href: '/financials' },
+  ],
+};
 
 /** Línea de carga en la parte superior del header. Usa globalLoading del store; retraso mínimo al ocultar para evitar parpadeo. */
 const MIN_HIDE_DELAY_MS = 320;
@@ -215,19 +248,17 @@ function Layout({ children }: LayoutProps) {
     });
   }
   
-  // Use UI store for sidebar and view mode state
+  // Use UI store for view mode state (sidebar siempre colapsado; sin toggle)
   const { 
-    sidebarCollapsed: isCollapsed, 
     viewMode: storeViewMode, 
-    toggleSidebarCollapsed, 
     setViewMode 
   } = useUIStore();
   
   // Ensure viewMode is always valid, default to 'manager'
   const viewMode = storeViewMode || 'manager';
 
-  // Check if we're in Settings pages - if so, hide the main sidebar
-  const isSettingsRoute = currentRoute.includes('/settings');
+  // Check if we're in Settings pages - if so, hide the main sidebar. Exception: /settings/dealer-users shows sidebar so Dealer Managers can navigate.
+  const isSettingsRoute = currentRoute.includes('/settings') && !currentRoute.startsWith('/settings/dealer-users');
   
   // Debug: Log sidebar visibility status
   if (import.meta.env.DEV) {
@@ -518,10 +549,49 @@ function Layout({ children }: LayoutProps) {
     ), [navigation]
   );
 
-  // Memoized handlers
-  const handleCollapseToggle = useCallback(() => {
-    toggleSidebarCollapsed();
-  }, [toggleSidebarCollapsed]);
+  // Hover para menú flotante con tabs (sidebar siempre colapsado)
+  const [hoveredNavHref, setHoveredNavHref] = useState<string | null>(null);
+  const [popoverRect, setPopoverRect] = useState<{ left: number; top: number } | null>(null);
+  const hoverLeaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHoverLeaveTimeout = useCallback(() => {
+    if (hoverLeaveTimeoutRef.current) {
+      clearTimeout(hoverLeaveTimeoutRef.current);
+      hoverLeaveTimeoutRef.current = null;
+    }
+  }, []);
+
+  const handleNavItemMouseEnter = useCallback((item: { name: string; href: string; icon: any }, e: React.MouseEvent) => {
+    clearHoverLeaveTimeout();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPopoverRect({ left: rect.right, top: rect.top });
+    setHoveredNavHref(item.href);
+  }, [clearHoverLeaveTimeout]);
+
+  const clearPopoverAndSelection = useCallback(() => {
+    setHoveredNavHref(null);
+    setPopoverRect(null);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  }, []);
+
+  const handleNavItemMouseLeave = useCallback(() => {
+    hoverLeaveTimeoutRef.current = setTimeout(() => {
+      hoverLeaveTimeoutRef.current = null;
+      clearPopoverAndSelection();
+    }, 150);
+  }, [clearPopoverAndSelection]);
+
+  const handlePopoverMouseEnter = useCallback(() => {
+    clearHoverLeaveTimeout();
+  }, [clearHoverLeaveTimeout]);
+
+  const handlePopoverMouseLeave = useCallback(() => {
+    clearPopoverAndSelection();
+  }, [clearPopoverAndSelection]);
+
+  useEffect(() => () => clearHoverLeaveTimeout(), [clearHoverLeaveTimeout]);
 
   const handleHelpClick = useCallback(() => {
     if (import.meta.env.DEV) {
@@ -617,17 +687,12 @@ function Layout({ children }: LayoutProps) {
     }
   }, [saveCurrentPageBeforeSettings, getLastRouteForModule, userType, allowedModules]);
 
-  // Memoized sidebar width calculations
-  const sidebarWidth = useMemo(() => 
-    isCollapsed ? '3.5rem' : '15rem', 
-    [isCollapsed]
-  );
-
+  // Sidebar siempre colapsado: solo iconos; nombres y tabs en menú flotante al hover
+  const sidebarWidth = useMemo(() => '3.5rem', []);
   const mainMarginLeft = useMemo(() => {
-    // If we're in Settings, don't add sidebar margin
     if (isSettingsRoute) return '0px';
-    return isCollapsed ? '3.5rem' : '15rem';
-  }, [isCollapsed, isSettingsRoute]);
+    return '3.5rem';
+  }, [isSettingsRoute]);
 
   const mainPaddingTop = useMemo(() => {
     const hasSecondaryNav = submoduleTabs.length > 0 || breadcrumbs.length > 0;
@@ -712,9 +777,7 @@ function Layout({ children }: LayoutProps) {
         {!isSettingsRoute && (
         <nav 
           id="main-navigation"
-          className={`min-h-screen fixed left-0 top-0 bottom-0 overflow-y-auto transition-all duration-300 z-50 border-r ${
-            isCollapsed ? 'w-14' : 'w-60'
-          }`}
+          className="min-h-screen fixed left-0 top-0 bottom-0 overflow-y-auto transition-[width] duration-300 ease-in-out z-50 border-r w-14"
           style={{ 
             width: sidebarWidth,
             ...getSidebarStyles(viewMode),
@@ -740,8 +803,8 @@ function Layout({ children }: LayoutProps) {
               className="absolute transition-opacity duration-300 whitespace-nowrap font-normal"
               style={{
                 left: '52px',
-                opacity: isCollapsed ? 0 : 1,
-                pointerEvents: isCollapsed ? 'none' : 'auto',
+                opacity: 0,
+                pointerEvents: 'none',
                 color: getLogoTextColor(viewMode),
                 fontSize: '16px'
               }}
@@ -754,18 +817,22 @@ function Layout({ children }: LayoutProps) {
           <div className="pb-4">
             {/* Dashboard Button - Separate */}
             {dashboardItem && (
-              <div style={{ marginTop: '-1px' }}>
+              <div
+                style={{ marginTop: '-1px' }}
+                title={dashboardItem.name}
+                onMouseEnter={(e) => handleNavItemMouseEnter(dashboardItem, e)}
+                onMouseLeave={handleNavItemMouseLeave}
+              >
                 <button
                     {...getDashboardButtonProps(
-                      viewMode, 
-                      isNavItemActive(dashboardItem.name, dashboardItem.href),
+                      viewMode,
+                      hoveredNavHref === dashboardItem.href,
                       () => handleNavigation(dashboardItem.href)
                     )}
-                    title={isCollapsed ? dashboardItem.name : undefined}
                     aria-label={`${dashboardItem.name}${isNavItemActive(dashboardItem.name, dashboardItem.href) ? ' (current page)' : ''}`}
                     aria-current={isNavItemActive(dashboardItem.name, dashboardItem.href) ? 'page' : undefined}
                   >
-                    {createNavItemContent(dashboardItem.icon, dashboardItem.name, isCollapsed)}
+                    {createNavItemContent(dashboardItem.icon, dashboardItem.name, true)}
                   </button>
               </div>
             )}
@@ -773,7 +840,7 @@ function Layout({ children }: LayoutProps) {
             {/* Spacer between Dashboard and other items */}
             <div style={{ height: '18px' }}></div>
 
-            {/* Other Navigation Items */}
+            {/* Other Navigation Items - menú flotante con tabs al hover */}
             <div 
               style={{ gap: '1px', marginTop: '-3px' }} 
               className="flex flex-col" 
@@ -782,22 +849,30 @@ function Layout({ children }: LayoutProps) {
             >
               {otherNavItems.map((item) => {
                 if (!item) return null;
-                const isActive = isNavItemActive(item.name, item.href);
+                const isHovered = hoveredNavHref === item.href;
+                const isActive = isHovered;
                 const Icon = item.icon;
+                const tabs = MODULE_TABS[item.href] ?? [];
 
                 return (
-                    <button
+                  <div
                     key={item.name}
-                    {...getNavigationButtonProps(
-                      viewMode,
-                      isActive,
-                      () => handleNavigation(item.href)
-                    )}
-                        title={isCollapsed ? item.name : undefined}
-                        aria-label={item.name}
-                      >
-                    {createNavItemContent(Icon, item.name, isCollapsed)}
-                      </button>
+                    className="relative"
+                    onMouseEnter={(e) => handleNavItemMouseEnter(item, e)}
+                    onMouseLeave={handleNavItemMouseLeave}
+                  >
+                    <button
+                      {...getNavigationButtonProps(
+                        viewMode,
+                        isActive,
+                        () => handleNavigation(item.href)
+                      )}
+                      title={tabs.length === 0 ? item.name : undefined}
+                      aria-label={item.name}
+                    >
+                      {createNavItemContent(Icon, item.name, true)}
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -821,32 +896,64 @@ function Layout({ children }: LayoutProps) {
                     aria-label={`Settings${isActive ? ' (current page)' : ''}`}
                     aria-current={isActive ? 'page' : undefined}
                   >
-                    {createNavItemContent(Settings, 'Settings', isCollapsed)}
+                    {createNavItemContent(Settings, 'Settings', true)}
                   </button>
                 );
               })()}
-
-              {/* Collapse/Expand Button */}
-              <button
-                {...getNavigationButtonProps(viewMode, false, handleCollapseToggle, {
-                  borderLeft: '3px solid transparent'
-                })}
-                aria-label={isCollapsed ? "Expand sidebar navigation" : "Collapse sidebar navigation"}
-              aria-expanded={!isCollapsed}
-                aria-controls="main-navigation"
-                title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {createCollapseExpandContent(isCollapsed, ChevronRight, ChevronLeft, 'Show Labels', 'Hide Labels')}
-            </button>
             </div>
           </div>
         </nav>
         )}
 
+        {/* Menú flotante con tabs: renderizado en portal para no ser recortado por overflow del nav */}
+        {!isSettingsRoute && hoveredNavHref && popoverRect && (MODULE_TABS[hoveredNavHref]?.length ?? 0) > 0 && (() => {
+          const hoveredItem = otherNavItems.find((i) => i?.href === hoveredNavHref);
+          const tabs = MODULE_TABS[hoveredNavHref] ?? [];
+          if (!hoveredItem || tabs.length === 0) return null;
+          const popoverContent = (
+            <div
+              className="py-2 px-3 rounded-r-md shadow-lg border border-gray-700 border-l-0 text-sm min-w-[200px]"
+              style={{
+                position: 'fixed',
+                left: popoverRect.left,
+                top: popoverRect.top,
+                background: 'var(--sidebar-active-hover, #122d3b)',
+                color: 'var(--sidebar-text-inactive, #8fa3ad)',
+                zIndex: 9999,
+              }}
+              role="menu"
+              aria-label={`${hoveredItem.name} submenu`}
+              onMouseEnter={handlePopoverMouseEnter}
+              onMouseLeave={handlePopoverMouseLeave}
+            >
+              <div className="font-semibold mb-2 pl-3 pr-5 text-white">
+                {hoveredItem.name}
+              </div>
+              <div className="flex flex-col gap-0.5 -mx-3 pl-6 pr-3">
+                {tabs.map((tab) => (
+                  <a
+                    key={tab.href}
+                    href={tab.href}
+                    className="block py-1.5 pr-5 rounded text-left no-underline text-inherit w-full hover:text-white"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleNavigation(tab.href);
+                      clearPopoverAndSelection();
+                    }}
+                  >
+                    {tab.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          );
+          return createPortal(popoverContent, document.body);
+        })()}
+
         {/* Main Navigation Bar - Hide when in Settings */}
         {!isSettingsRoute && (
         <header 
-          className="bg-white border-b fixed top-0 right-0 z-40 transition-all duration-300"
+          className="bg-white border-b fixed top-0 right-0 z-40 transition-[left] duration-300 ease-in-out"
           style={{
             height: '3.5rem',
             left: mainMarginLeft,
@@ -955,8 +1062,22 @@ function Layout({ children }: LayoutProps) {
 
                     {/* Menu Items */}
                     <div className="py-1">
-                      {/* Organization User - Solo visible para Superadmin y Admin */}
-                      {!isMember && (
+                      {/* Dealer User - solo para portal (dealer); Organization User - solo para internal (Superadmin/Admin) */}
+                      {userType === 'portal' && (
+                        <button
+                          className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            router.navigate('/settings/dealer-users');
+                          }}
+                          role="menuitem"
+                          aria-label="Dealer User"
+                        >
+                          <Building2 style={{ width: '16px', height: '16px' }} aria-hidden="true" />
+                          Dealer User
+                        </button>
+                      )}
+                      {userType === 'internal' && !isMember && (
                         <button
                           className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
                           onClick={() => {
@@ -1013,7 +1134,7 @@ function Layout({ children }: LayoutProps) {
         {/* Secondary Navigation Bar for Submodules */}
         {!isSettingsRoute && (submoduleTabs.length > 0 || breadcrumbs.length > 0) && (
           <div 
-            className="border-b fixed right-0 z-30 transition-all duration-300"
+            className="border-b fixed right-0 z-30 transition-[left] duration-300 ease-in-out"
             style={{
               top: '3.5rem',
               height: '2.625rem',
@@ -1083,7 +1204,7 @@ function Layout({ children }: LayoutProps) {
         {/* Main Content */}
         <main 
           id="main-content"
-          className="flex-1 min-w-0 transition-all duration-300"
+          className="flex-1 min-w-0 transition-[margin-left] duration-300 ease-in-out"
           style={{
             marginLeft: isSettingsRoute ? '0px' : mainMarginLeft,
             paddingTop: isSettingsRoute ? '0px' : mainPaddingTop,

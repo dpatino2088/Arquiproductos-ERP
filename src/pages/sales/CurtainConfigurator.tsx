@@ -74,7 +74,7 @@ const STEPS: { id: ConfigStep; label: string }[] = [
   { id: 'variants', label: 'VARIANTS' },
   { id: 'operating-system', label: 'OPERATING SYSTEM' },
   { id: 'accessories', label: 'ACCESSORIES' },
-  { id: 'review', label: 'QUOTE' },
+  { id: 'review', label: 'REVIEW' },
 ];
 
 export default function CurtainConfigurator({ quoteId, onComplete, onClose }: CurtainConfiguratorProps) {

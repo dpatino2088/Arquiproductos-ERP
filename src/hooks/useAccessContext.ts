@@ -21,6 +21,8 @@ type AccessContextState = {
   userType: AccessUserType;
 
   activeOrganizationId: string | null;
+  /** When userType === 'portal', the dealer_id for the current dealer user (from AppUsers/DealerUsers). */
+  portalDealerId: string | null;
 
   internalRole?: string | null;
   portalRole?: PortalRole | null;
@@ -36,10 +38,11 @@ type AccessContextState = {
 
 const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales"];
 
-function normalizePortalRole(v: any): PortalRole | null {
+/** Map AppUser.role_code (dealer_manager, dealer_member) or Legacy DealerUsers.role to PortalRole */
+function roleCodeToPortalRole(v: any): PortalRole | null {
   const s = (v ?? "").toString().trim().toLowerCase();
-  if (s === "member") return "member";
-  if (s === "member_manager" || s === "manager") return "member_manager";
+  if (s === "member" || s === "dealer_member") return "member";
+  if (s === "member_manager" || s === "manager" || s === "dealer_manager") return "member_manager";
   return null;
 }
 
@@ -54,6 +57,7 @@ export function useAccessContext(): AccessContextState {
 
   const [portalRole, setPortalRole] = useState<PortalRole | null>(null);
   const [portalOrgId, setPortalOrgId] = useState<string | null>(null);
+  const [portalDealerId, setPortalDealerId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +78,7 @@ export function useAccessContext(): AccessContextState {
           setInternalRole(null);
           setPortalRole(null);
           setPortalOrgId(null);
+          setPortalDealerId(null);
           setLoading(false);
           setAccessResolved(true);
         }
@@ -83,15 +88,57 @@ export function useAccessContext(): AccessContextState {
       setLoading(true);
 
       // =========================================================
-      // 1) PORTAL FIRST (DealerUsers)  ✅ (safer)
+      // 1) PORTAL: AppUsers first (role from role_code), then Legacy DealerUsers
       // =========================================================
-      const orParts: string[] = [];
-      if (uid) orParts.push(`user_id.eq.${uid}`);
-      if (jwtEmail) orParts.push(`portal_user_email.ilike.${jwtEmail}`);
+      const appUserOr: string[] = [];
+      if (uid) appUserOr.push(`auth_user_id.eq.${uid}`);
+      if (jwtEmail) appUserOr.push(`email.ilike.${jwtEmail}`);
+      const appUserOrFilter =
+        appUserOr.length > 0 ? appUserOr.join(",") : "id.eq.00000000-0000-0000-0000-000000000000";
 
-      const portalOr =
-        orParts.length > 0
-          ? orParts.join(",")
+      const { data: appUserRow, error: appUserErr } = await supabase
+        .from("AppUsers")
+        .select("id, organization_id, dealer_id, role_code, status, deleted, email")
+        .eq("user_type", "dealer")
+        .eq("deleted", false)
+        .in("status", ["active", "invited"])
+        .or(appUserOrFilter)
+        .maybeSingle();
+
+      if (!cancelled && appUserRow && !appUserErr) {
+        if (import.meta.env.DEV) {
+          console.log("[useAccessContext] Portal user from AppUsers (role_code):", {
+            id: appUserRow.id,
+            role_code: appUserRow.role_code,
+            organization_id: appUserRow.organization_id,
+            email: appUserRow.email,
+            status: appUserRow.status,
+          });
+        }
+        setUserType("portal");
+        setInternalRole(null);
+        setPortalDealerId(appUserRow.dealer_id ?? null);
+        const normalizedRole = roleCodeToPortalRole(appUserRow.role_code);
+        setPortalRole(normalizedRole);
+        setPortalOrgId(appUserRow.organization_id ?? null);
+        if (import.meta.env.DEV && !normalizedRole) {
+          console.warn("[useAccessContext] AppUsers role_code not mapped to PortalRole:", appUserRow.role_code);
+        }
+        if (!activeOrganizationId && appUserRow.organization_id) {
+          setActiveOrganizationId(appUserRow.organization_id);
+        }
+        setAccessResolved(true);
+        setLoading(false);
+        return;
+      }
+
+      // Legacy: DealerUsers (role from column "role")
+      const legacyOrParts: string[] = [];
+      if (uid) legacyOrParts.push(`user_id.eq.${uid}`);
+      if (jwtEmail) legacyOrParts.push(`portal_user_email.ilike.${jwtEmail}`);
+      const legacyOr =
+        legacyOrParts.length > 0
+          ? legacyOrParts.join(",")
           : "id.eq.00000000-0000-0000-0000-000000000000";
 
       const { data: cpuRow, error: cpuErr } = await supabase
@@ -99,53 +146,34 @@ export function useAccessContext(): AccessContextState {
         .select("id, organization_id, dealer_id, role, status, deleted, portal_user_email, user_id")
         .eq("deleted", false)
         .in("status", ["active", "invited"])
-        .or(portalOr)
+        .or(legacyOr)
         .maybeSingle();
 
-      if (cpuErr) {
-        console.error("[useAccessContext] DealerUsers lookup error", {
+      if (cpuErr && import.meta.env.DEV) {
+        console.warn("[useAccessContext] DealerUsers (Legacy) lookup error", {
           message: cpuErr.message,
-          details: cpuErr.details,
-          hint: cpuErr.hint,
           code: cpuErr.code,
         });
-        // IMPORTANT: set a stable state so it doesn't re-fetch forever
-        if (!cancelled) {
-          setAccessResolved(true);
-          setLoading(false);
-          // Continue to check OrganizationUsers instead of returning early
-        }
-      } else if (!cancelled && cpuRow) {
-        // Filter by status (double-check, though query already filters)
+      }
+      if (!cancelled && cpuRow) {
         const status = cpuRow.status;
-        if (status && status !== 'active' && status !== 'invited') {
-          // Not active/invited, continue to check OrganizationUsers
-        } else {
+        if (status === "active" || status === "invited") {
           if (import.meta.env.DEV) {
-            console.log("[useAccessContext] Portal user found:", {
+            console.log("[useAccessContext] Portal user from DealerUsers (Legacy):", {
               id: cpuRow.id,
               role: cpuRow.role,
               organization_id: cpuRow.organization_id,
-              email: cpuRow.portal_user_email,
-              status: cpuRow.status
             });
           }
-
           setUserType("portal");
           setInternalRole(null);
-          // Use role column (as per actual database schema)
-          const normalizedRole = normalizePortalRole(cpuRow.role);
+          setPortalDealerId(cpuRow.dealer_id ?? null);
+          const normalizedRole = roleCodeToPortalRole(cpuRow.role);
           setPortalRole(normalizedRole);
           setPortalOrgId(cpuRow.organization_id ?? null);
-
-          if (import.meta.env.DEV && !normalizedRole) {
-            console.warn("[useAccessContext] role is null or invalid:", cpuRow.role);
-          }
-
           if (!activeOrganizationId && cpuRow.organization_id) {
             setActiveOrganizationId(cpuRow.organization_id);
           }
-
           setAccessResolved(true);
           setLoading(false);
           return;
@@ -176,6 +204,7 @@ export function useAccessContext(): AccessContextState {
           setInternalRole(null);
           setPortalRole(null);
           setPortalOrgId(null);
+          setPortalDealerId(null);
           setAccessResolved(true);
           setLoading(false);
         }
@@ -195,6 +224,7 @@ export function useAccessContext(): AccessContextState {
         setInternalRole(ouRow.role ?? null);
         setPortalRole(null);
         setPortalOrgId(null);
+        setPortalDealerId(null);
 
         if (!activeOrganizationId && ouRow.organization_id) {
           setActiveOrganizationId(ouRow.organization_id);
@@ -206,16 +236,17 @@ export function useAccessContext(): AccessContextState {
       }
 
       // =========================================================
-      // 3) UNKNOWN - No user found in either table
+      // 3) UNKNOWN - No user found in AppUsers, DealerUsers (Legacy), or OrganizationUsers
       // =========================================================
       if (!cancelled) {
         if (import.meta.env.DEV) {
-          console.log("[useAccessContext] No user found in DealerUsers or OrganizationUsers");
+          console.log("[useAccessContext] No user found in AppUsers, DealerUsers (Legacy), or OrganizationUsers");
         }
         setUserType("unknown");
         setInternalRole(null);
         setPortalRole(null);
         setPortalOrgId(null);
+        setPortalDealerId(null);
         setAccessResolved(true);
         setLoading(false);
       }
@@ -281,6 +312,7 @@ export function useAccessContext(): AccessContextState {
     userType,
 
     activeOrganizationId: resolvedOrgId,
+    portalDealerId: userType === "portal" ? portalDealerId : null,
 
     internalRole,
     portalRole,

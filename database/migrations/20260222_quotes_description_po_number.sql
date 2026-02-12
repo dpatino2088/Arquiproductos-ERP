@@ -1,4 +1,5 @@
 -- Add description and po_number to Quotes for Dealer use (description = label for notes; PO = tracking number)
+-- Run this in Supabase SQL Editor if you get: Could not find the 'description' column of 'Quotes' in the schema cache (PGRST204)
 BEGIN;
 
 -- description: free text for quote description (replaces/labels "notes" in UI)

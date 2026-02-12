@@ -452,3 +452,19 @@
     border-radius: 0 !important;
   }
 }
+
+/* Dealer logo slot: 78mm × 15.6mm (+20% from 65×13mm); alineado con la P de Proposal No */
+.logo-slot {
+  width: 78mm;
+  height: 15.6mm;
+  display: flex;
+  align-items: center;
+  margin-left: 0;
+  padding-left: 0;
+}
+.logo-slot img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: left center;
+}

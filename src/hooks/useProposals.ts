@@ -68,19 +68,22 @@ export function useProposalsList() {
           return;
         }
       } else {
+        // Internal users: always filter by dealer_id. If no dealer selected, show no proposals.
         effectiveDealerId = activeDealerId ?? null;
+        if (effectiveDealerId == null) {
+          setList([]);
+          setLoading(false);
+          return;
+        }
       }
 
       let query = supabase
         .from('Proposals')
         .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, created_by_user_id')
         .eq('organization_id', activeOrganizationId)
+        .eq('dealer_id', effectiveDealerId)
         .or('deleted.is.false,deleted.is.null')
         .order('created_at', { ascending: false });
-
-      if (effectiveDealerId) {
-        query = query.eq('dealer_id', effectiveDealerId);
-      }
 
       const { data, error: e } = await query;
 
@@ -195,6 +198,7 @@ export interface QuoteLineInfoForPDF {
   area?: string | null;
   position?: string | null;
   product_type?: string | null;
+  product_type_id?: string | null;
   collection_name?: string | null;
   variant_name?: string | null;
   drive_type?: string | null;
@@ -206,6 +210,10 @@ export interface QuoteLineInfoForPDF {
 
 export interface ProposalDetailCustomer {
   customer_name: string;
+  /** Formatted address from DirectoryCustomer (street, city, state, zip, country) */
+  address?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
 }
 export interface ProposalDetailContact {
   contact_name: string | null;
@@ -221,6 +229,8 @@ export interface ProposalDetailState {
   quote: { id: string; quote_no: string } | null;
   customer: ProposalDetailCustomer | null;
   contact: ProposalDetailContact | null;
+  /** Dealer logo URL for the proposal's dealer (Dealers.logo_url filtered by proposal.dealer_id) */
+  dealerLogoUrl: string | null;
   loading: boolean;
   error: string | null;
   canWrite: boolean;
@@ -236,6 +246,7 @@ export function useProposalDetail(proposalId: string | null) {
     quote: null,
     customer: null,
     contact: null,
+    dealerLogoUrl: null,
     loading: true,
     error: null,
     canWrite: true,
@@ -268,6 +279,7 @@ export function useProposalDetail(proposalId: string | null) {
           quote: null,
           customer: null,
           contact: null,
+          dealerLogoUrl: null,
         }));
         return;
       }
@@ -283,7 +295,7 @@ export function useProposalDetail(proposalId: string | null) {
         .order('created_at', { ascending: true });
 
       if (linesError) {
-        setState((s) => ({ ...s, loading: false, error: linesError.message, proposal, lines: [], addonsMap: new Map(), quoteLinesMap: new Map(), configuredProductsMap: {}, quote: null, customer: null, contact: null }));
+        setState((s) => ({ ...s, loading: false, error: linesError.message, proposal, lines: [], addonsMap: new Map(), quoteLinesMap: new Map(), configuredProductsMap: {}, quote: null, customer: null, contact: null, dealerLogoUrl: null }));
         return;
       }
 
@@ -321,7 +333,7 @@ export function useProposalDetail(proposalId: string | null) {
       if (quoteLineIds.length > 0) {
         const { data: qlData } = await supabase
           .from('QuoteLines')
-          .select('id, quantity, name, sku, msrp, unit_msrp, area, position, product_type, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
+          .select('id, quantity, name, sku, msrp, unit_msrp, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
           .in('id', quoteLineIds);
         (qlData || []).forEach((ql: any) => {
           quoteLinesMap.set(ql.id, {
@@ -333,6 +345,7 @@ export function useProposalDetail(proposalId: string | null) {
             area: ql.area ?? null,
             position: ql.position ?? null,
             product_type: ql.product_type ?? null,
+            product_type_id: ql.product_type_id ?? null,
             collection_name: ql.collection_name ?? null,
             variant_name: ql.variant_name ?? null,
             drive_type: ql.drive_type ?? null,
@@ -342,6 +355,29 @@ export function useProposalDetail(proposalId: string | null) {
             config_snapshot: null,
           });
         });
+
+        // Resolve product_type from ProductTypes when product_type is null but product_type_id is set
+        const ptIdsToResolve = (qlData || [])
+          .filter((ql: any) => ql.product_type_id && !ql.product_type)
+          .map((ql: any) => ql.product_type_id);
+        const uniquePtIds = [...new Set(ptIdsToResolve)] as string[];
+        if (uniquePtIds.length > 0) {
+          const { data: ptData } = await supabase
+            .from('ProductTypes')
+            .select('id, name, code')
+            .in('id', uniquePtIds);
+          const ptMap = new Map<string, string>();
+          (ptData || []).forEach((pt: any) => {
+            const label = (pt.name || pt.code || '').trim() || null;
+            if (label) ptMap.set(pt.id, label);
+          });
+          quoteLinesMap.forEach((ql, qlId) => {
+            const ptId = ql.product_type_id;
+            if (ptId && ptMap.has(ptId) && !ql.product_type) {
+              quoteLinesMap.set(qlId, { ...ql, product_type: ptMap.get(ptId)! });
+            }
+          });
+        }
 
         const configuredProductIds = (qlData || [])
           .map((ql: any) => ql.configured_product_id)
@@ -361,6 +397,58 @@ export function useProposalDetail(proposalId: string | null) {
             }
           });
         }
+
+        // Resolve accessories from QuoteLineComponents when config_snapshot.accessories is missing/empty
+        const { data: accData } = await supabase
+          .from('QuoteLineComponents')
+          .select('quote_line_id, catalog_item_id, qty')
+          .in('quote_line_id', quoteLineIds)
+          .eq('organization_id', proposal.organization_id)
+          .eq('deleted', false)
+          .or('source.eq.accessory,component_role.eq.accessory');
+        const accByLine = new Map<string, Array<{ catalog_item_id: string; qty: number }>>();
+        (accData || []).forEach((row: any) => {
+          const list = accByLine.get(row.quote_line_id) || [];
+          list.push({
+            catalog_item_id: row.catalog_item_id,
+            qty: Number(row.qty) || 1,
+          });
+          accByLine.set(row.quote_line_id, list);
+        });
+        const allAccItemIds = (accData || [])
+          .map((r: any) => r.catalog_item_id)
+          .filter(Boolean) as string[];
+        const uniqueAccIds = [...new Set(allAccItemIds)];
+        let catalogItemMap = new Map<string, { name?: string; item_name?: string; sku?: string }>();
+        if (uniqueAccIds.length > 0) {
+          const { data: ciData } = await supabase
+            .from('CatalogItems')
+            .select('id, name, item_name, sku')
+            .in('id', uniqueAccIds)
+            .eq('organization_id', proposal.organization_id);
+          (ciData || []).forEach((ci: any) => {
+            catalogItemMap.set(ci.id, {
+              name: ci.name ?? undefined,
+              item_name: ci.item_name ?? undefined,
+              sku: ci.sku ?? undefined,
+            });
+          });
+        }
+        quoteLinesMap.forEach((ql, qlId) => {
+          const snap = ql.config_snapshot as Record<string, unknown> | null | undefined;
+          const hasAccessories = Array.isArray(snap?.accessories) && (snap!.accessories as unknown[]).length > 0;
+          if (hasAccessories) return;
+          const components = accByLine.get(qlId) || [];
+          if (components.length === 0) return;
+          const accessories = components.map((c) => {
+            const ci = catalogItemMap.get(c.catalog_item_id);
+            const name = (ci?.item_name || ci?.name || ci?.sku || '—').trim();
+            return { name, qty: c.qty };
+          });
+          const nextSnapshot = snap && typeof snap === 'object' ? { ...snap } : {};
+          (nextSnapshot as Record<string, unknown>).accessories = accessories;
+          quoteLinesMap.set(qlId, { ...ql, config_snapshot: nextSnapshot });
+        });
       }
 
       let customer: ProposalDetailCustomer | null = null;
@@ -382,10 +470,35 @@ export function useProposalDetail(proposalId: string | null) {
       if (customerIdToUse) {
         const { data: custData } = await supabase
           .from('DirectoryCustomers')
-          .select('customer_name')
+          .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
           .eq('id', customerIdToUse)
           .single();
-        if (custData) customer = { customer_name: (custData as any).customer_name || 'N/A' };
+        if (custData) {
+          const c = custData as {
+            customer_name?: string;
+            street_address_line_1?: string | null;
+            street_address_line_2?: string | null;
+            city?: string | null;
+            state?: string | null;
+            zip_code?: string | null;
+            country?: string | null;
+            customer_email?: string | null;
+            customer_phone?: string | null;
+            alt_phone?: string | null;
+          };
+          const parts = [
+            c.street_address_line_1,
+            c.street_address_line_2,
+            [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
+            c.country,
+          ].filter(Boolean) as string[];
+          customer = {
+            customer_name: c.customer_name || 'N/A',
+            address: parts.length > 0 ? parts.join(', ') : null,
+            customer_email: c.customer_email ?? null,
+            customer_phone: c.customer_phone ?? c.alt_phone ?? null,
+          };
+        }
       }
       if (contactIdToUse) {
         const { data: contData } = await supabase
@@ -397,6 +510,17 @@ export function useProposalDetail(proposalId: string | null) {
           contact_name: (contData as any).contact_name ?? null,
           contact_email: (contData as any).contact_email ?? null,
         };
+      }
+
+      // Dealer logo: filter by proposal.dealer_id so the logo matches the proposal's dealer
+      let dealerLogoUrl: string | null = null;
+      if (proposal.dealer_id) {
+        const { data: dealerData } = await supabase
+          .from('Dealers')
+          .select('logo_url')
+          .eq('id', proposal.dealer_id)
+          .maybeSingle();
+        dealerLogoUrl = (dealerData as { logo_url?: string } | null)?.logo_url?.trim() || null;
       }
 
       setState((s) => ({
@@ -411,6 +535,7 @@ export function useProposalDetail(proposalId: string | null) {
         quote,
         customer,
         contact,
+        dealerLogoUrl,
         canWrite: true,
       }));
     } catch (err: any) {
@@ -426,6 +551,7 @@ export function useProposalDetail(proposalId: string | null) {
         quote: null,
         customer: null,
         contact: null,
+        dealerLogoUrl: null,
       }));
     }
   }, [proposalId]);
@@ -441,39 +567,55 @@ export function useProposalDetail(proposalId: string | null) {
   return { ...state, refetch: fetchDetail, setCanWrite };
 }
 
+export interface CreateProposalFromQuoteOptions {
+  /** When internal user is "acting as dealer", pass the selected dealer id so the proposal has a dealer even if the quote has none. */
+  actingDealerId?: string | null;
+}
+
 /**
  * Create a new Proposal from a Quote and copy its QuoteLines as ProposalLines.
  * Sets created_by_user_id or created_by_portal_user_id from auth context.
+ * Resolves dealer_id: quote.dealer_id ?? actingDealerId ?? portalUser.dealer_id (required for Proposals.dealer_id NOT NULL).
  */
-export async function createProposalFromQuote(quoteId: string): Promise<{ proposalId: string } | { error: string }> {
+export async function createProposalFromQuote(
+  quoteId: string,
+  options?: CreateProposalFromQuoteOptions
+): Promise<{ proposalId: string } | { error: string }> {
   const { data: sessionData } = await supabase.auth.getSession();
   const userId = sessionData?.session?.user?.id;
   if (!userId) {
     return { error: 'Not authenticated' };
   }
 
-  const authContext = await fetchAuthContext(supabase);
   let createdByUserId: string | null = null;
   let createdByPortalUserId: string | null = null;
+  let portalDealerId: string | null = null;
 
-  if (authContext.is_portal_user && authContext.dealer_id) {
-    const { data: du } = await supabase
-      .from('DealerUsers')
-      .select('id')
-      .eq('dealer_id', authContext.dealer_id)
-      .eq('user_id', userId)
-      .eq('deleted', false)
-      .limit(1)
-      .single();
-    if (du) createdByPortalUserId = du.id;
-    else return { error: 'Dealer user not found' };
-  } else {
+  try {
+    const authContext = await fetchAuthContext(supabase);
+    if (authContext.is_portal_user && authContext.dealer_id) {
+      portalDealerId = authContext.dealer_id;
+      const { data: du } = await supabase
+        .from('DealerUsers')
+        .select('id')
+        .eq('dealer_id', authContext.dealer_id)
+        .eq('user_id', userId)
+        .eq('deleted', false)
+        .limit(1)
+        .single();
+      if (du) createdByPortalUserId = du.id;
+      else return { error: 'Dealer user not found' };
+    } else {
+      createdByUserId = userId;
+    }
+  } catch {
+    // If get_auth_context fails (e.g. RPC missing), treat as org user
     createdByUserId = userId;
   }
 
   const { data: quote, error: quoteErr } = await supabase
     .from('Quotes')
-    .select('id, organization_id, dealer_id, customer_id, contact_id, currency, quote_no')
+    .select('id, organization_id, dealer_id, customer_id, contact_id, currency, quote_no, created_by_user_id, created_by_portal_user_id')
     .eq('id', quoteId)
     .eq('deleted', false)
     .single();
@@ -483,9 +625,18 @@ export async function createProposalFromQuote(quoteId: string): Promise<{ propos
   }
 
   const orgId = quote.organization_id;
-  const dealerId = quote.dealer_id;
+  // Resolve dealer_id: Quote first, then acting-as dealer (internal user), then portal user's dealer. Proposals.dealer_id is NOT NULL in DB.
+  const dealerId =
+    quote.dealer_id ??
+    options?.actingDealerId ??
+    portalDealerId ??
+    null;
+
   if (!dealerId) {
-    return { error: 'Quote has no dealer assigned' };
+    return {
+      error:
+        'No se puede crear la propuesta sin dealer. Asigna un dealer a la cotización o selecciona "Actuar como" un dealer antes de crear la propuesta.',
+    };
   }
 
   const { data: maxVersion } = await supabase
@@ -498,7 +649,24 @@ export async function createProposalFromQuote(quoteId: string): Promise<{ propos
     .single();
 
   const newVersion = (maxVersion?.version_no ?? 0) + 1;
-  const proposalNo = quote.quote_no ? `${quote.quote_no}-P${newVersion}` : null;
+  // proposal_no must be unique per org: use quote's quote_no as base (e.g. QT-000003 -> QT-000003-V1) to avoid uq_proposals_org_proposal_no
+  const quoteNoBase = (quote.quote_no ?? 'QT-0001').trim().replace(/-V\d+$/i, '') || 'QT-0001';
+  const proposalNo = `${quoteNoBase}-V${newVersion}`;
+
+  // Constraint proposals_created_by_exactly_one_chk: exactly one of the two must be set (never both null)
+  let finalCreatedByUser: string | null = createdByPortalUserId ? null : (createdByUserId ?? userId);
+  let finalCreatedByPortal: string | null = createdByPortalUserId ?? null;
+  if (finalCreatedByUser == null && finalCreatedByPortal == null) {
+    // Fallback: copy creator from the Quote so the insert never violates the constraint
+    const q = quote as { created_by_user_id?: string | null; created_by_portal_user_id?: string | null };
+    if (q.created_by_user_id != null && q.created_by_portal_user_id == null) {
+      finalCreatedByUser = q.created_by_user_id;
+    } else if (q.created_by_portal_user_id != null && q.created_by_user_id == null) {
+      finalCreatedByPortal = q.created_by_portal_user_id;
+    } else {
+      return { error: 'Could not determine proposal creator. Please sign in again and try again.' };
+    }
+  }
 
   const insertProposal: Record<string, unknown> = {
     organization_id: orgId,
@@ -510,8 +678,8 @@ export async function createProposalFromQuote(quoteId: string): Promise<{ propos
     proposal_no: proposalNo,
     version_no: newVersion,
     currency: quote.currency ?? 'USD',
-    created_by_user_id: createdByUserId,
-    created_by_portal_user_id: createdByPortalUserId,
+    created_by_user_id: finalCreatedByUser,
+    created_by_portal_user_id: finalCreatedByPortal,
   };
 
   const { data: newProposal, error: insertErr } = await supabase

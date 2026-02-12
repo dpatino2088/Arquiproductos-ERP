@@ -229,8 +229,32 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
             });
           }
         } else {
-          // portal: mostrar nombre del Dealer (si existe) en lugar del Organization para quien ingresa
+          // portal: mostrar nombre del Dealer. Si el usuario tiene dealer en AppUsers, preferir ese para evitar mostrar otro (ej. Arquiluz en vez de Claroscuro)
+          const appUserDealerIds = new Set<string>();
+          const orPartsApp: string[] = [];
+          if (currentUserId) orPartsApp.push(`auth_user_id.eq.${currentUserId}`);
+          if (currentEmail) orPartsApp.push(`email.ilike.${currentEmail}`);
+          const { data: appUserRows } = await supabase
+            .from('AppUsers')
+            .select('dealer_id')
+            .eq('user_type', 'dealer')
+            .eq('deleted', false)
+            .or(orPartsApp.length ? orPartsApp.join(',') : 'id.eq.00000000-0000-0000-0000-000000000000');
+          if (appUserRows?.length) {
+            appUserRows.forEach((r: { dealer_id?: string | null }) => {
+              if (r.dealer_id) appUserDealerIds.add(r.dealer_id);
+            });
+          }
+
           const dealerIdsByOrg = new Map<string, string>();
+          // Primera pasada: asignar el dealer que está en AppUsers (el "del usuario") por org
+          for (const pu of activePortal) {
+            if (!pu.organization_id || !pu.dealer_id) continue;
+            if (appUserDealerIds.has(pu.dealer_id)) {
+              dealerIdsByOrg.set(pu.organization_id, pu.dealer_id);
+            }
+          }
+          // Segunda pasada: rellenar orgs que no tengan dealer preferido
           for (const pu of activePortal) {
             if (pu.organization_id && pu.dealer_id && !dealerIdsByOrg.has(pu.organization_id)) {
               dealerIdsByOrg.set(pu.organization_id, pu.dealer_id);

@@ -146,7 +146,7 @@ export function useUpdateQuoteLineCosts() {
 
     setIsUpdating(true);
     try {
-      // First, get the existing costs to ensure we have the quote_line_id
+      // QuoteLineCosts table may have been removed; costs come from QuoteLines/ConfiguredProduct.
       const { data: existingCosts, error: fetchError } = await supabase
         .from('QuoteLineCosts')
         .select('id, quote_line_id')
@@ -154,6 +154,10 @@ export function useUpdateQuoteLineCosts() {
         .eq('deleted', false)
         .maybeSingle();
 
+      if (fetchError?.code === '42P01' || (fetchError?.message ?? '').includes('does not exist')) {
+        // Table dropped; no-op (costs are from QuoteLines/ConfiguredProduct).
+        return null;
+      }
       if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = not found
         throw fetchError;
       }

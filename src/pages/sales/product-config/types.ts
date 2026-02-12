@@ -9,7 +9,8 @@ export type ProductType =
   | 'triple-shade'
   | 'drapery'
   | 'awning'
-  | 'window-film';
+  | 'window-film'
+  | 'accessories';
 
 // Panel interface for multi-panel support (for interconnected curtains)
 // Note: height_mm is stored globally in height_mm field, not per panel
@@ -243,6 +244,12 @@ export interface WindowFilmConfig extends BaseProductConfig {
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }
 
+// Accessories-only configuration (no measurements/variants/hardware; goes straight to AccessoriesStep)
+export interface AccessoriesConfig extends BaseProductConfig {
+  productType: 'accessories';
+  accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
+}
+
 // Union type for all product configurations
 export type ProductConfig = 
   | RollerShadeConfig
@@ -250,5 +257,6 @@ export type ProductConfig =
   | TripleShadeConfig
   | DraperyConfig
   | AwningConfig
-  | WindowFilmConfig;
+  | WindowFilmConfig
+  | AccessoriesConfig;
 

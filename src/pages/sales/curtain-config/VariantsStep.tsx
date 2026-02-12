@@ -16,14 +16,22 @@ import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { supabase } from '../../../lib/supabase/client';
 import type { CatalogItemRollSpecsRow } from '../../../services/catalogItemRollSpecs';
 import { Image as ImageIcon, Search, X } from 'lucide-react';
+import type { DealerConfiguratorPolicy } from '../../../hooks/useDealerConfiguratorPolicy';
+import { useConfiguratorPolicy } from '../../../context/ConfiguratorPolicyContext';
 
 interface VariantsStepProps {
   config: CurtainConfiguration | ProductConfig;
   onUpdate: (updates: Partial<CurtainConfiguration | ProductConfig>) => void;
+  /** Optional override; when inside ProductConfigurator, policy comes from ConfiguratorPolicyContext */
+  policy?: DealerConfiguratorPolicy | null;
 }
 
-export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
+export default function VariantsStep({ config, onUpdate, policy: policyProp }: VariantsStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
+  const { policy: policyCtx } = useConfiguratorPolicy();
+  const policy = policyProp ?? policyCtx;
+
+  const showCatalog = !policy || policy.allow_variants_catalog;
 
   // Get productTypeId from config (set by ProductStep)
   const productTypeId = (config as any).productTypeId || (config as any).product_type_id;
@@ -368,9 +376,23 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
     );
   }
 
-  return (
-    <div className="max-w-4xl mx-auto">
-      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+  // DealerConfiguratorPolicy: catalog not allowed
+  if (policy && !showCatalog) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <Label className="text-sm font-medium mb-4 block">COLLECTION | VARIANTS</Label>
+          <div className="text-center text-gray-500 py-8">
+            <p className="text-sm font-medium">Fabric selection is not available for your account.</p>
+            <p className="text-xs mt-1">Contact your administrator if you need access.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const catalogContent = (
+    <div className="space-y-6">
         <div>
           <Label className="text-sm font-medium mb-4 block">COLLECTION | VARIANTS</Label>
 
@@ -682,6 +704,13 @@ export default function VariantsStep({ config, onUpdate }: VariantsStepProps) {
             )}
           </div>
         )}
+      </div>
+  );
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+        {catalogContent}
       </div>
     </div>
   );

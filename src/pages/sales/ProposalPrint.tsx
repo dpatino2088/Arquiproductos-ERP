@@ -4,12 +4,13 @@
  * Uses window.print(); no server/PDF generation.
  */
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useProposalDetail } from '../../hooks/useProposals';
 import type { ProposalLine, QuoteLineSnapshot } from '../../types/proposals';
 import { supabase } from '../../lib/supabase/client';
 import { Printer } from 'lucide-react';
 import { formatDimensionsDisplayCompact } from '../../lib/formatDimensions';
+import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
 function getProposalIdFromPath(): string | null {
   const m = window.location.pathname.match(/\/sales\/proposals\/([^/]+)\/print/);
@@ -102,10 +103,9 @@ function formatAddressBlock(parts: Array<string | null | undefined>): string {
 export default function ProposalPrint() {
   const proposalId = getProposalIdFromPath();
   const mode = getModeFromSearch();
-  const { proposal, lines, addonsMap, quoteLinesMap, configuredProductsMap, quote, customer, contact, loading, error } =
+  const { proposal, lines, addonsMap, quoteLinesMap, configuredProductsMap, quote, customer, contact, dealerLogoUrl, loading, error } =
     useProposalDetail(proposalId);
   const [orgName, setOrgName] = useState<string | null>(null);
-  const [dealerLogoUrl, setDealerLogoUrl] = useState<string | null>(null);
   const [dealerInfo, setDealerInfo] = useState<{
     dealer_name?: string | null;
     dealer_email?: string | null;
@@ -134,7 +134,6 @@ export default function ProposalPrint() {
 
   useEffect(() => {
     if (!proposal?.dealer_id) {
-      setDealerLogoUrl(null);
       setDealerInfo(null);
       return;
     }
@@ -143,19 +142,26 @@ export default function ProposalPrint() {
       const { data } = await supabase
         .from('Dealers')
         .select(
-          'logo_url, dealer_name, dealer_email, dealer_phone, street_address_line_1, street_address_line_2, city, state, zip_code, country'
+          'dealer_name, dealer_email, dealer_phone, street_address_line_1, street_address_line_2, city, state, zip_code, country'
         )
         .eq('id', proposal.dealer_id)
         .maybeSingle();
       if (cancelled) return;
-      setDealerLogoUrl((data as any)?.logo_url ?? null);
       setDealerInfo(data as any);
     })();
     return () => { cancelled = true; };
   }, [proposal?.dealer_id]);
 
+  const resolvedLogoUrl = useResolvedStorageUrl(dealerLogoUrl ?? null);
+  const [logoError, setLogoError] = useState(false);
+  const showLogo = Boolean(resolvedLogoUrl) && !logoError;
+  const handleLogoError = useCallback(() => setLogoError(true), []);
+  useEffect(() => {
+    if (!resolvedLogoUrl) setLogoError(false);
+  }, [resolvedLogoUrl]);
+
   const { totals, lineTotals } = useMemo(() => {
-    let subtotal = 0;
+    let totalProduct = 0;
     const lineTotals: number[] = [];
     let installationTotal = 0;
     lines.forEach((line) => {
@@ -163,29 +169,32 @@ export default function ProposalPrint() {
       const snap = line.quote_line_snapshot ?? undefined;
       const material = computeLineTotal(line, qlInfo, snap);
       lineTotals.push(material);
-      subtotal += material;
+      totalProduct += material;
       const installationAddons = (addonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
       installationTotal += installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
     });
+    const discountPct = proposal?.global_discount_pct ?? 0;
+    const discountAmount = totalProduct * (discountPct / 100);
     const installationAmount = proposal?.installation_amount ?? installationTotal ?? 0;
-    if (proposal?.subtotal_amount != null && proposal?.discount_amount != null && proposal?.itbms_amount != null && proposal?.total_amount != null) {
+    const subtotal = Math.max(totalProduct - discountAmount, 0) + installationAmount;
+    if (proposal?.itbms_amount != null && proposal?.total_amount != null) {
       return {
         totals: {
-          subtotal: proposal.subtotal_amount,
+          totalProduct,
+          discountAmount,
           installationAmount,
-          discountAmount: proposal.discount_amount,
+          subtotal,
           itbmsAmount: proposal.itbms_amount,
           total: proposal.total_amount,
         },
         lineTotals,
       };
     }
-    const discountPct = proposal?.global_discount_pct ?? 0;
-    const discountAmount = subtotal * (discountPct / 100);
-    const itbmsAmount = 0;
-    const total = Math.max(subtotal - discountAmount, 0) + (installationAmount ?? 0) + itbmsAmount;
+    const itbmsPct = 0.07;
+    const itbmsAmount = subtotal * itbmsPct;
+    const total = subtotal + itbmsAmount;
     return {
-      totals: { subtotal, installationAmount: installationAmount ?? 0, discountAmount, itbmsAmount, total },
+      totals: { totalProduct, discountAmount, installationAmount, subtotal, itbmsAmount, total },
       lineTotals,
     };
   }, [lines, addonsMap, quoteLinesMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.itbms_amount, proposal?.total_amount, proposal?.global_discount_pct]);
@@ -278,16 +287,20 @@ export default function ProposalPrint() {
             </div>
 
             <div className="flex-shrink-0 flex flex-col items-end">
-              {/* Top-right logo (or placeholder space) */}
-              <div className="h-14 w-36 flex items-center justify-end">
-                {dealerLogoUrl ? (
+              <div className="logo-slot">
+                {showLogo ? (
                   <img
-                    src={dealerLogoUrl}
+                    id="dealerLogoPrint"
+                    src={resolvedLogoUrl ?? ''}
                     alt="Dealer logo"
-                    className="h-14 w-36 object-contain object-right"
+                    crossOrigin="anonymous"
+                    onError={handleLogoError}
+                    className="max-w-full max-h-full object-contain"
                   />
                 ) : (
-                  <div className="h-14 w-36 border border-gray-200 bg-white" />
+                  <div className="flex items-center justify-center w-full h-full text-gray-400 text-xs" aria-hidden>
+                    Dealer logo
+                  </div>
                 )}
               </div>
             </div>
@@ -462,12 +475,12 @@ export default function ProposalPrint() {
           </table>
         )}
 
-        {/* Totals: Subtotal (material), Discount, Instalación, ITBMS, Total */}
+        {/* Totals: Total Product, Discount, Installation, Subtotal, ITBMS, Total */}
         <div className="flex justify-end">
           <div className="w-64 border border-gray-200 rounded-lg p-3 text-sm">
             <div className="flex justify-between py-1">
-              <span className="text-gray-600">Subtotal</span>
-              <span>{formatCurrency(totals.subtotal, currency)}</span>
+              <span className="text-gray-600">Total Product</span>
+              <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
             </div>
             {(totals.discountAmount ?? 0) > 0 && (
               <div className="flex justify-between py-1">
@@ -477,10 +490,14 @@ export default function ProposalPrint() {
             )}
             {(totals.installationAmount ?? 0) > 0 && (
               <div className="flex justify-between py-1">
-                <span className="text-gray-600">Instalación</span>
+                <span className="text-gray-600">Installation</span>
                 <span>{formatCurrency(totals.installationAmount ?? 0, currency)}</span>
               </div>
             )}
+            <div className="flex justify-between py-1">
+              <span className="text-gray-600">Subtotal</span>
+              <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
+            </div>
             <div className="flex justify-between py-1">
               <span className="text-gray-600">ITBMS</span>
               <span>{formatCurrency(totals.itbmsAmount ?? 0, currency)}</span>

@@ -1,8 +1,7 @@
-# ⚠️ DEPRECATED - DO NOT USE
+# send-invite: preferir send-org-invite / send-customer-portal-invite
 
-**Status:** DEPRECATED  
-**Date:** 2026-01-12  
-**Reason:** This function is deprecated and should NOT be used.
+**Status:** Reescrita Feb 2026 para usar **dealer_id** y **DealerUsers** (portal). Para flujos nuevos se recomienda **send-org-invite** (org) y **send-customer-portal-invite** (dealer).  
+**Antes:** DEPRECATED (2026-01-12) por uso de generateLink y company_id.
 
 ---
 
@@ -29,16 +28,18 @@ await supabase.functions.invoke('send-org-invite', {
 });
 ```
 
-### For Company Portal Users (external customers)
+### For Dealer Portal Users
 ```typescript
 await supabase.functions.invoke('send-customer-portal-invite', {
   body: {
-    company_id: string,
+    dealer_id: string,
+    organization_id: string,
     portal_user_email: string,
     role: 'member' | 'member_manager'
   }
 });
 ```
+(Or use `send-invite` with `kind: "portal"` and `dealer_id`; both use DealerUsers.)
 
 ---
 

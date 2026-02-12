@@ -4,6 +4,9 @@ import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { useProductTypes } from '../../../hooks/useProductTypes';
 import { useUIStore } from '../../../stores/ui-store';
+import type { DealerConfiguratorPolicy } from '../../../hooks/useDealerConfiguratorPolicy';
+import { useConfiguratorPolicy } from '../../../context/ConfiguratorPolicyContext';
+import { useActingAsContext } from '../../../context/ActingAsContext';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/SelectShadcn';
 import { useBOMTemplates } from '../../../hooks/useBOMTemplates';
 import { Image as ImageIcon } from 'lucide-react';
@@ -17,11 +20,20 @@ const PRODUCT_TYPE_IMAGES: Record<string, string> = {
   'Drapery': '/images/Drapery.png',
   'Awning': '/images/Awning.png',
   'Window Film': '/images/Window Film.png',
+  'Accessories': '/images/Accessories.png',
 };
+// Fallback si el archivo está guardado como "Accesories" (una s)
+const ACCESSORIES_IMAGE_PATHS = ['/images/Accessories.png', '/images/Accesories.png'];
 
 interface ProductStepProps {
   config: CurtainConfiguration | ProductConfig;
   onUpdate: (updates: Partial<CurtainConfiguration | ProductConfig>) => void;
+  /** When set (acting as dealer with policy), only these product types are shown */
+  policy?: DealerConfiguratorPolicy | null;
+  /** True while policy is being loaded (acting as dealer). Show skeleton to avoid flash of all types. */
+  policyLoading?: boolean;
+  /** Navigate to a step by id (e.g. 'accessories' for Accessories Only card) */
+  onNavigateToStep?: (stepId: string) => void;
 }
 
 // UI metadata for each product type code (display info only)
@@ -114,7 +126,21 @@ const PRODUCT_UI_METADATA: Record<string, {
   },
 };
 
-export default function ProductStep({ config, onUpdate }: ProductStepProps) {
+export default function ProductStep({ config, onUpdate, policy: policyProp, policyLoading: policyLoadingProp, onNavigateToStep }: ProductStepProps) {
+  const { policy: policyCtx, loading: policyLoadingCtx } = useConfiguratorPolicy();
+  const { activeDisplayName } = useActingAsContext() ?? {};
+  const policy = policyProp ?? policyCtx;
+  const policyLoading = policyLoadingProp ?? policyLoadingCtx;
+  const accessoriesOnlyMode = !!policy && policy.allow_accessories_only === true;
+
+  const handleAccessoriesSelect = () => {
+    onUpdate({
+      productType: 'accessories' as any,
+      productTypeId: undefined,
+      product_type_id: undefined,
+      bom_template_id: null,
+    } as any);
+  };
   // Load ProductTypes from database
   const { productTypes, loading: loadingProductTypes } = useProductTypes();
   useOrganizationContext();
@@ -128,6 +154,7 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
   // Debug BOM template picker oculto (no se muestra en UI)
   const showTemplatePicker = false;
   const [productImageErrors, setProductImageErrors] = useState<Record<string, boolean>>({});
+  const [accessoriesImageIndex, setAccessoriesImageIndex] = useState(0);
   
   // FASE 1: Support both productTypeId (legacy) and product_type_id (unified contract)
   const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
@@ -215,10 +242,26 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
       })
       .filter(Boolean);
   }, [productTypes]);
+
+  // Filter by DealerConfiguratorPolicy when acting as dealer with policy.
+  // Case-insensitive: policy codes are normalized to lowercase in the hook; compare with pt.code.toLowerCase().
+  // Fail closed: if policy exists and array is empty → show nothing (no product types assigned).
+  const visibleProductCards = useMemo(() => {
+    if (!policy) return productCards;
+    const codes = policy.allowed_product_type_codes ?? [];
+    if (codes.length === 0) return [];
+    const policyCodesLower = codes.map((c) => c.toLowerCase());
+    return productCards.filter(
+      (p): p is NonNullable<typeof p> =>
+        !!p && policyCodesLower.includes((p.code || '').toLowerCase())
+    );
+  }, [productCards, policy]);
   
   if (import.meta.env.DEV && productCards.length > 0) {
     console.log('ProductStep: Product cards generated', {
       count: productCards.length,
+      visibleCount: visibleProductCards.length,
+      policy: policy ? { allowed_product_type_codes: policy.allowed_product_type_codes } : null,
       cards: productCards.map(c => ({ code: c?.code, name: c?.name, id: c?.id })),
     });
   }
@@ -257,18 +300,38 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     } as any);
   };
   
-  // Show loading state
+  // Show loading state (product types or policy when acting as dealer)
   if (loadingProductTypes) return <div className="py-6 px-6" />;
+  if (policyLoading) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
+          <div className="text-center text-gray-500 py-8">
+            <p className="text-sm">Loading permissions…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  // Show error if no product types
-  if (productCards.length === 0) {
+  // Show error if no product types (after policy filter). Fail closed: policy with empty allowed list = no types assigned.
+  if (visibleProductCards.length === 0) {
+    const noTypesAssigned = policy && (!policy.allowed_product_type_codes?.length);
+    const dealerLabel = activeDisplayName?.trim() ? ` (${activeDisplayName})` : '';
     return (
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
           <div className="text-center text-red-500 py-8">
-            <p className="text-sm font-medium">No product types available</p>
-            <p className="text-xs mt-1">Please configure product types in your organization settings.</p>
+            <p className="text-sm font-medium">
+              {noTypesAssigned ? `No product types assigned for this dealer${dealerLabel}.` : 'No product types available'}
+            </p>
+            <p className="text-xs mt-1">
+              {noTypesAssigned
+                ? 'Please contact admin.'
+                : 'Please configure product types in your organization settings.'}
+            </p>
           </div>
         </div>
       </div>
@@ -279,9 +342,9 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
-        
+
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {productCards.map((product) => {
+          {visibleProductCards.map((product) => {
             if (!product) return null;
             
             // Check if selected by comparing UUID (support both unified contract and legacy)
@@ -331,6 +394,47 @@ export default function ProductStep({ config, onUpdate }: ProductStepProps) {
               </div>
             );
           })}
+          {accessoriesOnlyMode && (
+            <div
+              onClick={() => {
+                const isAccessoriesSelected = (config as any).productType === 'accessories';
+                if (isAccessoriesSelected) {
+                  handleProductTypeDeselect();
+                } else {
+                  handleAccessoriesSelect();
+                }
+              }}
+              className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                (config as any).productType === 'accessories'
+                  ? 'border-2 border-gray-900 shadow-lg'
+                  : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+              }`}
+            >
+              <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
+                {!productImageErrors['Accessories'] ? (
+                  <img
+                    src={ACCESSORIES_IMAGE_PATHS[accessoriesImageIndex]}
+                    alt="Accessories"
+                    className="w-full h-full object-contain"
+                    onError={() => {
+                      if (accessoriesImageIndex + 1 < ACCESSORIES_IMAGE_PATHS.length) {
+                        setAccessoriesImageIndex((i) => i + 1);
+                      } else {
+                        setProductImageErrors((prev) => ({ ...prev, 'Accessories': true }));
+                      }
+                    }}
+                  />
+                ) : (
+                  <ImageIcon className="w-16 h-16 text-gray-300" />
+                )}
+              </div>
+              <div className="p-4 bg-gray-100">
+                <h3 className="font-semibold text-sm truncate text-center text-gray-900" title="Accessories">
+                  Accessories
+                </h3>
+              </div>
+            </div>
+          )}
         </div>
         
         {/* BOM Template Selection - SOLO en modo DEBUG para admin/superadmin */}

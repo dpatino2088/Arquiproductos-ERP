@@ -18,7 +18,7 @@ const TRIPLE_SHADE_STEPS: ProductStep[] = [
   { id: 'hardware', label: 'HARDWARE', component: HardwareStepComponent },
   { id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent },
   { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
-  { id: 'review', label: 'QUOTE', component: ReviewStepComponent },
+  { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
 ];
 
 function validateStep(stepId: string, config: ProductConfig): boolean {
@@ -29,8 +29,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
     case 'measurements':
       return !!(tripleConfig.width_mm && tripleConfig.height_mm);
 
-    case 'variants':
-      // VariantsStep actual es compartido y usa collectionName/collection_name + variantId (CatalogItem id).
+    case 'variants': {
       const hasCollection = !!(
         (tripleConfig as any).collectionName ||
         (tripleConfig as any).collection_name ||
@@ -42,6 +41,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
         (tripleConfig as any).fabric_variant_id
       );
       return hasCollection && hasVariant;
+    }
 
     case 'hardware':
       // ✅ NUEVO FLUJO SECUENCIAL: Hardware requiere color + bottom bar + headbox (obligatorio para triple)
