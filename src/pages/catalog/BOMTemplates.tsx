@@ -3886,8 +3886,8 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
+                    <div className="table-fit-wrapper">
+                      <table className="table-fit">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
                             <th className="text-left py-2 px-4 text-xs font-semibold text-gray-900">Component</th>
@@ -4093,7 +4093,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
               handleSave();
             }}
             disabled={isCreating || isUpdating || !productTypeId || components.length === 0}
-            className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-save px-4 py-2 text-sm font-medium text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isCreating || isUpdating ? 'Saving...' : 'Save BOM Template'}
           </button>
@@ -4235,8 +4235,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId, setEditingTempla
               </button>
               <button
                 onClick={handleSaveEngineeringRules}
-                className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors hover:opacity-90"
               >
                 Save
               </button>

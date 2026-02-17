@@ -6,6 +6,11 @@ import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 
 /**
+ * ✅ Estándar #1: Scope State Machine
+ */
+export type ScopeState = 'idle' | 'loading_scope' | 'ready' | 'switching' | 'error';
+
+/**
  * Customer shape canónico para UI
  */
 export interface DirectoryCustomer {
@@ -110,9 +115,20 @@ export interface UpdateCustomerInput {
  */
 export function useDirectoryCustomers(params?: { organizationId?: string | null; enabled?: boolean }) {
   const [customers, setCustomers] = useState<DirectoryCustomer[]>([]);
-  const [isPending, setIsPending] = useState(false);
+  // ✅ Iniciar como true cuando enabled → isFirstLoad=true desde el primer render (sin flash false→true)
+  const [isPending, setIsPending] = useState(true);
   const [hasResolvedOnce, setHasResolvedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // ✅ Estándar #1: State Machine
+  const [scopeState, setScopeState] = useState<ScopeState>('idle');
+  
+  // ✅ Estándar #6: Cache por scopeKey
+  const cacheRef = useRef<Map<string, DirectoryCustomer[]>>(new Map());
+  
+  // ✅ Estándar #5: Guardar scopeKey con el que se cargó
+  const [customersScopeKey, setCustomersScopeKey] = useState<string>('');
+  
   const fetchIdRef = useRef(0);
   const { activeOrganizationId: contextOrgId } = useOrganizationContext();
   const { activeDealerId, hasHydrated } = useActiveDealer();
@@ -120,9 +136,17 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
 
   const activeOrganizationId = params?.organizationId ?? contextOrgId;
   const enabled = params?.enabled ?? true;
+  
+  // ✅ Estándar #2: scopeKey estable (string, solo IDs)
+  const scopeKey = `${activeOrganizationId ?? 'none'}:${activeDealerId ?? 'none'}`;
+  const prevScopeKeyRef = useRef<string>(scopeKey);
+  
   /** Para org: solo true cuando ActingAs hidrató (dealer conocido). Para portal: true. No renderizar lista hasta que sea true. */
   const isScopeReady = userType === 'internal' ? hasHydrated : true;
   const isInitialLoading = !hasResolvedOnce;
+  
+  // ✅ Estándar #5: Gate por Dealer - solo mostrar si customersScopeKey coincide
+  const canShowCustomers = customersScopeKey === scopeKey;
 
   /** Columnas explícitas de DirectoryCustomers según dump (sin name/email/phone que no existen) */
   const DIRECTORY_CUSTOMERS_SELECT = `
@@ -196,6 +220,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
 
   /**
    * Fetch customers — regla de oro: portal = dealer_id obligatorio (0 si null); org = selectedDealerId o todos.
+   * ✅ Estándar #3: NO limpiar data al iniciar fetch (keep previous data)
    */
   const fetchCustomers = useCallback(async () => {
     if (!enabled || !activeOrganizationId) {
@@ -203,11 +228,30 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       setIsPending(false);
       setHasResolvedOnce(false);
       setError(null);
+      setScopeState('idle');
+      setCustomersScopeKey('');
       return;
     }
 
     const thisFetchId = ++fetchIdRef.current;
+    const currentScopeKey = scopeKey;
+    
+    // ✅ Estándar #6: Revisar cache primero
+    if (cacheRef.current.has(currentScopeKey)) {
+      const cached = cacheRef.current.get(currentScopeKey)!;
+      if (import.meta.env.DEV) {
+        console.log('[useDirectoryCustomers] Cache HIT:', { scopeKey: currentScopeKey, count: cached.length });
+      }
+      setCustomers(cached);
+      setCustomersScopeKey(currentScopeKey);
+      setScopeState('ready');
+      setHasResolvedOnce(true);
+      // Continuar con fetch en background para actualizar
+    }
+    
+    // ✅ Estándar #3: NO vaciar customers - mantener datos previos
     setIsPending(true);
+    setScopeState(hasResolvedOnce ? 'switching' : 'loading_scope');
 
     try {
       let dealerId: string | null = null;
@@ -220,9 +264,11 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
         dealerId = effective.dealerId;
         if (dealerId == null) {
           if (thisFetchId === fetchIdRef.current) {
-            setCustomers([]);
+            // ✅ Mantener customers previos incluso si no hay dealer
             setIsPending(false);
             setHasResolvedOnce(true);
+            setScopeState('ready');
+            setCustomersScopeKey(currentScopeKey);
           }
           return;
         }
@@ -234,28 +280,37 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       const mapped = data.map(mapToCustomer);
 
       if (thisFetchId !== fetchIdRef.current) return;
+      
       if (import.meta.env.DEV) {
         console.log('[useDirectoryCustomers] Fetched customers:', {
           count: mapped.length,
           userType,
           dealerId,
+          scopeKey: currentScopeKey,
         });
       }
+      
+      // ✅ Estándar #6: Guardar en cache
+      cacheRef.current.set(currentScopeKey, mapped);
+      
       setCustomers(mapped);
+      setCustomersScopeKey(currentScopeKey);
       setError(null);
+      setScopeState('ready');
     } catch (err: any) {
       if (thisFetchId !== fetchIdRef.current) return;
       const errorMessage = err?.message || 'Error loading customers';
       console.error('[useDirectoryCustomers] Error:', errorMessage, err);
       setError(errorMessage);
-      // Mantener lista previa en error (no vaciar)
+      setScopeState('error');
+      // ✅ Estándar #3: Mantener lista previa en error (no vaciar)
     } finally {
       if (thisFetchId === fetchIdRef.current) {
         setIsPending(false);
         setHasResolvedOnce(true);
       }
     }
-  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectCustomers, mapToCustomer]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectCustomers, mapToCustomer, scopeKey, hasResolvedOnce]);
 
   /**
    * Create customer — payload mínimo. org/dealer vía getEffectiveOrgAndDealer.
@@ -495,13 +550,24 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     fetchCustomers();
   }, [fetchCustomers]);
 
-  // Al cambiar dealer u org: limpiar lista y marcar como no resuelto para no mostrar datos de otro scope.
+  // ✅ Estándar #3: NO limpiar data cuando scopeKey cambia - mantener previous data
+  // Solo marcar que scopeKey cambió para indicar "switching"
   useEffect(() => {
     if (!enabled) return;
-    setHasResolvedOnce(false);
-    setCustomers([]);
-    setError(null);
-  }, [activeDealerId, activeOrganizationId, enabled]);
+    if (prevScopeKeyRef.current !== scopeKey) {
+      if (import.meta.env.DEV) {
+        console.log('[useDirectoryCustomers] scopeKey changed:', {
+          from: prevScopeKeyRef.current,
+          to: scopeKey,
+        });
+      }
+      prevScopeKeyRef.current = scopeKey;
+      // ✅ NO limpiar customers - mantener datos previos
+      // ✅ NO resetear hasResolvedOnce - permite diferenciar first load vs switch
+      setError(null);
+      setScopeState('switching');
+    }
+  }, [scopeKey, enabled]);
 
   // Auto-fetch cuando cambia organization (siempre declarado, no condicional).
   // Org user: no hacer el primer fetch hasta que ActingAs haya hidratado (evita flash con todos los datos).
@@ -519,6 +585,12 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     fetchCustomers();
   }, [fetchCustomers, enabled, userType, hasHydrated]);
 
+  // ✅ Estándar #4: Diferenciar estados
+  const hasData = customers.length > 0;
+  const isFirstLoad = isPending && !hasResolvedOnce;
+  const isRefreshing = isPending && hasResolvedOnce && customersScopeKey === scopeKey;
+  const isSwitchingDealer = scopeState === 'switching' && isPending;
+
   return {
     customers,
     isLoading: isPending,
@@ -527,6 +599,16 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     isScopeReady,
     hasResolvedOnce,
     error,
+    
+    // ✅ Nuevos campos para state machine
+    scopeState,
+    customersScopeKey,
+    canShowCustomers,
+    hasData,
+    isFirstLoad,
+    isRefreshing,
+    isSwitchingDealer,
+    
     fetchCustomers,
     createCustomer,
     updateCustomer,

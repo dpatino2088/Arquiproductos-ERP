@@ -1,8 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useDeferredValue } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { router } from '../../lib/router';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useDirectoryContacts } from '../../hooks/useDirectoryContacts';
 import { useDeleteContact } from '../../hooks/useDirectory';
 import { useUIStore } from '../../stores/ui-store';
@@ -113,13 +112,35 @@ const formatContactTypeLabel = (contactType: string) => {
 };
 
 export default function Contacts() {
+  // ✅ Estándar #8: Instrumentación - detectar remount
+  useEffect(() => {
+    if (import.meta.env.DEV) console.log('[MOUNT] Contacts');
+    return () => {
+      if (import.meta.env.DEV) console.log('[UNMOUNT] Contacts');
+    };
+  }, []);
+
   // ✅ ALL HOOKS MUST BE CALLED FIRST (before any conditional returns)
-  const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
-  // ✅ Hook siempre se llama, pero puede estar deshabilitado
-  const { contacts, isPending: contactsPending, isInitialLoading: contactsInitialLoading, isScopeReady: contactsScopeReady, error: contactsError, refetch } = useDirectoryContacts({
+  // ✅ Hook con nuevos campos: scopeState, canShowContacts, hasData, isFirstLoad, isRefreshing, isSwitchingDealer
+  const {
+    contacts,
+    isPending: contactsPending,
+    isInitialLoading: contactsInitialLoading,
+    isScopeReady: contactsScopeReady,
+    error: contactsError,
+    // ✅ Nuevos campos del hook mejorado
+    scopeState,
+    contactsScopeKey,
+    canShowContacts,
+    hasData,
+    isFirstLoad,
+    isRefreshing,
+    isSwitchingDealer,
+    refetch,
+  } = useDirectoryContacts({
     organizationId: activeOrganizationId ?? null,
     enabled: !!activeOrganizationId,
   });
@@ -127,14 +148,35 @@ export default function Contacts() {
   const { deleteContact, isDeleting } = useDeleteContact();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
-  const contactsLoading = orgLoading || !contactsScopeReady || contactsInitialLoading || contactsPending;
+  // ✅ Estándar #4: Diferenciar estados correctamente
+  const initialLoading = isFirstLoad || orgLoading || !contactsScopeReady;
+  
+  // ✅ Estándar #8: Instrumentación - log de estados
   useEffect(() => {
-    setGlobalLoading(contactsLoading);
+    if (import.meta.env.DEV) {
+      console.log('[Contacts] State:', {
+        scopeState,
+        contactsScopeKey,
+        canShowContacts,
+        hasData,
+        isFirstLoad,
+        isRefreshing,
+        isSwitchingDealer,
+        contactsCount: contacts.length,
+      });
+    }
+  }, [scopeState, contactsScopeKey, canShowContacts, hasData, isFirstLoad, isRefreshing, isSwitchingDealer, contacts.length]);
+
+  useEffect(() => {
+    setGlobalLoading(initialLoading);
     return () => setGlobalLoading(false);
-  }, [contactsLoading, setGlobalLoading]);
+  }, [initialLoading, setGlobalLoading]);
 
   // State hooks
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  // ✅ Estándar #9: Detectar settling de search
+  const isSearchSettling = searchTerm !== deferredSearchTerm;
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -163,12 +205,13 @@ export default function Contacts() {
     }
   }, []);
 
+  // Detect remount (si ves UNMOUNT/MOUNT al cambiar tab, hay remount escondido)
   useEffect(() => {
-    registerSubmodules('Directory', [
-      { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
-      { id: 'customers', label: 'Customers', href: '/directory/customers' },
-    ]);
-  }, [registerSubmodules]);
+    if (import.meta.env.DEV) {
+      console.log('[MOUNT] Contacts');
+      return () => console.log('[UNMOUNT] Contacts');
+    }
+  }, []);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -257,10 +300,9 @@ export default function Contacts() {
 
   // ✅ useMemo MUST run before any conditional return (rules of hooks)
   const filteredContacts = useMemo(() => {
+    const searchLower = deferredSearchTerm.toLowerCase();
     const filtered = contactsData.filter(contact => {
-      // Search filter - safely handle undefined/null values
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || (
+      const matchesSearch = !deferredSearchTerm || (
         (contact.firstName || '').toLowerCase().includes(searchLower) ||
         (contact.lastName || '').toLowerCase().includes(searchLower) ||
         (contact.email || '').toLowerCase().includes(searchLower) ||
@@ -325,17 +367,15 @@ export default function Contacts() {
         return 0;
       }
     });
-  }, [searchTerm, contactsData, sortBy, sortOrder, selectedCategory, selectedStatus, selectedContactType, selectedLocation]);
+  }, [deferredSearchTerm, contactsData, sortBy, sortOrder, selectedCategory, selectedStatus, selectedContactType, selectedLocation]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredContacts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedContacts = filteredContacts.slice(startIndex, startIndex + itemsPerPage);
 
-  // Conditional returns AFTER all hooks (rules of hooks)
-  if (orgLoading) return <div className="py-6 px-6" />;
-
-  if (!activeOrganizationId) {
+  // Conditional returns ONLY for real empty state (no org). Never empty div to avoid flash.
+  if (!orgLoading && !activeOrganizationId) {
     return (
       <div className="py-6 px-6">
         <div style={{ padding: '24px' }}>
@@ -346,19 +386,24 @@ export default function Contacts() {
     );
   }
 
-  if (contactsError) {
-    return (
-      <div className="py-6 px-6">
-        <div style={{ padding: '24px' }}>
-          <div>Something went wrong</div>
-          <pre>{String(contactsError)}</pre>
-          <button onClick={refetch}>Try again</button>
-        </div>
-      </div>
-    );
-  }
+  // Flags: first load vs refetch (keep previous data, no empty list flash)
+  // ✅ hasData ya viene del hook - no redeclarar
+  const contentLoading = !contactsScopeReady || contactsPending;
+  // ✅ Estándar #4: Ya no usar estas variables antiguas - usar las del hook
+  // const initialLoading = isFirstLoad; // ya está en el hook
+  // const refreshing = isRefreshing; // ya está en el hook
+  // isSearchSettling ya está definido arriba
+  const showOverlay = isRefreshing || isSearchSettling || isSwitchingDealer;
+  const showEmptyState = !isFirstLoad && !isSearchSettling && !isSwitchingDealer && filteredContacts.length === 0;
 
-  if (!contactsScopeReady) return <div className="py-6 px-6" />;
+  // Carga progresiva: 1) Header + Table container, 2) Search+Filters, 3) contenido tabla
+  const [showSearchAndFilters, setShowSearchAndFilters] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setShowSearchAndFilters(true));
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   // Handle sorting
   const handleSort = (field: typeof sortBy) => {
@@ -577,19 +622,14 @@ export default function Contacts() {
     }
   };
 
-  if (contactsInitialLoading) return <div className="py-6 px-6" />;
-
-  const showSkeleton = contacts.length === 0 && contactsPending;
-  const showOverlay = contacts.length > 0 && contactsPending;
-
   return (
     <div className="py-6">
-      {/* Header */}
+      {/* 1) Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Contacts Directory</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {`Manage your ${filteredContacts.length} contacts${filteredContacts.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
+            {isFirstLoad ? 'Loading…' : `Manage your ${filteredContacts.length} contacts${filteredContacts.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -608,7 +648,8 @@ export default function Contacts() {
         </div>
       </div>
 
-      {/* Search and Filters */}
+      {/* 2) Search and Filters — se muestran después del primer paint (Header + Table container) */}
+      {showSearchAndFilters && (
       <div className="mb-4">
         <div className={`bg-white border border-gray-200 py-6 px-6 ${
           showFilters ? 'rounded-t-lg' : 'rounded-lg'
@@ -933,15 +974,86 @@ export default function Contacts() {
           </div>
         )}
       </div>
+      )}
 
-      <div className="relative">
-        {showSkeleton ? <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[120px]" /> : (
+      {/* 3) Table container — visible desde el primer paint */}
+      <div className="relative min-h-[420px]">
+        {/* ✅ Estándar #7: Overlays para estados sin desmontar layout */}
+        {isSwitchingDealer && (
+          <div className="absolute inset-0 bg-white/80 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p className="text-sm text-gray-600 font-medium">Switching dealer...</p>
+            </div>
+          </div>
+        )}
+        {isSearchSettling && hasData && !isSwitchingDealer && (
+          <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+              <p className="text-xs text-gray-500 font-medium">Filtering...</p>
+            </div>
+          </div>
+        )}
+        {isRefreshing && !isSwitchingDealer && !isSearchSettling && (
+          <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              <p className="text-xs text-gray-500 font-medium">Updating...</p>
+            </div>
+          </div>
+        )}
+        
+        {contactsError ? (
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 p-6">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-800 font-medium mb-2">Error loading contacts</p>
+              <p className="text-sm text-red-700 mb-3">{contactsError}</p>
+              <button onClick={() => refetch()} className="px-3 py-1.5 rounded text-sm bg-red-100 text-red-800 hover:bg-red-200">Try again</button>
+            </div>
+          </div>
+        ) : isFirstLoad ? (
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Name</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Customer Name</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Phone</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Email</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Type</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created By</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created At</th>
+                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i} className="border-b border-gray-100">
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-28" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-32" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-20" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-20" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-20" /></td>
+                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-16" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
           <>
       {/* Table View */}
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="table-fit-wrapper">
+            <table className="table-fit">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
@@ -981,7 +1093,7 @@ export default function Contacts() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredContacts.length === 0 ? (
+                {showEmptyState ? (
                   <tr>
                     <td colSpan={10} className="py-12 px-6 text-center">
                       <Contact className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -993,36 +1105,32 @@ export default function Contacts() {
                       </p>
                     </td>
                   </tr>
+                ) : filteredContacts.length === 0 && isSearchSettling ? (
+                  <tr>
+                    <td colSpan={10} className="py-8 px-6 text-center text-sm text-muted-foreground">Updating search…</td>
+                  </tr>
                 ) : (
                   paginatedContacts.map((contact) => (
                     <tr 
                       key={contact.id} 
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
-                      <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
-                        <span className="font-medium">{contact.firstName}</span>
-                      </td>
+                      <td className="py-4 px-6 text-gray-900 text-sm"><span className="block truncate font-medium" title={contact.firstName}>{contact.firstName}</span></td>
+                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate" title={contact.company || '— Not linked'}>{contact.company || '— Not linked'}</span></td>
                       <td className="py-4 px-6 text-gray-700 text-sm">
-                        <span className="whitespace-nowrap">{contact.company || '— Not linked'}</span>
-                      </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
                           <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                          <span>{(contact as any).primary_phone || 'N/A'}</span>
+                          <span className="truncate">{(contact as any).primary_phone || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
-                        <div className="flex items-center gap-1">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
+                        <div className="flex items-center gap-1 min-w-0">
                           <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{contact.email || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
-                        {(contact as any).contact_country || 'N/A'}
-                      </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
-                        {(contact as any).contact_city || 'N/A'}
-                      </td>
+                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{(contact as any).contact_country || 'N/A'}</span></td>
+                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{(contact as any).contact_city || 'N/A'}</span></td>
                       <td className="py-4 px-6">
                         <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${
                           getContactTypeBadgeColor((contact as any).contact_type || '')
@@ -1030,9 +1138,7 @@ export default function Contacts() {
                           {formatContactTypeLabel((contact as any).contact_type || 'architect')}
                         </span>
                       </td>
-                      <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
-                        {contact.createdBy || '—'}
-                      </td>
+                      <td className="py-4 px-6 text-gray-600 text-sm"><span className="block truncate" title={contact.createdBy || '—'}>{contact.createdBy || '—'}</span></td>
                       <td className="py-4 px-6 text-gray-600 text-sm">
                         {(contact as any).created_at 
                           ? new Date((contact as any).created_at).toLocaleDateString() 
@@ -1275,7 +1381,7 @@ export default function Contacts() {
       </div>
           </>
         )}
-        {showOverlay && <div className="absolute inset-0 z-10 rounded-lg pointer-events-none" aria-hidden />}
+        {/* ✅ Los overlays ya están definidos arriba - este duplicado fue eliminado */}
       </div>
 
       {/* Confirm Dialog */}

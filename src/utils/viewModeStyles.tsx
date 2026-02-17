@@ -2,13 +2,15 @@ import React from 'react';
 
 export type ViewMode = 'manager';
 
-// Sidebar: tono base #163342 y colores relacionados (más oscuro para active/hover, acento en el mismo tono)
-const SIDEBAR_BASE = '#163342';
-const SIDEBAR_ACTIVE_HOVER = '#122d3b';   // Variante más oscura de #163342
-const SIDEBAR_ACCENT = '#1e4555';         // Acento claro en el mismo tono (borde activo)
-const SIDEBAR_TEXT_INACTIVE = '#8fa3ad';  // Texto inactivo, legible sobre #163342
+// Sidebar: usa variables CSS de global.css para poder probar/cambiar el azul en un solo lugar
+// En global.css: --sidebar-base, --sidebar-active-hover, --sidebar-accent, --sidebar-text-inactive
+const SIDEBAR_BASE = 'var(--sidebar-base)';
+const SIDEBAR_ACTIVE_HOVER = 'var(--sidebar-active-hover)';
+const SIDEBAR_ACCENT = 'var(--sidebar-accent)';
+const SIDEBAR_TEXT_INACTIVE = 'var(--sidebar-text-inactive)';
+// Solo la barra vertical del ítem activo = Cyan
+const SIDEBAR_ACTIVE_BAR = '#008DD2';
 
-// View mode color constants – sidebar y colores relacionados con el tono #163342
 export const VIEW_MODE_COLORS = {
   manager: {
     sidebar: {
@@ -22,7 +24,7 @@ export const VIEW_MODE_COLORS = {
       active: {
         background: SIDEBAR_ACTIVE_HOVER,
         color: '#ffffff',
-        border: '#ffffff'
+        border: SIDEBAR_ACTIVE_BAR
       },
       inactive: {
         color: SIDEBAR_TEXT_INACTIVE

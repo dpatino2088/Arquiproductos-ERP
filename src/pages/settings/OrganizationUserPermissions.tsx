@@ -789,8 +789,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
                   handleSave(false);
                 }}
                 disabled={saving || !isDirtyPermissions}
-                className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save px-4 py-2 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
               >
                 {saving ? (
                   <>
@@ -810,8 +809,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
                   handleSave(true);
                 }}
                 disabled={saving || !isDirtyPermissions}
-                className="px-4 py-2 bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save-close px-4 py-2 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
               >
                 {saving ? (
                   <>

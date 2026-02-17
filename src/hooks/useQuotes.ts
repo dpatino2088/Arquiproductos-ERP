@@ -81,7 +81,7 @@ export function useQuotes(dealerId?: string | null) {
       }
 
       if (isMounted) {
-        setQuotes([]);
+        // ✅ NO vaciar quotes — mantener datos previos mientras carga (evita flash)
         setLoading(true);
         setError(null);
       }
@@ -296,7 +296,7 @@ export function useApprovedQuotesWithProgress(dealerId?: string | null) {
         return;
       }
 
-      setQuotes([]);
+      // ✅ NO vaciar quotes — mantener datos previos mientras carga (evita flash)
       setLoading(true);
       setError(null);
 

@@ -66,8 +66,7 @@ export default function NotesTab({ moId }: NotesTabProps) {
         <button
           onClick={handleSave}
           disabled={!hasChanges || isUpdating}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+          className="btn-save flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Save className="w-4 h-4" />
           {isUpdating ? 'Saving...' : 'Save Notes'}

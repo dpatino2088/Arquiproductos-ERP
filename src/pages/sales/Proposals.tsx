@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { router } from '../../lib/router';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+
 import { useProposalsList } from '../../hooks/useProposals';
 import { useUIStore } from '../../stores/ui-store';
 import {
   Search,
-  FileText,
   RefreshCw,
   Filter,
   SortAsc,
@@ -52,7 +51,6 @@ function formatCurrency(amount: number | null | undefined) {
 }
 
 export default function Proposals() {
-  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { list, loading, error, refetch, deleteProposal, deleteProposals } = useProposalsList();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
   const addNotification = useUIStore((s) => s.addNotification);
@@ -219,17 +217,12 @@ export default function Proposals() {
     }
   }, [selectedIds, showConfirm, deleteProposals, setDialogLoading, addNotification]);
 
-  useEffect(() => {
-    registerSubmodules('Sales', [
-      { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
-      { id: 'proposals', label: 'Proposals', href: '/sales/proposals', icon: FileText },
-    ]);
-    return () => clearSubmoduleNav();
-  }, [registerSubmodules, clearSubmoduleNav]);
+  // ✅ registerSubmodules se maneja en SalesDirectory.tsx (wrapper)
 
-  if (loading) return <div className="py-6 px-6" />;
+  // ✅ NUNCA retornar vacío por loading — usar overlay en su lugar (igual que Directory)
+  // if (loading) return <div ... />; ← ELIMINADO: causaba flash
 
-  if (error) {
+  if (error && !loading) {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
@@ -353,9 +346,18 @@ export default function Proposals() {
       </div>
 
       {/* Table: mismos estilos que Quotes */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+      <div className="relative bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[300px]">
+        {/* ✅ Overlay de loading — nunca desmontar la tabla */}
+        {loading && (
+          <div className="absolute inset-0 bg-white/90 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p className="text-sm text-gray-600 font-medium">Loading...</p>
+            </div>
+          </div>
+        )}
+        <div className="table-fit-wrapper">
+          <table className="table-fit">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="w-10 py-3 px-4 text-left">

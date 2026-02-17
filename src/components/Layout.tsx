@@ -772,7 +772,7 @@ function Layout({ children }: LayoutProps) {
         </a>
       </div>
       
-      <div className="flex">
+      <div className="flex min-w-0 overflow-x-hidden">
         {/* Sidebar Navigation - Hide when in Settings */}
         {!isSettingsRoute && (
         <nav 
@@ -1204,7 +1204,7 @@ function Layout({ children }: LayoutProps) {
         {/* Main Content */}
         <main 
           id="main-content"
-          className="flex-1 min-w-0 transition-[margin-left] duration-300 ease-in-out"
+          className="flex-1 min-w-0 overflow-x-hidden transition-[margin-left] duration-300 ease-in-out"
           style={{
             marginLeft: isSettingsRoute ? '0px' : mainMarginLeft,
             paddingTop: isSettingsRoute ? '0px' : mainPaddingTop,

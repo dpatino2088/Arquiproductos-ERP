@@ -148,8 +148,8 @@ export default function CutListTab({ moId, moStatus }: CutListTabProps) {
                 </div>
 
                 {/* Cut Lines Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+                <div className="table-fit-wrapper">
+                  <table className="table-fit">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">SKU</th>

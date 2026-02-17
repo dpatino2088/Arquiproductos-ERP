@@ -49,7 +49,7 @@ export function useProposalsList() {
       return;
     }
 
-    setList([]);
+    // ✅ NO vaciar list — mantener datos previos mientras carga (evita flash)
     setLoading(true);
     setError(null);
 

@@ -295,8 +295,8 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
         {currentAccessories.length > 0 && (
           <div className="border-t border-gray-200 pt-6">
             <Label className="text-sm font-medium mb-4 block">SELECTED ACCESSORIES</Label>
-            <div className="border border-gray-200 rounded-lg overflow-x-auto">
-              <table className="w-full min-w-[800px]">
+            <div className="border border-gray-200 rounded-lg table-fit-wrapper">
+              <table className="table-fit w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="text-left py-3 px-5 text-xs font-medium text-gray-700 whitespace-nowrap" style={{ width: '12%' }}>SKU</th>

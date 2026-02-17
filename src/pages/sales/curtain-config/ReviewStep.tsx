@@ -714,8 +714,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
               ) : loadingBreakdown ? (
                 <div className="text-sm text-gray-500">Loading component breakdown...</div>
               ) : breakdownLines.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <div className="table-fit-wrapper">
+                  <table className="table-fit min-w-full divide-y divide-gray-200 text-sm">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">

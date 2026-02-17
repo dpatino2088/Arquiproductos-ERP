@@ -491,8 +491,8 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
 
       {/* Users Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-        <div className="overflow-x-auto">
-        <table className="w-full">
+        <div className="table-fit-wrapper">
+        <table className="table-fit">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">

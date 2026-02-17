@@ -30,12 +30,9 @@ const GatewayTimeout = lazy(() => import('./pages/error-pages/GatewayTimeout'));
 
 const Branches = lazy(() => import('./pages/branches/Branches'));
 
-// Directory module pages
-const DirectoryContacts = lazy(() => import('./pages/directory/Contacts'));
-
+// Directory module pages (Contacts/Customers rendered inside Directory for persistent tabs)
+const Directory = lazy(() => import('./pages/directory/Directory'));
 const DirectoryContactNew = lazy(() => import('./pages/directory/ContactNew'));
-
-const DirectoryCustomers = lazy(() => import('./pages/directory/Customers'));
 const DirectoryCustomerNew = lazy(() => import('./pages/directory/CustomerNew'));
 const TestDirectory = lazy(() => import('./pages/directory/TestDirectory'));
 
@@ -47,6 +44,7 @@ const CompanyReports = lazy(() => import('./pages/reports/CompanyReports'));
 
 // New module pages
 const Sales = lazy(() => import('./pages/sales/Sales'));
+const SalesDirectory = lazy(() => import('./pages/sales/SalesDirectory'));
 const Orders = lazy(() => import('./pages/sales/Orders'));
 const Quotes = lazy(() => import('./pages/sales/Quotes'));
 const QuoteNew = lazy(() => import('./pages/sales/QuoteNew'));
@@ -960,13 +958,13 @@ function App() {
       case 'branches':
         return <Branches />;
       
-      // Directory module pages (protected but accessible to portal)
+      // Directory module pages (Contacts + Customers in one wrapper to avoid flash on tab switch)
       case 'directory-contacts':
-        return <RequireModule module="directory"><DirectoryContacts /></RequireModule>;
+        return <RequireModule module="directory"><Directory activeTab="contacts" /></RequireModule>;
       case 'directory-contact-new':
         return <RequireModule module="directory"><DirectoryContactNew /></RequireModule>;
       case 'directory-customers':
-        return <RequireModule module="directory"><DirectoryCustomers /></RequireModule>;
+        return <RequireModule module="directory"><Directory activeTab="customers" /></RequireModule>;
       case 'directory-customer-new':
         return <RequireModule module="directory"><DirectoryCustomerNew /></RequireModule>;
       case 'test-directory':
@@ -978,11 +976,11 @@ function App() {
       case 'orders':
         return <RequireModule module="sales"><Orders /></RequireModule>;
       case 'quotes':
-        return <RequireModule module="sales"><Quotes /></RequireModule>;
+        return <RequireModule module="sales"><SalesDirectory activeTab="quotes" /></RequireModule>;
       case 'quote-new':
         return <RequireModule module="sales"><QuoteNew /></RequireModule>;
       case 'proposals':
-        return <RequireModule module="sales"><Proposals /></RequireModule>;
+        return <RequireModule module="sales"><SalesDirectory activeTab="proposals" /></RequireModule>;
       case 'proposal-detail':
         return <RequireModule module="sales"><ProposalDetail /></RequireModule>;
       case 'sale-orders':

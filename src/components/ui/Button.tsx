@@ -2,7 +2,7 @@ import React, { forwardRef, memo } from 'react';
 import { logger } from '../../lib/logger';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'save';
   size?: 'sm' | 'md' | 'lg';
   loading?: boolean;
   leftIcon?: React.ReactNode;
@@ -31,6 +31,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
     outline: 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-blue-500',
     ghost: 'text-gray-700 hover:bg-gray-100 focus:ring-gray-500',
     danger: 'bg-status-red text-white hover:bg-red-700 focus:ring-red-500',
+    save: 'btn-save text-white hover:opacity-90 focus:ring-2 focus:ring-offset-2 focus:ring-[var(--save-hex)]',
   };
 
   const sizeClasses = {
@@ -58,7 +59,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
 
   const buttonClasses = [
     baseClasses,
-    variantClasses[variant],
+    variantClasses[variant] ?? variantClasses.primary,
     sizeClasses[size],
     fullWidth ? 'w-full' : '',
     className,

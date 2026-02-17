@@ -288,7 +288,7 @@ export default function Login() {
         <div className="w-full max-w-md">
           <div className="lg:hidden text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center gap-2">
-              <Box size={32} style={{ color: "var(--primary-brand-hex)" }} />
+              <Box size={32} style={{ color: "#404a63" }} />
               <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
           </div>
@@ -370,7 +370,7 @@ export default function Login() {
                 type="submit"
                 disabled={isLoading || otpSent}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: "var(--primary-brand-hex)" }}
+                style={{ backgroundColor: "#404a63" }}
               >
                 {isLoading ? (
                   <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
@@ -387,7 +387,8 @@ export default function Login() {
                   type="button"
                   onClick={handleTestConnection}
                   disabled={connectionTest.status === 'testing'}
-                  className="text-xs text-muted-foreground hover:text-foreground underline disabled:opacity-50"
+                  className="text-xs underline hover:opacity-80 disabled:opacity-50"
+                  style={{ color: "#404a63" }}
                 >
                   {connectionTest.status === 'testing' ? 'Probando...' : 'Probar conexión a Supabase'}
                 </button>
@@ -424,7 +425,7 @@ export default function Login() {
                   type="submit"
                   disabled={isLoading || otpCode.length !== 6}
                   className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: "var(--primary-brand-hex)" }}
+                  style={{ backgroundColor: "#404a63" }}
                 >
                   {isLoading ? (
                     <>
@@ -441,7 +442,8 @@ export default function Login() {
                     setOtpSent(false);
                     setOtpCode('');
                   }}
-                  className="w-full text-sm text-primary hover:text-primary/80 transition-colors"
+                  className="w-full text-sm hover:opacity-80 transition-colors"
+                  style={{ color: "#404a63" }}
                 >
                   Use different email
                 </button>
@@ -478,11 +480,11 @@ export default function Login() {
         </div>
       </div>
 
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: "#1f4456" }}>
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: "#404a63" }}>
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">
-              <Box size={48} style={{ color: "var(--primary-brand-hex)" }} />
+              <Box size={48} style={{ color: "#ffffff" }} />
               <span className="text-4xl font-semibold text-white">Adaptio</span>
             </div>
           </div>

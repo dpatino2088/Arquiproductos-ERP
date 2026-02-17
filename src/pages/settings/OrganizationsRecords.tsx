@@ -168,8 +168,8 @@ export default function OrganizationsRecords({ onSelectOrganization, selectedOrg
 
       {/* Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="table-fit-wrapper">
+          <table className="table-fit">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">

@@ -735,8 +735,8 @@ export default function ApprovedBOMList() {
 
                 {/* Components Table */}
                 {group.components.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
+                  <div className="table-fit-wrapper">
+                    <table className="table-fit">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
                           <th className="text-left py-3 px-6 text-xs font-medium text-gray-700">Product Type</th>

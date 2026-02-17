@@ -1,6 +1,5 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useDeferredValue } from 'react';
 import { router } from '../../lib/router';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useDeleteCustomer } from '../../hooks/useDirectory';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
@@ -81,21 +80,26 @@ const getDotSize = (avatarSize: 'sm' | 'md' | 'lg') => {
 };
 
 export default function Customers() {
-  // ✅ ALL HOOKS MUST BE CALLED FIRST (before any conditional returns)
-  const { registerSubmodules } = useSubmoduleNav();
+  // ✅ ESTRUCTURA IDÉNTICA A CONTACTS — mismos hooks en el mismo orden
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
-  const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
-  const { canEditCustomers, canViewQuotes, loading: roleLoading, isSuperAdmin, isAdmin, isOwner } = useCurrentOrgRole();
-  
-  // Portal users can always edit Directory (both member and member_manager)
-  // Internal users need explicit canEditCustomers permission or be superadmin/admin/owner
-  const canEditCustomersFinal = userType === "portal" 
-    ? canEditDirectory 
-    : (isSuperAdmin || isOwner || isAdmin || canEditCustomers);
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
-  // ✅ Hook siempre se llama, pero puede estar deshabilitado
-  const { customers, isPending: customersPending, isInitialLoading: customersInitialLoading, isScopeReady: customersScopeReady, error: customersError, refetch, archiveCustomer } = useDirectoryCustomers({
+  const {
+    customers,
+    isPending: customersPending,
+    isInitialLoading: customersInitialLoading,
+    isScopeReady: customersScopeReady,
+    error: customersError,
+    scopeState,
+    customersScopeKey,
+    canShowCustomers,
+    hasData,
+    isFirstLoad,
+    isRefreshing,
+    isSwitchingDealer,
+    refetch,
+    archiveCustomer,
+  } = useDirectoryCustomers({
     organizationId: activeOrganizationId ?? null,
     enabled: !!activeOrganizationId,
   });
@@ -103,18 +107,26 @@ export default function Customers() {
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
-  const customersLoading = orgLoading || !customersScopeReady || customersInitialLoading || customersPending;
+  // Permisos — llamados siempre pero NO afectan layout/loading
+  const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
+  const { canEditCustomers, canViewQuotes, loading: roleLoading, isSuperAdmin, isAdmin, isOwner } = useCurrentOrgRole();
+  const canEditCustomersFinal = userType === "portal" 
+    ? canEditDirectory 
+    : (isSuperAdmin || isOwner || isAdmin || canEditCustomers);
+
+  // ✅ IDÉNTICO A CONTACTS — solo isFirstLoad para loading global
+  const initialLoading = isFirstLoad || orgLoading || !customersScopeReady;
+
   useEffect(() => {
-    setGlobalLoading(customersLoading);
+    setGlobalLoading(initialLoading);
     return () => setGlobalLoading(false);
-  }, [customersLoading, setGlobalLoading]);
+  }, [initialLoading, setGlobalLoading]);
 
   // Mapear DirectoryCustomer a CustomerItem para compatibilidad con UI existente
-  // También necesitamos cargar primary_contact_id y customer_type_name
   const [customersData, setCustomersData] = useState<CustomerItem[]>([]);
-  
+
   useEffect(() => {
-    // Mapear customers base (keepPreviousData: no vaciar al refetch)
+    // Mapear customers base de inmediato para evitar estado vacío intermedio.
     const mapped = customers.map(c => ({
       id: c.id,
       companyName: c.customer_name || '',
@@ -133,10 +145,14 @@ export default function Customers() {
       primary_contact_id: c.primary_contact_id || null,
       customer_type_name: c.customer_type_name || null,
     }));
-    
-    // Cargar contact names si hay primary_contact_ids
+
+    const baseRows = mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[];
+    setCustomersData(baseRows);
+
+    // Cargar contact names si hay primary_contact_ids y luego enriquecer sin vaciar UI.
     const contactIds = [...new Set(mapped.filter(c => (c as any).primary_contact_id).map(c => (c as any).primary_contact_id))];
     if (contactIds.length > 0 && activeOrganizationId) {
+      let cancelled = false;
       supabase
         .from('DirectoryContacts')
         .select('id, contact_name')
@@ -144,6 +160,7 @@ export default function Customers() {
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .then(({ data: contactsData }: { data: Array<{ id: string; contact_name: string | null }> | null }) => {
+          if (cancelled) return;
           if (contactsData) {
             const contactMap = new Map(contactsData.map((ct: { id: string; contact_name: string | null }) => [ct.id, ct.contact_name || '']));
             const updated = mapped.map(c => {
@@ -153,23 +170,25 @@ export default function Customers() {
               return { ...c, contactName, dateAdded: c.dateAdded ?? '' };
             });
             setCustomersData(updated as CustomerItem[]);
-          } else {
-            setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
           }
         })
         .catch((err: unknown) => {
+          if (cancelled) return;
           console.error('[Customers] Error loading contact names:', err);
-          setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
         });
-    } else {
-      setCustomersData(mapped.map(c => ({ ...c, contactName: 'N/A', dateAdded: c.dateAdded ?? '' })) as CustomerItem[]);
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [customers, activeOrganizationId]);
 
-  const customersIsError = !!customersError;
+    return;
+  }, [customers, activeOrganizationId]); // ✅ Remover canShowCustomers de deps - igual que Contacts
 
   // State hooks
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  // ✅ Estándar #9: Detectar settling de search
+  const isSearchSettling = searchTerm !== deferredSearchTerm;
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -186,13 +205,7 @@ export default function Customers() {
   const [customerTypeSearchTerm, setCustomerTypeSearchTerm] = useState('');
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
 
-  // Effect hooks
-  useEffect(() => {
-    registerSubmodules('Directory', [
-      { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
-      { id: 'customers', label: 'Customers', href: '/directory/customers' },
-    ]);
-  }, [registerSubmodules]);
+  // ✅ ELIMINADO - ya existe al inicio del componente (línea 85)
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -220,11 +233,9 @@ export default function Customers() {
 
   // Filtered and sorted customers (hooks MUST run before any conditional return — same as DirectoryContacts)
   const filteredCustomers = useMemo(() => {
-    if (!customersData || customersData.length === 0) return [];
-
+    const searchLower = deferredSearchTerm.toLowerCase();
     const filtered = customersData.filter(customer => {
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || (
+      const matchesSearch = !deferredSearchTerm || (
         customer.companyName.toLowerCase().includes(searchLower) ||
         customer.contactName.toLowerCase().includes(searchLower) ||
         customer.email.toLowerCase().includes(searchLower) ||
@@ -274,7 +285,7 @@ export default function Customers() {
         return 0;
       }
     });
-  }, [searchTerm, customersData, sortBy, sortOrder, selectedStatus, selectedCustomerType, selectedLocation]);
+  }, [deferredSearchTerm, customersData, sortBy, sortOrder, selectedStatus, selectedCustomerType, selectedLocation]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
@@ -485,10 +496,8 @@ export default function Customers() {
     }).format(amount);
   }, []);
 
-  // Conditional returns AFTER all hooks (rules of hooks) — same order as DirectoryContacts
-  if (orgLoading) return <div className="py-6 px-6" />;
-
-  if (!activeOrganizationId) {
+  // Conditional returns ONLY for real error/empty states (no org). Never empty div to avoid flash.
+  if (!orgLoading && !activeOrganizationId) {
     return (
       <div className="py-6 px-6">
         <div style={{ padding: '24px' }}>
@@ -499,49 +508,28 @@ export default function Customers() {
     );
   }
 
-  if (customersError) {
-    return (
-      <div className="py-6 px-6">
-        <div style={{ padding: '24px' }}>
-          <div>Something went wrong</div>
-          <pre>{String(customersError)}</pre>
-          <button onClick={refetch}>Try again</button>
-        </div>
-      </div>
-    );
-  }
+  // Flags: solo usar isFirstLoad del hook (sin combinar con orgLoading/scopeReady para evitar oscilaciones)
+  const showOverlay = isRefreshing || isSearchSettling || isSwitchingDealer;
+  const showEmptyState = !isFirstLoad && !isSearchSettling && !isSwitchingDealer && filteredCustomers.length === 0;
 
-  if (!customersScopeReady) return <div className="py-6 px-6" />;
+  // Carga progresiva: 1) Header + Table container, 2) Search+Filters, 3) contenido tabla
+  const [showSearchAndFilters, setShowSearchAndFilters] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setShowSearchAndFilters(true));
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
 
-  if (customersInitialLoading) return <div className="py-6 px-6" />;
-
-  const showSkeleton = customers.length === 0 && customersPending;
-  const showOverlay = customers.length > 0 && customersPending;
-
-  // Error state
-  if (customersIsError && customersError) {
-    return (
-      <div className="py-6 px-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error loading customers</p>
-          <p className="text-sm text-red-700">{customersError}</p>
-          {import.meta.env.DEV && (
-            <p className="text-xs text-red-600 mt-2">Check the browser console for more details.</p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Main render
+  // Main render — 1) Header, 2) Search+Filters (tras primer paint), 3) Table container
   return (
     <div className="py-6">
-      {/* Header */}
+      {/* 1) Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Customers Directory</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {`Manage your ${filteredCustomers.length} customers${filteredCustomers.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
+            {isFirstLoad ? 'Loading…' : `Manage your ${filteredCustomers.length} customers${filteredCustomers.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -549,24 +537,21 @@ export default function Customers() {
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
           </button>
-          {canEditCustomersFinal ? (
-            <button
-              onClick={() => router.navigate('/directory/customers/new')}
-              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
-              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            >
-              <Plus style={{ width: '14px', height: '14px' }} />
-              Add Customer
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              You don't have permission to create customers
-            </span>
-          )}
+          <button
+            onClick={() => canEditCustomersFinal && router.navigate('/directory/customers/new')}
+            disabled={!canEditCustomersFinal}
+            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" 
+            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            title={!canEditCustomersFinal ? "You don't have permission to create customers" : undefined}
+          >
+            <Plus style={{ width: '14px', height: '14px' }} />
+            Add Customer
+          </button>
         </div>
       </div>
 
-      {/* Search and Filters */}
+      {/* 2) Search and Filters — se muestran después del primer paint (Header + Table container) */}
+      {showSearchAndFilters && (
       <div className="mb-4">
         <div className={`bg-white border border-gray-200 py-6 px-6 ${
           showFilters ? 'rounded-t-lg' : 'rounded-lg'
@@ -816,15 +801,63 @@ export default function Customers() {
           </div>
         )}
       </div>
+      )}
 
-      <div className="relative">
-        {showSkeleton ? <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[120px]" /> : (
+      {/* 3) Table container — visible desde el primer paint */}
+      <div className="relative min-h-[420px]">
+        {/* ✅ Overlays — SIEMPRE sobre la misma tabla, nunca remontarla */}
+        {(isFirstLoad || isSwitchingDealer) && (
+          <div className="absolute inset-0 bg-white/90 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p className="text-sm text-gray-600 font-medium">{isSwitchingDealer ? 'Switching dealer...' : 'Loading...'}</p>
+            </div>
+          </div>
+        )}
+        {isSearchSettling && hasData && !isSwitchingDealer && !isFirstLoad && (
+          <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+              <p className="text-xs text-gray-500 font-medium">Filtering...</p>
+            </div>
+          </div>
+        )}
+        {isRefreshing && !isSwitchingDealer && !isSearchSettling && !isFirstLoad && (
+          <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              <p className="text-xs text-gray-500 font-medium">Updating...</p>
+            </div>
+          </div>
+        )}
+        
+        {customersError ? (
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 p-6">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-800 font-medium mb-2">Error loading customers</p>
+              <p className="text-sm text-red-700 mb-3">{customersError}</p>
+              <button onClick={() => refetch()} className="px-3 py-1.5 rounded text-sm bg-red-100 text-red-800 hover:bg-red-200">Try again</button>
+            </div>
+          </div>
+        ) : (
           <>
       {/* Table View */}
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="table-fit-wrapper">
+            <table className="table-fit">
+              <colgroup>
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '5%' }} />
+              </colgroup>
               <thead className="bg-gray-100 border-b border-gray-200">
                 <tr>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
@@ -836,13 +869,13 @@ export default function Customers() {
                       {sortBy === 'companyName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Name</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Phone</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Email</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Customer Type</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created By</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Contact Name</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Primary Phone</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Email</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Country</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">City</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Customer Type</th>
+                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Created By</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
@@ -856,7 +889,7 @@ export default function Customers() {
                 </tr>
               </thead>
               <tbody>
-                {filteredCustomers.length === 0 ? (
+                {showEmptyState ? (
                   <tr>
                     <td colSpan={10} className="py-12 px-6 text-center">
                       <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -868,11 +901,15 @@ export default function Customers() {
                       </p>
                     </td>
                   </tr>
+                ) : filteredCustomers.length === 0 && isSearchSettling ? (
+                  <tr>
+                    <td colSpan={10} className="py-8 px-6 text-center text-sm text-muted-foreground">Updating search…</td>
+                  </tr>
                 ) : (
                   paginatedCustomers.map((customer) => (
                     <tr key={customer.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="py-4 px-6 text-gray-900 text-sm">
-                        <div className="flex items-center gap-3 whitespace-nowrap">
+                        <div className="flex items-center gap-3 min-w-0">
                           <div className="relative flex-shrink-0">
                             <div 
                               className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium" 
@@ -895,21 +932,21 @@ export default function Customers() {
                           <span className="font-medium text-gray-900 text-sm truncate">{customer.companyName}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">{customer.contactName || 'N/A'}</td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
-                        <div className="flex items-center gap-1">
+                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate" title={customer.contactName || 'N/A'}>{customer.contactName || 'N/A'}</span></td>
+                      <td className="py-4 px-6 text-gray-700 text-sm">
+                        <div className="flex items-center gap-1 min-w-0">
                           <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                          <span>{customer.phone || 'N/A'}</span>
+                          <span className="truncate">{customer.phone || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
-                        <div className="flex items-center gap-1">
+                      <td className="py-4 px-6 text-gray-700 text-sm">
+                        <div className="flex items-center gap-1 min-w-0">
                           <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{customer.email || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">{customer.country || 'N/A'}</td>
-                      <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">{customer.city || 'N/A'}</td>
+                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{customer.country || 'N/A'}</span></td>
+                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{customer.city || 'N/A'}</span></td>
                       <td className="py-4 px-6">
                         {(() => {
                           const type = (customer as any).customer_type_name;
@@ -917,7 +954,7 @@ export default function Customers() {
                           return getCustomerTypeBadge(formatCustomerTypeLabel(type));
                         })()}
                       </td>
-                      <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">{customer.createdBy || '—'}</td>
+                      <td className="py-4 px-6 text-gray-600 text-sm"><span className="block truncate" title={customer.createdBy || '—'}>{customer.createdBy || '—'}</span></td>
                       <td className="py-4 px-6 text-gray-600 text-sm">{customer.dateAdded ? new Date(customer.dateAdded).toLocaleDateString() : 'N/A'}</td>
                       <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
@@ -1165,7 +1202,14 @@ export default function Customers() {
       </div>
           </>
         )}
-        {showOverlay && <div className="absolute inset-0 z-10 rounded-lg pointer-events-none" aria-hidden />}
+        {showOverlay && (
+          <div className="absolute inset-0 z-10 rounded-lg bg-white/70 flex items-center justify-center" aria-hidden>
+            <div className="flex flex-col items-center gap-2 px-4 py-2 rounded-lg bg-white border border-gray-200 shadow-sm">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+              <span className="text-sm text-muted-foreground">{isSearchSettling ? 'Updating search…' : 'Updating…'}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Confirm Dialog */}

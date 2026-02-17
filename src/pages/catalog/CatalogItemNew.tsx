@@ -1064,7 +1064,7 @@ export default function CatalogItemNew() {
               })();
             }}
             disabled={isSaving || isReadOnly}
-            className="px-4 py-1.5 rounded border border-primary bg-white text-primary text-sm hover:bg-primary/10 disabled:opacity-50"
+            className="btn-save px-4 py-1.5 rounded text-white text-sm hover:opacity-90 disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save'}
           </button>
@@ -1089,7 +1089,7 @@ export default function CatalogItemNew() {
               })();
             }}
             disabled={isSaving || isReadOnly}
-            className="px-4 py-1.5 rounded bg-primary text-white text-sm hover:bg-primary/90 disabled:opacity-50"
+            className="btn-save-close px-4 py-1.5 rounded text-sm hover:opacity-90 disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save & Close'}
           </button>

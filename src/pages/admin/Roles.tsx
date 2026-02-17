@@ -386,7 +386,7 @@ export default function Roles() {
                         disabled={
                           updateRoleName.isPending || draftName.trim() === selectedRole.name
                         }
-                        className="px-3 py-1.5 text-sm font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
+                        className="btn-save px-3 py-1.5 text-sm font-medium text-white rounded hover:opacity-90 disabled:opacity-50"
                       >
                         Save name
                       </button>
@@ -406,7 +406,7 @@ export default function Roles() {
                     type="button"
                     onClick={handleSavePermissions}
                     disabled={syncPermissions.isPending}
-                    className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                    className="btn-save px-3 py-1.5 text-sm font-medium text-white rounded hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
                   >
                     {syncPermissions.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Save permissions
                   </button>

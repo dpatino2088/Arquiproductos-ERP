@@ -43,6 +43,9 @@ export function useActiveDealer() {
 
   /** True cuando el contexto ActingAs ya leyó localStorage. Para org users evita fetch con dealer=null antes de hidratar. */
   const hasHydrated = actingAs?.hasHydrated ?? true;
+  
+  /** ✅ Estándar #10: True durante cambio de dealer (SuperAdmin switching) */
+  const isSwitching = actingAs?.isSwitching ?? false;
 
   return {
     activeDealerId,
@@ -52,5 +55,6 @@ export function useActiveDealer() {
     hasDealers: dealers.length > 0,
     dealers,
     hasHydrated,
+    isSwitching,
   };
 }

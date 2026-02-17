@@ -6,11 +6,12 @@
 
 @layer base {
   :root {
-    /* Layout */
+    /* ============================================
+       LAYOUT & TYPOGRAPHY
+       ============================================ */
     --sidebar-width: 240px;
     --navbar-height: 56px;
 
-    /* Typography */
     --font-family: 'Inter', 'Helvetica Neue', sans-serif;
     --font-size-body: 14px;
     --font-size-small: 12px;
@@ -59,7 +60,7 @@
     --orange-900: #7c2d12;
     --orange-800: #9a3412;
     --orange-700: #c2410c;
-    --orange-600: #111827;
+    --orange-600: #ea580c;
     --orange-500: #f97316;
     --orange-400: #fb923c;
     --orange-300: #fdba74;
@@ -79,18 +80,31 @@
     --blue-100: #dbeafe;
     --blue-50: #eff6ff;
     
-    --navy-950: #08141b;
-    --navy-900: #0a1621;   /* casi negro azulado */
-    --navy-800: #0d2233;
-    --navy-700: #003153;   /* tono principal solicitado */
-    --navy-650: #003c68;   /* deep navy (sidebar base recomendado) */
-    --navy-600: #004a7f;
-    --navy-500: #0A66C2;   /* azul vibrante tipo LinkedIn */
-    --navy-400: #3b84cf;
-    --navy-300: #66a2db;
-    --navy-200: #99c2e8;
-    --navy-100: #cce0f4;
-    --navy-50: #f0f6fc;    /* muy claro, fondos suaves */
+    /* Cyan - Primario Citel #008DD2 */
+    --cyan-950: #032a3d;
+    --cyan-900: #054363;
+    --cyan-800: #00678d;
+    --cyan-700: #007aa3;
+    --cyan-600: #008DD2;   /* PRIMARIO CITEL - botones, enlaces, acentos */
+    --cyan-500: #339ddb;
+    --cyan-400: #66b4e4;
+    --cyan-300: #99caed;
+    --cyan-200: #cce0f6;
+    --cyan-100: #e6f8fd;   /* fondos badges cyan */
+    --cyan-50: #f2fbfe;    /* row highlight cyan suave */
+    
+    --navy-950: #060d12;
+    --navy-900: #0D202D;   /* SIDEBAR/FOOTER CITEL - navy muy oscuro */
+    --navy-800: #132B3B;   /* hover sidebar Citel */
+    --navy-700: #1a3647;
+    --navy-650: #1e3d50;
+    --navy-600: #2a4d66;
+    --navy-500: #3d6b8c;
+    --navy-400: #5C8DA6;   /* SECUNDARIO CITEL - gris azulado */
+    --navy-300: #7aa3b8;
+    --navy-200: #a8c4d4;
+    --navy-100: #d1e2eb;
+    --navy-50: #eef4f8;    /* fondos suaves navy */
     
     --green-950: #052e16;
     --green-900: #14532d;
@@ -103,6 +117,13 @@
     --green-200: #bbf7d0;
     --green-100: #dcfce7;
     --green-50: #f0fdf4;
+    
+    /* Green - Success / Save and Close #27ae60 */
+    --green-neon-700: #1e8449;   /* hover Save and Close */
+    --green-neon-600: #27ae60;   /* VERDE - Save and Close */
+    --green-neon-500: #58d68d;
+    --green-neon-100: #d5f5e3;
+    --green-neon-50: #eafaf1;
 
     /* Purple palette - for leave status and special states */
     --purple-950: #3b0764;
@@ -117,84 +138,88 @@
     --purple-100: #f3e8ff;
     --purple-50: #faf5ff;
 
-    /* Semantic Color Mapping using Updated Gray Palette - UPDATED */
-    --foreground: 221 39% 11%;               /* Dark text - HSL for gray-900 #111827 */
-    --background: 200 100% 99%;              /* Light background - HSL for new gray-50 #fdfefe */
-    --brand-primary: 20 92% 48%;           /* Primary brand color #ea580c in HSL */
-    --brand-secondary: 220 9% 46%;           /* Secondary brand color - HSL for gray-500 */
+    /* Semantic - Botones y líneas cyan #008DD2 */
+    --foreground: 0 0% 20%;                /* Texto #333333 */
+    --background: 200 100% 99%;             /* fondo gris claro actual #fdfefe */
+    --brand-primary: 199 100% 41%;          /* Cyan #008DD2 - botones Add, Save, tabs */
+    --brand-secondary: 199 29% 52%;        /* Secundario #5C8DA6 */
 
     --primary: var(--brand-primary);
-    --primary-foreground: 200 100% 99%;      /* HSL for new gray-50 #fdfefe */
+    --primary-foreground: 0 0% 100%;        /* Blanco sobre cyan */
     --secondary: var(--brand-secondary);
-    --secondary-foreground: 200 100% 99%;    /* HSL for new gray-50 #fdfefe */
+    --secondary-foreground: 0 0% 100%;
 
-    --card: 200 100% 99%;                    /* HSL for new gray-50 #fdfefe */
+    --card: 200 100% 99%;                  /* SIN CAMBIO - mismo que background */
     --card-foreground: var(--foreground);
-    --popover: 200 100% 99%;                 /* HSL for new gray-50 #fdfefe */
+    --popover: 200 100% 99%;
     --popover-foreground: var(--foreground);
-    --muted: 210 20% 98%;                    /* HSL for new gray-100 #fafbfc */
-    --muted-foreground: 220 9% 46%;          /* HSL for gray-500 */
+    --muted: 210 20% 98%;                  /* SIN CAMBIO - gray-100 #fafbfc */
+    --muted-foreground: 220 9% 46%;
     --accent: var(--brand-primary);
-    --accent-foreground: 200 100% 99%;       /* HSL for new gray-50 #fdfefe */
-    --destructive: 0 84% 60%;                /* HSL for red-600 */
-    --destructive-foreground: 200 100% 99%;  /* HSL for new gray-50 #fdfefe */
-    --border: 210 17% 96%;                   /* HSL for new gray-200 #f5f7fa */
-    --input: 210 17% 96%;                    /* HSL for new gray-200 #f5f7fa */
-    --ring: var(--brand-primary);            /* Focus ring - primary green HSL */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 17% 96%;                 /* SIN CAMBIO - gray-200 #f5f7fa */
+    --input: 210 17% 96%;
+    --ring: var(--brand-primary);
     --radius: 0;
 
-    /* Sidebar colors */
+    /* Sidebar - Citel navy oscuro */
     --sidebar-light-background: var(--gray-50);
-    --sidebar-dark-background: var(--gray-900);
-    --sidebar-background: var(--sidebar-light-background);
-    --sidebar-foreground: var(--foreground);
+    --sidebar-dark-background: var(--navy-900);
+    --sidebar-background: var(--sidebar-dark-background);  /* Sidebar Citel oscuro */
+    --sidebar-foreground: 0 0% 100%;        /* Texto blanco sobre sidebar */
+    --sidebar-base: #404a63;               /* Sidebar principal */
+    --sidebar-active-hover: #363f54;        /* Hover / ítem activo (más oscuro) */
+    --sidebar-accent: #404a63;             /* Acento en mismo tono */
+    --sidebar-text-inactive: #8fa3ad;
 
-/* Status colors per design system specification - WCAG 2.2 AA compliant */
---status-green: #15803d;               /* Success/Active - Green 700 for better contrast */
---status-red: #b91c1c;                 /* Error/Critical/Delete - Red 700 for better contrast */
---status-blue: #2563eb;                /* Info/Neutral actions - Blue 500 from our palette */
---status-purple: #9333ea;              /* Purple status - Purple 600 for better contrast */
---status-yellow: #a16207;              /* Yellow status - Yellow 700 for better contrast */
---status-orange: #c2410c;              /* Orange status - Orange 700 for better contrast */
---status-gray: #6b7280;                /* Gray status - Gray 500 for neutral/inactive states */
+    /* Status */
+    --status-cyan: #008DD2;                /* Info/Primary - cyan */
+    --status-green: #27ae60;              /* Success - botones Save and Close */
+    --status-red: #b91c1c;
+    --status-blue: #2563eb;
+    --status-purple: #9333ea;
+    --status-yellow: #a16207;
+    --status-orange: #c2410c;
+    --status-gray: #5C8DA6;                /* Inactive - gris azulado Citel */
 
-/* Avatar status dots - Brighter colors for better visibility */
---avatar-status-green: #16a34a;        /* Green 600 - Brighter for avatar dots */
---avatar-status-red: #dc2626;          /* Red 600 - Brighter for avatar dots */
---avatar-status-yellow: #eab308;       /* Yellow 500 - Brighter for avatar dots */
---avatar-status-purple: #9333ea;       /* Purple 600 - Brighter for avatar dots */
---avatar-status-blue: #2563eb;         /* Blue 600 - Brighter for avatar dots */
---avatar-status-orange: #ea580c;       /* Orange 600 - Brighter for avatar dots */
---avatar-status-gray: #d1d5db;         /* Gray 300 - Brighter for avatar dots */
+    /* Avatar status dots */
+    --avatar-status-cyan: #008DD2;
+    --avatar-status-green: #27ae60;         /* Verde Save and Close */
+    --avatar-status-red: #dc2626;
+    --avatar-status-yellow: #eab308;
+    --avatar-status-purple: #9333ea;
+    --avatar-status-blue: #2563eb;
+    --avatar-status-orange: #ea580c;
+    --avatar-status-gray: #5C8DA6;
     
-    /* Utility colors */
-    --focus-ring: var(--brand-primary);     /* Focus indicator - primary green */
-    --row-highlight: var(--green-50);        /* Row hover/highlight */
-    
-    /* Hex versions for direct usage */
-    --primary-brand-hex: #ea580c;        /* Primary brand color */
-    --primary-brand-hover: #c2410c;      /* Primary brand hover state (darker variant) */
-    --primary-600-hex: var(--orange-600);          /* Primary color variant - 600 */
-    --primary-500-hex: var(--orange-500);          /* Primary color variant - 500 */
-    /* RGBA variants calculated from primary brand color using color-mix */
+    /* Utility colors - Cyan #008DD2 para botones y líneas */
+    --focus-ring: #008DD2;
+    --row-highlight: var(--cyan-50);
+    --primary-brand-hex: #008DD2;          /* Add, Create, Save, etc. - cyan */
+    --primary-brand-hover: #00678d;        /* Hover cyan */
+    --primary-600-hex: var(--cyan-600);
+    --primary-500-hex: var(--cyan-500);
+    --secondary-brand-hex: #5C8DA6;
     --primary-brand-rgba-10: color-mix(in srgb, var(--primary-brand-hex) 10%, transparent);
     --primary-brand-rgba-20: color-mix(in srgb, var(--primary-brand-hex) 20%, transparent);
     --primary-brand-rgba-25: color-mix(in srgb, var(--primary-brand-hex) 25%, transparent);
     --primary-brand-rgba-30: color-mix(in srgb, var(--primary-brand-hex) 30%, transparent);
     --primary-brand-rgba-40: color-mix(in srgb, var(--primary-brand-hex) 40%, transparent);
     --primary-brand-rgba-50: color-mix(in srgb, var(--primary-brand-hex) 50%, transparent);
-    --graphite-black-hex: var(--gray-900);
-    --white-hex: var(--gray-50);
-
-    /* Additional utility colors */
-    --neutral-gray: #9E9E9E;               /* Disabled/Inactive elements */
-    --highlight-bg: #E3F2FD;               /* Hover states, highlighted rows */
-    --tab-active-underline: #122d3b;  /* Línea inferior de tabs (módulos y submódulos) */
-    /* Sidebar – tono base #163342 y colores relacionados */
-    --sidebar-base: #163342;
-    --sidebar-active-hover: #122d3b;        /* Variante más oscura para active/hover */
-    --sidebar-accent: #1e4555;             /* Acento borde activo, mismo tono */
-    --sidebar-text-inactive: #8fa3ad;      /* Texto inactivo sobre sidebar */
+    --graphite-black-hex: #333333;         /* Texto Citel */
+    --white-hex: #FFFFFF;
+    --neutral-gray: #5C8DA6;               /* Citel secundario/inactive */
+    --highlight-bg: #e6f8fd;                /* Hover cyan suave Citel */
+    --tab-active-underline: #008DD2;        /* Líneas inferiores tabs - cyan */
+    --accent-green-neon: #27ae60;           /* Verde Save and Close */
+    /* Save (solo) - mismo cyan que el resto de botones */
+    --save-hex: #008DD2;
+    --save-hover: #00678d;
+    /* Save and Close - verde (se mantiene) */
+    --save-close-hex: #27ae60;
+    --save-close-hover: #1e8449;
   }
 
   .dark {
@@ -205,33 +230,62 @@
 
 @layer base {
   * { @apply border-border; }
+  html, body { overflow-x: hidden; }
   body { @apply bg-background text-foreground; font-family: var(--font-family); font-size: var(--font-size-body); line-height: 1.5; }
 
   .btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: 0; @apply inline-flex items-center justify-center font-medium transition-colors; }
   .btn-primary { @apply bg-primary text-primary-foreground hover:bg-primary/90; }
   .btn-secondary { @apply bg-background border border-border text-foreground hover:bg-muted; }
+  .btn-save { background-color: var(--save-hex); color: var(--white-hex); }
+  .btn-save:hover:not(:disabled) { background-color: var(--save-hover); }
+  .btn-save-close { background-color: var(--save-close-hex); color: var(--white-hex); }
+  .btn-save-close:hover:not(:disabled) { background-color: var(--save-close-hover); }
+
+  /* Add Quote Line modal: Next activo = azul oscuro; desactivado = gris */
+  button.btn-configurator-next {
+    color: #fff !important;
+  }
+  button.btn-configurator-next:not(:disabled) {
+    background-color: #132B3B !important;
+  }
+  button.btn-configurator-next:not(:disabled):hover {
+    background-color: #0D202D !important;
+    opacity: 1;
+  }
+  button.btn-configurator-next:disabled {
+    background-color: #9ca3af !important;
+    opacity: 0.9;
+    cursor: not-allowed;
+  }
 
   .icon-btn { width: 32px; height: 32px; @apply inline-flex items-center justify-center hover:bg-muted transition-colors; }
+
+  /* Tablas: sin scroll lateral, todo visible en una vista */
+  .table-fit-wrapper { overflow-x: hidden; }
+  .table-fit { table-layout: fixed; width: 100%; min-width: 0; }
+  .table-fit th, .table-fit td { overflow: hidden; text-overflow: ellipsis; }
 
   .text-body { font-size: var(--font-size-body); }
   .text-small { font-size: var(--font-size-small); }
   .text-heading { font-size: var(--font-size-heading); }
   .text-title { font-size: var(--font-size-title); }
 
-/* Status utilities using design system colors */
-.text-status-green { color: var(--status-green); }
-.text-status-red { color: var(--status-red); }
-.text-status-blue { color: var(--status-blue); }
-.text-status-purple { color: var(--status-purple); }
-.text-status-yellow { color: var(--status-yellow); }
-.text-status-orange { color: var(--status-orange); }
-.text-status-gray { color: var(--status-gray); }
+  /* Status utilities - Citel */
+  .text-status-cyan { color: var(--status-cyan); }
+  .text-status-green { color: var(--status-green); }
+  .text-status-red { color: var(--status-red); }
+  .text-status-blue { color: var(--status-blue); }
+  .text-status-purple { color: var(--status-purple); }
+  .text-status-yellow { color: var(--status-yellow); }
+  .text-status-orange { color: var(--status-orange); }
+  .text-status-gray { color: var(--status-gray); }
   .text-neutral-gray { color: var(--neutral-gray); }
+  .text-light-on-dark { color: var(--white-hex); }
 
   /* Text utilities */
   .text-secondary { color: var(--gray-600); }
   .text-muted { color: var(--gray-500); }
-  .text-primary-contrast { color: var(--teal-800); } /* Higher contrast version of primary for WCAG compliance */
+  .text-primary-contrast { color: var(--primary-brand-hex); }
   
   /* Navy text utilities */
   .text-navy-900 { color: var(--navy-900); }
@@ -246,30 +300,34 @@
   .text-navy-100 { color: var(--navy-100); }
   .text-navy-50 { color: var(--navy-50); }
   
-  /* Light background variants for badges using design system palette - WCAG 2.2 AA compliant */
-  .bg-status-green-light { background-color: var(--green-100); }
+  /* Light background variants for badges - Citel */
+  .bg-status-cyan-light { background-color: var(--cyan-100); }
+  .bg-status-green-light { background-color: var(--green-neon-100); }
   .bg-status-red-light { background-color: var(--red-100); }
   .bg-status-blue-light { background-color: var(--blue-100); }
   .bg-status-orange-light { background-color: var(--orange-100); }
   .bg-status-purple-light { background-color: var(--purple-100); }
+  .bg-status-gray-light { background-color: var(--navy-100); }
 
-/* Solid backgrounds */
-.bg-status-green { background-color: var(--status-green); }
-.bg-status-red { background-color: var(--status-red); }
-.bg-status-blue { background-color: var(--status-blue); }
-.bg-status-purple { background-color: var(--status-purple); }
-.bg-status-yellow { background-color: var(--status-yellow); }
-.bg-status-orange { background-color: var(--status-orange); }
-.bg-status-gray { background-color: var(--status-gray); }
+  /* Solid status backgrounds - Citel */
+  .bg-status-cyan { background-color: var(--status-cyan); }
+  .bg-status-green { background-color: var(--status-green); }
+  .bg-status-red { background-color: var(--status-red); }
+  .bg-status-blue { background-color: var(--status-blue); }
+  .bg-status-purple { background-color: var(--status-purple); }
+  .bg-status-yellow { background-color: var(--status-yellow); }
+  .bg-status-orange { background-color: var(--status-orange); }
+  .bg-status-gray { background-color: var(--status-gray); }
 
-/* Avatar status dot backgrounds - Brighter colors */
-.bg-avatar-status-green { background-color: var(--avatar-status-green); }
-.bg-avatar-status-red { background-color: var(--avatar-status-red); }
-.bg-avatar-status-yellow { background-color: var(--avatar-status-yellow); }
-.bg-avatar-status-purple { background-color: var(--avatar-status-purple); }
-.bg-avatar-status-blue { background-color: var(--avatar-status-blue); }
-.bg-avatar-status-orange { background-color: var(--avatar-status-orange); }
-.bg-avatar-status-gray { background-color: var(--avatar-status-gray); }
+  /* Avatar status dot backgrounds - Citel */
+  .bg-avatar-status-cyan { background-color: var(--avatar-status-cyan); }
+  .bg-avatar-status-green { background-color: var(--avatar-status-green); }
+  .bg-avatar-status-red { background-color: var(--avatar-status-red); }
+  .bg-avatar-status-yellow { background-color: var(--avatar-status-yellow); }
+  .bg-avatar-status-purple { background-color: var(--avatar-status-purple); }
+  .bg-avatar-status-blue { background-color: var(--avatar-status-blue); }
+  .bg-avatar-status-orange { background-color: var(--avatar-status-orange); }
+  .bg-avatar-status-gray { background-color: var(--avatar-status-gray); }
   .bg-neutral-gray { background-color: var(--neutral-gray); }
   .bg-highlight { background-color: var(--highlight-bg); }
   .bg-row-highlight { background-color: var(--row-highlight); }
@@ -287,14 +345,15 @@
   .bg-navy-100 { background-color: var(--navy-100); }
   .bg-navy-50 { background-color: var(--navy-50); }
 
-/* Border colors for tooltip arrows */
-.border-t-status-green { border-top-color: var(--status-green); }
-.border-t-status-red { border-top-color: var(--status-red); }
-.border-t-status-blue { border-top-color: var(--status-blue); }
-.border-t-status-purple { border-top-color: var(--status-purple); }
-.border-t-status-yellow { border-top-color: var(--status-yellow); }
-.border-t-status-orange { border-top-color: var(--status-orange); }
-.border-t-status-gray { border-top-color: var(--status-gray); }
+  /* Border colors for tooltip arrows - Citel */
+  .border-t-status-cyan { border-top-color: var(--status-cyan); }
+  .border-t-status-green { border-top-color: var(--status-green); }
+  .border-t-status-red { border-top-color: var(--status-red); }
+  .border-t-status-blue { border-top-color: var(--status-blue); }
+  .border-t-status-purple { border-top-color: var(--status-purple); }
+  .border-t-status-yellow { border-top-color: var(--status-yellow); }
+  .border-t-status-orange { border-top-color: var(--status-orange); }
+  .border-t-status-gray { border-top-color: var(--status-gray); }
 
   /* Borders using Tailwind v3 */
   .border-subtle { border-color: var(--gray-200); }

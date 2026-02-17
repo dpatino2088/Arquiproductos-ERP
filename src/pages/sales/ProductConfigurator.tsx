@@ -1282,9 +1282,10 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             onClick={() => setCurrentStepIndex(0)}
             className={`w-full text-left px-4 py-3 mb-1 rounded transition-colors ${
               !productType
-                ? 'bg-gray-900 text-white shadow-md'
+                ? 'text-white shadow-md'
                 : 'bg-green-50 text-green-700 hover:bg-green-100'
             }`}
+            style={!productType ? { backgroundColor: 'var(--primary-brand-hex)' } : undefined}
           >
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">PRODUCT</span>
@@ -1306,13 +1307,14 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
                   disabled={!isAccessible}
                   className={`w-full text-left px-4 py-3 mb-1 rounded transition-colors ${
                     isActive
-                      ? 'bg-gray-900 text-white shadow-md'
+                      ? 'text-white shadow-md'
                       : isCompleted
                       ? 'bg-green-50 text-green-700 hover:bg-green-100'
                       : isAccessible
                       ? 'bg-gray-50 text-gray-700 hover:bg-gray-100'
                       : 'bg-gray-50 text-gray-400 cursor-not-allowed'
                   }`}
+                  style={isActive ? { backgroundColor: 'var(--primary-brand-hex)' } : undefined}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{step.label}</span>
@@ -1362,7 +1364,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
                 <button
                   onClick={handleNext}
                   disabled={!!(isSubmitting || (!productType && currentStepIndex === 0) || (productType && !canProceed()))}
-                  className="px-6 py-2 rounded-lg bg-gray-900 text-white transition-colors text-sm font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-configurator-next px-6 py-2 rounded-lg text-white transition-colors text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Next
                 </button>

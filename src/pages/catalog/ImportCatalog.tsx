@@ -485,8 +485,8 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
               )}
 
               <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="overflow-x-auto max-h-96">
-                  <table className="w-full text-xs">
+                <div className="table-fit-wrapper max-h-96 overflow-y-auto">
+                  <table className="table-fit w-full text-xs">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="text-left py-2 px-3 font-medium text-gray-900">SKU</th>

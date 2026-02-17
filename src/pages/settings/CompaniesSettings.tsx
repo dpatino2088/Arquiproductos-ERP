@@ -420,7 +420,7 @@ export default function CompaniesSettings() {
 
       {/* Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="table-fit-wrapper">
 
           {isLoading ? (
             <div className="text-center py-12 px-6">
@@ -444,7 +444,7 @@ export default function CompaniesSettings() {
               </p>
             </div>
           ) : (
-            <table className="w-full">
+            <table className="table-fit w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Company Number</th>

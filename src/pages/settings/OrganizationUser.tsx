@@ -784,8 +784,8 @@ export default function OrganizationUser() {
       {/* Table View */}
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="table-fit-wrapper">
+            <table className="table-fit">
               <thead>
                 <tr className="bg-gray-100 border-b border-gray-200">
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">

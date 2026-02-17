@@ -227,8 +227,8 @@ export default function Collections() {
 
       {/* Collections Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="table-fit-wrapper">
+          <table className="table-fit">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Collection Name</th>

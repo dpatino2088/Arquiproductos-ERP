@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+
 import { useQuotes, approveQuote, waitForSalesOrder, type QuoteListItem } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
@@ -37,7 +37,6 @@ const formatCurrency = (amount: number) => {
 };
 
 export default function Quotes() {
-  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
 
@@ -74,14 +73,7 @@ export default function Quotes() {
     return set;
   }, []);
 
-  // Register submodules
-  useEffect(() => {
-    registerSubmodules('Sales', [
-      { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
-      { id: 'proposals', label: 'Proposals', href: '/sales/proposals', icon: FileText },
-    ]);
-    return () => clearSubmoduleNav();
-  }, [registerSubmodules, clearSubmoduleNav]);
+  // ✅ registerSubmodules se maneja en SalesDirectory.tsx (wrapper)
 
   // Limpiar selección cuando los IDs ya no están en la lista (p. ej. tras borrar)
   const quoteIds = useMemo(() => new Set(quotes.map((q) => q.id)), [quotes]);
@@ -352,10 +344,9 @@ export default function Quotes() {
   const statusOptions: QuoteStatus[] = ['draft', 'sent', 'approved', 'rejected', 'cancelled'];
 
   // === RENDER ===
-  
-  if (loading) return <div className="py-6 px-6" />;
+  // ✅ NUNCA retornar vacío por loading — usar overlay en su lugar (igual que Directory)
 
-  if (error) {
+  if (error && !loading) {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
@@ -399,7 +390,8 @@ export default function Quotes() {
           </button>
           <button
             onClick={() => router.navigate('/sales/quotes/new')}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm bg-blue-600 hover:bg-blue-700"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm hover:opacity-90 transition-colors"
+            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
           >
             <Plus className="w-4 h-4" />
             Add Quote
@@ -484,9 +476,18 @@ export default function Quotes() {
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+      <div className="relative bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[300px]">
+        {/* ✅ Overlay de loading — nunca desmontar la tabla */}
+        {loading && (
+          <div className="absolute inset-0 bg-white/90 z-10 flex items-center justify-center rounded-lg">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <p className="text-sm text-gray-600 font-medium">Loading...</p>
+            </div>
+          </div>
+        )}
+        <div className="table-fit-wrapper">
+          <table className="table-fit">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="w-10 py-3 px-4 text-left">

@@ -22,7 +22,7 @@ export default function AccessDenied() {
           {/* Mobile Header */}
           <div className="lg:hidden text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center gap-2">
-              <Box size={32} style={{ color: 'var(--primary-brand-hex)' }} />
+              <Box size={32} style={{ color: '#404a63' }} />
               <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
           </div>
@@ -69,7 +69,7 @@ export default function AccessDenied() {
               <button
                 onClick={handleGoToLogin}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                style={{ backgroundColor: '#404a63' }}
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back to Login
@@ -80,11 +80,11 @@ export default function AccessDenied() {
       </div>
 
       {/* Right Side - Brand Background */}
-      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#1f4456' }}>
+      <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ backgroundColor: '#404a63' }}>
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">
-              <Box size={48} style={{ color: 'var(--primary-brand-hex)' }} />
+              <Box size={48} style={{ color: '#ffffff' }} />
               <span className="text-4xl font-semibold text-white">Adaptio</span>
             </div>
             <p className="text-white/80">

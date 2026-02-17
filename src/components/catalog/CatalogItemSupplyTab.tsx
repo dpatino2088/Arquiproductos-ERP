@@ -237,7 +237,7 @@ export function CatalogItemSupplyTab({ catalogItemId, organizationId, readOnly =
 
       <div className="flex justify-end">
         <Button
-          variant="primary"
+          variant="save"
           size="sm"
           loading={saving}
           disabled={readOnly || saving}

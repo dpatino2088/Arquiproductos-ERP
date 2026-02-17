@@ -407,8 +407,7 @@ export default function SaleOrderNew() {
             type="button"
             onClick={handleSubmit(onSubmit)}
             disabled={isSaving || isUpdating}
-            className="px-4 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save px-4 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving || isUpdating ? 'Saving...' : 'Save'}
           </button>
@@ -637,8 +636,8 @@ export default function SaleOrderNew() {
           ) : saleOrderLines.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No lines found for this sales order.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="table-fit-wrapper">
+              <table className="table-fit">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="py-3 px-6 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Line #</th>

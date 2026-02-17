@@ -245,7 +245,7 @@ export default function QuoteLineCostsSectionV1({
                   type="button"
                   onClick={handleSaveLabor}
                   disabled={isUpdating}
-                  className="px-3 py-1 bg-primary text-white text-xs rounded hover:bg-primary/90 disabled:opacity-50"
+                  className="btn-save px-3 py-1 text-white text-xs rounded hover:opacity-90 disabled:opacity-50"
                 >
                   Save
                 </button>
@@ -318,7 +318,7 @@ export default function QuoteLineCostsSectionV1({
                   type="button"
                   onClick={handleSaveShipping}
                   disabled={isUpdating}
-                  className="px-3 py-1 bg-primary text-white text-xs rounded hover:bg-primary/90 disabled:opacity-50"
+                  className="btn-save px-3 py-1 text-white text-xs rounded hover:opacity-90 disabled:opacity-50"
                 >
                   Save
                 </button>
@@ -391,7 +391,7 @@ export default function QuoteLineCostsSectionV1({
                   type="button"
                   onClick={handleSaveImportTax}
                   disabled={isUpdating}
-                  className="px-3 py-1 bg-primary text-white text-xs rounded hover:bg-primary/90 disabled:opacity-50"
+                  className="btn-save px-3 py-1 text-white text-xs rounded hover:opacity-90 disabled:opacity-50"
                 >
                   Save
                 </button>

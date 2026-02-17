@@ -343,10 +343,6 @@ export default function Items() {
           aValue = (a.family || '').toLowerCase();
           bValue = (b.family || '').toLowerCase();
           break;
-        case 'category':
-          aValue = (a.category || '').toLowerCase();
-          bValue = (b.category || '').toLowerCase();
-          break;
         case 'measure_basis':
           aValue = (a.measure_basis || '').toLowerCase();
           bValue = (b.measure_basis || '').toLowerCase();
@@ -891,8 +887,8 @@ export default function Items() {
       {/* Table View */}
       {viewMode === 'table' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="table-fit-wrapper">
+            <table className="table-fit">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-16">Image</th>

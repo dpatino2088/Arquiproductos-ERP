@@ -50,6 +50,8 @@ type ActingAsContextValue = {
   hasChosenActingAs: boolean;
   /** True after first run of useEffect (localStorage read). Evita fetch con activeDealerId=null antes de hidratar. */
   hasHydrated: boolean;
+  /** ✅ Estándar #10: True durante cambio de dealer (SuperAdmin switching) */
+  isSwitching: boolean;
   setActiveDealer: (dealerId: string | null, displayName: string) => void;
   clearActingAs: () => void;
 };
@@ -63,6 +65,8 @@ export function ActingAsProvider({ children }: { children: React.ReactNode }) {
   const [activeDealerType, setActiveDealerTypeState] = useState<ActiveDealerType>('internal');
   const [hasChosenActingAs, setHasChosenActingAs] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
+  // ✅ Estándar #10: Estado "switching" durante cambio de dealer
+  const [isSwitching, setIsSwitching] = useState(false);
 
   useEffect(() => {
     const stored = loadStored(activeOrganizationId ?? null);
@@ -78,17 +82,26 @@ export function ActingAsProvider({ children }: { children: React.ReactNode }) {
       setHasChosenActingAs(false);
     }
     setHasHydrated(true);
+    // ✅ Hidratar no es switching
+    setIsSwitching(false);
   }, [activeOrganizationId, activeOrganization?.name]);
 
   const setActiveDealer = useCallback(
     (dealerId: string | null, displayName: string) => {
       if (!activeOrganizationId) return;
+      
+      // ✅ Estándar #10: Marcar switching ANTES de cambiar dealer
+      setIsSwitching(true);
+      
       const dealerType: ActiveDealerType = dealerId == null ? 'internal' : 'external';
       setActiveDealerIdState(dealerId);
       setActiveDisplayName(displayName);
       setActiveDealerTypeState(dealerType);
       setHasChosenActingAs(true);
       saveStored(activeOrganizationId, dealerId, displayName, dealerType);
+      
+      // ✅ Desmarcar switching después de un breve delay (permite que hooks reaccionen)
+      setTimeout(() => setIsSwitching(false), 100);
     },
     [activeOrganizationId]
   );
@@ -111,6 +124,7 @@ export function ActingAsProvider({ children }: { children: React.ReactNode }) {
     activeDealerType,
     hasChosenActingAs,
     hasHydrated,
+    isSwitching,
     setActiveDealer,
     clearActingAs,
   };

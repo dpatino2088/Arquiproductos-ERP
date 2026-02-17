@@ -813,7 +813,7 @@ export default function ProposalDetail() {
             type="button"
             onClick={handleSave}
             disabled={saving || readOnly || !headerDirty}
-            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Save"
           >
             {saving ? 'Saving...' : 'Save'}
@@ -822,8 +822,7 @@ export default function ProposalDetail() {
             type="button"
             onClick={handleSaveAndClose}
             disabled={saving || readOnly}
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? 'Saving...' : 'Save and Close'}
           </button>
@@ -997,8 +996,8 @@ export default function ProposalDetail() {
             </div>
           </div>
         ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="table-fit-wrapper">
+          <table className="table-fit">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10" title="Drag to reorder"></th>

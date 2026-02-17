@@ -213,8 +213,8 @@ export default function Members() {
         </div>
 
         {/* Members Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="table-fit-wrapper">
+          <table className="table-fit">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-900">Name</th>

@@ -196,7 +196,7 @@ export default function Roles() {
                   type="button"
                   onClick={savePermissions}
                   disabled={saving}
-                  className="px-3 py-1.5 text-sm font-medium text-white rounded-md bg-primary hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
+                  className="btn-save px-3 py-1.5 text-sm font-medium text-white rounded-md hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
                 >
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   Save

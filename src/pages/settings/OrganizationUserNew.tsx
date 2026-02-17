@@ -273,8 +273,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                   }
                 }}
                 disabled={isSavingPermissions || !isDirtyPermissions}
-                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSavingPermissions ? 'Saving...' : 'Save'}
               </button>
@@ -288,8 +287,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                   }
                 }}
                 disabled={isSavingPermissions || !isDirtyPermissions}
-                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSavingPermissions ? 'Saving...' : 'Save and Close'}
               </button>
@@ -352,8 +350,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                   }
                 }}
                 disabled={isSavingPermissions || !isDirtyPermissions}
-                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSavingPermissions ? 'Saving...' : 'Save'}
               </button>
@@ -367,8 +364,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                   }
                 }}
                 disabled={isSavingPermissions || !isDirtyPermissions}
-                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSavingPermissions ? 'Saving...' : 'Save and Close'}
               </button>

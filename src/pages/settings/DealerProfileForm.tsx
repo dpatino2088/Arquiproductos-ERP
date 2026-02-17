@@ -639,8 +639,7 @@ export default function DealerProfileForm() {
           </button>
           <button
             type="button"
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleSubmit(onSubmit)}
             disabled={isSaving || isReadOnly}
             title={isReadOnly ? 'You only have read permissions (viewer role)' : undefined}
@@ -1228,8 +1227,8 @@ export default function DealerProfileForm() {
                       )}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg">
-                      <table className="w-full">
+                    <div className="table-fit-wrapper bg-white border border-gray-200 rounded-lg">
+                      <table className="table-fit">
                         <thead>
                           <tr className="border-b border-gray-200 bg-gray-50">
                             <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Name</th>
@@ -1500,8 +1499,7 @@ export default function DealerProfileForm() {
                             <button
                               type="submit"
                               disabled={editUserSubmitting}
-                              className="px-3 py-1.5 text-sm font-medium text-white rounded-md disabled:opacity-50"
-                              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+                              className="btn-save px-3 py-1.5 text-sm font-medium text-white rounded-md disabled:opacity-50"
                             >
                               {editUserSubmitting ? 'Saving...' : 'Save'}
                             </button>

@@ -482,8 +482,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
               handleSaveAll(false);
             }}
             disabled={isSaving}
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving ? 'Saving...' : 'Save'}
           </button>
@@ -498,8 +497,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
               handleSaveAll(true);
             }}
             disabled={isSaving}
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving ? 'Saving...' : 'Save & Finish'}
           </button>

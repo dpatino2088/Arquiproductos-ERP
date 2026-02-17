@@ -455,7 +455,7 @@ export default function CompanyRegistration() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-2">
-                <Box size={24} style={{ color: "var(--primary-brand-hex)" }} />
+                <Box size={24} style={{ color: "#404a63" }} />
                 <span className="text-lg font-semibold text-gray-900">Adaptio</span>
               </div>
               <span className="text-sm text-gray-500">Account created successfully</span>
@@ -516,7 +516,7 @@ export default function CompanyRegistration() {
                 <button
                   onClick={handleGoBack}
                   className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm"
-                  style={{ backgroundColor: "var(--primary-brand-hex)" }}
+                  style={{ backgroundColor: "#404a63" }}
                 >
                   <ArrowLeft className="w-4 h-4" />
                   {cameFromLogin ? "Back to Login" : "Go Back"}
@@ -1170,7 +1170,7 @@ export default function CompanyRegistration() {
                     className="h-1.5 rounded-full transition-all duration-300"
                     style={{
                       width: `${(currentStep / totalSteps) * 100}%`,
-                      backgroundColor: "var(--primary-brand-hex)",
+                      backgroundColor: "#404a63",
                     }}
                   />
                 </div>
@@ -1203,7 +1203,7 @@ export default function CompanyRegistration() {
                   onClick={handleStepNext}
                   disabled={isLoading}
                   className="flex items-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: "var(--primary-brand-hex)" }}
+                  style={{ backgroundColor: "#404a63" }}
                 >
                   {isLoading ? (
                     <>
@@ -1229,12 +1229,12 @@ export default function CompanyRegistration() {
 
       <div
         className="hidden lg:flex lg:w-1/2 flex-col items-center justify-center p-12"
-        style={{ backgroundColor: "#1f4456" }}
+        style={{ backgroundColor: "#404a63" }}
       >
         <div className="w-full max-w-md">
           <div className="text-center mb-12">
             <div className="flex items-center justify-center gap-2 mb-6">
-              <Box size={32} style={{ color: "var(--primary-brand-hex)" }} />
+              <Box size={32} style={{ color: "#ffffff" }} />
               <span className="text-2xl font-semibold text-white">Adaptio</span>
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">Company Registration</h2>
@@ -1261,7 +1261,7 @@ export default function CompanyRegistration() {
                             ? "text-white"
                             : "bg-gray-100 text-gray-400"
                         }`}
-                        style={active ? { backgroundColor: "var(--primary-brand-hex)" } : {}}
+                        style={active ? { backgroundColor: "#404a63" } : {}}
                       >
                         {done ? "✓" : String(step)}
                       </div>

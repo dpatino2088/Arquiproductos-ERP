@@ -543,8 +543,8 @@ function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
           No proposals yet. Create one to send to the customer.
         </div>
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-lg">
-          <table className="w-full text-sm">
+        <div className="table-fit-wrapper border border-gray-200 rounded-lg">
+          <table className="table-fit w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
                 <th className="py-2.5 px-4 text-left font-medium text-gray-700">Proposal No</th>
@@ -3448,8 +3448,7 @@ export default function QuoteNew() {
             type="button"
             onClick={handleSubmit((data) => onSubmit(data, false))}
             disabled={isSaving || isCreating || isUpdating}
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save'}
           </button>
@@ -3457,8 +3456,7 @@ export default function QuoteNew() {
             type="button"
             onClick={handleSubmit(handleSaveAndClose)}
             disabled={isSaving || isCreating || isUpdating}
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save and Close'}
           </button>
@@ -3686,8 +3684,8 @@ export default function QuoteNew() {
           ) : quoteLines.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px]">
+            <div className="table-fit-wrapper">
+              <table className="table-fit w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" title="Drag to reorder"> </th>

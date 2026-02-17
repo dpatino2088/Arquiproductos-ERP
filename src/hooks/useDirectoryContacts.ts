@@ -6,6 +6,11 @@ import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 
 /**
+ * ✅ Estándar #1: Scope State Machine
+ */
+export type ScopeState = 'idle' | 'loading_scope' | 'ready' | 'switching' | 'error';
+
+/**
  * Contact Type enum values (DB uses EN, UI shows ES)
  */
 export type ContactType = 'architect' | 'interior_designer' | 'engineer' | 'project_manager' | 'end_customer';
@@ -111,9 +116,20 @@ const DIRECTORY_CONTACTS_SELECT = `
  */
 export function useDirectoryContacts(params?: { organizationId?: string | null; enabled?: boolean }) {
   const [contacts, setContacts] = useState<DirectoryContact[]>([]);
-  const [isPending, setIsPending] = useState(false);
+  // ✅ Iniciar como true cuando enabled → isFirstLoad=true desde el primer render (sin flash false→true)
+  const [isPending, setIsPending] = useState(true);
   const [hasResolvedOnce, setHasResolvedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // ✅ Estándar #1: State Machine
+  const [scopeState, setScopeState] = useState<ScopeState>('idle');
+  
+  // ✅ Estándar #6: Cache por scopeKey
+  const cacheRef = useRef<Map<string, DirectoryContact[]>>(new Map());
+  
+  // ✅ Estándar #5: Guardar scopeKey con el que se cargó
+  const [contactsScopeKey, setContactsScopeKey] = useState<string>('');
+  
   const fetchIdRef = useRef(0);
   const { activeOrganizationId: contextOrgId } = useOrganizationContext();
   const { activeDealerId, hasHydrated } = useActiveDealer();
@@ -121,9 +137,17 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
 
   const activeOrganizationId = params?.organizationId ?? contextOrgId;
   const enabled = params?.enabled ?? true;
+  
+  // ✅ Estándar #2: scopeKey estable (string, solo IDs)
+  const scopeKey = `${activeOrganizationId ?? 'none'}:${activeDealerId ?? 'none'}`;
+  const prevScopeKeyRef = useRef<string>(scopeKey);
+  
   /** Para org: solo true cuando ActingAs hidrató (dealer conocido). Para portal: true. No renderizar lista hasta que sea true. */
   const isScopeReady = userType === 'internal' ? hasHydrated : true;
   const isInitialLoading = !hasResolvedOnce;
+  
+  // ✅ Estándar #5: Gate por Dealer - solo mostrar si contactsScopeKey coincide
+  const canShowContacts = contactsScopeKey === scopeKey;
 
   /**
    * Lista de contactos: una sola fuente de verdad.
@@ -220,6 +244,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
 
   /**
    * Fetch contacts — regla de oro: portal = dealer_id obligatorio; org = selectedDealerId o todos.
+   * ✅ Estándar #3: NO limpiar data al iniciar fetch (keep previous data)
    */
   const fetchContacts = useCallback(async () => {
     if (!enabled || !activeOrganizationId) {
@@ -227,11 +252,30 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
       setIsPending(false);
       setHasResolvedOnce(false);
       setError(null);
+      setScopeState('idle');
+      setContactsScopeKey('');
       return;
     }
 
     const thisFetchId = ++fetchIdRef.current;
+    const currentScopeKey = scopeKey;
+    
+    // ✅ Estándar #6: Revisar cache primero
+    if (cacheRef.current.has(currentScopeKey)) {
+      const cached = cacheRef.current.get(currentScopeKey)!;
+      if (import.meta.env.DEV) {
+        console.log('[useDirectoryContacts] Cache HIT:', { scopeKey: currentScopeKey, count: cached.length });
+      }
+      setContacts(cached);
+      setContactsScopeKey(currentScopeKey);
+      setScopeState('ready');
+      setHasResolvedOnce(true);
+      // Continuar con fetch en background para actualizar
+    }
+    
+    // ✅ Estándar #3: NO vaciar contacts - mantener datos previos
     setIsPending(true);
+    setScopeState(hasResolvedOnce ? 'switching' : 'loading_scope');
 
     try {
       let dealerId: string | null = null;
@@ -244,9 +288,11 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         dealerId = effective.dealerId;
         if (dealerId == null) {
           if (thisFetchId === fetchIdRef.current) {
-            setContacts([]);
+            // ✅ Mantener contacts previos incluso si no hay dealer
             setIsPending(false);
             setHasResolvedOnce(true);
+            setScopeState('ready');
+            setContactsScopeKey(currentScopeKey);
           }
           return;
         }
@@ -260,28 +306,37 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
       const mapped = data.map(mapToContact);
 
       if (thisFetchId !== fetchIdRef.current) return;
+      
       if (import.meta.env.DEV) {
         console.log('[useDirectoryContacts] Fetched contacts:', {
           count: mapped.length,
           userType,
           dealerId: userType === 'portal' ? dealerId : activeDealerId,
+          scopeKey: currentScopeKey,
         });
       }
+      
+      // ✅ Estándar #6: Guardar en cache
+      cacheRef.current.set(currentScopeKey, mapped);
+      
       setContacts(mapped);
+      setContactsScopeKey(currentScopeKey);
       setError(null);
+      setScopeState('ready');
     } catch (err: any) {
       if (thisFetchId !== fetchIdRef.current) return;
       const errorMessage = err?.message || 'Error loading contacts';
       console.error('[useDirectoryContacts] Error:', errorMessage, err);
       setError(errorMessage);
-      // Mantener contactos previos en error (no vaciar)
+      setScopeState('error');
+      // ✅ Estándar #3: Mantener lista previa en error (no vaciar)
     } finally {
       if (thisFetchId === fetchIdRef.current) {
         setIsPending(false);
         setHasResolvedOnce(true);
       }
     }
-  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectContacts, mapToContact]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectContacts, mapToContact, scopeKey, hasResolvedOnce]);
 
   /**
    * Get contact by ID
@@ -526,13 +581,24 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     fetchContacts();
   }, [fetchContacts]);
 
-  // Al cambiar dealer u org: limpiar lista y marcar como no resuelto para no mostrar datos de otro scope.
+  // ✅ Estándar #3: NO limpiar data cuando scopeKey cambia - mantener previous data
+  // Solo marcar que scopeKey cambió para indicar "switching"
   useEffect(() => {
     if (!enabled) return;
-    setHasResolvedOnce(false);
-    setContacts([]);
-    setError(null);
-  }, [activeDealerId, activeOrganizationId, enabled]);
+    if (prevScopeKeyRef.current !== scopeKey) {
+      if (import.meta.env.DEV) {
+        console.log('[useDirectoryContacts] scopeKey changed:', {
+          from: prevScopeKeyRef.current,
+          to: scopeKey,
+        });
+      }
+      prevScopeKeyRef.current = scopeKey;
+      // ✅ NO limpiar contacts - mantener datos previos
+      // ✅ NO resetear hasResolvedOnce - permite diferenciar first load vs switch
+      setError(null);
+      setScopeState('switching');
+    }
+  }, [scopeKey, enabled]);
 
   // Auto-fetch cuando cambia organization (siempre declarado, no condicional).
   // Org user: no hacer el primer fetch hasta que ActingAs haya hidratado (evita flash con todos los contactos).
@@ -550,6 +616,12 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     fetchContacts();
   }, [fetchContacts, enabled, userType, hasHydrated]);
 
+  // ✅ Estándar #4: Diferenciar estados
+  const hasData = contacts.length > 0;
+  const isFirstLoad = isPending && !hasResolvedOnce;
+  const isRefreshing = isPending && hasResolvedOnce && contactsScopeKey === scopeKey;
+  const isSwitchingDealer = scopeState === 'switching' && isPending;
+
   return {
     contacts,
     isLoading: isPending,
@@ -558,6 +630,16 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     isScopeReady,
     hasResolvedOnce,
     error,
+    
+    // ✅ Nuevos campos para state machine
+    scopeState,
+    contactsScopeKey,
+    canShowContacts,
+    hasData,
+    isFirstLoad,
+    isRefreshing,
+    isSwitchingDealer,
+    
     fetchContacts,
     getContactById,
     createContact,

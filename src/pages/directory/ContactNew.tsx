@@ -285,8 +285,7 @@ export default function ContactNew() {
           </button>
           <button
             type="button"
-            className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleSubmit}
             disabled={isSaving || isReadOnly}
             title={isReadOnly ? 'You only have read permissions (viewer role)' : undefined}
