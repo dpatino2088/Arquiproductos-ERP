@@ -12,7 +12,6 @@ import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
 import { usePermissions, MODULE_PERMS } from '../hooks/usePermissions';
 import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { useActingAsContext } from '../context/ActingAsContext';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { ActingAsSwitcher } from './layout/ActingAsSwitcher';
 import { 
@@ -215,24 +214,14 @@ function Layout({ children }: LayoutProps) {
   const { saveCurrentPageBeforeSettings } = usePreviousPage();
   const { isMember, isSuperAdmin, role: currentRole } = useCurrentOrgRole();
   const { can, loading: permissionsLoading } = usePermissions();
-  const { allowedModules, loading: accessLoading, userType } = useAccessContext();
+  const { allowedModules, loading: accessLoading, userType, portalRole } = useAccessContext();
   const { activeOrganization, role: orgContextRole } = useOrganizationContext();
-  const actingAs = useActingAsContext();
 
   // Solo Organization Super Admin ve el switcher "Dealer Account" (rol canónico: superadmin)
   const isSuperAdminUser = isSuperAdmin || orgContextRole === 'superadmin' || currentRole === 'superadmin';
 
-  // Nombre del dealer para el header: solo si hay dealer seleccionado y no es el mismo que la org (si es Arquiproductos no mostrar nada extra)
-  const orgName = activeOrganization?.name?.trim() || '';
-  const dealerDisplayInHeader =
-    userType === 'internal' &&
-    isSuperAdminUser &&
-    actingAs?.activeDealerId &&
-    actingAs.activeDisplayName &&
-    orgName &&
-    orgName.toLowerCase() !== (actingAs.activeDisplayName || '').trim().toLowerCase()
-      ? actingAs.activeDisplayName
-      : null;
+  // ActingAs dealer display: show switcher for internal users
+  const showDealerSwitcher = userType === 'internal';
   
   // Debug log for SuperAdmin detection
   if (import.meta.env.DEV) {
@@ -257,8 +246,10 @@ function Layout({ children }: LayoutProps) {
   // Ensure viewMode is always valid, default to 'manager'
   const viewMode = storeViewMode || 'manager';
 
-  // Check if we're in Settings pages - if so, hide the main sidebar. Exception: /settings/dealer-users shows sidebar so Dealer Managers can navigate.
-  const isSettingsRoute = currentRoute.includes('/settings') && !currentRoute.startsWith('/settings/dealer-users');
+  // Check if we're in Settings pages - if so, hide the main sidebar. Exception: /settings/dealer-account and /settings/dealer-users show sidebar so Dealer Managers can navigate.
+  const isSettingsRoute = currentRoute.includes('/settings')
+    && !currentRoute.startsWith('/settings/dealer-account')
+    && !currentRoute.startsWith('/settings/dealer-users');
   
   // Debug: Log sidebar visibility status
   if (import.meta.env.DEV) {
@@ -964,14 +955,10 @@ function Layout({ children }: LayoutProps) {
           {/* Top loading bar: línea delgada fija arriba del header, visible mientras globalLoading; mínimo ~300ms visible para evitar parpadeo */}
           <TopBarLoading />
           <div className="flex items-center justify-between h-full px-6">
-            {/* Left side - Organization Switcher; nombre del dealer en header cuando hay uno seleccionado distinto a la org (si es Arquiproductos no sale nada). */}
+            {/* Left side - Organization Switcher + Acting As Dealer filter */}
             <div className="flex items-center gap-4 flex-shrink-0" style={{ marginLeft: '-4px', minWidth: '280px' }}>
               <OrganizationSwitcher />
-              {dealerDisplayInHeader && (
-                <span className="text-sm font-medium" style={{ color: 'var(--gray-950)' }} title="Dealer actual">
-                  {dealerDisplayInHeader}
-                </span>
-              )}
+              {showDealerSwitcher && <ActingAsSwitcher />}
             </div>
 
             {/* Center - Empty space for future use */}
@@ -1053,28 +1040,21 @@ function Layout({ children }: LayoutProps) {
                       )}
                     </div>
 
-                    {/* Dealer Account - mismo card (solo Super Admin). Selector debajo de la etiqueta. Al elegir dealer se cierra el menú. */}
-                    {userType === 'internal' && isSuperAdminUser && (
-                      <div className="px-4 py-3 border-b border-gray-100">
-                        <ActingAsSwitcher labelAbove onAfterSelect={() => setIsUserMenuOpen(false)} />
-                      </div>
-                    )}
-
                     {/* Menu Items */}
                     <div className="py-1">
-                      {/* Dealer User - solo para portal (dealer); Organization User - solo para internal (Superadmin/Admin) */}
-                      {userType === 'portal' && (
+                      {/* Dealer Account - solo para Dealer Manager (portal); solo Manager puede cambiar algo */}
+                      {userType === 'portal' && portalRole === 'dealer_manager' && (
                         <button
                           className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
                           onClick={() => {
                             setIsUserMenuOpen(false);
-                            router.navigate('/settings/dealer-users');
+                            router.navigate('/settings/dealer-account');
                           }}
                           role="menuitem"
-                          aria-label="Dealer User"
+                          aria-label="Dealer Account"
                         >
                           <Building2 style={{ width: '16px', height: '16px' }} aria-hidden="true" />
-                          Dealer User
+                          Dealer Account
                         </button>
                       )}
                       {userType === 'internal' && !isMember && (

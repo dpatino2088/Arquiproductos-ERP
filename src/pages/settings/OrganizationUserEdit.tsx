@@ -492,14 +492,14 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
               e.preventDefault();
               e.stopPropagation();
               debugClickCount++;
-              setDebugInfo(prev => ({ ...prev, clicks: debugClickCount, lastAction: 'SAVE_FINISH', banner: 'Save & Finish clicked' }));
+              setDebugInfo(prev => ({ ...prev, clicks: debugClickCount, lastAction: 'SAVE_CLOSE', banner: 'Save & Close clicked' }));
               console.log('HEADER CLICK', { action: 'save_finish', ts: Date.now() });
               handleSaveAll(true);
             }}
             disabled={isSaving}
             className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSaving ? 'Saving...' : 'Save & Finish'}
+            {isSaving ? 'Saving...' : 'Save & Close'}
           </button>
         </div>
       </div>

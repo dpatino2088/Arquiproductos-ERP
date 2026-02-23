@@ -96,7 +96,7 @@ export interface CostSettings {
   global_import_tax_pct: number; // 0-1
   minimum_margin_pct: number;   // Pricing floor margin-on-sale (0-1). Default 0.35
   default_msrp_pct: number; // 0-1 (e.g. 0.65 = 65%). Default MSRP %
-  itbms_pct?: number;         // ITBMS % (0-1, e.g. 0.07 = 7%). From CostSettings, used in Quotes/Proposals.
+  itbms_pct?: number;         // Tax % (0-1, e.g. 0.07 = 7%). From CostSettings, used in Quotes/Proposals.
   import_tax_pct?: number;     // Generated column = global_import_tax_pct
   is_active?: boolean;
   created_at?: string;

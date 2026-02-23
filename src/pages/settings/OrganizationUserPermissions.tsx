@@ -13,8 +13,13 @@ interface Permission {
 }
 
 interface OrganizationUserPermissionsProps {
-  organizationUserId: string;
+  /** When null, draft mode: permissions editable in React only, no DB save until user is created */
+  organizationUserId: string | null;
   userRole: 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance' | 'member';
+  /** When switching from draft to saved user, pass the draft so first Save persists it */
+  initialDraftPermissions?: Set<string>;
+  /** In draft mode, called when draft permissions change so parent can persist them */
+  onDraftChange?: (codes: Set<string>) => void;
   onSave?: (saved: boolean) => void;
   onCancel?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
@@ -217,6 +222,8 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
 const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, OrganizationUserPermissionsProps>(({ 
   organizationUserId,
   userRole,
+  initialDraftPermissions,
+  onDraftChange,
   onSave,
   onCancel,
   onDirtyChange,
@@ -224,6 +231,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
   onRequestSave,
   showActions = true, // Default: render buttons (parent can override)
 }, ref) => {
+  const isDraftMode = organizationUserId == null;
   const { activeOrganizationId } = useOrganizationContext();
   const { isSuperAdmin, isAdmin } = useCurrentOrgRole();
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -243,21 +251,21 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
   // Only admins can edit permissions
   const canEdit = isSuperAdmin || isAdmin;
 
-  // Apply role preset (exposed via ref)
+  // Apply role preset (exposed via ref). In draft mode notify parent so draft persists.
   const applyRolePreset = useCallback(async (role: OrgRole, allPermissionCodes?: string[]) => {
     if (role === 'superadmin') {
-      // Superadmin: use all permissions
       const allCodes = allPermissionCodes || permissions.map(p => p.code);
       const preset = new Set(allCodes);
       setDraftPermissions(preset);
       setOriginalPermissions(preset);
+      if (isDraftMode && onDraftChange) onDraftChange(preset);
     } else {
-      // Get preset for role
       const preset = getDefaultPermissionsForRole(role, allPermissionCodes);
       setDraftPermissions(preset);
       setOriginalPermissions(preset);
+      if (isDraftMode && onDraftChange) onDraftChange(preset);
     }
-  }, [permissions]);
+  }, [permissions, isDraftMode, onDraftChange]);
 
   // Expose applyRolePreset via ref
   useImperativeHandle(ref, () => ({
@@ -291,7 +299,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
 
   // Internal save function (also used by external save)
   const savePermissionsInternal = useCallback(async () => {
-    if (!canEdit || saving) return;
+    if (isDraftMode || !canEdit || saving) return;
     
     // If superadmin, don't save permissions (they're implicit)
     if (userRole === 'superadmin') {
@@ -412,13 +420,6 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
     }
   }, []);
 
-  // Load data when userId or org changes
-  useEffect(() => {
-    if (organizationUserId && activeOrganizationId) {
-      loadData();
-    }
-  }, [organizationUserId, activeOrganizationId]);
-
   // Handle role change: recalculate draftPermissions
   useEffect(() => {
     // Skip on initial load (wait for permissions to load)
@@ -438,60 +439,91 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
   }, [userRole, permissions, assignedPermissions]);
 
   const loadData = useCallback(async () => {
-    if (!activeOrganizationId || !organizationUserId) return;
+    if (!activeOrganizationId) return;
+    if (!organizationUserId) {
+      // Draft mode: load only Permissions list, init draft from role or initialDraftPermissions
+      setLoading(true);
+      try {
+        const { data: allPermissions, error: permsError } = await supabase
+          .from('Permissions')
+          .select('code, module, description')
+          .order('module, code');
+        if (permsError) throw permsError;
+        setPermissions(allPermissions || []);
+        setAssignedPermissions(new Set());
+        const allCodes = (allPermissions || []).map((p: Permission) => p.code);
+        if (initialDraftPermissions != null) {
+          setOriginalPermissions(new Set());
+          setDraftPermissions(new Set(initialDraftPermissions));
+        } else if (userRole === 'superadmin') {
+          setOriginalPermissions(new Set());
+          setDraftPermissions(new Set());
+        } else if (isValidOrgRole(userRole)) {
+          const rolePreset = getDefaultPermissionsForRole(userRole, allCodes);
+          setOriginalPermissions(new Set());
+          setDraftPermissions(rolePreset);
+        } else {
+          setOriginalPermissions(new Set());
+          setDraftPermissions(new Set());
+        }
+      } catch (err: any) {
+        if (import.meta.env.DEV) console.error('Error loading permissions (draft):', err);
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'Error loading permissions. Please try again.',
+        });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     setLoading(true);
     try {
-      // Load all available permissions
       const { data: allPermissions, error: permsError } = await supabase
         .from('Permissions')
         .select('code, module, description')
         .order('module, code');
-
       if (permsError) throw permsError;
       setPermissions(allPermissions || []);
 
-      // Load user's current permissions
+      // If parent passed initial draft (from draft mode before user was created), use it and skip DB load
+      if (initialDraftPermissions !== undefined) {
+        setOriginalPermissions(new Set());
+        setDraftPermissions(new Set(initialDraftPermissions));
+        setAssignedPermissions(new Set());
+        setLoading(false);
+        return;
+      }
+
       const { data: userPerms, error: userPermsError } = await supabase
         .from('OrganizationUserPermissions')
         .select('permission_code')
         .eq('organization_user_id', organizationUserId);
-
       if (userPermsError) throw userPermsError;
-      
       const currentPerms = new Set<string>((userPerms || []).map((p: any) => p.permission_code));
       setAssignedPermissions(new Set<string>(currentPerms));
-      
-      // Initialize draftPermissions based on current role
+
       if (userRole === 'superadmin') {
-        // Superadmin: don't use DB permissions, they're implicit
         setOriginalPermissions(new Set<string>());
         setDraftPermissions(new Set<string>());
       } else if (isValidOrgRole(userRole)) {
-        // New roles: use role preset if no DB permissions, otherwise use DB permissions
         const allCodes = (allPermissions || []).map((p: Permission) => p.code);
         const rolePreset = getDefaultPermissionsForRole(userRole, allCodes);
-        
         if (currentPerms.size > 0) {
-          // User has DB permissions, use those
           setOriginalPermissions(new Set<string>(currentPerms));
           setDraftPermissions(new Set<string>(currentPerms));
         } else {
-          // No DB permissions: initialize originalPermissions as EMPTY (so save will insert preset)
-          // and draftPermissions with preset (so UI shows them)
-          // This ensures that when user saves, all preset permissions get inserted
-          setOriginalPermissions(new Set<string>()); // Empty = no permissions in DB yet
-          setDraftPermissions(rolePreset); // Preset = what we want to save
+          setOriginalPermissions(new Set<string>());
+          setDraftPermissions(rolePreset);
         }
       } else {
-        // Member or other legacy roles: use only DB permissions
         setOriginalPermissions(new Set<string>(currentPerms));
         setDraftPermissions(new Set<string>(currentPerms));
       }
     } catch (err: any) {
-      if (import.meta.env.DEV) {
-        console.error('Error loading permissions:', err);
-      }
+      if (import.meta.env.DEV) console.error('Error loading permissions:', err);
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
@@ -500,11 +532,19 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
     } finally {
       setLoading(false);
     }
-  }, [organizationUserId, activeOrganizationId]);
+  // initialDraftPermissions intentionally omitted: only run when org/userId changes to avoid loop when parent updates draft
+  }, [organizationUserId, activeOrganizationId, userRole]);
 
-  // Toggle permission in draft state (NO persiste en DB)
+  // Load data when org changes, or when userId appears (draft mode uses loadData too)
+  useEffect(() => {
+    if (activeOrganizationId) {
+      loadData();
+    }
+  }, [organizationUserId, activeOrganizationId, loadData]);
+
+  // Toggle permission in draft state (NO persiste en DB). Notify parent only on user action to avoid render loop.
   const handleTogglePermission = useCallback((permissionCode: string) => {
-    if (!canEdit || saving || userRole === 'superadmin') return; // Superadmin can't toggle
+    if (!canEdit || saving || userRole === 'superadmin') return;
 
     setDraftPermissions(prev => {
       const next = new Set(prev);
@@ -513,12 +553,17 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
       } else {
         next.add(permissionCode);
       }
+      if (isDraftMode && onDraftChange) {
+        onDraftChange(next);
+      }
       return next;
     });
-  }, [canEdit, saving, userRole]);
+  }, [canEdit, saving, userRole, isDraftMode, onDraftChange]);
 
   // Save permissions to DB
   const handleSave = useCallback(async (finish: boolean = false) => {
+    if (isDraftMode) return;
+
     console.log('CLICK SAVE', {
       isDirtyPermissions,
       isSaving: saving,
@@ -688,7 +733,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
     } finally {
       setSaving(false);
     }
-  }, [canEdit, saving, isDirtyPermissions, draftPermissions, originalPermissions, organizationUserId, userRole, onSave]);
+  }, [isDraftMode, canEdit, saving, isDirtyPermissions, draftPermissions, originalPermissions, organizationUserId, userRole, onSave]);
 
   // Group and sort permissions by module
   const permissionsByModule = useMemo(() => {
@@ -729,9 +774,11 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
           </div>
         ) : (
           <p className="text-sm text-gray-600">
-            {canEdit 
-              ? 'Select the permissions this user can have. Changes will be saved when you press "Save" or "Save & Finish".'
-              : 'Only administrators can edit permissions.'}
+            {isDraftMode
+              ? 'Configura los permisos aquí. Se guardarán en la base de datos cuando crees el usuario y hagas clic en "Save" o "Save and Close".'
+              : canEdit
+                ? 'Select the permissions this user can have. Changes will be saved when you press "Save" or "Save & Close".'
+                : 'Only administrators can edit permissions.'}
           </p>
         )}
         {isDirtyPermissions && canEdit && userRole !== 'superadmin' && (
@@ -788,7 +835,8 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
                   console.log('CLICK SAVE BUTTON', { isDirtyPermissions, saving });
                   handleSave(false);
                 }}
-                disabled={saving || !isDirtyPermissions}
+                disabled={saving || !isDirtyPermissions || isDraftMode}
+                title={isDraftMode ? 'Crea el usuario primero para guardar en BD' : undefined}
                 className="btn-save px-4 py-2 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
               >
                 {saving ? (
@@ -808,7 +856,8 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
                   console.log('CLICK SAVE & FINISH BUTTON', { isDirtyPermissions, saving });
                   handleSave(true);
                 }}
-                disabled={saving || !isDirtyPermissions}
+                disabled={saving || !isDirtyPermissions || isDraftMode}
+                title={isDraftMode ? 'Crea el usuario primero para guardar en BD' : undefined}
                 className="btn-save-close px-4 py-2 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
               >
                 {saving ? (

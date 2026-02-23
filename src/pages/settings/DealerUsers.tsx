@@ -187,8 +187,7 @@ function CreateDealerUserModal({ isOpen, onClose, onSuccess, organizationId, sin
       // ✅ Use create-temp-user (temporary password flow)
       const normalizedEmail = trimmedEmail.trim().toLowerCase();
       
-      // create-temp-user expects role 'member' | 'member_manager'
-      const portalRole = role === 'dealer_manager' ? 'member_manager' : 'member';
+      const portalRole = role;
       const { data, error: createError } = await supabase.functions.invoke('create-temp-user', {
         body: {
           kind: 'portal',
@@ -731,7 +730,7 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
 export default function DealerUsers() {
   const { activeOrganizationId, activeOrganization } = useOrganizationContext();
   const { userType, portalDealerId, portalRole } = useAccessContext();
-  const isPortalManager = userType === 'portal' && portalRole === 'member_manager';
+  const isPortalManager = userType === 'portal' && portalRole === 'dealer_manager';
   const isPortal = userType === 'portal';
 
   const orgUsers = useDealerAppUsersForOrg(isPortal ? null : activeOrganizationId);
@@ -1115,10 +1114,10 @@ export default function DealerUsers() {
                       {(() => {
                         const role = roleCodeToPortalRole(user.role_code);
                         const roleColors: Record<string, { bg: string; text: string; border: string }> = {
-                          member_manager: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border border-purple-200' },
-                          member: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border border-blue-200' },
+                          dealer_manager: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border border-purple-200' },
+                          dealer_member: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border border-blue-200' },
                         };
-                        const colors = roleColors[role] ?? roleColors.member;
+                        const colors = roleColors[role] ?? roleColors.dealer_member;
                         return (
                           <span className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
                             {getRoleLabel(role)}

@@ -36,6 +36,8 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   const [activeTab, setActiveTab] = useState<'details' | 'permissions'>('details');
   const [isDirtyPermissions, setIsDirtyPermissions] = useState(false);
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
+  /** Draft permissions while user not created; persisted so first Save writes them to DB */
+  const [draftPermissionsFromParent, setDraftPermissionsFromParent] = useState<Set<string> | null>(null);
   const { activeOrganizationId, hasOrganizations, loading: orgLoading } = useOrganizationContext();
   const { user } = useAuthStore();
   const { isSuperAdmin, loading: roleLoading } = useCurrentOrgRole();
@@ -84,73 +86,46 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       const normalizedEmail = data.email.trim().toLowerCase();
       const userName: string | null = data.user_name?.trim() || null;
 
-      // ✅ Use create-temp-user (temporary password flow)
-      const { data: createData, error: createError } = await supabase.functions.invoke('create-temp-user', {
+      // ✅ Redirect del correo de invitación: usar URL base configurable en producción para evitar 404
+      // (ej. si la app está en app.adaptio.app, define VITE_APP_ORIGIN=https://app.adaptio.app)
+      const appOrigin = (import.meta.env.VITE_APP_ORIGIN ?? '').trim() || window.location.origin;
+      const redirectTo = `${appOrigin.replace(/\/$/, '')}/auth/callback?next=/set-password`;
+      const { data: inviteData, error: inviteError } = await supabase.functions.invoke('send-org-invite', {
         body: {
-          kind: 'org',
           organization_id: activeOrganizationId,
-          email: normalizedEmail,
-          name: userName,
+          user_email: normalizedEmail,
+          user_name: userName,
           role: data.role,
+          redirect_to: redirectTo,
         },
       });
 
+      // Edge returns 200 with ok: true even when invite email fails (org record is created)
       const errStr =
-        (typeof createData?.error === 'string' && createData.error) ||
-        (typeof (createError as any)?.context === 'string' && (createError as any).context) ||
-        (typeof createError?.message === 'string' && createError.message) ||
-        (createData?.ok === false ? 'Edge Function failed' : null);
-      const realMessage = typeof errStr === 'string' ? errStr : 'Failed to create user';
-      if (createError || !createData?.ok) {
-        if (import.meta.env.DEV) console.error('[OrganizationUserNew] create-temp-user', { createData, createError, realMessage });
+        (typeof inviteData?.error === 'string' && inviteData.error) ||
+        (typeof (inviteError as any)?.context === 'string' && (inviteError as any).context) ||
+        (typeof inviteError?.message === 'string' && inviteError.message) ||
+        (inviteData?.ok === false ? 'Edge Function failed' : null);
+      const realMessage = typeof errStr === 'string' ? errStr : 'Failed to send invite';
+      if (inviteError && !inviteData?.ok) {
+        if (import.meta.env.DEV) console.error('[OrganizationUserNew] send-org-invite', { inviteData, inviteError, realMessage });
         throw new Error(realMessage);
       }
 
-      console.log('[OrganizationUserNew] User created:', createData);
-      console.log('[OrganizationUserNew] Email sent?', createData?.email_sent);
-      console.log('[OrganizationUserNew] Email error?', createData?.email_error);
-      console.log('[OrganizationUserNew] Temp password?', createData?.temp_password ? 'YES' : 'NO');
-
-      // ✅ Get the OrganizationUsers record ID that was just created
-      const { data: orgUser, error: fetchError } = await supabase
-        .from('OrganizationUsers')
-        .select('id')
-        .eq('organization_id', activeOrganizationId)
-        .eq('user_email', normalizedEmail)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (fetchError) {
-        console.warn('[OrganizationUserNew] Could not fetch created user ID:', fetchError);
-      } else if (orgUser?.id) {
-        console.log('[OrganizationUserNew] Found created user ID:', orgUser.id);
-        setCreatedUserId(orgUser.id);
-        // Switch to permissions tab automatically after creating user
-        setActiveTab('permissions');
-      }
-
-      // ✅ Success message - mostrar password temporal si está disponible
-      const emailSent = createData?.email_sent === true;
-      let message = emailSent 
-        ? `Usuario creado. Se envió email con credenciales temporales a ${normalizedEmail}.`
-        : `Usuario creado. Email no pudo enviarse (configura RESEND_API_KEY y FROM_EMAIL en Supabase).`;
-      
-      if (createData?.temp_password) {
-        message += `\n\n🔑 Contraseña temporal: ${createData.temp_password}\n\nCopia esta contraseña y compártela con el usuario.`;
-        console.log('[OrganizationUserNew] Temp password:', createData.temp_password);
-      }
-
-      if (createData?.email_error) {
-        console.warn('[OrganizationUserNew] Email error:', createData.email_error);
-        message += `\n\n⚠️ Error de email: ${createData.email_error}`;
-      }
+      const emailSent = inviteData?.email_sent === true;
+      const inviteErr = inviteData?.invite_error;
+      const message = emailSent
+        ? `Usuario creado correctamente. Se envió invitación por email a ${normalizedEmail}.`
+        : `Usuario creado correctamente y añadido a la organización.${inviteErr ? ` No se pudo enviar el correo de invitación (el usuario puede ya estar registrado).` : ' No se pudo enviar el correo de invitación.'}`;
 
       useUIStore.getState().addNotification({
-        type: emailSent ? 'success' : 'warning',
-        title: 'Usuario Creado',
+        type: 'success',
+        title: 'Usuario creado',
         message,
       });
+
+      // Redirigir a la lista de usuarios de la organización
+      router.navigate('/settings/organization-user');
     } catch (err: any) {
       console.error('Error creating user:', err);
       const errorMessage = err.message || 'Error creating user. Please try again.';
@@ -373,7 +348,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         </div>
       )}
 
-      {/* Tabs - Show always, but Permissions tab is only functional after user is created */}
+      {/* Tabs - Permissions always clickable; content shows message or permissions UI */}
       <div className="mb-6 border-b border-gray-200">
         <div className="flex gap-4">
           <button
@@ -387,23 +362,12 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
             Details
           </button>
           <button
-            onClick={() => {
-              if (createdUserId) {
-                setActiveTab('permissions');
-              } else {
-                useUIStore.getState().addNotification({
-                  type: 'info',
-                  title: 'Create User First',
-                  message: 'Please create the user first to assign permissions.',
-                });
-              }
-            }}
-            disabled={!createdUserId}
+            onClick={() => setActiveTab('permissions')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'permissions'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
-            } ${!createdUserId ? 'opacity-50 cursor-not-allowed' : ''}`}
+            }`}
           >
             <Shield className="w-4 h-4" />
             Permissions
@@ -542,38 +506,28 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         </>
       )}
 
-      {/* Permissions Tab Content - Only show if user is created */}
-      {activeTab === 'permissions' && createdUserId && (
-        <>
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <OrganizationUserPermissions
-              ref={permissionsComponentRef}
-              organizationUserId={createdUserId}
-              userRole={form.watch('role')}
-              onSave={(finish) => {
-                setIsSavingPermissions(false);
-                if (finish) {
-                  router.navigate('/settings/organization-user');
-                }
-              }}
-              onCancel={() => router.navigate('/settings/organization-user')}
-              onDirtyChange={setIsDirtyPermissions}
-              externalSave={(saveFn) => {
-                savePermissionsFnRef.current = saveFn;
-              }}
-              showActions={false}
-            />
-          </div>
-        </>
-      )}
-
-      {activeTab === 'permissions' && !createdUserId && (
-        <div className="bg-white border border-gray-200 rounded-lg p-6 text-center">
-          <Shield className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-sm text-gray-600 mb-2">Create user first</p>
-          <p className="text-xs text-gray-500">
-            Please fill in the user details and click "Create User" to assign permissions.
-          </p>
+      {/* Permissions Tab: same UI with or without user; draft kept in React until Save (after user created) */}
+      {activeTab === 'permissions' && (
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <OrganizationUserPermissions
+            ref={permissionsComponentRef}
+            organizationUserId={createdUserId}
+            userRole={form.watch('role')}
+            initialDraftPermissions={draftPermissionsFromParent ?? undefined}
+            onDraftChange={setDraftPermissionsFromParent}
+            onSave={(finish) => {
+              setIsSavingPermissions(false);
+              if (finish) {
+                router.navigate('/settings/organization-user');
+              }
+            }}
+            onCancel={() => router.navigate('/settings/organization-user')}
+            onDirtyChange={setIsDirtyPermissions}
+            externalSave={(saveFn) => {
+              savePermissionsFnRef.current = saveFn;
+            }}
+            showActions={false}
+          />
         </div>
       )}
 

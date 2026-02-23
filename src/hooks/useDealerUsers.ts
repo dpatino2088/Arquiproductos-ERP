@@ -12,7 +12,7 @@ export interface DealerUser {
   user_id?: string | null;
   portal_user_email: string;
   portal_user_name?: string | null;
-  portal_user_role?: 'member_manager' | 'member' | null;
+  portal_user_role?: 'dealer_manager' | 'dealer_member' | null;
   portal_user_status: 'draft' | 'invited' | 'active' | 'disabled';
   organization_id?: string | null;
   invited_at?: string | null;
@@ -133,12 +133,12 @@ export function useDealerUsers(dealerId?: string | null, options?: UseDealerUser
       portal_user_name: row.portal_user_name || null,
       portal_user_role: (() => {
         const rawRole = row.role || row.portal_user_role;
-        if (rawRole === 'member_manager') return 'member_manager' as const;
-        if (rawRole === 'member') return 'member' as const;
-        if (!rawRole || rawRole === '' || rawRole === null) return 'member' as const;
+        if (rawRole === 'dealer_manager' || rawRole === 'member_manager') return 'dealer_manager' as const;
+        if (rawRole === 'dealer_member' || rawRole === 'member') return 'dealer_member' as const;
+        if (!rawRole || rawRole === '' || rawRole === null) return 'dealer_member' as const;
         const normalized = String(rawRole).toLowerCase().trim();
-        if (normalized === 'member_manager' || normalized === 'manager') return 'member_manager' as const;
-        return 'member' as const;
+        if (['dealer_manager', 'member_manager', 'manager'].includes(normalized)) return 'dealer_manager' as const;
+        return 'dealer_member' as const;
       })(),
       portal_user_status,
       organization_id: row.organization_id || (row.Dealers?.organization_id || null),

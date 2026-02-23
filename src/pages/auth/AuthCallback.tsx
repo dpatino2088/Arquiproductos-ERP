@@ -118,6 +118,14 @@ export default function AuthCallbackPage() {
             console.log("[AuthCallback] ✅ Session set from hash");
             // ✅ Remove hash para que no se reprocesa al refresh
             window.history.replaceState({}, document.title, url.pathname + url.search);
+
+            // ✅ Recovery (reset password): ir directo al formulario de nueva contraseña sin esperar más pasos
+            if (type === "recovery") {
+              console.log("[AuthCallback] type=recovery -> /auth/reset-password");
+              await useAuthStore.getState().syncSession();
+              if (!cancelled) router.navigate("/auth/reset-password", true);
+              return;
+            }
           } else if (hash) {
             // Si hay hash pero no access_token, puede que Supabase aún no lo haya procesado
             // Esperar un poco y verificar si detectSessionInUrl lo procesó

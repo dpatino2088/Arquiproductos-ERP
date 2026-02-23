@@ -2,12 +2,13 @@
  * Generate Quote PDF
  * Same format as Proposal PDF: logo slot (Arquiproducto) top-left, "Quote" + quote_no top-right,
  * Details: Customer, Contact, Address (left) | Date, Valid until, Salesperson (right).
- * Body: same table (#, Area, Position, Description, Measurements, Product type, Accessories, Qty, Unit Price, Line total) and summary.
+ * Body: same table (#, Area, Position, Description, Measurements, Product type, Qty, Unit Price, Line total) and summary.
  * Logo is always Arquiproducto (passed by caller from /images); no dealer logo link.
  */
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDimensionsForProposalPDF, type DimensionsSource } from '../formatDimensions';
 
 export type PDFVariant = 'dealer' | 'client';
 
@@ -19,8 +20,12 @@ export interface QuotePDFLine {
   collection_name?: string | null;
   variant_name?: string | null;
   drive_type?: string | null;
+  /** Name of selected drive/motor SKU for operating system line */
+  operating_system_sku_name?: string | null;
   width_m?: number | null;
   height_m?: number | null;
+  /** Dimensions source for per-panel format (same as Viewer) */
+  dimensions_source?: DimensionsSource | null;
   qty: number;
   line_total: number;
   /** Optional: for table "Accessories" column */
@@ -36,7 +41,13 @@ export interface QuotePDFData {
   customer_id: string;
   status: string;
   currency: string;
+  /** Project detail description (right box). */
+  description?: string | null;
   notes?: string | null;
+  /** Snapshot: terms title (for PDF). Preferred over notes. */
+  terms_title?: string | null;
+  /** Snapshot: terms content (for PDF). Preferred over notes. */
+  terms_content?: string | null;
   totals: {
     subtotal: number;
     tax_total: number;
@@ -75,8 +86,12 @@ export interface GenerateQuotePDFOptions {
   sellerName?: string;
   /** Project/Customer box (right side, bordered): Project, Customer, Contact, Description */
   projectName?: string | null;
-  /** ITBMS % for label e.g. "ITBMS (7%)" (0–1 or 0–100) */
+  /** Dealer PO / order number */
+  poNumber?: string | null;
+  /** Tax % for label e.g. "Tax (7%)" (0–1 or 0–100) */
   itbms_pct?: number | null;
+  /** If true, Tax row is hidden (tax exempt) */
+  exempt_itbms?: boolean;
 }
 
 function formatCurrency(amount: number, currency: string = 'USD'): string {
@@ -110,7 +125,9 @@ export function generateQuotePDF(
     description,
     sellerName,
     projectName,
+    poNumber,
     itbms_pct,
+    exempt_itbms = false,
   } = options;
 
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
@@ -262,9 +279,10 @@ export function generateQuotePDF(
   const boxLabelX = boxLeft + 3;
   const boxValueX = boxLeft + 28;
   const boxDescW = boxWidth - 31;
-  const descStr = (quote.notes && String(quote.notes).trim()) ? String(quote.notes).trim() : '—';
+  const descStr = (quote.description && String(quote.description).trim()) ? String(quote.description).trim() : '—';
   doc.setFontSize(9);
   const boxDescLines = doc.splitTextToSize(descStr, boxDescW);
+  const hasPoNumber = poNumber && String(poNumber).trim().length > 0;
   const boxContentH = 4 + boxRowH * 3 + 4 + Math.max(boxRowH, boxDescLines.length * 4);
   const boxHeight = Math.max(boxRowH * 4 + 4, boxContentH);
   const boxRadiusMm = 2;
@@ -274,11 +292,16 @@ export function generateQuotePDF(
   doc.setDrawColor(0, 0, 0);
 
   doc.setFontSize(9);
-  let boxY = boxTopY + 7; // contenido 3 mm más abajo dentro del recuadro
+  let boxY = boxTopY + 7;
   doc.setFont('helvetica', 'bold');
-  doc.text('Project', boxLabelX, boxY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(projectName ?? '—', boxValueX, boxY);
+  doc.setTextColor(120, 120, 120);
+  doc.text('Project Detail', boxLabelX, boxY);
+  doc.setTextColor(0, 0, 0);
+  if (hasPoNumber) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(String(poNumber).trim(), boxLeft + boxWidth - 3, boxY, { align: 'right' });
+  }
+  doc.setFontSize(9);
   boxY += boxRowH;
   doc.setFont('helvetica', 'bold');
   doc.text('Customer :', boxLabelX, boxY);
@@ -301,77 +324,43 @@ export function generateQuotePDF(
   const rightBlockEndY = Math.max(leftBlockEndY, boxTopY + boxHeight);
 
   // —— Table: same as Proposal (grey header, same columns and columnStyles) ——
-  const gapBeforeTableMm = 8 - (10 / 96) * 25.4;
-  yPos = rightBlockEndY + gapBeforeTableMm - 7;
+  const gapBeforeTableMm = 8;
+  yPos = rightBlockEndY + gapBeforeTableMm;
 
   const buildDescription = (line: QuotePDFLine): string => {
-    const parts = [
-      line.product_type ?? line.CatalogItems?.item_name ?? '—',
+    const collectionVariant =
       line.collection_name && line.variant_name
         ? `${line.collection_name} - ${line.variant_name}`
-        : line.collection_name ?? line.variant_name ?? '',
-      line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '',
-    ].filter(Boolean);
-    return parts.join(' | ') || '—';
+        : line.collection_name ?? line.variant_name ?? '';
+    const osLabel = line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '';
+    const operatingSystem =
+      osLabel && line.operating_system_sku_name
+        ? `${osLabel} - ${line.operating_system_sku_name}`
+        : osLabel || (line.operating_system_sku_name ?? '');
+    const lines: string[] = [];
+    if (collectionVariant) lines.push(collectionVariant);
+    if (operatingSystem) lines.push(operatingSystem);
+    return lines.join('\n') || '—';
   };
 
   const buildMeasurements = (line: QuotePDFLine): string => {
-    if (line.width_m != null && line.height_m != null) {
-      return `${(line.width_m * 1000).toFixed(0)} x ${(line.height_m * 1000).toFixed(0)}`;
-    }
-    return '—';
+    const source: DimensionsSource = line.dimensions_source ?? {
+      width_m: line.width_m,
+      height_m: line.height_m,
+    };
+    return formatDimensionsForProposalPDF(source);
   };
 
-  const movePosLeftPx = 7;
-  const movePosLeftMm = (movePosLeftPx / 96) * 25.4 + 5;
-  const lineTotalShiftRightMm = 10;
-  const productTypeAccQtyShiftRightMm = 10;
   const W = {
     n: 7,
-    area: 11, // 5 mm menos para que Position quede 5 mm más a la izquierda
+    area: 16,
     pos: 18,
-    desc: 38,
+    desc: 40,
     measurements: 26,
-    productType: 23, // +5 mm para mover Accessories y Qty 5 mm a la derecha
-    acc: 20,
-    qty: 9,
-    unit: 24 + lineTotalShiftRightMm - productTypeAccQtyShiftRightMm,
+    productType: 27,
+    qty: 7,
+    unit: 23,
     total: 22,
-  };
-  const descFlex = tableUsableWidth - (W.n + W.area + W.pos + W.measurements + W.productType + W.acc + W.qty + W.unit + W.total);
-  (W as Record<string, number>).desc = Math.max(descFlex, 23);
-
-  /** Trunca texto a máximo 2 líneas sin cortar palabras (aprox. 2.2 chars/mm a 8pt). */
-  const truncateToTwoLines = (text: string, cellWidthMm: number): string => {
-    const s = String(text ?? '').trim() || '—';
-    if (!s || s === '—') return s;
-    const maxCharsPerLine = Math.max(10, Math.floor(cellWidthMm * 2.2));
-    const words = s.split(/\s+/);
-    let line1 = '';
-    let line2 = '';
-    for (const w of words) {
-      if (!line1) {
-        line1 = w;
-        continue;
-      }
-      const next1 = line1 + ' ' + w;
-      if (next1.length <= maxCharsPerLine) {
-        line1 = next1;
-        continue;
-      }
-      if (!line2) {
-        line2 = w;
-        continue;
-      }
-      const next2 = line2 + ' ' + w;
-      if (next2.length <= maxCharsPerLine) {
-        line2 = next2;
-        continue;
-      }
-      line2 = line2 + '...';
-      break;
-    }
-    return line2 ? line1 + '\n' + line2 : line1;
   };
 
   const tableData = lines.map((line, index) => {
@@ -387,10 +376,9 @@ export function generateQuotePDF(
       String(index + 1),
       line.area ?? '—',
       line.position ?? '—',
-      truncateToTwoLines(buildDescription(line), W.desc),
+      buildDescription(line),
       buildMeasurements(line),
       line.product_type ?? line.CatalogItems?.item_name ?? '—',
-      line.accessories ?? '—',
       String(qty),
       formatCurrency(unitPrice, quote.currency),
       formatCurrency(lineTotal, quote.currency),
@@ -399,7 +387,7 @@ export function generateQuotePDF(
 
   autoTable(doc, {
     startY: yPos,
-    head: [['#', 'Area', 'Position', 'Description', 'Measurements', 'Product type', 'Accessories', 'Qty', 'Unit Price', 'Line total']],
+    head: [['#', 'Area', 'Position', 'Description', 'Measurements', 'Product type', 'Qty', 'Unit Price', 'Line total']],
     body: tableData,
     theme: 'plain',
     margin: { left: marginX, right: tableRightMm },
@@ -434,81 +422,84 @@ export function generateQuotePDF(
         valign: 'middle',
         overflow: 'linebreak',
         fontSize: 8,
-        cellPadding: { top: 5, bottom: 5, left: 3, right: 3 },
-        minCellHeight: 22,
+        cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+        minCellHeight: 20,
       },
-      4: { cellWidth: W.measurements, halign: 'center', valign: 'middle' },
+      4: {
+        cellWidth: W.measurements,
+        halign: 'left',
+        valign: 'middle',
+        overflow: 'linebreak',
+        fontSize: 8,
+        cellPadding: { top: 3, bottom: 3, left: 4, right: 2 },
+        minCellHeight: 20,
+      },
       5: { cellWidth: W.productType, halign: 'center', valign: 'middle' },
-      6: { cellWidth: W.acc, halign: 'left', valign: 'middle' },
-      7: { cellWidth: W.qty, halign: 'right', valign: 'middle' },
-      8: { cellWidth: W.unit, halign: 'right', valign: 'middle' },
-      9: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 5, right: 5 } },
+      6: { cellWidth: W.qty, halign: 'center', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 2, right: 2 } },
+      7: { cellWidth: W.unit, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 0, right: 2 } },
+      8: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 5, right: 5 } },
     },
     didParseCell: (data: any) => {
       if (data.section === 'head') {
         data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
-        data.cell.styles.overflow = 'visible'; // header en una sola línea, sin cortar palabras
-        if (data.column.index === 2 || data.column.index === 4) data.cell.styles.halign = 'center';
-        if (data.column.index === 7 || data.column.index === 8) data.cell.styles.halign = 'right';
-        if (data.column.index === 9) {
+        data.cell.styles.overflow = 'visible';
+        if (data.column.index === 3) data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 4, right: 2 }; // Description: +2mm a la derecha
+        if (data.column.index === 2) data.cell.styles.halign = 'center';
+        if (data.column.index === 4) {
+          data.cell.styles.halign = 'center';
+          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
+        }
+        if (data.column.index === 5) { data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 0 }; }
+        if (data.column.index === 6) { data.cell.styles.halign = 'center'; data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 0, right: 2 }; }
+        if (data.column.index === 7) data.cell.styles.halign = 'right';
+        if (data.column.index === 8) {
           data.cell.styles.halign = 'right';
           data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 5 };
         }
       }
-      if (data.section === 'body' && data.column.index === 3) {
+      if (data.section === 'body') {
         const raw = data.cell.raw;
         const text = Array.isArray(raw) ? (raw as string[]).join('\n') : String(raw ?? '');
-        const lineCount = Math.min(2, (text.match(/\n/g) || []).length + 1);
-        data.cell.styles.minCellHeight = Math.max(18, 8 + lineCount * 6);
+        const lineCount = (text.match(/\n/g) || []).length + 1;
+        if (data.column.index === 3) {
+          data.cell.styles.minCellHeight = Math.max(20, 8 + Math.min(3, lineCount) * 6);
+        } else if (data.column.index === 4) {
+          data.cell.styles.halign = 'left';
+          data.cell.styles.minCellHeight = Math.max(20, 8 + lineCount * 5);
+          if (typeof raw === 'string' && raw.includes('\n')) {
+            data.cell.text = raw.split('\n');
+          }
+        }
       }
     },
     didDrawCell: (data: any) => {
       if (data.section !== 'body') return;
       doc.setDrawColor(200, 200, 200);
       doc.setLineWidth(0.25);
-      const x = data.cell.x;
-      const y = data.cell.y + data.cell.height;
-      doc.line(x, y, x + data.cell.width, y);
+      doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
     },
   });
 
   const finalY = (doc as any).lastAutoTable.finalY || yPos + 50;
-  yPos = finalY + 10;
+  const gapAfterTable = 8;
+  const minSpaceForSummaryBlock = 45; // heading + summary table + terms start
+  const spaceLeft = pageHeight - marginBottom - finalY;
+  let sectionStartY: number;
+  if (spaceLeft < minSpaceForSummaryBlock) {
+    doc.addPage();
+    sectionStartY = marginTop;
+  } else {
+    sectionStartY = finalY + gapAfterTable;
+  }
 
   // —— Terms (left) + Summary (right): same layout as Proposal ——
   const summaryWidth = 62;
   const termsWidth = usableWidth - summaryWidth - 8;
   const summaryLeft = marginX + termsWidth + 8;
-  const sectionStartY = yPos;
-
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Terms and Conditions', marginX, sectionStartY);
-  let termsContentY = sectionStartY + 6;
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  const termsText = (quote.notes && String(quote.notes).trim()) ? String(quote.notes).trim() : '';
-  const defaultTerms = [
-    `• Any contract, payment or check must be issued to: ${organizationName.toUpperCase()}`,
-    '• This quote is valid for thirty (30) business days from the date of issue.',
-    '• A deposit of sixty percent (60%) of the total sale price will be required to confirm the order.',
-    '• The remaining balance shall be paid upon delivery of the products.',
-    '• Delivery times may vary depending on the product.',
-  ].join(' ');
-  const termsToUse = termsText || defaultTerms;
-  const termsLines = doc.splitTextToSize(termsToUse, termsWidth);
-  termsLines.forEach((line: string) => {
-    if (termsContentY > pageHeight - marginBottom - 15) {
-      doc.addPage();
-      termsContentY = marginTop;
-    }
-    doc.text(line, marginX, termsContentY);
-    termsContentY += 4;
-  });
 
   const subtotal = quote.totals?.subtotal ?? lines.reduce((s, l) => s + (l.line_total ?? 0), 0);
-  const itbmsAmount = quote.totals?.tax_total ?? 0;
-  const total = quote.totals?.total ?? subtotal + itbmsAmount;
+  const itbmsAmount = exempt_itbms ? 0 : (quote.totals?.tax_total ?? 0);
+  const total = exempt_itbms ? subtotal : (quote.totals?.total ?? subtotal + itbmsAmount);
   const toPctDisplay = (v: number | null | undefined): number | null =>
     v != null ? (v > 0 && v <= 1 ? Math.round(v * 100) : Math.round(v)) : null;
   const itbmsPctLabel = (() => {
@@ -518,7 +509,7 @@ export function generateQuotePDF(
 
   const summaryData: [string, string][] = [
     ['Subtotal:', formatCurrency(subtotal, quote.currency)],
-    ['ITBMS' + itbmsPctLabel, formatCurrency(itbmsAmount, quote.currency)],
+    ...(exempt_itbms ? [] : [['Tax' + itbmsPctLabel, formatCurrency(itbmsAmount, quote.currency)] as [string, string]]),
     ['Total:', formatCurrency(total, quote.currency)],
   ];
 
@@ -547,6 +538,36 @@ export function generateQuotePDF(
         }
       }
     },
+  });
+
+  // Terms block starts 30px below Summary + extra 10mm.
+  const summaryFinalY = (doc as any).lastAutoTable?.finalY ?? sectionStartY;
+  const thirtyPxMm = (30 / 96) * 25.4;
+  const extraDropMm = 10;
+  let termsStartY = summaryFinalY + thirtyPxMm + extraDropMm;
+  if (termsStartY > pageHeight - marginBottom - 20) {
+    doc.addPage();
+    termsStartY = marginTop;
+  }
+
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  const termsHeading = (quote as { terms_title?: string | null }).terms_title?.trim() || 'Terms and Conditions';
+  doc.text(termsHeading, marginX, termsStartY);
+  let termsContentY = termsStartY + 6;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  const termsBody = (quote as { terms_content?: string | null }).terms_content?.trim() || '';
+  const termsToUse = termsBody || 'No terms configured.';
+  // Full-width terms block under summary to avoid half-column appearance.
+  const termsLines = doc.splitTextToSize(termsToUse, usableWidth);
+  termsLines.forEach((line: string) => {
+    if (termsContentY > pageHeight - marginBottom - 15) {
+      doc.addPage();
+      termsContentY = marginTop;
+    }
+    doc.text(line, marginX, termsContentY);
+    termsContentY += 4;
   });
 
   const pageCount = (doc as any).internal.getNumberOfPages();

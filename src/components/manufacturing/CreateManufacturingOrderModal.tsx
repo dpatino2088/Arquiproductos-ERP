@@ -61,7 +61,7 @@ export default function CreateManufacturingOrderModal({
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
     return (
-      so.sale_order_no.toLowerCase().includes(searchLower) ||
+      (so.sale_order_no ?? (so as { sales_order_no?: string }).sales_order_no ?? '').toLowerCase().includes(searchLower) ||
       so.DirectoryCustomers?.customer_name.toLowerCase().includes(searchLower) ||
       so.Quotes?.quote_no.toLowerCase().includes(searchLower)
     );
@@ -75,13 +75,14 @@ export default function CreateManufacturingOrderModal({
     }
   }, [isOpen, reset]);
 
+  const priorityMap: Record<string, ManufacturingOrderPriority> = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Rush' };
   const onSubmit = async (data: CreateMOFormValues) => {
     try {
       const mo = await createManufacturingOrder({
         sales_order_id: data.sales_order_id,
         scheduled_start_date: data.scheduled_start_date || undefined,
         scheduled_end_date: data.scheduled_end_date || undefined,
-        priority: (data.priority as ManufacturingOrderPriority) || 'normal',
+        priority: priorityMap[data.priority || 'normal'] ?? 'Normal',
         notes: data.notes || undefined,
       });
 
@@ -166,7 +167,7 @@ export default function CreateManufacturingOrderModal({
               <Label htmlFor="priority">Priority</Label>
               <SelectShadcn
                 value={watch('priority') || 'normal'}
-                onValueChange={(value) => setValue('priority', value as ManufacturingOrderPriority)}
+                onValueChange={(value) => setValue('priority', value as 'low' | 'normal' | 'high' | 'urgent')}
               >
                 <SelectTrigger>
                   <SelectValue />

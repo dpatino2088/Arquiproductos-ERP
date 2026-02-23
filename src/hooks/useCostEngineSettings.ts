@@ -6,16 +6,23 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 // COST SETTINGS (organization defaults)
 // ====================================================
 
-/** CostSettings: columnas según BD (dump V9). PK = organization_id; sin tiers. */
+/** Valores válidos para fabric_pricing_basis */
+export type FabricPricingBasis = 'auto' | 'linear' | 'sqm';
+
+/** CostSettings: columnas según BD. PK = organization_id; sin tiers. */
 export interface CostSettingsRow {
   organization_id: string;
   labor_pct: number;
+  labor_dealer_pct?: number | null;
+  labor_msrp_pct?: number | null;
   shipping_pct: number;
   global_import_tax_pct: number;
   minimum_margin_pct: number;
   default_msrp_pct: number; // Default MSRP % (0-1, e.g. 0.65 = 65%)
-  itbms_pct?: number;       // ITBMS % (0-1, e.g. 0.07 = 7%). Used in Proposals.
-  import_tax_pct?: number;   // generated = global_import_tax_pct
+  itbms_pct?: number;       // Tax % (0-1, e.g. 0.07 = 7%). Used in Proposals.
+  import_tax_pct?: number;  // generated = global_import_tax_pct
+  /** Display/quote basis for fabric rolls. Only affects bom_preview_snapshot. */
+  fabric_pricing_basis?: FabricPricingBasis;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string | null;

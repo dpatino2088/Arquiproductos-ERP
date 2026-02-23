@@ -57,7 +57,7 @@ export async function finalizeQuoteLineFromConfiguredProduct(
 
   const rollMsrpSnapshot = Number(configuredProduct.roll_msrp_total) || 0;
   const bomMsrpSnapshot = Number(configuredProduct.bom_total) || 0;
-  const msrp = Number(configuredProduct.roll_plus_bom_total) || 0;
+  const msrp = Number(configuredProduct.unit_msrp_total ?? configuredProduct.total_msrp ?? configuredProduct.msrp_product_subtotal) || 0;
   const rollCostSnapshot = Number(configuredProduct.roll_total_cost) || 0;
   const bomCostSnapshot = Number(configuredProduct.bom_total_cost) || 0;
   const totalCost = rollCostSnapshot + bomCostSnapshot;
@@ -119,7 +119,7 @@ export async function finalizeQuoteLineFromConfiguredProduct(
     const finalPricing = {
       rollMsrp: Number(updatedConfiguredProduct.roll_msrp_total) || 0,
       bomMsrp: Number(updatedConfiguredProduct.bom_total) || 0,
-      totalMsrp: Number(updatedConfiguredProduct.total_msrp) || Number(updatedConfiguredProduct.roll_plus_bom_total) || 0,
+      totalMsrp: Number(updatedConfiguredProduct.unit_msrp_total ?? updatedConfiguredProduct.total_msrp) || Number(updatedConfiguredProduct.msrp_product_subtotal) || 0,
       rollCost: Number(updatedConfiguredProduct.roll_total_cost) || 0,
       bomCost: Number(updatedConfiguredProduct.bom_total_cost) || 0,
       totalCost: Number(updatedConfiguredProduct.roll_total_cost || 0) + Number(updatedConfiguredProduct.bom_total_cost || 0),

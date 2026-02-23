@@ -184,7 +184,7 @@ export default function PortalQuotesList() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900 mb-1">Quotes</h1>
           <p className="text-sm text-gray-500">
-            {portalUser.portal_user_role === 'member_manager'
+            {portalUser.portal_user_role === 'dealer_manager'
               ? 'All company quotes'
               : 'Your quotes'}
           </p>

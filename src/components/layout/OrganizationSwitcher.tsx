@@ -68,7 +68,7 @@ export function OrganizationSwitcher() {
         </span>
       );
     }
-    if (userType === 'portal' && role === 'member_manager') {
+    if (userType === 'portal' && role === 'dealer_manager') {
       const roleInfo = { label: 'Dealer Manager', color: 'text-blue-700', bgColor: 'bg-blue-50' };
       return (
         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${roleInfo.color} ${roleInfo.bgColor}`}>

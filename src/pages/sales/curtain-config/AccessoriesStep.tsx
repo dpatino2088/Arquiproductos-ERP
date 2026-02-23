@@ -19,6 +19,10 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [searchRef, setSearchRef] = useState<HTMLDivElement | null>(null);
+
+  // Area y Position (guardadas en QuoteLine)
+  const currentArea     = (config as any).area     ?? '';
+  const currentPosition = (config as any).position ?? '';
   
   // Load ALL catalog items (no filters) for searching
   const { items: catalogItems, loading: catalogLoading, error: catalogError } = useCatalogItems(undefined, undefined);
@@ -200,7 +204,29 @@ export default function AccessoriesStep({ config, onUpdate }: AccessoriesStepPro
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
         <Label className="text-sm font-medium mb-4 block">ACCESSORIES</Label>
-        
+
+        {/* Area / Position — guardadas en QuoteLine (área y posición de los accesorios) */}
+        <div className="grid grid-cols-2 gap-4 pb-2 border-b border-gray-100 mb-2">
+          <div>
+            <Label className="text-xs mb-1 block">Area <span className="text-gray-400 font-normal">(opcional)</span></Label>
+            <Input
+              type="text"
+              placeholder="ej. Sala, Dormitorio, Zaza..."
+              value={currentArea}
+              onChange={(e) => onUpdate({ area: e.target.value || null } as any)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">Position <span className="text-gray-400 font-normal">(opcional)</span></Label>
+            <Input
+              type="text"
+              placeholder="ej. V.1, V.2..."
+              value={currentPosition}
+              onChange={(e) => onUpdate({ position: e.target.value || null } as any)}
+            />
+          </div>
+        </div>
+
         {/* Search Bar */}
         <div className="mb-6">
           <Label className="text-xs mb-2 block">Search Catalog Items</Label>

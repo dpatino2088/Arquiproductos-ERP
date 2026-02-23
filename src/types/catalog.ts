@@ -141,10 +141,12 @@ export interface Quote {
 }
 
 // QuoteLines interface
+// Note: QuoteLines uses dealer_id (company_id was renamed in 20260207_rename_company_to_dealer).
 export interface QuoteLine {
   id: string;
   organization_id: string;
   quote_id: string;
+  dealer_id?: string | null;
   catalog_item_id: string;
   qty: number;
   width_m?: number | null;

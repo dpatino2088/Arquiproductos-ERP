@@ -143,7 +143,7 @@ export async function createQuoteLineFromConfiguredProduct(
   // ✅ Si no existe, usar valores iniciales (se actualizarán después de crear BOMInstance)
   const rollMsrpSnapshot = configuredProduct ? (Number(configuredProduct.roll_msrp_total) || 0) : 0;
   const bomMsrpSnapshot = configuredProduct ? (Number(configuredProduct.bom_total) || 0) : 0;
-  const msrp = configuredProduct ? (Number(configuredProduct.roll_plus_bom_total) || 0) : 0; // ✅ Ya incluye labor
+  const msrp = configuredProduct ? (Number(configuredProduct.unit_msrp_total ?? configuredProduct.total_msrp ?? configuredProduct.msrp_product_subtotal) || 0) : 0;
   
   // ✅ Usar costos reales desde ConfiguredProducts (si existe)
   const rollCostSnapshot = configuredProduct ? (Number(configuredProduct.roll_total_cost) || 0) : 0;
@@ -158,9 +158,9 @@ export async function createQuoteLineFromConfiguredProduct(
   const netPrice = msrp * (1 - (discountPct / 100));
 
   // 8. Preparar datos para QuoteLine
-  // ✅ Filtrar campos no válidos que puedan causar errores de schema cache
-  // Excluir 'metadata' y 'fabricItemId' (no existe en QuoteLines)
-  const { metadata: _, fabricItemId: __, ...filteredOtherFields } = otherFields;
+  // ✅ Filtrar campos no válidos que puedan causar errores de schema cache (PGRST204)
+  // Excluir 'metadata', 'fabricItemId' (no existe en QuoteLines), 'drop_m' (legacy; usar fabric_drop)
+  const { metadata: _, fabricItemId: __, drop_m: ___dropM, ...filteredOtherFields } = otherFields;
   
   // ✅ Obtener medidas y otros datos desde ConfiguredProduct (si existe) o desde otherFields
   const productTypeId = configuredProduct?.product_type_id || (otherFields as any).product_type_id;

@@ -51,8 +51,8 @@ export interface UnifiedProductConfig {
  */
 export function normalizeConfig(config: Partial<UnifiedProductConfig>): UnifiedProductConfig {
   return {
-    // Core identifiers
-    product_type_id: config.product_type_id || null,
+    // Core identifiers (productTypeId es el UUID que guarda el paso PRODUCT; product_type_id es snake_case)
+    product_type_id: config.product_type_id ?? (config as any).productTypeId ?? null,
     bom_template_id: config.bom_template_id || null,
     productType: config.productType,
     

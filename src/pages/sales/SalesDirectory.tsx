@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText } from 'lucide-react';
 import Quotes from './Quotes';
-import Proposals from './Proposals';
+import ProposalsWithDetail from './ProposalsWithDetail';
 
 export type SalesTab = 'quotes' | 'proposals';
 
@@ -30,7 +30,7 @@ export default function SalesDirectory({ activeTab }: Props) {
         <Quotes />
       </div>
       <div style={{ display: activeTab === 'proposals' ? undefined : 'none' }}>
-        <Proposals />
+        <ProposalsWithDetail />
       </div>
     </>
   );

@@ -55,7 +55,7 @@ type Body =
       organization_id: string;
       company_id?: string;
       dealer_id?: string;
-      role: "member" | "member_manager" | string;
+      role: "dealer_member" | "dealer_manager" | "member" | "member_manager" | string;
       name?: string | null;
       email?: string;
       portal_user_email?: string;
@@ -157,9 +157,10 @@ Deno.serve(async (req) => {
 
     if (!userId) throw new Error("Could not resolve user id after create/update");
 
-    // 2) Membership upsert
+    // 2) Membership upsert (return id so frontend can open Permissions tab without extra fetch/RLS)
+    let organizationUserId: string | null = null;
     if (body.kind === "org") {
-      const { error } = await admin
+      const { data: orgUserRow, error } = await admin
         .from("OrganizationUsers")
         .upsert(
           {
@@ -175,17 +176,20 @@ Deno.serve(async (req) => {
             updated_at: now,
           },
           { onConflict: "organization_id,user_email" },
-        );
+        )
+        .select("id")
+        .single();
 
       if (error) throw new Error(`OrganizationUsers upsert failed: ${error.message}`);
+      organizationUserId = orgUserRow?.id ?? null;
     }
 
     if (body.kind === "portal") {
       const portalStatus = (body as any).status && ["invited", "active", "disabled"].includes((body as any).status)
         ? (body as any).status
         : "invited";
-      const portalRole = (body as any).role;
-      const roleCode = portalRole === "member_manager" ? "dealer_manager" : "dealer_member";
+      const rawRole = (body as any).role;
+      const dbRole = (rawRole === "dealer_manager" || rawRole === "member_manager" || rawRole === "manager") ? "dealer_manager" : "dealer_member";
 
       // Manual upsert: DB has unique index on (dealer_id, lower(portal_user_email)), not (dealer_id, portal_user_email)
       const { data: existingDu } = await admin
@@ -202,7 +206,7 @@ Deno.serve(async (req) => {
         user_id: userId,
         portal_user_email: email,
         portal_user_name: (body as any).name ?? null,
-        role: portalRole,
+        role: dbRole,
         status: portalStatus,
         must_change_password: true,
         temp_password_set_at: now,
@@ -239,7 +243,7 @@ Deno.serve(async (req) => {
           .update({
             auth_user_id: userId,
             display_name: (body as any).name ?? null,
-            role_code: roleCode,
+            role_code: dbRole,
             status: portalStatus,
             updated_at: now,
             must_change_password: true,
@@ -338,6 +342,7 @@ Deno.serve(async (req) => {
     return json({ 
       ok: true, 
       user_id: userId,
+      organization_user_id: organizationUserId ?? undefined,
       email_sent: emailSent,
       // Return temp password if debug_return_password=true, ALLOW_RETURN_TEMP_PASSWORD=true, or email failed
       ...(shouldReturnPassword ? { temp_password: tempPassword } : {}),

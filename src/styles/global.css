@@ -229,13 +229,16 @@
 }
 
 @layer base {
-  * { @apply border-border; }
+  * { border-color: hsl(var(--border)); }
   html, body { overflow-x: hidden; }
   body { @apply bg-background text-foreground; font-family: var(--font-family); font-size: var(--font-size-body); line-height: 1.5; }
 
   .btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: 0; @apply inline-flex items-center justify-center font-medium transition-colors; }
   .btn-primary { @apply bg-primary text-primary-foreground hover:bg-primary/90; }
-  .btn-secondary { @apply bg-background border border-border text-foreground hover:bg-muted; }
+  .btn-secondary {
+    @apply bg-background border text-foreground hover:bg-muted;
+    border-color: hsl(var(--border));
+  }
   .btn-save { background-color: var(--save-hex); color: var(--white-hex); }
   .btn-save:hover:not(:disabled) { background-color: var(--save-hover); }
   .btn-save-close { background-color: var(--save-close-hex); color: var(--white-hex); }
@@ -264,6 +267,47 @@
   .table-fit-wrapper { overflow-x: hidden; }
   .table-fit { table-layout: fixed; width: 100%; min-width: 0; }
   .table-fit th, .table-fit td { overflow: hidden; text-overflow: ellipsis; }
+  /* Columna de acciones: íconos visibles, sin recortar */
+  .table-fit th.td-actions-cell,
+  .table-fit td.td-actions-cell {
+    overflow: visible;
+    text-overflow: unset;
+    min-width: 130px;
+    white-space: nowrap;
+  }
+  /* Columna de checkbox: solo ícono, sin ellipsis ni superposición */
+  .table-fit th.td-checkbox-cell,
+  .table-fit td.td-checkbox-cell {
+    overflow: visible;
+    text-overflow: unset;
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    padding-left: 12px;
+    padding-right: 8px;
+    vertical-align: middle;
+    text-align: center;
+  }
+  .table-fit th.td-checkbox-cell input[type="checkbox"],
+  .table-fit td.td-checkbox-cell input[type="checkbox"] {
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  /* Quote Lines table (Quote Detail): headers completos, sin truncar, layout estable */
+  .quote-lines-table { table-layout: auto; width: 100%; min-width: 0; }
+  .quote-lines-table thead th {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.25;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    vertical-align: middle;
+    display: table-cell;
+  }
+  .quote-lines-table thead th,
+  .quote-lines-table td { overflow: visible; }
 
   .text-body { font-size: var(--font-size-body); }
   .text-small { font-size: var(--font-size-small); }

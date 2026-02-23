@@ -70,68 +70,61 @@ export function useCurrentOrgRole(
         setLoading(true);
         setError(null);
 
-        // ✅ CRITICAL FIX: First check if user is a Portal User (DealerUsers)
-        // Portal users should NOT have Organization roles - they are external customers
-        // IMPORTANT: Use 'role' and 'status' columns (matches actual DB schema)
-        const { data: portalUser, error: portalError } = await supabase
+        // 1) AppUsers (unified): org users — role from role_code (superadmin, admin, operator, etc.)
+        const { data: appUserOrgRows, error: appUserError } = await supabase
+          .from('AppUsers')
+          .select('role_code')
+          .eq('auth_user_id', userId)
+          .eq('user_type', 'org')
+          .eq('deleted', false)
+          .in('status', ['active', 'invited'])
+          .limit(10);
+
+        if (!cancelled && Array.isArray(appUserOrgRows) && appUserOrgRows.length > 0) {
+          // Prefer superadmin if user has it in any org row
+          const roleCode = appUserOrgRows.some((r: { role_code?: string }) =>
+            String(r?.role_code ?? '').trim().toLowerCase() === 'superadmin'
+          )
+            ? 'superadmin'
+            : String(appUserOrgRows[0]?.role_code ?? '').trim().toLowerCase();
+          if (roleCode) {
+            if (roleCode === 'superadmin') {
+              setRole('superadmin');
+              setLoading(false);
+              return;
+            }
+            if (isValidOrgRole(roleCode)) {
+              setRole(roleCode as OrgRole);
+              setLoading(false);
+              return;
+            }
+            setRole(mapLegacyRole(roleCode));
+            setLoading(false);
+            return;
+          }
+        }
+
+        if (appUserError && appUserError.code !== 'PGRST116' && import.meta.env.DEV) {
+          console.debug('[useCurrentOrgRole] AppUsers (org) lookup error:', appUserError.code);
+        }
+
+        // 2) Portal user check — DealerUsers entries (no AppUsers org row)
+        const { data: portalRows, error: portalError } = await supabase
           .from('DealerUsers')
           .select('id, role, status')
           .eq('user_id', userId)
           .eq('deleted', false)
           .in('status', ['active', 'invited'])
-          .maybeSingle();
+          .limit(1);
 
-        if (portalError && import.meta.env.DEV) {
-          console.error('[useCurrentOrgRole] DealerUsers lookup error', {
-            message: portalError.message,
-            details: portalError.details,
-            hint: portalError.hint,
-            code: portalError.code,
-          });
+        const portalUser = Array.isArray(portalRows) && portalRows.length > 0 ? portalRows[0] : null;
+
+        if (portalError && portalError.code !== 'PGRST116' && portalError.code !== '42P01' && import.meta.env.DEV) {
+          console.debug('[useCurrentOrgRole] DealerUsers lookup error:', portalError.code);
         }
 
-        // If user is a portal user, they should NOT have organization roles
         if (!cancelled && portalUser) {
-          // Use 'role' column (from actual DB schema)
-          const portalRole = portalUser.role;
-          if (import.meta.env.DEV) {
-            console.log('🔒 [useCurrentOrgRole] User is a Portal User, returning null for org role:', {
-              portalUserId: portalUser.id,
-              portalRole: portalRole,
-              userId: userId,
-            });
-          }
-          // Portal users should NOT have organization roles
           setRole(null);
-          setLoading(false);
-          return;
-        }
-
-        // If there was an error other than "not found", log it but continue
-        if (portalError && portalError.code !== 'PGRST116' && portalError.code !== '42P01') {
-          if (import.meta.env.DEV) {
-            console.debug('[useCurrentOrgRole] Error checking portal user (continuing):', portalError.code);
-          }
-        }
-
-        // 2) SUPERADMIN = fila en PlatformAdmins
-        // Nota: Si la tabla no existe, esto fallará silenciosamente
-        const { data: platformAdmin, error: paError } = await supabase
-          .from('PlatformAdmins')
-          .select('user_id')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-        // Si la tabla no existe (PGRST116 o 42P01), continuamos sin superadmin
-        if (paError && paError.code !== 'PGRST116' && paError.code !== '42P01') {
-          // Solo lanzamos error si no es "no encontrado" o "tabla no existe"
-          if (import.meta.env.DEV) {
-            console.debug('PlatformAdmins table may not exist:', paError.code);
-          }
-        }
-
-        if (!cancelled && platformAdmin) {
-          setRole('superadmin');
           setLoading(false);
           return;
         }
@@ -145,10 +138,7 @@ export function useCurrentOrgRole(
           return;
         }
 
-        // 4) Rol en OrganizationUsers (solo si NO es portal user)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ad52049f-725d-41d8-812c-491bc7b292e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCurrentOrgRole.ts:108',message:'Checking OrganizationUsers role',data:{userId,effectiveOrgId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B'})}).catch(()=>{});
-        // #endregion
+        // 4) Rol en OrganizationUsers
         const { data: orgUser, error: orgError } = await supabase
           .from('OrganizationUsers')
           .select('role')
@@ -156,9 +146,6 @@ export function useCurrentOrgRole(
           .eq('user_id', userId)
           .eq('deleted', false)
           .maybeSingle();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ad52049f-725d-41d8-812c-491bc7b292e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useCurrentOrgRole.ts:114',message:'OrganizationUsers query result',data:{foundOrgUser:!!orgUser,role:orgUser?.role,orgErrorCode:orgError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B'})}).catch(()=>{});
-        // #endregion
 
         if (orgError && orgError.code !== 'PGRST116') {
           throw orgError;

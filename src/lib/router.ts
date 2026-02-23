@@ -87,9 +87,19 @@ export class Router {
     return true;
   }
 
+  // Pathname only (no query/hash) for route matching so /login?next=/dashboard matches /login
+  private pathnameOnly(path: string): string {
+    const q = path.indexOf('?');
+    const h = path.indexOf('#');
+    if (q !== -1) return path.slice(0, q);
+    if (h !== -1) return path.slice(0, h);
+    return path;
+  }
+
   navigate(path: string, pushState: boolean = true) {
+    const pathname = this.pathnameOnly(path);
     // Infer and update view mode from URL path
-    const inferredViewMode = this.inferViewModeFromPath(path);
+    const inferredViewMode = this.inferViewModeFromPath(pathname);
     const oldViewMode = this.viewMode;
     
     // Update view mode if it changed
@@ -106,8 +116,8 @@ export class Router {
       }
     }
     
-    // Check route access before navigation
-    if (!this.hasRouteAccess(path)) {
+    // Check route access before navigation (use pathname for route checks)
+    if (!this.hasRouteAccess(pathname)) {
       console.warn(`Access denied to route: ${path}. Redirecting to dashboard.`);
       
       // Redirect to dashboard instead
@@ -134,14 +144,14 @@ export class Router {
     
     const oldRoute = this.currentRoute;
     this.currentRoute = path;
-    
-    // First try exact match
-    let handler = this.routes.get(path);
-    
+
+    // First try exact match on pathname (so /login?next=... matches /login)
+    let handler = this.routes.get(pathname);
+
     // If no exact match, try to find a route with parameters
     if (!handler) {
       for (const [routePattern, routeHandler] of this.routes.entries()) {
-        if (this.matchesRoute(routePattern, path)) {
+        if (this.matchesRoute(routePattern, pathname)) {
           handler = routeHandler;
           break;
         }

@@ -12,6 +12,9 @@ const CACHE_KEY_PREFIX = 'dir_effective_';
  * Source of truth para organization_id y dealer_id del usuario actual.
  * Para portal: llama link_portal_user (una vez) y current_dealer_id; cachea por sesión.
  * Para internal: devuelve activeOrgId y activeDealerId (acting-as) si aplica.
+ *
+ * IMPORTANTE: Para portal, la cache key incluye auth.uid() para evitar que al cambiar
+ * de usuario (log out / log in) se use el dealer_id del usuario anterior.
  */
 export async function getEffectiveOrgAndDealer(
   supabase: SupabaseClient,
@@ -26,7 +29,14 @@ export async function getEffectiveOrgAndDealer(
     return { orgId: null, dealerId: null };
   }
 
-  const cacheKey = `${CACHE_KEY_PREFIX}${activeOrgId}_${userType}_${activeDealerId ?? ''}`;
+  // Para portal, incluir auth.uid() en la key para que cada usuario tenga su propio cache
+  let cacheKey = `${CACHE_KEY_PREFIX}${activeOrgId}_${userType}_${activeDealerId ?? ''}`;
+  if (userType === 'portal') {
+    const { data: { user } } = await supabase.auth.getUser();
+    const uid = user?.id ?? 'anon';
+    cacheKey = `${CACHE_KEY_PREFIX}${activeOrgId}_portal_${uid}`;
+  }
+
   const cached = cache.get(cacheKey);
   if (cached !== undefined) {
     return cached;

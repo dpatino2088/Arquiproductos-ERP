@@ -327,8 +327,8 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
               disabled={isSubmitting}
               className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
             >
-              <option value="member_manager">Dealer Manager</option>
-              <option value="member">Dealer Member</option>
+              <option value="dealer_manager">Dealer Manager</option>
+              <option value="dealer_member">Dealer Member</option>
             </select>
             <p className="text-xs text-gray-500 mt-1">
               {getRoleDescription(role)}
@@ -487,7 +487,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
         return;
       }
 
-      const finalRoleCode = portalRoleToRoleCode((role?.trim() || 'member') as 'member' | 'member_manager');
+      const finalRoleCode = portalRoleToRoleCode((role?.trim() || 'dealer_member') as 'dealer_member' | 'dealer_manager');
 
       const { error: updateError } = await supabase
         .from('AppUsers')
@@ -633,8 +633,8 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
               disabled={isSubmitting}
               className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
             >
-              <option value="member_manager">Dealer Manager</option>
-              <option value="member">Dealer Member</option>
+              <option value="dealer_manager">Dealer Manager</option>
+              <option value="dealer_member">Dealer Member</option>
             </select>
             <p className="text-xs text-gray-500 mt-1">
               {getRoleDescription(role)}
@@ -1059,18 +1059,18 @@ export default function DealerUser() {
                       {(() => {
                         const role = roleCodeToPortalRole(user.role_code);
                         const roleColors: Record<string, { bg: string; text: string; border: string }> = {
-                          member_manager: {
+                          dealer_manager: {
                             bg: 'bg-purple-50',
                             text: 'text-purple-700',
                             border: 'border border-purple-200',
                           },
-                          member: {
+                          dealer_member: {
                             bg: 'bg-blue-50',
                             text: 'text-blue-700',
                             border: 'border border-blue-200',
                           },
                         };
-                        const colors = roleColors[role] || roleColors.member;
+                        const colors = roleColors[role] || roleColors.dealer_member;
                         return (
                           <span className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
                             {getRoleLabel(role)}

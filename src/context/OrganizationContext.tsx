@@ -103,28 +103,29 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
       try {
         // ==============================
-        // STEP 1: INTERNAL OrganizationUsers
+        // STEP 1: INTERNAL — AppUsers (unified source: user_type='org', role_code)
         // ==============================
-        const { data: membershipsData, error: membershipsError } = await supabase
-          .from('OrganizationUsers')
-          .select('id, organization_id, user_id, user_email, user_name, role, status, deleted, created_at, updated_at')
-          .eq('user_id', currentUserId)
+        const { data: appUsersOrgRows, error: appUsersError } = await supabase
+          .from('AppUsers')
+          .select('id, organization_id, auth_user_id, email, display_name, role_code, status, deleted, created_at, updated_at')
+          .eq('auth_user_id', currentUserId)
+          .eq('user_type', 'org')
           .eq('deleted', false)
           .in('status', ['active', 'invited']);
 
         if (reqId !== requestSeqRef.current) return; // stale
 
-        if (membershipsError && import.meta.env.DEV) {
-          console.error('[OrganizationContext] OrganizationUsers error:', membershipsError);
+        if (appUsersError && import.meta.env.DEV) {
+          console.error('[OrganizationContext] AppUsers (org) error:', appUsersError);
         }
 
-        const internalMemberships: OrganizationMembership[] = (membershipsData || []).map((m: any) => ({
+        const internalMemberships: OrganizationMembership[] = (appUsersOrgRows || []).map((m: any) => ({
           id: m.id,
           organization_id: m.organization_id,
-          user_id: m.user_id,
-          user_email: (m.user_email || '').toString().trim(),
-          user_name: m.user_name || null,
-          role: mapLegacyRole((m.role || 'viewer') as string),
+          user_id: (m.auth_user_id ?? '') as string,
+          user_email: (m.email || '').toString().trim(),
+          user_name: m.display_name || null,
+          role: mapLegacyRole((m.role_code || 'viewer') as string) as OrgRole,
           status: (m.status || 'active') as 'invited' | 'active' | 'disabled',
           deleted: !!m.deleted,
           created_at: m.created_at || new Date().toISOString(),

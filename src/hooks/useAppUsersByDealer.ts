@@ -111,16 +111,16 @@ export function roleCodeToPortalLabel(roleCode: string): string {
   return 'Member';
 }
 
-/** Map CompanyPortalRole (member | member_manager) to AppUsers.role_code. */
-export function portalRoleToRoleCode(role: 'member' | 'member_manager'): string {
-  return role === 'member_manager' ? 'dealer_manager' : 'dealer_member';
+/** Map CompanyPortalRole (dealer_member | dealer_manager) to AppUsers/DealerUsers.role_code. */
+export function portalRoleToRoleCode(role: 'dealer_member' | 'dealer_manager'): string {
+  return role;
 }
 
-/** Map AppUsers.role_code to CompanyPortalRole for form state. */
-export function roleCodeToPortalRole(roleCode: string): 'member' | 'member_manager' {
+/** Map AppUsers/DealerUsers.role_code to CompanyPortalRole. */
+export function roleCodeToPortalRole(roleCode: string): 'dealer_member' | 'dealer_manager' {
   const s = (roleCode ?? '').toString().trim().toLowerCase();
-  if (s === 'dealer_manager' || s === 'member_manager') return 'member_manager';
-  return 'member';
+  if (['dealer_manager', 'member_manager', 'manager'].includes(s)) return 'dealer_manager';
+  return 'dealer_member';
 }
 
 /** DealerAppUser with dealer_name (for list views across all dealers in org). */

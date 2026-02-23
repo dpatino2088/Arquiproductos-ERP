@@ -87,6 +87,22 @@ export function formatDimensionsDisplay(source: DimensionsSource): string {
 }
 
 /**
+ * Formato para PDF Proposal (igual que Quotes / DimensionsStackView).
+ * - 1 paño: "1200 x 3000" (mm)
+ * - 2 paños: "1200 x 3000\n1500"
+ * - 3 paños: "1200 x 3000\n1500\n1800"
+ */
+export function formatDimensionsForProposalPDF(source: DimensionsSource): string {
+  const data = getDimensionsStructured(source);
+  if (!data || data.widths.length === 0) return '—';
+  const { widths, heightMm } = data;
+  const first = `${widths[0]} x ${heightMm}`;
+  if (widths.length === 1) return first;
+  const rest = widths.slice(1).map((w) => String(w));
+  return [first, ...rest].join('\n');
+}
+
+/**
  * Formato compacto para tabla: una sola línea.
  * - 1 paño: "2700 x 3000 mm"
  * - Varios: "1200 (w) | 1500 (w) x 3000 (h) mm"

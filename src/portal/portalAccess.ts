@@ -1,11 +1,11 @@
 /**
  * Portal Access Control Helpers
- * 
- * Role-based access control for Company Portal Users
- * Roles: member_manager | member
+ *
+ * Role-based access control for Dealer Portal Users
+ * Roles: dealer_manager | dealer_member
  */
 
-export type CompanyPortalRole = 'member_manager' | 'member';
+export type CompanyPortalRole = 'dealer_manager' | 'dealer_member';
 
 export interface PortalQuote {
   id: string;
@@ -17,18 +17,18 @@ export interface PortalQuote {
 
 /**
  * Check if a role can create quotes
- * Both member and member_manager can create quotes
+ * Both dealer_member and dealer_manager can create quotes
  */
 export function canCreateQuote(role: CompanyPortalRole | string | null | undefined): boolean {
   if (!role) return false;
   const normalizedRole = normalizeRole(role);
-  return normalizedRole === 'member' || normalizedRole === 'member_manager';
+  return normalizedRole === 'dealer_member' || normalizedRole === 'dealer_manager';
 }
 
 /**
  * Check if a role can edit a specific quote
- * - member: only if they own the quote AND status is draft
- * - member_manager: can edit (optional, but minimum is view + approve)
+ * - dealer_member: only if they own the quote AND status is draft
+ * - dealer_manager: can edit all
  */
 export function canEditQuote(
   role: CompanyPortalRole | string | null | undefined,
@@ -36,29 +36,25 @@ export function canEditQuote(
   portalUserId: string | null | undefined
 ): boolean {
   if (!role || !quote || !portalUserId) return false;
-  
+
   const normalizedRole = normalizeRole(role);
-  
-  if (normalizedRole === 'member_manager') {
-    // Managers can edit (optional, but allowed)
-    return true;
-  }
-  
-  if (normalizedRole === 'member') {
-    // Members can only edit their own quotes in draft
+
+  if (normalizedRole === 'dealer_manager') return true;
+
+  if (normalizedRole === 'dealer_member') {
     return (
       quote.created_by_portal_user_id === portalUserId &&
       quote.status === 'draft'
     );
   }
-  
+
   return false;
 }
 
 /**
  * Check if a role can view a specific quote
- * - member_manager: can view all quotes for their company
- * - member: can only view quotes they created
+ * - dealer_manager: can view all quotes for their dealer
+ * - dealer_member: can only view quotes they created
  */
 export function canViewQuote(
   role: CompanyPortalRole | string | null | undefined,
@@ -66,60 +62,50 @@ export function canViewQuote(
   portalUserId: string | null | undefined
 ): boolean {
   if (!role || !quote) return false;
-  
+
   const normalizedRole = normalizeRole(role);
-  
-  if (normalizedRole === 'member_manager') {
-    // Managers can view all company quotes
-    return true;
-  }
-  
-  if (normalizedRole === 'member') {
-    // Members can only view their own quotes
+
+  if (normalizedRole === 'dealer_manager') return true;
+
+  if (normalizedRole === 'dealer_member') {
     return quote.created_by_portal_user_id === portalUserId;
   }
-  
+
   return false;
 }
 
 /**
  * Check if a role can approve/reject a quote
- * - member_manager: can approve if quote status allows
- * - member: cannot approve
+ * - dealer_manager: can approve if quote status allows
+ * - dealer_member: cannot approve
  */
 export function canApproveQuote(
   role: CompanyPortalRole | string | null | undefined,
   quote: PortalQuote | null | undefined
 ): boolean {
   if (!role || !quote) return false;
-  
+
   const normalizedRole = normalizeRole(role);
-  
-  if (normalizedRole !== 'member_manager') {
-    return false;
-  }
-  
-  // Can approve/reject if quote is in a state that allows it
-  // Typically: 'sent' or 'draft' (adjust based on your workflow)
+
+  if (normalizedRole !== 'dealer_manager') return false;
+
   const approvableStatuses: string[] = ['sent', 'draft'];
   return approvableStatuses.includes(quote.status);
 }
 
 /**
- * Normalize legacy role values to current roles
- * - 'manager' -> 'member_manager'
- * - anything else -> 'member'
+ * Normalize legacy role values to dealer_manager | dealer_member
  */
 export function normalizeRole(role: string | null | undefined): CompanyPortalRole {
-  if (!role) return 'member';
-  
+  if (!role) return 'dealer_member';
+
   const normalized = role.toLowerCase().trim();
-  
-  if (normalized === 'manager' || normalized === 'member_manager') {
-    return 'member_manager';
+
+  if (['manager', 'member_manager', 'dealer_manager'].includes(normalized)) {
+    return 'dealer_manager';
   }
-  
-  return 'member';
+
+  return 'dealer_member';
 }
 
 /**
@@ -127,11 +113,11 @@ export function normalizeRole(role: string | null | undefined): CompanyPortalRol
  */
 export function getRoleLabel(role: CompanyPortalRole | string | null | undefined): string {
   const normalized = normalizeRole(role);
-  
+
   switch (normalized) {
-    case 'member_manager':
+    case 'dealer_manager':
       return 'Dealer Manager';
-    case 'member':
+    case 'dealer_member':
       return 'Dealer Member';
     default:
       return 'Dealer Member';
@@ -143,11 +129,11 @@ export function getRoleLabel(role: CompanyPortalRole | string | null | undefined
  */
 export function getRoleDescription(role: CompanyPortalRole | string | null | undefined): string {
   const normalized = normalizeRole(role);
-  
+
   switch (normalized) {
-    case 'member_manager':
+    case 'dealer_manager':
       return 'Can view all dealer quotes, approve/reject, and delete quotes/proposals/directory.';
-    case 'member':
+    case 'dealer_member':
       return 'Can create/edit/delete their own quotes and proposals; delete directory (contacts/customers). Cannot approve quotes.';
     default:
       return 'Can create/edit/delete their own quotes and proposals; delete directory. Cannot approve quotes.';

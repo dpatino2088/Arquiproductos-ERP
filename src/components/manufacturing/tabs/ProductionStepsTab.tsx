@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useManufacturingOrder, useUpdateManufacturingOrder, useManufacturingMaterials, ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
+import { useManufacturingOrder, useUpdateManufacturingOrder, useManufacturingMaterials, ProductionStatusMO } from '../../../hooks/useManufacturing';
 import { useUIStore } from '../../../stores/ui-store';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../ui/ConfirmDialog';
@@ -12,14 +12,15 @@ interface ProductionStepsTabProps {
   moId: string;
 }
 
-const STATUS_STEPS: ManufacturingOrderStatus[] = ['draft', 'planned', 'in_production', 'completed'];
+const STATUS_STEPS: ProductionStatusMO[] = ['Pending Review', 'Planned', 'In Production', 'Completed', 'Ready for Pickup', 'Delivered'];
 
-const STATUS_LABELS: Record<ManufacturingOrderStatus, string> = {
-  draft: 'Draft',
-  planned: 'Planned',
-  in_production: 'In Production',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
+const STATUS_LABELS: Record<ProductionStatusMO, string> = {
+  'Pending Review': 'Pending Review',
+  'Planned': 'Planned',
+  'In Production': 'In Production',
+  'Completed': 'Completed',
+  'Ready for Pickup': 'Ready for Pickup',
+  'Delivered': 'Delivered',
 };
 
 export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
@@ -27,7 +28,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
   const { materials } = useManufacturingMaterials(moId);
   const { updateManufacturingOrder, isUpdating } = useUpdateManufacturingOrder();
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
-  const [updatingStatus, setUpdatingStatus] = useState<ManufacturingOrderStatus | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState<ProductionStatusMO | null>(null);
   const { activeOrganizationId } = useOrganizationContext();
   
   // Calculate BOM totals for validation
@@ -35,12 +36,12 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     totalLines: materials.length,
   };
 
-  const handleStatusChange = async (newStatus: ManufacturingOrderStatus) => {
+  const handleStatusChange = async (newStatus: ProductionStatusMO) => {
     if (!manufacturingOrder) return;
 
     // 🛡️ Guard Rail: Validate status transitions according to business rules
-    // DRAFT → PLANNED: Requires valid BOM (BOMInstanceLines > 0)
-    if (newStatus === 'planned') {
+    // Pending Review → Planned: Requires valid BOM (BOMInstanceLines > 0)
+    if (newStatus === 'Planned') {
       try {
         // Normalize UUID before query
         const safeMoId = normalizeUUID(moId);
@@ -125,7 +126,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     }
 
     // 🛡️ Guard Rail: Check if BOM has lines before starting production
-    if (newStatus === 'in_production') {
+    if (newStatus === 'In Production') {
       try {
         // Normalize UUID before query
         const safeMoId = normalizeUUID(moId);
@@ -221,18 +222,15 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
     try {
       setUpdatingStatus(newStatus);
-      const updateData: any = { status: newStatus };
+      const updateData: any = { production_status: newStatus };
 
       // Set actual dates when status changes
-      if (newStatus === 'in_production' && !manufacturingOrder.actual_start_date) {
+      if (newStatus === 'In Production' && !manufacturingOrder.actual_start_date) {
         updateData.actual_start_date = new Date().toISOString().split('T')[0];
       }
-      if (newStatus === 'completed' && !manufacturingOrder.actual_end_date) {
+      if ((newStatus === 'Completed' || newStatus === 'Ready for Pickup' || newStatus === 'Delivered') && !manufacturingOrder.actual_end_date) {
         updateData.actual_end_date = new Date().toISOString().split('T')[0];
       }
-
-      // Optional: Store status change timestamp in metadata (minimal)
-      // Do NOT invent complex history tracking
 
       await updateManufacturingOrder(moId, updateData);
 
@@ -273,29 +271,24 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     );
   }
 
-  const currentStatusIndex = STATUS_STEPS.indexOf(manufacturingOrder.status);
-  const isCancelled = manufacturingOrder.status === 'cancelled';
-  
-  // Helper function to check if advance is disabled
-  const getAdvanceDisabled = (status: ManufacturingOrderStatus, currentStatus: ManufacturingOrderStatus) => {
-    // DRAFT → PLANNED: Requires BOM with lines
-    if (status === 'planned' && currentStatus === 'draft') {
-      return bomTotals.totalLines === 0;
-    }
-    // PLANNED → IN_PRODUCTION: Requires BOM with lines
-    if (status === 'in_production' && currentStatus === 'planned') {
-      return bomTotals.totalLines === 0;
-    }
+  const legacyToProduction: Record<string, ProductionStatusMO> = {
+    draft: 'Pending Review', planned: 'Planned', in_production: 'In Production', completed: 'Completed', cancelled: 'Completed',
+  };
+  const currentProdStatus = (manufacturingOrder.production_status ?? (manufacturingOrder.status && legacyToProduction[manufacturingOrder.status])) as ProductionStatusMO | undefined;
+  const rawIndex = currentProdStatus ? STATUS_STEPS.indexOf(currentProdStatus) : 0;
+  const currentStatusIndex = rawIndex >= 0 ? rawIndex : 0;
+  const isCancelled = (manufacturingOrder as { status?: string }).status === 'cancelled';
+
+  const getAdvanceDisabled = (status: ProductionStatusMO, current: ProductionStatusMO | undefined) => {
+    if (!current) return false;
+    if (status === 'Planned' && current === 'Pending Review') return bomTotals.totalLines === 0;
+    if (status === 'In Production' && current === 'Planned') return bomTotals.totalLines === 0;
     return false;
   };
-  
-  const getDisableReason = (status: ManufacturingOrderStatus, currentStatus: ManufacturingOrderStatus) => {
-    if (status === 'planned' && currentStatus === 'draft' && bomTotals.totalLines === 0) {
-      return 'Generate BOM first';
-    }
-    if (status === 'in_production' && currentStatus === 'planned' && bomTotals.totalLines === 0) {
-      return 'BOM must have materials';
-    }
+
+  const getDisableReason = (status: ProductionStatusMO, current: ProductionStatusMO | undefined) => {
+    if (status === 'Planned' && current === 'Pending Review' && bomTotals.totalLines === 0) return 'Generate BOM first';
+    if (status === 'In Production' && current === 'Planned' && bomTotals.totalLines === 0) return 'BOM must have materials';
     return '';
   };
 
@@ -316,8 +309,8 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
             const canAdvance = index === currentStatusIndex + 1;
             
             // Business rule validation: disable advance if rules not met
-            const isAdvanceDisabled = canAdvance ? getAdvanceDisabled(status, manufacturingOrder.status) : false;
-            const disableReason = canAdvance ? getDisableReason(status, manufacturingOrder.status) : '';
+            const isAdvanceDisabled = canAdvance ? getAdvanceDisabled(status, currentProdStatus) : false;
+            const disableReason = canAdvance ? getDisableReason(status, currentProdStatus) : '';
 
             return (
               <div

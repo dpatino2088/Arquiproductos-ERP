@@ -190,8 +190,10 @@ Deno.serve(async (req) => {
     }
 
     const nowIso = new Date().toISOString();
+    let organizationUserId: string | null = null;
 
     if (existingUser && !existingUser.deleted) {
+      organizationUserId = existingUser.id;
       const { error: updateError } = await admin
         .from("OrganizationUsers")
         .update({
@@ -212,6 +214,7 @@ Deno.serve(async (req) => {
         );
       }
     } else if (existingUser && existingUser.deleted) {
+      organizationUserId = existingUser.id;
       const { error: reactivateError } = await admin
         .from("OrganizationUsers")
         .update({
@@ -239,17 +242,21 @@ Deno.serve(async (req) => {
         );
       }
     } else {
-      const { error: insertError } = await admin.from("OrganizationUsers").insert({
-        organization_id,
-        user_email: normalizedEmail,
-        user_name: payload.user_name ?? null,
-        role,
-        status: "invited",
-        deleted: false,
-        invited_at: nowIso,
-        invited_by_user_id: invitedByUserId,
-        user_id: null, // will link on accept
-      });
+      const { data: inserted, error: insertError } = await admin
+        .from("OrganizationUsers")
+        .insert({
+          organization_id,
+          user_email: normalizedEmail,
+          user_name: payload.user_name ?? null,
+          role,
+          status: "invited",
+          deleted: false,
+          invited_at: nowIso,
+          invited_by_user_id: invitedByUserId,
+          user_id: null, // will link on accept
+        })
+        .select("id")
+        .single();
 
       if (insertError) {
         console.error("send-org-invite: insert OrganizationUsers error:", insertError);
@@ -258,11 +265,12 @@ Deno.serve(async (req) => {
           500
         );
       }
+      organizationUserId = inserted?.id ?? null;
     }
 
-    // 2) Send Supabase Auth invite email (SMTP) with correct redirect
-    // Note: inviteUserByEmail doesn't support PKCE, but it works for invites
-    // The callback will handle the session establishment
+    // 2) Send Supabase Auth invite email (SMTP). If user already exists, we still succeed (org record created).
+    let emailSent = false;
+    let inviteErrorMsg: string | null = null;
     const { data: inviteData, error: inviteError } =
       await admin.auth.admin.inviteUserByEmail(normalizedEmail, {
         redirectTo: finalRedirectTo,
@@ -274,19 +282,22 @@ Deno.serve(async (req) => {
 
     if (inviteError) {
       console.error("send-org-invite: inviteUserByEmail error:", inviteError);
-      return json(
-        { error: `Failed to send invitation: ${inviteError.message}` },
-        500
-      );
+      inviteErrorMsg = inviteError.message;
+      // Do not return 500: OrganizationUsers was created/updated. Return 200 with email_sent: false.
+    } else {
+      emailSent = true;
     }
 
-    // ✅ Return useful info for debugging
+    // ✅ Always return 200 when org record was written; include invite_error when email failed
     return json({
       ok: true,
       email: normalizedEmail,
       organization_id,
+      organization_user_id: organizationUserId ?? undefined,
       role,
       redirect_to: finalRedirectTo,
+      email_sent: emailSent,
+      ...(inviteErrorMsg ? { invite_error: inviteErrorMsg } : {}),
       invite: inviteData ?? null,
     });
   } catch (error: any) {

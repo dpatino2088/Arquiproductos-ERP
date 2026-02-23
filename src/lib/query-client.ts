@@ -12,6 +12,9 @@ import { errorTracker } from './error-tracker';
  * - No refetch on focus/reconnect: Better mobile performance
  * - Smart retry logic: Don't retry client errors (4xx)
  */
+/** Keep previous data while fetching new data (no flash / empty list). Use in list queries. */
+export const keepPreviousData = <T>(previousData: T | undefined) => previousData;
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -20,14 +23,14 @@ export const queryClient = new QueryClient({
         if (error?.status && error.status >= 400 && error.status < 500) {
           return false;
         }
-        // Retry up to 2 times for other errors (5xx, network)
-        return failureCount < 2;
+        // Retry once for other errors (5xx, network) — ERP: avoid long waits
+        return failureCount < 1;
       },
-      staleTime: 10 * 60 * 1000, // 10 minutes - Data considered fresh
-      gcTime: 30 * 60 * 1000, // 30 minutes - Cache cleanup time
-      refetchOnWindowFocus: false, // Don't refetch when window regains focus
-      refetchOnReconnect: false, // Don't refetch when internet reconnects
-      refetchOnMount: false, // Only refetch if data is stale
+      staleTime: 60 * 1000, // 1 minute - lists stay fresh
+      gcTime: 10 * 60 * 1000, // 10 minutes - cache kept for tab switching
+      refetchOnWindowFocus: false, // Critical for ERP: no refetch on tab focus
+      refetchOnReconnect: false, // Avoid refetch on flaky WiFi
+      refetchOnMount: false, // Rely on staleTime + invalidation; avoid phantom refetches
     },
     mutations: {
       retry: (failureCount, error: Error & { status?: number }) => {

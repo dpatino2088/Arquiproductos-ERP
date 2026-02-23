@@ -11,10 +11,12 @@ import { Save, AlertCircle, Plus, Edit2, X, Check, Search, Filter } from 'lucide
 import DealerTiersSettings from './DealerTiersSettings';
 
 const costSettingsSchema = z.object({
-  labor_percentage: z.number().min(0, 'Labor percentage must be >= 0').max(100, 'Labor percentage must be <= 100'),
+  labor_cost_percentage: z.number().min(0, 'Labor cost % must be >= 0').max(100, 'Labor cost % must be <= 100'),
+  labor_dealer_margin_pct: z.number().min(0).max(95).optional(),
+  labor_msrp_margin_pct: z.number().min(0).max(95).optional(),
   shipping_percentage: z.number().min(0, 'Shipping percentage must be >= 0').max(100, 'Shipping percentage must be <= 100'),
   import_tax_percent: z.number().min(0, 'Import tax percentage must be >= 0').max(100, 'Import tax percentage must be <= 100'),
-  itbms_percent: z.number().min(0, 'ITBMS % must be >= 0').max(100, 'ITBMS % must be <= 100'),
+  itbms_percent: z.number().min(0, 'Tax % must be >= 0').max(100, 'Tax % must be <= 100'),
   msrp_pct: z.number().min(0, 'MSRP % must be >= 0').max(200, 'MSRP % must be <= 200'),
   min_margin_pct: z.number().min(0, 'Minimum margin must be >= 0').max(95, 'Minimum margin must be <= 95').optional(),
 });
@@ -22,7 +24,10 @@ const costSettingsSchema = z.object({
 type CostSettingsFormData = z.infer<typeof costSettingsSchema>;
 
 export default function CostEngineSettings() {
-  const [activeTab, setActiveTab] = useState<'defaults' | 'import_taxes' | 'category_margins' | 'dealer_tiers'>('defaults');
+  const [activeTab, setActiveTab] = useState<'defaults' | 'import_taxes' | 'category_margins' | 'dealer_tiers' | 'fabric_pricing'>('defaults');
+  const [fabricPricingBasis, setFabricPricingBasis] = useState<'auto' | 'linear' | 'sqm'>('auto');
+  const [savingFabric, setSavingFabric] = useState(false);
+  const [fabricSaveSuccess, setFabricSaveSuccess] = useState(false);
   const { settings, loading, error, upsertSettings } = useCostSettings();
   const { rules, loading: rulesLoading, upsertRule, deleteRule } = useImportTaxRules();
   const { margins, loading: marginsLoading, upsertMargin, deleteMargin } = useCategoryMargins();
@@ -45,10 +50,12 @@ export default function CostEngineSettings() {
   } = useForm<CostSettingsFormData>({
     resolver: zodResolver(costSettingsSchema),
     defaultValues: {
-      labor_percentage: 10.0000,
+      labor_cost_percentage: 10.0000,
+      labor_dealer_margin_pct: 35,
+      labor_msrp_margin_pct: 65,
       shipping_percentage: 15.0000,
       import_tax_percent: 0,
-      itbms_percent: 7, // Default 7% ITBMS (0.07 in DB). Used in Proposals.
+      itbms_percent: 7, // Default 7% tax (0.07 in DB). Used in Proposals.
       msrp_pct: 65, // Default 65% MSRP (0.65 in DB)
       min_margin_pct: 35, // Default 35% minimum margin (margin-on-sale, used as pricing floor)
     },
@@ -74,7 +81,9 @@ export default function CostEngineSettings() {
   const [showImportTaxFilters, setShowImportTaxFilters] = useState(false);
   const [filterImportTaxType, setFilterImportTaxType] = useState<string>('all'); // 'all', 'custom', 'default'
   // Defaults tab: which row is being edited (Dealer Tiers style)
-  const [editingDefaultKey, setEditingDefaultKey] = useState<'labor' | 'shipping' | 'import_tax' | 'itbms' | null>(null);
+  const [editingDefaultKey, setEditingDefaultKey] = useState<'shipping' | 'import_tax' | 'itbms' | null>(null);
+  const [editingLaborKey, setEditingLaborKey] = useState<'labor_cost' | 'labor_dealer' | 'labor_msrp' | null>(null);
+  const [laborEditValue, setLaborEditValue] = useState<string>('');
   const [defaultEditValue, setDefaultEditValue] = useState<string>('');
 
   // Filtered categories for Category Margins tab
@@ -138,7 +147,9 @@ export default function CostEngineSettings() {
       });
       
       // DB: 0.10 → UI: 10 (rounded)
-      setValue('labor_percentage', Math.round(settings.labor_pct * 100));
+      setValue('labor_cost_percentage', Math.round((settings.labor_pct ?? 0.10) * 100));
+      setValue('labor_dealer_margin_pct', Math.round(((settings as any).labor_dealer_pct ?? settings.minimum_margin_pct ?? 0.35) * 100));
+      setValue('labor_msrp_margin_pct', Math.round(((settings as any).labor_msrp_pct ?? settings.default_msrp_pct ?? 0.65) * 100));
       setValue('shipping_percentage', Math.round(settings.shipping_pct * 100));
       setValue('import_tax_percent', Math.round(settings.global_import_tax_pct * 100));
       setValue('itbms_percent', Math.round((settings.itbms_pct ?? 0.07) * 100));
@@ -148,6 +159,7 @@ export default function CostEngineSettings() {
       setValue('msrp_pct', msrpValue);
       
       setValue('min_margin_pct', Math.round(settings.minimum_margin_pct * 100));
+      setFabricPricingBasis((settings as any).fabric_pricing_basis || 'auto');
     }
   }, [settings, setValue]);
 
@@ -161,8 +173,11 @@ export default function CostEngineSettings() {
       const msrpPct = data.msrp_pct != null
         ? data.msrp_pct / 100
         : (settings?.default_msrp_pct ?? 0.65);
+      const laborPctValue = data.labor_cost_percentage / 100;
       const payload = {
-        labor_pct: data.labor_percentage / 100,
+        labor_pct: laborPctValue,
+        labor_dealer_pct: (data.labor_dealer_margin_pct ?? 35) / 100,
+        labor_msrp_pct: (data.labor_msrp_margin_pct ?? 65) / 100,
         shipping_pct: data.shipping_percentage / 100,
         global_import_tax_pct: data.import_tax_percent / 100,
         itbms_pct: (data.itbms_percent ?? 7) / 100,
@@ -303,7 +318,7 @@ export default function CostEngineSettings() {
             </button>
             <button
               onClick={() => setActiveTab('category_margins')}
-              className={`transition-colors flex items-center justify-start ${
+              className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'category_margins'
                   ? 'bg-white font-semibold'
                   : 'hover:bg-white/50 font-normal'
@@ -315,6 +330,7 @@ export default function CostEngineSettings() {
                 minWidth: '140px',
                 width: 'auto',
                 color: 'var(--graphite-black-hex)',
+                borderColor: 'var(--gray-250)',
                 borderBottom: activeTab === 'category_margins' ? '2px solid var(--tab-active-underline)' : 'none'
               }}
               role="tab"
@@ -323,22 +339,43 @@ export default function CostEngineSettings() {
             >
               Category Margins
             </button>
+            <button
+              onClick={() => setActiveTab('fabric_pricing')}
+              className={`transition-colors flex items-center justify-start ${
+                activeTab === 'fabric_pricing'
+                  ? 'bg-white font-semibold'
+                  : 'hover:bg-white/50 font-normal'
+              }`}
+              style={{
+                fontSize: '12px',
+                padding: '0 48px',
+                height: '100%',
+                minWidth: '140px',
+                width: 'auto',
+                color: 'var(--graphite-black-hex)',
+                borderBottom: activeTab === 'fabric_pricing' ? '2px solid var(--tab-active-underline)' : 'none'
+              }}
+              role="tab"
+              aria-selected={activeTab === 'fabric_pricing'}
+              aria-label={`Fabric Pricing${activeTab === 'fabric_pricing' ? ' (current tab)' : ''}`}
+            >
+              Fabric Pricing
+            </button>
           </div>
         </div>
 
         {/* Form Body - Matching CustomerNew content structure */}
         <div className="py-6 px-6">
           {activeTab === 'defaults' && (
-            <div>
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold text-gray-900">Cost Engine Defaults</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-8">
+              {/* Cost Engine Defaults (no Labor) */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">Cost Engine Defaults</h3>
+                <div className="grid grid-cols-2 gap-3">
                 {[
-                  { key: 'labor' as const, label: 'Labor Percentage (%)', field: 'labor_percentage' as const },
                   { key: 'shipping' as const, label: 'Shipping Percentage (%)', field: 'shipping_percentage' as const },
                   { key: 'import_tax' as const, label: 'Global Import Tax % (Fallback)', field: 'import_tax_percent' as const },
-                  { key: 'itbms' as const, label: 'ITBMS % (Proposals)', field: 'itbms_percent' as const, tooltip: 'Impuesto general (Panamá). Se usa en Proposals/Invoices.' },
+                  { key: 'itbms' as const, label: 'Tax % (Proposals)', field: 'itbms_percent' as const, tooltip: 'General tax (Panama). Used in Proposals/Invoices.' },
                 ].map(({ key, label, field, tooltip }) => {
                   const isEditing = editingDefaultKey === key;
                   const displayValue = watch(field) ?? 0;
@@ -359,12 +396,14 @@ export default function CostEngineSettings() {
                       setIsSaving(true);
                       const data = getValues();
                       await upsertSettings({
-                        labor_pct: (data.labor_percentage ?? 10) / 100,
                         shipping_pct: (data.shipping_percentage ?? 15) / 100,
                         global_import_tax_pct: (data.import_tax_percent ?? 0) / 100,
                         itbms_pct: (data.itbms_percent ?? 7) / 100,
                         default_msrp_pct: (settings?.default_msrp_pct ?? 0.65),
                         minimum_margin_pct: (settings?.minimum_margin_pct ?? 0.35),
+                        labor_pct: (settings?.labor_pct ?? 0.10),
+                        labor_dealer_pct: ((settings as any)?.labor_dealer_pct ?? 0.35),
+                        labor_msrp_pct: ((settings as any)?.labor_msrp_pct ?? 0.65),
                       });
                       setSaveSuccess(true);
                       setTimeout(() => setSaveSuccess(false), 3000);
@@ -434,6 +473,117 @@ export default function CostEngineSettings() {
                     </div>
                   );
                 })}
+              </div>
+              </div>
+
+              {/* Labor form (separate section below) */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">Labor</h3>
+                <div className="grid grid-cols-2 gap-3">
+                {[
+                  { key: 'labor_cost' as const, label: 'Labor % (of materials)', field: 'labor_cost_percentage' as const, tooltip: 'labor_cost = materials × labor_pct' },
+                  { key: 'labor_dealer' as const, label: 'Labor Dealer Margin %', field: 'labor_dealer_margin_pct' as const, tooltip: 'labor_dealer = labor_cost / (1 − %). Margen sobre venta.' },
+                  { key: 'labor_msrp' as const, label: 'Labor MSRP Margin %', field: 'labor_msrp_margin_pct' as const, tooltip: 'labor_msrp = labor_dealer / (1 − %). Margen sobre venta.' },
+                ].map(({ key, label, field, tooltip }) => {
+                  const isEditing = editingLaborKey === key;
+                  const displayValue = watch(field) ?? 0;
+                  const handleStartEdit = () => {
+                    setEditingLaborKey(key);
+                    setLaborEditValue(String(Math.round(Number(displayValue))));
+                  };
+                  const handleSaveLabor = async () => {
+                    const num = parseFloat(laborEditValue);
+                    const maxVal = key === 'labor_cost' ? 100 : 95;
+                    if (Number.isNaN(num) || num < 0 || num > maxVal) {
+                      alert(`${label} must be between 0 and ${maxVal}.`);
+                      return;
+                    }
+                    setValue(field, num);
+                    setEditingLaborKey(null);
+                    setLaborEditValue('');
+                    try {
+                      setIsSaving(true);
+                      const data = getValues();
+                      const laborPct = (data.labor_cost_percentage ?? 10) / 100;
+                      await upsertSettings({
+                        labor_pct: laborPct,
+                        labor_dealer_pct: (data.labor_dealer_margin_pct ?? 35) / 100,
+                        labor_msrp_pct: (data.labor_msrp_margin_pct ?? 65) / 100,
+                        shipping_pct: (settings?.shipping_pct ?? 0.15),
+                        global_import_tax_pct: (settings?.global_import_tax_pct ?? 0),
+                        itbms_pct: (settings?.itbms_pct ?? 0.07),
+                        default_msrp_pct: (settings?.default_msrp_pct ?? 0.65),
+                        minimum_margin_pct: (settings?.minimum_margin_pct ?? 0.35),
+                      });
+                      setSaveSuccess(true);
+                      setTimeout(() => setSaveSuccess(false), 3000);
+                    } catch (err: any) {
+                      alert(err?.message ?? 'Failed to save.');
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  };
+                  return (
+                    <div
+                      key={key}
+                      className="col-span-1 col-start-1 flex items-center gap-4 p-4 bg-white border border-gray-200 rounded-lg"
+                      title={tooltip}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium text-gray-900">{label}</span>
+                      </div>
+                      <div className="flex items-center gap-4 shrink-0">
+                        {isEditing ? (
+                          <>
+                            <div className="w-24">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={key === 'labor_cost' ? 100 : 95}
+                                step={1}
+                                value={laborEditValue}
+                                onChange={(e) => setLaborEditValue(e.target.value)}
+                                className="py-1 text-xs text-right"
+                                placeholder="0"
+                              />
+                            </div>
+                            <span className="text-gray-500 text-sm">%</span>
+                            <button
+                              type="button"
+                              onClick={handleSaveLabor}
+                              disabled={isSaving}
+                              className="p-2 text-primary hover:bg-primary/10 rounded-md"
+                              title="Save"
+                            >
+                              <Save className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setEditingLaborKey(null); setLaborEditValue(''); }}
+                              className="p-2 text-gray-500 hover:bg-gray-100 rounded-md"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-20 text-right shrink-0 mr-6">
+                              <span className="text-gray-700 font-medium whitespace-nowrap">{Math.round(Number(displayValue))}%</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleStartEdit}
+                              className="text-sm text-primary hover:underline"
+                            >
+                              Edit
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
               </div>
             </div>
           )}
@@ -855,6 +1005,111 @@ export default function CostEngineSettings() {
 
           {activeTab === 'dealer_tiers' && (
             <DealerTiersSettings />
+          )}
+
+          {activeTab === 'fabric_pricing' && (
+            <div>
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">Fabric Pricing Basis</h3>
+                <p className="text-xs text-gray-500">
+                  Controls how fabric/roll quantity and unit price are displayed in quotes and BOM preview.
+                  This is a <strong>display setting only</strong> — it does not affect real costs or totals.
+                  The economic total (qty × unit price) is always the same regardless of basis.
+                </p>
+                <p className="text-xs text-amber-700 mt-2 bg-amber-50 px-2 py-1 rounded">
+                  <strong>Applies to new configured products going forward.</strong> Existing quotes/products keep their saved snapshot.
+                </p>
+              </div>
+
+              <div className="space-y-3 max-w-lg">
+                {([
+                  {
+                    value: 'auto',
+                    label: 'Auto (use catalog item pricing mode)',
+                    description: 'Each fabric uses its own roll_pricing_mode (per_linear_meter → m, per_square_meter → m²).',
+                  },
+                  {
+                    value: 'linear',
+                    label: 'Linear meter (m)',
+                    description: 'Always quote fabric in linear meters. Unit price is converted to $/m when the catalog price is in $/m².',
+                  },
+                  {
+                    value: 'sqm',
+                    label: 'Square meter (m²)',
+                    description: 'Always quote fabric in m². Unit price is converted to $/m² when the catalog price is in $/m.',
+                  },
+                ] as { value: 'auto' | 'linear' | 'sqm'; label: string; description: string }[]).map((option) => (
+                  <label
+                    key={option.value}
+                    className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors ${
+                      fabricPricingBasis === option.value
+                        ? 'border-primary bg-primary/5'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="fabric_pricing_basis"
+                      value={option.value}
+                      checked={fabricPricingBasis === option.value}
+                      onChange={() => setFabricPricingBasis(option.value)}
+                      className="mt-0.5 accent-primary"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-gray-900">{option.label}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{option.description}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {/* Example */}
+              <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg max-w-lg">
+                <p className="text-xs font-medium text-gray-700 mb-2">Example — same fabric, same total:</p>
+                <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
+                  <div className="font-medium text-gray-500 uppercase tracking-wide">Basis</div>
+                  <div className="font-medium text-gray-500 uppercase tracking-wide text-right">Qty / UOM</div>
+                  <div className="font-medium text-gray-500 uppercase tracking-wide text-right">Unit Price</div>
+                  <div className={fabricPricingBasis === 'auto' ? 'text-primary font-semibold' : ''}>Auto (linear)</div>
+                  <div className={`text-right ${fabricPricingBasis === 'auto' ? 'text-primary font-semibold' : ''}`}>1.20 m</div>
+                  <div className={`text-right ${fabricPricingBasis === 'auto' ? 'text-primary font-semibold' : ''}`}>$88.82 / m</div>
+                  <div className={fabricPricingBasis === 'sqm' ? 'text-primary font-semibold' : ''}>Square meter</div>
+                  <div className={`text-right ${fabricPricingBasis === 'sqm' ? 'text-primary font-semibold' : ''}`}>2.40 m²</div>
+                  <div className={`text-right ${fabricPricingBasis === 'sqm' ? 'text-primary font-semibold' : ''}`}>$44.41 / m²</div>
+                  <div className="col-span-3 border-t border-gray-300 mt-1 pt-1 text-gray-700">
+                    Total: <strong>$106.58</strong> in both cases
+                  </div>
+                </div>
+              </div>
+
+              {/* Save button */}
+              <div className="mt-6">
+                {fabricSaveSuccess && (
+                  <p className="text-sm text-green-700 mb-2">Fabric pricing basis saved.</p>
+                )}
+                <button
+                  type="button"
+                  disabled={savingFabric}
+                  onClick={async () => {
+                    try {
+                      setSavingFabric(true);
+                      setFabricSaveSuccess(false);
+                      await upsertSettings({ fabric_pricing_basis: fabricPricingBasis } as any);
+                      setFabricSaveSuccess(true);
+                      setTimeout(() => setFabricSaveSuccess(false), 3000);
+                    } catch (err: any) {
+                      alert(err?.message ?? 'Error saving fabric pricing basis.');
+                    } finally {
+                      setSavingFabric(false);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm rounded-md hover:bg-primary/90 disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  {savingFabric ? 'Saving…' : 'Save Fabric Pricing Basis'}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

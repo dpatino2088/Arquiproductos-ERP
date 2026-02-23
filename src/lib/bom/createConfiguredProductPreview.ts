@@ -434,6 +434,16 @@ export async function createConfiguredProductPreview(
 
     const quantity = Number(config_snapshot.quantity ?? 1) || 1;
 
+    // Keep ConfiguredProducts.labor_pct aligned with current CostSettings (MSRP labor %),
+    // instead of trusting stale config_snapshot.labor_pct from legacy payloads.
+    let laborPctForConfiguredProduct = 0;
+    const { data: costSettings } = await supabase
+      .from('CostSettings')
+      .select('labor_msrp_pct, labor_pct')
+      .eq('organization_id', organization_id)
+      .maybeSingle();
+    laborPctForConfiguredProduct = Number((costSettings as any)?.labor_msrp_pct ?? (costSettings as any)?.labor_pct ?? 0) || 0;
+
     // Roll from catalog variant only
     let roll_sku: string | null = null;
     let roll_collection_name: string | null = null;
@@ -476,11 +486,11 @@ export async function createConfiguredProductPreview(
       roll_collection_name,
       roll_variant_name,
       roll_width,
-      // Totals se rellenan por recalculate/build_bom_preview en backend
+      // Totals se rellenan por recalculate/build_bom_preview en backend. Usar msrp_product_subtotal (no roll_plus_bom_total).
       roll_msrp_total: 0,
       bom_total: 0,
-      roll_plus_bom_total: 0,
-      labor_pct: config_snapshot.labor_pct ?? 0,
+      msrp_product_subtotal: 0,
+      labor_pct: laborPctForConfiguredProduct,
       accessories_total: 0,
       total_msrp: 0,
     };
@@ -496,9 +506,11 @@ export async function createConfiguredProductPreview(
       throw new Error(insertError.message || 'Failed to create ConfiguredProduct (fallback)');
     }
 
-    // ✅ Intentar calcular totales si la función existe/funciona en DB
+    // Recalculate totals and read back bom_preview_snapshot for UI
     try {
       const totals = await recalculateConfiguredProductTotals(inserted.id);
+      const cp = await getConfiguredProduct(inserted.id);
+      const snapshot = cp?.bom_preview_snapshot ?? null;
       return {
         configured_product_id: inserted.id,
         bom_instance_id: null as any,
@@ -506,28 +518,41 @@ export async function createConfiguredProductPreview(
         totals: {
           roll_msrp_total: Number(totals?.roll_msrp_total ?? 0),
           bom_total: Number(totals?.bom_total ?? 0),
-          roll_plus_bom_total: Number(totals?.roll_plus_bom_total ?? 0),
+          msrp_product_subtotal: Number(totals?.msrp_product_subtotal ?? 0),
           labor_pct: Number(totals?.labor_pct ?? 0),
+          labor_amount: Number(totals?.labor_msrp ?? 0),
           accessories_total: Number(totals?.accessories_total ?? 0),
-          total_msrp: Number(totals?.total_msrp ?? 0),
+          total_msrp: Number(totals?.unit_msrp_total ?? totals?.total_msrp ?? 0),
+          unit_dealer_price: Number(totals?.unit_dealer_price ?? 0),
+          total_cost: Number(totals?.total_cost ?? 0),
+          roll_total_cost: Number(totals?.roll_cost ?? 0),
+          bom_total_cost: Number(totals?.bom_cost ?? 0),
         },
+        bom_preview_snapshot: snapshot,
       };
     } catch (e: any) {
       if (import.meta.env.DEV) {
         console.warn('[createConfiguredProductPreview] Fallback totals calc failed, returning zeros:', e?.message || e);
       }
+      // Still try to read the snapshot even if recalc failed
+      let snapshot = null;
+      try {
+        const cp = await getConfiguredProduct(inserted.id);
+        snapshot = cp?.bom_preview_snapshot ?? null;
+      } catch (_) { /* ignore */ }
       return {
         configured_product_id: inserted.id,
-        bom_instance_id: null as any, // No BOMInstance in fallback preview
+        bom_instance_id: null as any,
         bom_template_id: inserted.bom_template_id,
         totals: {
           roll_msrp_total: 0,
           bom_total: 0,
-          roll_plus_bom_total: 0,
+          msrp_product_subtotal: 0,
           labor_pct: 0,
           accessories_total: 0,
           total_msrp: 0,
         },
+        bom_preview_snapshot: snapshot,
       };
     }
   }

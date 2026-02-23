@@ -49,12 +49,12 @@ const Orders = lazy(() => import('./pages/sales/Orders'));
 const Quotes = lazy(() => import('./pages/sales/Quotes'));
 const QuoteNew = lazy(() => import('./pages/sales/QuoteNew'));
 const Proposals = lazy(() => import('./pages/sales/Proposals'));
-const ProposalDetail = lazy(() => import('./pages/sales/ProposalDetail'));
 const ProposalPrint = lazy(() => import('./pages/sales/ProposalPrint'));
 const SaleOrders = lazy(() => import('./pages/sales/SaleOrders'));
 const SaleOrderNew = lazy(() => import('./pages/sales/SaleOrderNew'));
 
 const Catalog = lazy(() => import('./pages/catalog/Catalog'));
+const CatalogModule = lazy(() => import('./pages/catalog/CatalogModule'));
 const Items = lazy(() => import('./pages/catalog/Items'));
 const Manufacturers = lazy(() => import('./pages/catalog/Manufacturers'));
 const Categories = lazy(() => import('./pages/catalog/Categories'));
@@ -82,6 +82,7 @@ const OrganizationUsers = lazy(() => import('./pages/settings/OrganizationUsers'
 const OrganizationUser = lazy(() => import('./pages/settings/OrganizationUser'));
 const OrganizationUserNew = lazy(() => import('./pages/settings/OrganizationUserNew'));
 const DealerUsers = lazy(() => import('./pages/settings/DealerUsers'));
+const DealerAccount = lazy(() => import('./pages/settings/DealerAccount'));
 const Roles = lazy(() => import('./pages/settings/Roles'));
 const AdminRoles = lazy(() => import('./pages/admin/Roles'));
 
@@ -96,7 +97,6 @@ import NewPassword from './pages/auth/NewPassword';
 import SetPassword from './pages/auth/SetPassword';
 import AcceptInvite from './pages/auth/AcceptInvite';
 import AccessDenied from './pages/auth/AccessDenied';
-import SelectActingDealer from './pages/SelectActingDealer';
 import { SuperAdminActingGate } from './components/SuperAdminActingGate';
 
 
@@ -495,7 +495,7 @@ function App() {
     });
     router.addRoute('/sales/proposals/:id', () => {
       if (isAuthenticated) {
-        setCurrentPage('proposal-detail');
+        setCurrentPage('proposals'); // same as list — ProposalsWithDetail keeps both mounted
       } else {
         setCurrentPage('login');
       }
@@ -759,15 +759,31 @@ function App() {
     });
     router.addRoute('/settings/dealer-users', () => {
       if (isAuthenticated) {
-        setCurrentPage('dealer-users');
+        router.navigate('/settings/dealer-account', false);
+        setCurrentPage('dealer-account');
       } else {
         setCurrentPage('login');
       }
     });
-    // Legacy: redirect old URL to same page
+    router.addRoute('/settings/dealer-account', () => {
+      if (isAuthenticated) {
+        setCurrentPage('dealer-account');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/dealer-account/terms', () => {
+      if (isAuthenticated) {
+        setCurrentPage('dealer-account');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    // Legacy: redirect old URL to Dealer Account
     router.addRoute('/settings/company-portal-users', () => {
       if (isAuthenticated) {
-        setCurrentPage('dealer-users');
+        router.navigate('/settings/dealer-account', false);
+        setCurrentPage('dealer-account');
       } else {
         setCurrentPage('login');
       }
@@ -980,9 +996,8 @@ function App() {
       case 'quote-new':
         return <RequireModule module="sales"><QuoteNew /></RequireModule>;
       case 'proposals':
-        return <RequireModule module="sales"><SalesDirectory activeTab="proposals" /></RequireModule>;
       case 'proposal-detail':
-        return <RequireModule module="sales"><ProposalDetail /></RequireModule>;
+        return <RequireModule module="sales"><SalesDirectory activeTab="proposals" /></RequireModule>;
       case 'sale-orders':
         return <RequireModule module="sales"><SaleOrders /></RequireModule>;
       case 'sale-order-new':
@@ -990,7 +1005,7 @@ function App() {
       case 'catalog':
         return <RequireModule module="catalog"><Catalog /></RequireModule>;
       case 'items':
-        return <RequireModule module="catalog"><Items /></RequireModule>;
+        return <RequireModule module="catalog"><CatalogModule activeTab="items" /></RequireModule>;
       case 'catalog-item-new':
         return <RequireModule module="catalog"><CatalogItemNew /></RequireModule>;
       case 'manufacturers':
@@ -1000,7 +1015,7 @@ function App() {
       case 'collections':
         return <RequireModule module="catalog"><Collections /></RequireModule>;
       case 'bom':
-        return <RequireModule module="catalog"><BOM /></RequireModule>;
+        return <RequireModule module="catalog"><CatalogModule activeTab="bom" /></RequireModule>;
       // Variants case removed - use CollectionsCatalog instead
       case 'inventory':
         return <Inventory />;
@@ -1034,7 +1049,8 @@ function App() {
       case 'organization-user':
         return <OrganizationUser />;
       case 'dealer-users':
-        return <DealerUsers />;
+      case 'dealer-account':
+        return <DealerAccount />;
       case 'roles':
       case 'admin-roles':
         return <RequireModule module="settings"><AdminRoles /></RequireModule>;
@@ -1062,7 +1078,8 @@ function App() {
       case 'auth-reset-password':
         return <ResetPasswordForm />;
       case 'select-acting-dealer':
-        return <SelectActingDealer />;
+        router.navigate('/');
+        return <ManagementDashboard />;
 
       default:
         return <ManagementDashboard />;
@@ -1097,7 +1114,16 @@ function App() {
           if (isAuthPage || isLoading || isAuthPath) {
             return (
           <ErrorBoundary>
-            <Suspense fallback={null}>
+            <Suspense fallback={
+              <div className="min-h-dvh flex items-center justify-center bg-background">
+                <div className="flex flex-col items-center gap-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+                  <p className="text-sm text-muted-foreground">
+                    {isLoading ? 'Verifying access...' : 'Loading...'}
+                  </p>
+                </div>
+              </div>
+            }>
               {renderPage()}
             </Suspense>
           </ErrorBoundary>
@@ -1139,9 +1165,10 @@ function App() {
           }
 
           if (currentPage === 'select-acting-dealer') {
+            router.navigate('/');
             return (
               <ErrorBoundary>
-                <SelectActingDealer />
+                <ManagementDashboard />
               </ErrorBoundary>
             );
           }

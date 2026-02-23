@@ -43,8 +43,9 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
     (config as any).fabric_catalog_item_id ||
     (config as any).fabric_variant_id;
 
-  // MSRP Sale Out from CatalogItemsMSRP (per-org)
+  // MSRP from CatalogItemsMSRP (per-org) + its pricing UOM
   const [msrpSaleOut, setMsrpSaleOut] = useState<number | null>(null);
+  const [msrpPricingUom, setMsrpPricingUom] = useState<string | null>(null);
   // Roll Specs from CatalogItemRollSpecs (when variant selected)
   const [rollSpecs, setRollSpecs] = useState<CatalogItemRollSpecsRow | null>(null);
   const [loadingRollSpecs, setLoadingRollSpecs] = useState(false);
@@ -124,20 +125,24 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
   useEffect(() => {
     if (!variantId || !activeOrganizationId) {
       setMsrpSaleOut(null);
+      setMsrpPricingUom(null);
       return;
     }
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from('CatalogItemsMSRP')
-        .select('msrp')
+        .select('msrp, pricing_uom')
         .eq('catalog_item_id', variantId)
         .eq('organization_id', activeOrganizationId)
         .maybeSingle();
-      if (!cancelled && data?.msrp != null && !isNaN(Number(data.msrp))) {
-        setMsrpSaleOut(Number(data.msrp));
-      } else if (!cancelled) {
-        setMsrpSaleOut(null);
+      if (!cancelled) {
+        if (data?.msrp != null && !isNaN(Number(data.msrp))) {
+          setMsrpSaleOut(Number(data.msrp));
+        } else {
+          setMsrpSaleOut(null);
+        }
+        setMsrpPricingUom(data?.pricing_uom != null ? String(data.pricing_uom) : null);
       }
     })();
     return () => { cancelled = true; };
@@ -237,26 +242,74 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
   // Extract fabric specs from variants or from selectedCatalogItem (fallback when editing / variant not in list)
   // Variant = CatalogItems.variant_name
   const fabricSpecs = useMemo(() => {
+    const clean = (v: unknown): string | null => {
+      if (v == null) return null;
+      const s = String(v).trim();
+      if (!s || s === '—') return null;
+      return s;
+    };
     const selectedVariant = variants.find(v => v.id === variantId);
     if (selectedVariant) {
       return {
-        manufacturer: selectedManufacturerName,
-        rollWidth: selectedVariant.roll_width ? `${selectedVariant.roll_width}m` : '—',
-        variantName: selectedVariant.variant_name ?? selectedVariant.color ?? '—',
-        description: selectedVariant.description ?? '—',
+        manufacturer: clean(selectedManufacturerName),
+        rollWidth: selectedVariant.roll_width ? `${selectedVariant.roll_width}m` : null,
+        variantName: clean(selectedVariant.variant_name ?? selectedVariant.color),
+        description: clean(selectedVariant.description),
       };
     }
     if (selectedCatalogItem && variantId) {
       const rw = (selectedCatalogItem as any).roll_width_m ?? (selectedCatalogItem as any).roll_width;
       return {
-        manufacturer: selectedManufacturerName,
-        rollWidth: rw != null ? `${rw}m` : '—',
-        variantName: (selectedCatalogItem as any).variant_name ?? (selectedCatalogItem as any).name ?? '—',
-        description: (selectedCatalogItem as any).description ?? '—',
+        manufacturer: clean(selectedManufacturerName),
+        rollWidth: rw != null ? `${rw}m` : null,
+        variantName: clean((selectedCatalogItem as any).variant_name ?? (selectedCatalogItem as any).name),
+        description: clean((selectedCatalogItem as any).description),
       };
     }
     return null;
   }, [variantId, variants, selectedManufacturerName, selectedCatalogItem]);
+
+  const rollWidthM = useMemo(() => {
+    const selectedVariant = variants.find(v => v.id === variantId);
+    const fromVariant = selectedVariant?.roll_width != null ? Number(selectedVariant.roll_width) : null;
+    if (fromVariant != null && !isNaN(fromVariant) && fromVariant > 0) return fromVariant;
+    const fromCatalog =
+      (selectedCatalogItem as any)?.roll_width_m != null
+        ? Number((selectedCatalogItem as any).roll_width_m)
+        : ((selectedCatalogItem as any)?.roll_width != null ? Number((selectedCatalogItem as any).roll_width) : null);
+    if (fromCatalog != null && !isNaN(fromCatalog) && fromCatalog > 0) return fromCatalog;
+    return null;
+  }, [variantId, variants, selectedCatalogItem]);
+
+  const msrpPerM2 = useMemo(() => {
+    if (msrpSaleOut == null || isNaN(msrpSaleOut)) return null;
+    const uomNorm = (msrpPricingUom || '').toLowerCase().replace('²', '2');
+    if (uomNorm === 'm2' || uomNorm === 'sqm' || uomNorm === 'sq_m') return msrpSaleOut;
+    if (uomNorm === 'm') {
+      if (rollWidthM != null && rollWidthM > 0) return msrpSaleOut / rollWidthM;
+      return null;
+    }
+    // Fallback for legacy rows without pricing_uom: assume linear meter if roll width exists.
+    if (rollWidthM != null && rollWidthM > 0) return msrpSaleOut / rollWidthM;
+    return msrpSaleOut;
+  }, [msrpSaleOut, msrpPricingUom, rollWidthM]);
+
+  const hasTechnicalData = useMemo(() => {
+    return Boolean(
+      fabricSpecs?.manufacturer ||
+      fabricSpecs?.rollWidth ||
+      fabricSpecs?.variantName ||
+      fabricSpecs?.description ||
+      msrpPerM2 != null ||
+      rollSpecs?.can_rotate != null ||
+      rollSpecs?.is_weldable != null ||
+      (rollSpecs?.raw_material && String(rollSpecs.raw_material).trim() !== '') ||
+      rollSpecs?.openness_factor_pct != null ||
+      rollSpecs?.weight_g_m2 != null ||
+      rollSpecs?.weight_kg_m2 != null ||
+      (rollSpecs?.notes && String(rollSpecs.notes).trim() !== '')
+    );
+  }, [fabricSpecs, msrpPerM2, rollSpecs]);
 
   // Filter collections based on search
   const filteredCollections = useMemo(() => {
@@ -642,7 +695,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
         </div>
 
         {/* Fabric Spec Details (incl. CatalogItemRollSpecs) */}
-        {variantId && (
+        {variantId && (loadingSelectedItem || loadingRollSpecs || hasTechnicalData) && (
           <div className="border-t border-gray-200 pt-4">
             <Label className="text-sm font-medium mb-3 block">Fabric Spec Details</Label>
             {loadingSelectedItem || loadingRollSpecs ? (
@@ -650,55 +703,78 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
             ) : (
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Manufacturer:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs?.manufacturer ?? '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Roll Width:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs?.rollWidth ?? '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Variant:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs?.variantName ?? '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">MSRP / m²:</span>
-                    <span className="ml-2 font-medium">{msrpSaleOut != null && !isNaN(msrpSaleOut) ? `$${Number(msrpSaleOut).toFixed(2)}` : '—'}</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-gray-600">Description:</span>
-                    <span className="ml-2 font-medium">{fabricSpecs?.description ?? '—'}</span>
-                  </div>
-                  {/* CatalogItemRollSpecs: siempre mostrar filas; valor "—" o No si no hay datos */}
-                  <div>
-                    <span className="text-gray-600">Can rotate:</span>
-                    <span className="ml-2 font-medium">{rollSpecs ? (rollSpecs.can_rotate ? 'Yes' : 'No') : '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Weldable:</span>
-                    <span className="ml-2 font-medium">{rollSpecs ? (rollSpecs.is_weldable ? 'Yes' : 'No') : '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Raw material:</span>
-                    <span className="ml-2 font-medium">{rollSpecs?.raw_material ?? '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Openness:</span>
-                    <span className="ml-2 font-medium">{rollSpecs?.openness_factor_pct != null && rollSpecs.openness_factor_pct !== '' ? `${Number(rollSpecs.openness_factor_pct)}%` : '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Weight (g/m²):</span>
-                    <span className="ml-2 font-medium">{rollSpecs?.weight_g_m2 != null && rollSpecs.weight_g_m2 !== '' ? Number(rollSpecs.weight_g_m2) : '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Weight (kg/m²):</span>
-                    <span className="ml-2 font-medium">{rollSpecs?.weight_kg_m2 != null && rollSpecs.weight_kg_m2 !== '' ? Number(rollSpecs.weight_kg_m2) : '—'}</span>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-gray-600">Notes:</span>
-                    <span className="ml-2 font-medium">{rollSpecs?.notes ?? '—'}</span>
-                  </div>
+                  {fabricSpecs?.manufacturer ? (
+                    <div>
+                      <span className="text-gray-600">Manufacturer:</span>
+                      <span className="ml-2 font-medium">{fabricSpecs.manufacturer}</span>
+                    </div>
+                  ) : null}
+                  {fabricSpecs?.rollWidth ? (
+                    <div>
+                      <span className="text-gray-600">Roll Width:</span>
+                      <span className="ml-2 font-medium">{fabricSpecs.rollWidth}</span>
+                    </div>
+                  ) : null}
+                  {fabricSpecs?.variantName ? (
+                    <div>
+                      <span className="text-gray-600">Variant:</span>
+                      <span className="ml-2 font-medium">{fabricSpecs.variantName}</span>
+                    </div>
+                  ) : null}
+                  {msrpPerM2 != null && !isNaN(msrpPerM2) ? (
+                    <div>
+                      <span className="text-gray-600">MSRP / m²:</span>
+                      <span className="ml-2 font-medium">${Number(msrpPerM2).toFixed(2)}</span>
+                    </div>
+                  ) : null}
+                  {fabricSpecs?.description ? (
+                    <div className="col-span-2">
+                      <span className="text-gray-600">Description:</span>
+                      <span className="ml-2 font-medium">{fabricSpecs.description}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.can_rotate != null ? (
+                    <div>
+                      <span className="text-gray-600">Can rotate:</span>
+                      <span className="ml-2 font-medium">{rollSpecs.can_rotate ? 'Yes' : 'No'}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.is_weldable != null ? (
+                    <div>
+                      <span className="text-gray-600">Weldable:</span>
+                      <span className="ml-2 font-medium">{rollSpecs.is_weldable ? 'Yes' : 'No'}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.raw_material ? (
+                    <div>
+                      <span className="text-gray-600">Raw material:</span>
+                      <span className="ml-2 font-medium">{rollSpecs.raw_material}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.openness_factor_pct != null && rollSpecs.openness_factor_pct !== '' ? (
+                    <div>
+                      <span className="text-gray-600">Openness:</span>
+                      <span className="ml-2 font-medium">{`${Number(rollSpecs.openness_factor_pct)}%`}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.weight_g_m2 != null && rollSpecs.weight_g_m2 !== '' ? (
+                    <div>
+                      <span className="text-gray-600">Weight (g/m²):</span>
+                      <span className="ml-2 font-medium">{Number(rollSpecs.weight_g_m2)}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.weight_kg_m2 != null && rollSpecs.weight_kg_m2 !== '' ? (
+                    <div>
+                      <span className="text-gray-600">Weight (kg/m²):</span>
+                      <span className="ml-2 font-medium">{Number(rollSpecs.weight_kg_m2)}</span>
+                    </div>
+                  ) : null}
+                  {rollSpecs?.notes ? (
+                    <div className="col-span-2">
+                      <span className="text-gray-600">Notes:</span>
+                      <span className="ml-2 font-medium">{rollSpecs.notes}</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}

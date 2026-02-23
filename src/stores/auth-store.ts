@@ -246,6 +246,10 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           logger.error("Error signing out", error as Error);
         }
+        try {
+          const { clearDirectoryContextCache } = await import('../lib/directoryContext');
+          clearDirectoryContextCache();
+        } catch { /* ignore */ }
 
         set({
           user: null,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useForm, Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
 import { useUIStore } from '../../stores/ui-store';
 import Input from '../../components/ui/Input';
@@ -9,7 +10,13 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 import Label from '../../components/ui/Label';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
+import { useAccessContext } from '../../hooks/useAccessContext';
 import { useCreateCatalogItem, useUpdateCatalogItem, useCatalogCategories } from '../../hooks/useCatalog';
+import { useCatalogItemDetail } from '../../hooks/useCatalogItemDetail';
+import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
+import { catalogItemsListKey, catalogItemDetailKey } from '../../lib/queryKeys';
+import type { CatalogItem } from '../../types/catalog';
 import { useCategoryMargins } from '../../hooks/useCostEngineSettings';
 import { supabase } from '../../lib/supabase/client';
 import ImageUpload from '../../components/ui/ImageUpload';
@@ -189,6 +196,32 @@ export default function CatalogItemNew() {
     const match = currentPath.match(/\/catalog\/items\/edit\/([^/]+)/);
     return match && match[1] ? match[1] : null;
   }, [currentPath]);
+
+  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { userType } = useAccessContext();
+  const queryClient = useQueryClient();
+  const scopeKey = useMemo(
+    () =>
+      buildCatalogScopeKey({
+        orgId: activeOrganizationId ?? null,
+        activeDealerId: activeDealerId ?? null,
+        userRole: userType,
+      }),
+    [activeOrganizationId, activeDealerId, userType]
+  );
+  const defaultListFilters = useMemo(
+    () => ({ q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 500 }),
+    []
+  );
+  const listCache = queryClient.getQueryData(
+    catalogItemsListKey(scopeKey, defaultListFilters)
+  ) as CatalogItem[] | undefined;
+  const initialItemFromList: CatalogItem | undefined =
+    itemId && listCache ? listCache.find((i) => i.id === itemId) : undefined;
+  const { data: detailItem } = useCatalogItemDetail(scopeKey, itemId, {
+    orgId: activeOrganizationId ?? null,
+    initialData: initialItemFromList,
+  });
   
   // Hooks
   const { createItem, isCreating } = useCreateCatalogItem();
@@ -218,6 +251,7 @@ export default function CatalogItemNew() {
   const shouldCloseAfterSaveRef = useRef(false);
   
   // CatalogItemsMSRP: read-only for Rates tab (computed in backend; UI only displays)
+  // All monetary values are already in pricing_uom ($/m or $/m²). No conversion needed.
   const [msrpRow, setMsrpRow] = useState<{
     dealer_price: number;
     msrp: number;
@@ -226,7 +260,13 @@ export default function CatalogItemNew() {
     import_tax_cost: number;
     minimum_margin_pct: number;
     msrp_pct: number;
+    shipping_pct: number;
+    import_tax_pct: number;
+    pricing_uom: string | null;
+    pricing_cost_exw: number | null;
   } | null>(null);
+  // Counter to force re-fetch of msrpRow after save
+  const [msrpFetchKey, setMsrpFetchKey] = useState(0);
   const [msrpLoading, setMsrpLoading] = useState(false);
   
   // Conversions state (from CatalogItemConversions table)
@@ -311,7 +351,7 @@ export default function CatalogItemNew() {
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isDirty, dirtyFields },
     setValue,
     watch,
     reset,
@@ -391,31 +431,26 @@ export default function CatalogItemNew() {
   const costExw = watch('cost_exw');
   const pricingMode = watch('roll_pricing_mode');
   
-  // Calculate MSRP normalization (factor to convert base unit prices to display unit)
+  // CatalogItemsMSRP already stores shipping_cost/import_tax_cost/total_cost/dealer_price/msrp
+  // in pricing_uom ($/m or $/m²), because pricing_cost_exw is the UOM-converted base.
+  // Factor = 1; just derive the unit label from pricing_uom / roll_pricing_mode.
   const { msrpFactor, msrpUnitLabel } = useMemo(() => {
-    const costExwNum = Number(costExw) || 0;
-    let factor = 1;
-    let unitLabel = unitOfMeasure ? `/${unitOfMeasure}` : '';
-    
-    if (costExwNum > 0 && conversions) {
-      const effectiveMode = pricingMode === 'per_unit' ? 'per_linear_meter' : pricingMode;
-      if (effectiveMode === 'per_linear_meter' && conversions.cost_exw_per_m != null) {
-        factor = conversions.cost_exw_per_m / costExwNum;
-        unitLabel = '/m';
-      } else if (effectiveMode === 'per_square_meter' && conversions.cost_exw_per_m2 != null) {
-        factor = conversions.cost_exw_per_m2 / costExwNum;
-        unitLabel = '/m²';
-      } else if (!pricingMode && measureBasis === 'linear' && conversions.cost_exw_per_m != null) {
-        factor = conversions.cost_exw_per_m / costExwNum;
-        unitLabel = '/m';
-      } else if (!pricingMode && measureBasis === 'area' && conversions.cost_exw_per_m2 != null) {
-        factor = conversions.cost_exw_per_m2 / costExwNum;
-        unitLabel = '/m²';
-      }
+    const effectiveMode = pricingMode === 'per_unit' ? 'per_linear_meter' : pricingMode;
+    let unitLabel = '/ea';
+    if (effectiveMode === 'per_linear_meter' || (!pricingMode && measureBasis === 'linear')) {
+      unitLabel = '/m';
+    } else if (effectiveMode === 'per_square_meter' || (!pricingMode && measureBasis === 'area')) {
+      unitLabel = '/m²';
     }
-    
-    return { msrpFactor: factor, msrpUnitLabel: unitLabel };
-  }, [costExw, pricingMode, measureBasis, unitOfMeasure, conversions]);
+    return { msrpFactor: 1, msrpUnitLabel: unitLabel };
+  }, [pricingMode, measureBasis]);
+
+  // Detect if any pricing-relevant field has been changed since last save
+  const isPricingDirty = isDirty && !!(
+    dirtyFields.cost_exw || dirtyFields.category_id ||
+    dirtyFields.unit_of_measure || dirtyFields.roll_pricing_mode ||
+    dirtyFields.roll_width_value || dirtyFields.roll_width_uom
+  );
 
   // Display conversions: ALWAYS compute live from form inputs when possible.
   // Rationale: DB conversions can be stale until user clicks Save. This must reflect Cost EXW normalized in meters.
@@ -490,6 +525,42 @@ export default function CatalogItemNew() {
     ['ea', 'each', 'pcs', 'pc', 'unit', 'piece'].includes(unitLower)
       ? costExwNum
       : null);
+
+  // Live MSRP preview: computed in the UI when pricing-relevant fields are dirty.
+  // Uses rates (shipping_pct, import_tax_pct, minimum_margin_pct, msrp_pct) from the last
+  // saved msrpRow snapshot — they only change when CategoryMargins/CostSettings change,
+  // not when the user edits cost_exw. The cost base updates live.
+  const liveMsrp = useMemo(() => {
+    if (!isPricingDirty || !msrpRow) return null;
+
+    const liveCost =
+      msrpUnitLabel === '/m'  ? normalizedCostExwPerM  :
+      msrpUnitLabel === '/m²' ? normalizedCostExwPerM2 :
+      costExwNum;
+
+    if (!liveCost || liveCost <= 0) return null;
+
+    const s = msrpRow.shipping_pct    || 0;
+    const t = msrpRow.import_tax_pct  || 0;
+    const m = msrpRow.minimum_margin_pct || 0.35;
+    const p = msrpRow.msrp_pct         || 0.65;
+
+    const shipping    = Math.round(liveCost * s * 10000) / 10000;
+    const importTax   = Math.round(liveCost * (1 + s) * t * 10000) / 10000;
+    const totalCost   = Math.round(liveCost * (1 + s) * (1 + t) * 10000) / 10000;
+    const dealerPrice = Math.round(totalCost / Math.max(1 - m, 0.0001) * 10000) / 10000;
+    const msrpVal     = Math.round(dealerPrice / Math.max(1 - p, 0.0001) * 10000) / 10000;
+
+    return {
+      shipping_cost:      shipping,
+      import_tax_cost:    importTax,
+      total_cost:         totalCost,
+      dealer_price:       dealerPrice,
+      msrp:               msrpVal,
+      minimum_margin_pct: m,
+      msrp_pct:           p,
+    };
+  }, [isPricingDirty, msrpRow, msrpUnitLabel, normalizedCostExwPerM, normalizedCostExwPerM2, costExwNum]);
 
   // Cost per Full Roll: always Cost EXW normalized to meters × roll length (meters)
   const fullRollCost = useMemo(() => {
@@ -780,22 +851,36 @@ export default function CatalogItemNew() {
       try {
         const { data, error } = await supabase
           .from('CatalogItemsMSRP')
-          .select('dealer_price, msrp, total_cost, shipping_cost, import_tax_cost, minimum_margin_pct, msrp_pct')
+          .select('dealer_price, msrp, total_cost, shipping_cost, import_tax_cost, minimum_margin_pct, msrp_pct, shipping_pct, import_tax_pct, pricing_uom, pricing_cost_exw')
           .eq('catalog_item_id', itemId)
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
-        
+
         if (error) throw error;
+
         if (isMounted && data) {
           setMsrpRow({
-            dealer_price: Number(data.dealer_price ?? 0),
-            msrp: Number(data.msrp ?? 0),
-            total_cost: Number(data.total_cost ?? 0),
-            shipping_cost: Number(data.shipping_cost ?? 0),
-            import_tax_cost: Number(data.import_tax_cost ?? 0),
+            dealer_price:       Number(data.dealer_price ?? 0),
+            msrp:               Number(data.msrp ?? 0),
+            total_cost:         Number(data.total_cost ?? 0),
+            shipping_cost:      Number(data.shipping_cost ?? 0),
+            import_tax_cost:    Number(data.import_tax_cost ?? 0),
             minimum_margin_pct: Number(data.minimum_margin_pct ?? 0),
-            msrp_pct: Number(data.msrp_pct ?? 0),
+            msrp_pct:           Number(data.msrp_pct ?? 0),
+            shipping_pct:       Number((data as any).shipping_pct ?? 0),
+            import_tax_pct:     Number((data as any).import_tax_pct ?? 0),
+            pricing_uom:        (data as any).pricing_uom ?? null,
+            pricing_cost_exw:   (data as any).pricing_cost_exw != null ? Number((data as any).pricing_cost_exw) : null,
           });
+
+          // Auto-fix: CIM row exists but prices are zero → stale from UOM change.
+          // Trigger recompute silently and re-fetch once done.
+          if (Number(data.dealer_price ?? 0) === 0 &&
+              Number((data as any).pricing_cost_exw ?? 0) === 0) {
+            supabase.rpc('msrp_compute_for_item', { p_item_id: itemId })
+              .then(() => { if (isMounted) setMsrpFetchKey(k => k + 1); })
+              .catch(() => {});
+          }
         }
       } catch (err) {
         if (import.meta.env.DEV) console.warn('⚠️ Could not load CatalogItemsMSRP:', err);
@@ -804,9 +889,9 @@ export default function CatalogItemNew() {
         if (isMounted) setMsrpLoading(false);
       }
     })();
-    
+
     return () => { isMounted = false; };
-  }, [itemId, activeOrganizationId]);
+  }, [itemId, activeOrganizationId, msrpFetchKey]);
   
   // Load CatalogItemConversions when itemId changes
   useEffect(() => {
@@ -883,6 +968,39 @@ export default function CatalogItemNew() {
         // Update
         await updateItem(effectiveItemId, payload);
         finalItemId = effectiveItemId;
+        // Patch bidireccional: detail + list cache (0 refetch, ERP pattern)
+        const updatedItem =
+          detailItem &&
+          (() => {
+            const base = { ...detailItem, id: effectiveItemId };
+            return {
+              ...base,
+              sku: payload.sku,
+              name: payload.name ?? base.name,
+              description: payload.description ?? base.description,
+              unit_of_measure: payload.unit_of_measure,
+              measure_basis: payload.measure_basis as CatalogItem['measure_basis'],
+              category_id: payload.category_id ?? base.category_id,
+              image_url: payload.image_url ?? base.image_url,
+              is_active: payload.is_active,
+              cost_exw: payload.cost_exw ?? base.cost_exw,
+              collection_name: payload.collection_name ?? base.collection_name,
+              variant_name: payload.variant_name ?? base.variant_name,
+              roll_type: payload.roll_type ?? base.roll_type,
+              color: payload.color ?? base.color,
+            } as CatalogItem;
+          })();
+        if (updatedItem) {
+          queryClient.setQueryData(
+            catalogItemDetailKey(scopeKey, effectiveItemId),
+            updatedItem
+          );
+          queryClient.setQueryData(
+            catalogItemsListKey(scopeKey, defaultListFilters),
+            (old: CatalogItem[] | undefined) =>
+              old?.map((i) => (i.id === effectiveItemId ? { ...i, ...updatedItem } : i)) ?? []
+          );
+        }
       } else {
         // Create
         const newItem = await createItem(payload);
@@ -974,6 +1092,19 @@ export default function CatalogItemNew() {
         }
       }
       
+      // Always recompute CatalogItemsMSRP after save: covers cost_exw, UOM, measure_basis
+      // and category changes. DB trigger alone is not enough for UOM/measure_basis changes.
+      if (finalItemId) {
+        try {
+          await supabase.rpc('msrp_compute_for_item', { p_item_id: finalItemId });
+        } catch (_) {
+          // Non-blocking
+        }
+      }
+
+      // Re-fetch CatalogItemsMSRP after save so the Rates tab shows fresh DB values.
+      setTimeout(() => setMsrpFetchKey(k => k + 1), 400);
+
       // Navigate based on user action (use intent captured at submit start)
       shouldCloseAfterSaveRef.current = false;
       if (closeAfterSave) {
@@ -1309,27 +1440,9 @@ export default function CatalogItemNew() {
             </SelectShadcn>
           </div>
 
-          {/* Unit of Measure + Measure Basis (non-roll) - keep row alignment like Roll Item */}
+          {/* Measure Basis + Unit of Measure (non-roll) - Measure Basis in the middle of the row */}
           {!isRoll && (
             <>
-              <div className="col-span-3">
-                <Label htmlFor="unit_of_measure" className="text-xs" required>Unit of Measure</Label>
-                <SelectShadcn
-                  value={watch('unit_of_measure')}
-                  onValueChange={(value) => setValue('unit_of_measure', value)}
-                  disabled={isReadOnly}
-                >
-                  <SelectTrigger className="h-auto py-1 text-xs w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getUomOptions().map((uom) => (
-                      <SelectItem key={uom} value={uom}>{uom === 'roll' ? 'Roll' : uom}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </SelectShadcn>
-              </div>
-              
               <div className="col-span-3">
                 <Label htmlFor="measure_basis" className="text-xs" required>Measure Basis</Label>
                 <SelectShadcn
@@ -1344,6 +1457,24 @@ export default function CatalogItemNew() {
                     <SelectItem value="unit">Unit (each)</SelectItem>
                     <SelectItem value="linear">Linear (length)</SelectItem>
                     <SelectItem value="area">Area (m²)</SelectItem>
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+
+              <div className="col-span-3">
+                <Label htmlFor="unit_of_measure" className="text-xs" required>Unit of Measure</Label>
+                <SelectShadcn
+                  value={watch('unit_of_measure')}
+                  onValueChange={(value) => setValue('unit_of_measure', value)}
+                  disabled={isReadOnly}
+                >
+                  <SelectTrigger className="h-auto py-1 text-xs w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getUomOptions().map((uom) => (
+                      <SelectItem key={uom} value={uom}>{uom === 'roll' ? 'Roll' : uom}</SelectItem>
+                    ))}
                   </SelectContent>
                 </SelectShadcn>
               </div>
@@ -1851,50 +1982,60 @@ export default function CatalogItemNew() {
             ) : msrpLoading ? (
               <p className="text-xs text-gray-500">Loading MSRP…</p>
             ) : msrpRow ? (
-              <div className="space-y-3">
-                {/* Porcentajes afuera del bar */}
-                <div className="grid grid-cols-2 gap-4 text-xs max-w-xs">
-                  <div>
-                    <p className="font-medium text-gray-700">Minimum Margin</p>
-                    <p className="text-lg font-semibold text-purple-600">
-                      {(msrpRow.minimum_margin_pct * 100).toFixed(2)}%
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">From category</p>
+              (() => {
+                // Show live preview when dirty, otherwise DB values
+                const display = liveMsrp ?? msrpRow;
+                const isLive = !!liveMsrp;
+                return (
+                  <div className="space-y-3">
+                    {/* Porcentajes afuera del bar */}
+                    <div className="grid grid-cols-2 gap-4 text-xs max-w-xs">
+                      <div>
+                        <p className="font-medium text-gray-700">Minimum Margin</p>
+                        <p className="text-lg font-semibold text-purple-600">
+                          {(display.minimum_margin_pct * 100).toFixed(2)}%
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">From category</p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-700">MSRP % Sale Out</p>
+                        <p className="text-lg font-semibold text-primary">
+                          {(display.msrp_pct * 100).toFixed(2)}%
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">From category</p>
+                      </div>
+                    </div>
+                    {/* Bar: Shipping Cost | Import Tax | Total Cost | Dealer Price | MSRP */}
+                    <div className="bg-blue-50 border border-blue-200 rounded p-4">
+                      {isLive && (
+                        <p className="text-xs text-gray-500 mb-3">⚡ Preview — save to persist</p>
+                      )}
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
+                        <div>
+                          <p className="font-medium text-gray-700">Shipping Cost</p>
+                          <p className="text-lg font-semibold">${display.shipping_cost.toFixed(2)}{msrpUnitLabel}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Import Tax</p>
+                          <p className="text-lg font-semibold">${display.import_tax_cost.toFixed(2)}{msrpUnitLabel}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Total Cost</p>
+                          <p className="text-lg font-semibold">${display.total_cost.toFixed(2)}{msrpUnitLabel}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Dealer Price</p>
+                          <p className="text-lg font-semibold text-green-600">${display.dealer_price.toFixed(2)}{msrpUnitLabel}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">MSRP (Retail)</p>
+                          <p className="text-lg font-semibold text-primary">${display.msrp.toFixed(2)}{msrpUnitLabel}</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-gray-700">MSRP % Sale Out</p>
-                    <p className="text-lg font-semibold text-primary">
-                      {(msrpRow.msrp_pct * 100).toFixed(2)}%
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">From category</p>
-                  </div>
-                </div>
-                {/* Bar: Shipping Cost | Import Tax | Total Cost | Dealer Price | MSRP — normalized */}
-                <div className="bg-blue-50 border border-blue-200 rounded p-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
-                    <div>
-                      <p className="font-medium text-gray-700">Shipping Cost</p>
-                      <p className="text-lg font-semibold">${(msrpRow.shipping_cost * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-700">Import Tax</p>
-                      <p className="text-lg font-semibold">${(msrpRow.import_tax_cost * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-700">Total Cost</p>
-                      <p className="text-lg font-semibold">${(msrpRow.total_cost * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-700">Dealer Price</p>
-                      <p className="text-lg font-semibold text-green-600">${(msrpRow.dealer_price * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-700">MSRP (Retail)</p>
-                      <p className="text-lg font-semibold text-primary">${(msrpRow.msrp * msrpFactor).toFixed(2)}{msrpUnitLabel}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                );
+              })()
             ) : (
               <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-3">
                 MSRP will be calculated by the system when cost and category are set. Recompute runs on save via triggers.

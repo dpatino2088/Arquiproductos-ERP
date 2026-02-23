@@ -140,12 +140,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           </div>
           <div className="flex items-center gap-3">
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-              manufacturingOrder.status === 'completed' ? 'bg-green-100 text-green-800' :
-              manufacturingOrder.status === 'in_production' ? 'bg-yellow-100 text-yellow-800' :
-              manufacturingOrder.status === 'planned' ? 'bg-blue-100 text-blue-800' :
+              (manufacturingOrder.production_status ?? manufacturingOrder.status) === 'Completed' || (manufacturingOrder as { status?: string }).status === 'completed' ? 'bg-green-100 text-green-800' :
+              (manufacturingOrder.production_status ?? manufacturingOrder.status) === 'In Production' || (manufacturingOrder as { status?: string }).status === 'in_production' ? 'bg-yellow-100 text-yellow-800' :
+              (manufacturingOrder.production_status ?? manufacturingOrder.status) === 'Planned' || (manufacturingOrder as { status?: string }).status === 'planned' ? 'bg-blue-100 text-blue-800' :
               'bg-gray-100 text-gray-800'
             }`}>
-              {manufacturingOrder.status.replace('_', ' ').toUpperCase()}
+              {(manufacturingOrder.production_status ?? manufacturingOrder.status ?? 'Pending Review').replace('_', ' ')}
             </span>
           </div>
         </div>
@@ -156,25 +156,25 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
             <div>
               <label className="text-xs font-medium text-gray-700">Sale Order</label>
               <div className="mt-1 text-sm text-gray-900">
-                {manufacturingOrder.SaleOrders?.sale_order_no || 'N/A'}
+                {(manufacturingOrder as any).SalesOrders?.sales_order_no ?? manufacturingOrder.SaleOrders?.sale_order_no ?? 'N/A'}
               </div>
             </div>
             <div>
               <label className="text-xs font-medium text-gray-700">Customer</label>
               <div className="mt-1 text-sm text-gray-900">
-                {manufacturingOrder.SaleOrders?.DirectoryCustomers?.customer_name || 'N/A'}
+                {(manufacturingOrder as any)._resolvedCustomer?.customer_name ?? (manufacturingOrder as any).SalesOrders?.Quotes?.DirectoryCustomers?.customer_name ?? manufacturingOrder.SaleOrders?.DirectoryCustomers?.customer_name ?? 'N/A'}
               </div>
             </div>
             <div>
               <label className="text-xs font-medium text-gray-700">Priority</label>
               <div className="mt-1">
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  manufacturingOrder.priority === 'urgent' ? 'bg-red-100 text-red-800' :
-                  manufacturingOrder.priority === 'high' ? 'bg-orange-100 text-orange-800' :
-                  manufacturingOrder.priority === 'low' ? 'bg-gray-100 text-gray-800' :
+                  (manufacturingOrder.priority_code ?? manufacturingOrder.priority) === 'Rush' || (manufacturingOrder as { priority?: string }).priority === 'urgent' ? 'bg-red-100 text-red-800' :
+                  (manufacturingOrder.priority_code ?? manufacturingOrder.priority) === 'High' || (manufacturingOrder as { priority?: string }).priority === 'high' ? 'bg-orange-100 text-orange-800' :
+                  (manufacturingOrder.priority_code ?? manufacturingOrder.priority) === 'Low' || (manufacturingOrder as { priority?: string }).priority === 'low' ? 'bg-gray-100 text-gray-800' :
                   'bg-blue-100 text-blue-800'
                 }`}>
-                  {manufacturingOrder.priority.toUpperCase()}
+                  {(manufacturingOrder.priority_code ?? manufacturingOrder.priority ?? 'Normal').toString()}
                 </span>
               </div>
             </div>

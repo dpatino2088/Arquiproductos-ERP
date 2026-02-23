@@ -21,8 +21,10 @@ export interface ProposalPDFLine {
   /** Product name or custom description */
   description?: string | null;
   sku?: string | null;
-  /** Dimensions string (e.g. "1.2 x 3.2 m") */
+  /** Dimensions string – internal: Quote-style "1200 x 3000" (mm) per panel; customer: not used */
   dimensions?: string | null;
+  /** Panel count – customer variant: shows "1 paño" / "2 paños" / "3 paños" as reference */
+  panel_count?: number | null;
   /** True if installation addon present (shows "Install Included") */
   install_included?: boolean;
   /** Internal only: accessories string */
@@ -61,8 +63,10 @@ export interface GenerateProposalPDFOptions {
   overrideTotals?: ProposalSummaryTotals;
   /** For Discount label: "Discount (15%)" when set */
   global_discount_pct?: number | null;
-  /** For ITBMS label: "ITBMS (7%)" when set */
+  /** For Tax label: "Tax (7%)" when set */
   itbms_pct?: number | null;
+  /** If true, Tax row is hidden (tax exempt) */
+  exempt_itbms?: boolean;
 }
 
 export interface ProposalPDFData {
@@ -73,6 +77,10 @@ export interface ProposalPDFData {
   /** Short proposal description (shown below Address in PDF). */
   description?: string | null;
   notes?: string | null;
+  /** Snapshot: terms title (for PDF). Preferred over fixed "Terms and Conditions". */
+  terms_title?: string | null;
+  /** Snapshot: terms content (for PDF). Preferred over notes. */
+  terms_content?: string | null;
   global_discount_pct?: number | null;
   global_fee_amount?: number | null;
   subtotal_amount?: number | null;
@@ -118,10 +126,10 @@ export function generateProposalPDF(
   const tableUsableWidth = usableWidth;
   let yPos = marginTop;
 
-  // Dealer logo slot: 80mm × 20mm, 3mm desde el borde izquierdo (padding)
+  // Dealer logo slot: 80mm × 20mm, aligned with Customer (marginX)
   const logoSlotW = 80;
   const logoSlotH = 20;
-  const logoSlotX = 3;
+  const logoSlotX = marginX;
   const logoSlotY = marginTop - 5;
   let logoDrawn = false;
   if (opts.logoPngBase64) {
@@ -165,7 +173,7 @@ export function generateProposalPDF(
   const headerRightX = pageWidth - marginX;
   doc.setFontSize(10);
   doc.text('Proposal', headerRightX, yPos, { align: 'right' });
-  const proposalToNumberGapMm = (7 / 72) * 25.4; // 7px between "Proposal" and number
+  const proposalToNumberGapMm = (7 / 72) * 25.4;
   const proposalLineHeightMm = (10 / 72) * 25.4;
   doc.setFontSize(14);
   doc.text(proposal.proposal_no, headerRightX, yPos + proposalLineHeightMm + proposalToNumberGapMm, { align: 'right' });
@@ -273,10 +281,12 @@ export function generateProposalPDF(
   const buildDescriptionCell = (line: ProposalPDFLine): string => {
     const name = line.description || line.product_type || '—';
     const skuPart = line.sku ? ` (${line.sku})` : '';
-    const dimsPart =
-      includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—'
-        ? `\n${line.dimensions}`
-        : '';
+    let dimsPart = '';
+    if (includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—') {
+      dimsPart = `\n${line.dimensions}`;
+    } else if (!includeMeasurements && line.panel_count != null && line.panel_count >= 1) {
+      dimsPart = `\n${line.panel_count === 1 ? '1 paño' : `${line.panel_count} paños`}`;
+    }
     const installPart = line.install_included ? '\nInstall Included' : '';
     return `${name}${skuPart}${dimsPart}${installPart}`.trim();
   };
@@ -287,34 +297,29 @@ export function generateProposalPDF(
     line.position || '—',
     buildDescriptionCell(line),
     line.product_type ?? '—',
-    line.accessories ?? '—',
     String(line.qty),
     formatCurrency(line.unit_price, proposal.currency),
     formatCurrency(line.line_total, proposal.currency),
   ]);
 
-  // Table: same headers as proposal viewer (no all-caps)
-  const movePosLeftPx = 7;
-  const movePosLeftMm = (movePosLeftPx / 96) * 25.4 + 5;
+  // Table: sin Accessories; Area 5mm más estrecha para mover Position y Description 5mm a la izquierda
   const lineTotalShiftRightMm = 10;
-  const productTypeAccQtyShiftRightMm = 10;
   const W = {
     n: 8,
-    area: 18 - movePosLeftMm,
-    pos: 22 + movePosLeftMm,
+    area: 21,  // reducido 5mm (26→21) para Position/Description 5mm más a la izq.
+    pos: 18,
     desc: 52,
-    productType: 22,
-    acc: 26,
+    productType: 24,
     qty: 10,
-    unit: 24 + lineTotalShiftRightMm - productTypeAccQtyShiftRightMm,
+    unit: 28,
     total: 24,
   };
-  const descFlex = tableUsableWidth - (W.n + W.area + W.pos + W.productType + W.acc + W.qty + W.unit + W.total);
+  const descFlex = tableUsableWidth - (W.n + W.area + W.pos + W.productType + W.qty + W.unit + W.total);
   (W as Record<string, number>).desc = Math.max(descFlex, 18);
 
   autoTable(doc, {
     startY: yPos,
-    head: [['#', 'Area', 'Position', 'Description', 'Product type', 'Accessories', 'Qty', 'Unit Price', 'Line total']],
+    head: [['#', 'Area', 'Position', 'Description', 'Product type', 'Qty', 'Unit Price', 'Line total']],
     body: tableData,
     theme: 'plain',
     margin: { left: marginX, right: tableRightMm },
@@ -326,8 +331,8 @@ export function generateProposalPDF(
       cellPadding: { top: 3, bottom: 3, left: 2, right: 2 },
     },
     headStyles: {
-      fillColor: [245, 245, 245],
-      textColor: [60, 60, 60],
+      fillColor: [0, 0, 0],
+      textColor: [255, 255, 255],
       fontStyle: 'bold',
       fontSize: 8,
       overflow: 'linebreak',
@@ -352,17 +357,16 @@ export function generateProposalPDF(
         minCellHeight: 22,
       },
       4: { cellWidth: W.productType, halign: 'center', valign: 'middle' },
-      5: { cellWidth: W.acc, halign: 'left', valign: 'middle' },
-      6: { cellWidth: W.qty, halign: 'right', valign: 'middle' },
-      7: { cellWidth: W.unit, halign: 'right', valign: 'middle' },
-      8: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 5, right: 5 } },
+      5: { cellWidth: W.qty, halign: 'right', valign: 'middle' },
+      6: { cellWidth: W.unit, halign: 'right', valign: 'middle' },
+      7: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 5, right: 5 } },
     },
     didParseCell: (data) => {
       if (data.section === 'head') {
         data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
         if (data.column.index === 2) data.cell.styles.halign = 'center';
-        if (data.column.index === 6 || data.column.index === 7) data.cell.styles.halign = 'right';
-        if (data.column.index === 8) {
+        if (data.column.index === 5 || data.column.index === 6) data.cell.styles.halign = 'right';
+        if (data.column.index === 7) {
           data.cell.styles.halign = 'right';
           data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 5 };
         }
@@ -386,43 +390,30 @@ export function generateProposalPDF(
   });
 
   const finalY = (doc as any).lastAutoTable.finalY || yPos + 50;
-  yPos = finalY + 10;
-
-  // Layout like proposal viewer: Terms and Conditions (left ~2/3) + Summary (right ~1/3)
-  const summaryWidth = 62;
-  const termsWidth = usableWidth - summaryWidth - 8;
-  const summaryLeft = marginX + termsWidth + 8;
-
-  // Terms and Conditions: from proposal.notes (Términos y Condiciones in Proposal)
-  const sectionStartY = yPos;
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Terms and Conditions', marginX, sectionStartY);
-  let termsContentY = sectionStartY + 6;
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  const termsText = (proposal.notes && String(proposal.notes).trim()) ? String(proposal.notes).trim() : '';
-  if (termsText) {
-    const termsLines = doc.splitTextToSize(termsText, termsWidth);
-    termsLines.forEach((line: string) => {
-      if (termsContentY > pageHeight - marginBottom - 15) {
-        doc.addPage();
-        termsContentY = marginTop;
-      }
-      doc.text(line, marginX, termsContentY);
-      termsContentY += 4;
-    });
+  const gapAfterTable = 8;
+  const minSpaceForSummaryBlock = 45;
+  const spaceLeft = pageHeight - marginBottom - finalY;
+  let sectionStartY: number;
+  if (spaceLeft < minSpaceForSummaryBlock) {
+    doc.addPage();
+    sectionStartY = marginTop;
+  } else {
+    sectionStartY = finalY + gapAfterTable;
   }
 
-  // Summary: same order as Proposal UI – Total Product, Discount (if > 0), Installation (if > 0), Subtotal, ITBMS, Total
+  // —— Summary (right) + Notes (left, aligned with summary) ——
+  const summaryWidth = 62;
+  const summaryLeft = pageWidth - marginX - summaryWidth;
+
+  // Summary rows
+  const exemptItbms = opts.exempt_itbms ?? false;
   const useOverride = opts.overrideTotals != null;
   const totalProduct = useOverride ? opts.overrideTotals!.totalProduct : lines.reduce((sum, line) => sum + (line.line_total ?? 0), 0);
   const discountAmount = useOverride ? opts.overrideTotals!.discountAmount : (proposal.discount_amount ?? 0);
   const installationAmount = useOverride ? opts.overrideTotals!.installationAmount : (proposal.installation_amount ?? 0);
   const subtotal = useOverride ? opts.overrideTotals!.subtotal : Math.max(totalProduct - discountAmount, 0) + installationAmount;
-  const itbmsAmount = useOverride ? opts.overrideTotals!.itbmsAmount : (proposal.itbms_amount ?? 0);
+  const itbmsAmount = exemptItbms ? 0 : (useOverride ? opts.overrideTotals!.itbmsAmount : (proposal.itbms_amount ?? 0));
   const total = useOverride ? opts.overrideTotals!.total : (proposal.total_amount ?? subtotal + itbmsAmount);
-  // Percent: accept decimal (0.15) or already percent (15); show as "15%"
   const toPctDisplay = (v: number | null | undefined): number | null =>
     v != null ? (v > 0 && v <= 1 ? Math.round(v * 100) : Math.round(v)) : null;
   const discountPctLabel = (() => {
@@ -442,10 +433,11 @@ export function generateProposalPDF(
     summaryData.push(['Installation:', formatCurrency(installationAmount, proposal.currency)]);
   }
   summaryData.push(['Subtotal:', formatCurrency(subtotal, proposal.currency)]);
-  summaryData.push(['ITBMS' + itbmsPctLabel, formatCurrency(itbmsAmount, proposal.currency)]);
+  if (!exemptItbms) {
+    summaryData.push(['Tax' + itbmsPctLabel, formatCurrency(itbmsAmount, proposal.currency)]);
+  }
   summaryData.push(['Total:', formatCurrency(total, proposal.currency)]);
 
-  // Summary row spacing: 2mm less between lines (Total Product, Installation, Subtotal, ITBMS, Discount, Total)
   const summaryCellPadding = { top: 1, bottom: 1, left: 2, right: 3 };
   autoTable(doc, {
     startY: sectionStartY,
@@ -456,10 +448,9 @@ export function generateProposalPDF(
       0: { cellWidth: 32, fontStyle: 'bold', cellPadding: summaryCellPadding },
       1: { cellWidth: 28, halign: 'right', fontStyle: 'bold', cellPadding: summaryCellPadding },
     },
-    margin: { left: summaryLeft, right: tableRightMm },
+    margin: { left: summaryLeft, right: marginX },
     tableWidth: summaryWidth,
     didDrawCell: (data) => {
-      // Divider line between ITBMS and Total: same thickness as body table (0.25)
       if (data.section === 'body' && data.row.index === summaryData.length - 1 && data.column.index === 0) {
         const x = Number(data.cell.x);
         const y = Number(data.cell.y);
@@ -473,6 +464,54 @@ export function generateProposalPDF(
       }
     },
   });
+
+  // Notes: left of summary, aligned at sectionStartY
+  const notesText = (proposal.notes && String(proposal.notes).trim()) || '';
+  const notesColWidth = summaryLeft - marginX - 8;
+  if (notesText) {
+    let notesY = sectionStartY;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Notes', marginX, notesY);
+    notesY += 5;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    const notesLines = doc.splitTextToSize(notesText, notesColWidth);
+    notesLines.forEach((line: string) => {
+      doc.text(line, marginX, notesY);
+      notesY += 4;
+    });
+  }
+
+  // —— Terms & Conditions: 30px below Summary final Y, full width ——
+  const summaryFinalY = (doc as any).lastAutoTable?.finalY ?? sectionStartY;
+  const thirtyPxMm = (30 / 96) * 25.4;
+  const extraDropMm = 10;
+  let termsStartY = summaryFinalY + thirtyPxMm + extraDropMm;
+  if (termsStartY > pageHeight - marginBottom - 20) {
+    doc.addPage();
+    termsStartY = marginTop;
+  }
+
+  const termsText = (proposal.terms_content && String(proposal.terms_content).trim()) || '';
+  if (termsText) {
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    const termsHeading = proposal.terms_title?.trim() || 'Terms and Conditions';
+    doc.text(termsHeading, marginX, termsStartY);
+    let termsContentY = termsStartY + 6;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    const termsLines = doc.splitTextToSize(termsText, usableWidth);
+    termsLines.forEach((line: string) => {
+      if (termsContentY > pageHeight - marginBottom - 15) {
+        doc.addPage();
+        termsContentY = marginTop;
+      }
+      doc.text(line, marginX, termsContentY);
+      termsContentY += 4;
+    });
+  }
 
   // Footer
   const pageCount = (doc as any).internal.getNumberOfPages();

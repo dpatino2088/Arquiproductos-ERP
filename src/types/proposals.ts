@@ -12,7 +12,8 @@ export type ProposalOverrideMode =
   | 'fixed_unit_price'
   | 'fixed_line_total';
 /** DB enum: use only these. Standardized on "delivery" (not "transportation"). */
-export type ProposalCustomCategory = 'installation' | 'delivery' | 'service' | 'other';
+export const PROPOSAL_CUSTOM_CATEGORIES = ['installation', 'delivery', 'service', 'other'] as const;
+export type ProposalCustomCategory = (typeof PROPOSAL_CUSTOM_CATEGORIES)[number];
 
 export interface Proposal {
   id: string;
@@ -30,8 +31,18 @@ export interface Proposal {
   description: string | null;
   /** Notes / Terms and Conditions. */
   notes: string | null;
+  /** Snapshot: terms title (for PDF). */
+  terms_title?: string | null;
+  /** Snapshot: terms content (for PDF). */
+  terms_content?: string | null;
+  /** Snapshot: source template id. */
+  terms_source_template_id?: string | null;
   global_discount_pct: number | null;
   global_fee_amount: number | null;
+  /** Discount % applied to installation addons total (e.g. 15 = 15%). */
+  global_installation_discount_pct?: number | null;
+  /** Fee/surcharge % applied to installation addons total (e.g. 5 = 5%). */
+  global_installation_fee_pct?: number | null;
   subtotal_amount: number | null;
   installation_amount?: number | null;
   discount_amount: number | null;
@@ -60,10 +71,13 @@ export interface ProposalLine {
   fixed_unit_price: number | null;
   fixed_line_total: number | null;
   custom_category: ProposalCustomCategory | null;
+  area?: string | null;
+  position?: string | null;
   description: string | null;
   qty: number | null;
   uom: string | null;
   unit_price: number | null;
+  unit_cost?: number | null;
   line_total: number | null;
   line_adjustment_pct: number | null;
   sort_order: number;

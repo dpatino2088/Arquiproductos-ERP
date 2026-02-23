@@ -4,14 +4,16 @@
  * 1. Load QuoteLine
  * 2. Build base config from QuoteLine columns (productType, dimensions, etc.)
  * 3. If QuoteLine has configured_product_id → load CP → spread config_snapshot OVER config
- *    (snapshot wins for anything it has)
+ *    (snapshot wins for hardware selections). Cost keys are NEVER spread from config_snapshot;
+ *    they come only from CP columns and bom_preview_snapshot.
  * 4. Return config
  *
- * The config_snapshot IS the source of truth for hardware selections.
- * We spread it entirely — no cherry-picking keys.
+ * config_snapshot: source of truth for SELECTIONS (SKUs, IDs, measurements). NO cost keys.
+ * CP columns + bom_preview_snapshot.totals: source of truth for pricing/costs (display only).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { CONFIG_SNAPSHOT_SKIP_ON_SPREAD } from '../config-snapshot-schema';
 import type { ProductConfig } from '../../pages/sales/product-config/types';
 
 const PT_MAP: Record<string, string> = {
@@ -156,9 +158,28 @@ export async function getConfigFromQuoteLine(
   let snapshotApplied = false;
 
   if (cpId) {
+    // HARD LOCK: Cost columns ONLY roll_total_cost, bom_total_cost, accessories_total_cost, unit_product_cost, total_cost (no _landed)
     const { data: cp, error: cpErr } = await supabase
       .from('ConfiguredProducts')
-      .select('id, config_snapshot, hardware_color')
+      .select(`
+        id,
+        config_snapshot,
+        hardware_color,
+        bom_preview_snapshot,
+        roll_msrp_total,
+        bom_total,
+        accessories_total,
+        labor_amount,
+        labor_pct,
+        unit_msrp_total,
+        msrp_product_subtotal,
+        roll_total_cost,
+        bom_total_cost,
+        accessories_total_cost,
+        unit_product_cost,
+        unit_labor_cost,
+        total_cost
+      `)
       .eq('id', cpId)
       .maybeSingle();
 
@@ -173,15 +194,10 @@ export async function getConfigFromQuoteLine(
         const snap = snapshot as Record<string, any>;
         snapshotApplied = true;
 
-        // ── Spread ALL snapshot keys into config (snapshot wins) ──
-        // But skip keys that would break the UI (productType, quote_line_id, etc.)
-        const SKIP_KEYS = new Set([
-          'productType', 'product_type_id', 'productTypeId',
-          'quote_line_id', 'configured_product_id',
-        ]);
-
+        // ── Spread snapshot keys into config (snapshot wins for SELECTIONS only) ──
+        // Skip cost/pricing keys: those come from CP columns and bom_preview_snapshot.totals.
         for (const [key, value] of Object.entries(snap)) {
-          if (SKIP_KEYS.has(key)) continue;
+          if (CONFIG_SNAPSHOT_SKIP_ON_SPREAD.has(key)) continue;
           if (value === undefined || value === null) continue;
           // Snapshot value wins (overwrite base config); never overwrite with null
           config[key] = value;
@@ -282,6 +298,21 @@ export async function getConfigFromQuoteLine(
         }
       }
 
+      // ── CP totals and snapshot for ReviewStep (Breakdown vs QuoteLine must match) ──
+      if ((cp as any).bom_preview_snapshot) config.bom_preview_snapshot = (cp as any).bom_preview_snapshot;
+      if ((cp as any).roll_msrp_total != null) config.roll_msrp_total = (cp as any).roll_msrp_total;
+      if ((cp as any).bom_total != null) config.bom_total = (cp as any).bom_total;
+      if ((cp as any).labor_amount != null) config.labor_amount = (cp as any).labor_amount;
+      if ((cp as any).labor_pct != null) config.labor_pct = (cp as any).labor_pct;
+      if ((cp as any).unit_msrp_total != null) config.unit_msrp_total = (cp as any).unit_msrp_total;
+      if ((cp as any).msrp_product_subtotal != null) config.msrp_product_subtotal = (cp as any).msrp_product_subtotal;
+      if ((cp as any).roll_total_cost != null) config.roll_total_cost = (cp as any).roll_total_cost;
+      if ((cp as any).bom_total_cost != null) config.bom_total_cost = (cp as any).bom_total_cost;
+      if ((cp as any).accessories_total_cost != null) config.accessories_total_cost = (cp as any).accessories_total_cost;
+      if ((cp as any).unit_product_cost != null) config.unit_product_cost = (cp as any).unit_product_cost;
+      if ((cp as any).unit_labor_cost != null) config.unit_labor_cost = (cp as any).unit_labor_cost;
+      if ((cp as any).total_cost != null) config.total_cost = (cp as any).total_cost;
+
       // Fallback: CP column hardware_color
       if (!config.hardware_color && cp.hardware_color) {
         const lower = String(cp.hardware_color).trim().toLowerCase();
@@ -294,7 +325,18 @@ export async function getConfigFromQuoteLine(
     }
   }
 
-  // ── 7. Derive width_m / height_m ──────────────────────────────────
+  // ── 7. Quote line dealer pricing and labor snapshots for ReviewStep (when editing) ──
+  if (forEdit && line) {
+    if (line.dealer_discount_pct != null) config.dealer_discount_pct = line.dealer_discount_pct;
+    if (line.unit_dealer_price_snapshot != null) config.unit_dealer_price_snapshot = line.unit_dealer_price_snapshot;
+    if (line.dealer_price_total != null) config.dealer_price_total = line.dealer_price_total;
+    if ((config as any).unit_labor_cost == null && (line as any).labor_cost_snapshot != null)
+      (config as any).unit_labor_cost = (line as any).labor_cost_snapshot;
+    if ((config as any).labor_amount == null && (line as any).labor_msrp_snapshot != null)
+      (config as any).labor_amount = (line as any).labor_msrp_snapshot;
+  }
+
+  // ── 8. Derive width_m / height_m ──────────────────────────────────
   if (config.width_mm != null) config.width_m = config.width_mm / 1000;
   if (config.height_mm != null) config.height_m = config.height_mm / 1000;
 

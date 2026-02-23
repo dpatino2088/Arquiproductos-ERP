@@ -1,8 +1,16 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useCatalogItems, useDeleteCatalogItem, useCatalogCategories } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
+import { catalogItemDetailKey } from '../../lib/queryKeys';
+import { fetchCatalogItemDetail } from '../../lib/catalogListFetchers';
+import { warmDetailIfNeeded } from '../../lib/zeroLoading';
+import { useNearViewportWarm } from '../../hooks/useNearViewportWarm';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useInventoryAvailability } from '../../hooks/useInventoryAvailability';
 import { InventoryAvailabilityBadge } from '../../components/inventory/InventoryAvailabilityBadge';
@@ -81,6 +89,36 @@ export default function Items() {
     }
   }, [registerSubmodules]);
   const { activeOrganizationId } = useOrganizationContext();
+  const { activeDealerId } = useActiveDealer();
+  const { userType } = useAccessContext();
+  const queryClient = useQueryClient();
+  const scopeKey = useMemo(
+    () =>
+      buildCatalogScopeKey({
+        orgId: activeOrganizationId ?? null,
+        activeDealerId: activeDealerId ?? null,
+        userRole: userType,
+      }),
+    [activeOrganizationId, activeDealerId, userType]
+  );
+  const warmDetail = useCallback(
+    (itemId: string) => {
+      if (!scopeKey || !activeOrganizationId || !itemId) return;
+      warmDetailIfNeeded(
+        queryClient,
+        {
+          queryKey: catalogItemDetailKey(scopeKey, itemId),
+          queryFn: () =>
+            fetchCatalogItemDetail(supabase, { orgId: activeOrganizationId, itemId }),
+          warmId: `${scopeKey}:${itemId}`,
+          enabled: true,
+        },
+        { cooldownMs: 20_000 }
+      );
+    },
+    [queryClient, scopeKey, activeOrganizationId]
+  );
+  const rowRefForViewport = useNearViewportWarm(warmDetail, { rootMargin: '200px' });
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
   const catalogItemIds = useMemo(
     () => [...new Set((items ?? []).map((i) => i.id).filter(Boolean))],
@@ -962,8 +1000,13 @@ export default function Items() {
                   </tr>
                 ) : (
                   paginatedItems.map((item) => (
-                    <tr 
-                      key={item.id} 
+                    <tr
+                      key={item.id}
+                      ref={rowRefForViewport(item.id)}
+                      tabIndex={0}
+                      role="row"
+                      onMouseEnter={() => warmDetail(item.id)}
+                      onFocus={() => warmDetail(item.id)}
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
                       <td className="py-3 px-4">

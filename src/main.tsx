@@ -38,6 +38,20 @@ logger.info('Application starting up', {
   version: import.meta.env.VITE_APP_VERSION || '1.0.0',
 })
 
+// Recover from dynamic import chunk load failures (stale chunks after deploy, cache issues)
+const CHUNK_LOAD_KEY = 'adaptio_chunk_reload_attempted'
+window.addEventListener('error', (ev: ErrorEvent) => {
+  const msg = ev?.message || ''
+  if (
+    (msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Importing a module script failed')) &&
+    !sessionStorage.getItem(CHUNK_LOAD_KEY)
+  ) {
+    sessionStorage.setItem(CHUNK_LOAD_KEY, '1')
+    window.location.reload()
+  }
+})
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

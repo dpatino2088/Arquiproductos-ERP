@@ -41,10 +41,11 @@ export interface ConfiguredProduct {
   tube_sku?: string | null;
   operating_type?: string | null;
   
-  // Pricing (calculated)
+  // Pricing (calculated). Usar msrp_product_subtotal (roll + bom + accessories); unit_msrp_total = subtotal + labor.
   roll_msrp_total: number;
   bom_total: number;
-  roll_plus_bom_total: number;
+  msrp_product_subtotal?: number;
+  unit_msrp_total?: number;
   labor_pct: number;
   accessories_total: number;
   total_msrp: number;
@@ -112,7 +113,7 @@ export interface CreateConfiguredProductPreviewResult {
   totals: {
     roll_msrp_total: number;
     bom_total: number;
-    roll_plus_bom_total: number;
+    msrp_product_subtotal?: number;
     labor_pct: number;
     accessories_total: number;
     total_msrp: number;

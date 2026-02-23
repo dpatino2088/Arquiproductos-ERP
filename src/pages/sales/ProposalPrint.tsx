@@ -177,6 +177,20 @@ export default function ProposalPrint() {
     const discountAmount = totalProduct * (discountPct / 100);
     const installationAmount = proposal?.installation_amount ?? installationTotal ?? 0;
     const subtotal = Math.max(totalProduct - discountAmount, 0) + installationAmount;
+    const exemptItbms = (proposal as { exempt_itbms?: boolean })?.exempt_itbms ?? false;
+    if (exemptItbms) {
+      return {
+        totals: {
+          totalProduct,
+          discountAmount,
+          installationAmount,
+          subtotal,
+          itbmsAmount: 0,
+          total: subtotal,
+        },
+        lineTotals,
+      };
+    }
     if (proposal?.itbms_amount != null && proposal?.total_amount != null) {
       return {
         totals: {
@@ -197,7 +211,7 @@ export default function ProposalPrint() {
       totals: { totalProduct, discountAmount, installationAmount, subtotal, itbmsAmount, total },
       lineTotals,
     };
-  }, [lines, addonsMap, quoteLinesMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.itbms_amount, proposal?.total_amount, proposal?.global_discount_pct]);
+  }, [lines, addonsMap, quoteLinesMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.itbms_amount, proposal?.total_amount, proposal?.global_discount_pct, (proposal as { exempt_itbms?: boolean })?.exempt_itbms]);
 
   const currency = proposal?.currency || 'USD';
 
@@ -475,7 +489,7 @@ export default function ProposalPrint() {
           </table>
         )}
 
-        {/* Totals: Total Product, Discount, Installation, Subtotal, ITBMS, Total */}
+        {/* Totals: Total Product, Discount, Installation, Subtotal, Tax, Total */}
         <div className="flex justify-end">
           <div className="w-64 border border-gray-200 rounded-lg p-3 text-sm">
             <div className="flex justify-between py-1">
@@ -498,10 +512,12 @@ export default function ProposalPrint() {
               <span className="text-gray-600">Subtotal</span>
               <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
             </div>
-            <div className="flex justify-between py-1">
-              <span className="text-gray-600">ITBMS</span>
-              <span>{formatCurrency(totals.itbmsAmount ?? 0, currency)}</span>
-            </div>
+            {!(proposal as { exempt_itbms?: boolean })?.exempt_itbms && (
+              <div className="flex justify-between py-1">
+                <span className="text-gray-600">Tax</span>
+                <span>{formatCurrency(totals.itbmsAmount ?? 0, currency)}</span>
+              </div>
+            )}
             <div className="flex justify-between py-2 mt-1 border-t border-gray-200 font-semibold">
               <span>Total ({currency})</span>
               <span>{formatCurrency(totals.total, currency)}</span>

@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useManufacturingOrders, ManufacturingOrderStatus } from '../../hooks/useManufacturing';
+import { useManufacturingOrders, ManufacturingOrderStatus, ProductionStatusMO } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
@@ -18,7 +18,7 @@ import Input from '../../components/ui/Input';
 interface ManufacturingOrderItem {
   id: string;
   manufacturingOrderNo: string;
-  status: ManufacturingOrderStatus;
+  status: ManufacturingOrderStatus | ProductionStatusMO | undefined;
   saleOrderNo: string;
   customerName: string;
   scheduledStartDate?: string | null;
@@ -31,15 +31,16 @@ interface ManufacturingOrderItem {
 // UTILITIES
 // ============================================================================
 
-const getStatusBadgeColor = (status: ManufacturingOrderStatus) => {
+const getStatusBadgeColor = (status: ManufacturingOrderStatus | ProductionStatusMO | undefined) => {
+  if (!status) return 'bg-gray-50 text-gray-700';
   switch (status) {
-    case 'draft':
+    case 'draft': case 'Pending Review':
       return 'bg-gray-50 text-gray-700';
-    case 'planned':
+    case 'planned': case 'Planned':
       return 'bg-blue-50 text-blue-700';
-    case 'in_production':
+    case 'in_production': case 'In Production':
       return 'bg-yellow-50 text-yellow-700';
-    case 'completed':
+    case 'completed': case 'Completed': case 'Ready for Pickup': case 'Delivered':
       return 'bg-green-50 text-green-700';
     case 'cancelled':
       return 'bg-red-50 text-red-700';
@@ -49,16 +50,11 @@ const getStatusBadgeColor = (status: ManufacturingOrderStatus) => {
 };
 
 const getPriorityBadgeColor = (priority: string) => {
-  switch (priority) {
-    case 'urgent':
-      return 'bg-red-50 text-red-700';
-    case 'high':
-      return 'bg-orange-50 text-orange-700';
-    case 'low':
-      return 'bg-gray-50 text-gray-700';
-    default:
-      return 'bg-blue-50 text-blue-700';
-  }
+  const p = (priority || '').toLowerCase();
+  if (p === 'urgent' || p === 'rush') return 'bg-red-50 text-red-700';
+  if (p === 'high') return 'bg-orange-50 text-orange-700';
+  if (p === 'low') return 'bg-gray-50 text-gray-700';
+  return 'bg-blue-50 text-blue-700';
 };
 
 // ============================================================================
@@ -76,7 +72,7 @@ export default function ManufacturingOrders() {
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'scheduled_start_date' | 'priority'>('manufacturing_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedStatus, setSelectedStatus] = useState<ManufacturingOrderStatus[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<(ManufacturingOrderStatus | ProductionStatusMO)[]>([]);
 
   // Permission checks
   const canRead = can('manufacturing.read');
@@ -106,19 +102,19 @@ export default function ManufacturingOrders() {
   const displayOrders: ManufacturingOrderItem[] = useMemo(() => {
     if (import.meta.env.DEV) {
       console.log('🔍 ManufacturingOrders: Total MOs fetched:', manufacturingOrders.length);
-      console.log('   Statuses:', manufacturingOrders.map(mo => mo.status));
+      console.log('   Statuses:', manufacturingOrders.map(mo => mo.production_status ?? mo.status));
     }
 
     return manufacturingOrders
       .map(mo => ({
         id: mo.id,
         manufacturingOrderNo: mo.manufacturing_order_no,
-        status: mo.status,
-        saleOrderNo: mo.SaleOrders?.sale_order_no || 'N/A',
-        customerName: mo.SaleOrders?.DirectoryCustomers?.customer_name || 'N/A',
+        status: mo.production_status ?? mo.status,
+        saleOrderNo: (mo as any).SalesOrders?.sales_order_no ?? mo.SaleOrders?.sale_order_no ?? 'N/A',
+        customerName: (mo as any)._resolvedCustomer?.customer_name ?? (mo as any).SalesOrders?.Quotes?.DirectoryCustomers?.customer_name ?? mo.SaleOrders?.DirectoryCustomers?.customer_name ?? 'N/A',
         scheduledStartDate: mo.scheduled_start_date,
         scheduledEndDate: mo.scheduled_end_date,
-        priority: mo.priority,
+        priority: mo.priority_code ?? mo.priority ?? 'Normal',
         createdAt: mo.created_at,
       }));
   }, [manufacturingOrders]);
@@ -139,7 +135,7 @@ export default function ManufacturingOrders() {
 
     // Status filter
     if (selectedStatus.length > 0) {
-      filtered = filtered.filter(mo => selectedStatus.includes(mo.status));
+      filtered = filtered.filter(mo => mo.status != null && selectedStatus.includes(mo.status));
     }
 
     // Sort
@@ -283,7 +279,7 @@ export default function ManufacturingOrders() {
       {/* Status Filters */}
       <div className="mb-4 flex items-center gap-2 flex-wrap">
         <span className="text-sm text-gray-700">Filter by status:</span>
-        {(['draft', 'planned', 'in_production', 'completed', 'cancelled'] as ManufacturingOrderStatus[]).map(status => (
+        {(['Pending Review', 'Planned', 'In Production', 'Completed', 'Ready for Pickup', 'Delivered'] as ProductionStatusMO[]).map(status => (
           <button
             key={status}
             onClick={() => {
@@ -299,7 +295,7 @@ export default function ManufacturingOrders() {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            {status.replace('_', ' ').toUpperCase()}
+            {status}
           </button>
         ))}
         {selectedStatus.length > 0 && (
@@ -403,7 +399,7 @@ export default function ManufacturingOrders() {
                     </td>
                     <td className="py-4 px-6">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(mo.status)}`}>
-                        {mo.status.replace('_', ' ').toUpperCase()}
+                        {(mo.status ?? 'Pending Review').toString().replace('_', ' ')}
                       </span>
                     </td>
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.saleOrderNo}</td>
@@ -415,7 +411,7 @@ export default function ManufacturingOrders() {
                     </td>
                     <td className="py-4 px-6">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityBadgeColor(mo.priority)}`}>
-                        {mo.priority.toUpperCase()}
+                        {(mo.priority ?? 'Normal').toString()}
                       </span>
                     </td>
                     <td className="py-4 px-6 text-right">

@@ -27,7 +27,8 @@ import {
   portalRoleToRoleCode,
   roleCodeToPortalRole,
 } from '../../hooks/useAppUsersByDealer';
-import { Settings2 } from 'lucide-react';
+import { Settings2, FileText } from 'lucide-react';
+import DealerTermsTab from './DealerTermsTab';
 
 // Schema for Dealer
 const dealerSchema = z.object({
@@ -70,7 +71,7 @@ const dealerSchema = z.object({
 type DealerFormValues = z.infer<typeof dealerSchema>;
 
 export default function DealerProfileForm() {
-  const [activeTab, setActiveTab] = useState<'details' | 'billing' | 'configurator-permissions'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'billing' | 'configurator-permissions' | 'terms'>('details');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [dealerId, setDealerId] = useState<string | null>(null);
@@ -314,6 +315,18 @@ export default function DealerProfileForm() {
     [dealerUsers]
   );
 
+  // Populate edit form when opening (DealerAppUser from AppUsers) — must be before any early return to keep hook count stable
+  useEffect(() => {
+    if (editingUser) {
+      setEditUserName(editingUser.display_name || '');
+      setEditUserEmail(editingUser.email || '');
+      setEditUserRole(roleCodeToPortalRole(editingUser.role_code));
+      const st = (editingUser.status || 'active').toLowerCase();
+      setEditUserStatus(st === 'disabled' ? 'disabled' : 'active');
+      setEditUserError(null);
+    }
+  }, [editingUser]);
+
   if (!activeOrganizationId) {
     return (
       <div className="py-6 px-6">
@@ -536,18 +549,6 @@ export default function DealerProfileForm() {
     }
   };
 
-  // Populate edit form when opening (DealerAppUser from AppUsers)
-  useEffect(() => {
-    if (editingUser) {
-      setEditUserName(editingUser.display_name || '');
-      setEditUserEmail(editingUser.email || '');
-      setEditUserRole(roleCodeToPortalRole(editingUser.role_code));
-      const st = (editingUser.status || 'active').toLowerCase();
-      setEditUserStatus(st === 'disabled' ? 'disabled' : 'active');
-      setEditUserError(null);
-    }
-  }, [editingUser]);
-
   const handleEditDealerUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser || !dealerId || !activeOrganizationId) return;
@@ -712,35 +713,62 @@ export default function DealerProfileForm() {
               Billing
             </button>
             {dealerId && (
-              <button
-                onClick={() => setActiveTab('configurator-permissions')}
-                className={`transition-colors flex items-center justify-start ${
-                  activeTab === 'configurator-permissions'
-                    ? 'bg-white font-semibold'
-                    : 'hover:bg-white/50 font-normal'
-                }`}
-                style={{
-                  fontSize: '12px',
-                  padding: '0 48px',
-                  height: '100%',
-                  minWidth: '140px',
-                  width: 'auto',
-                  color: 'var(--graphite-black-hex)',
-                  borderColor: 'var(--gray-250)',
-                  borderBottom: activeTab === 'configurator-permissions' ? '2px solid var(--tab-active-underline)' : 'none'
-                }}
-                role="tab"
-                aria-selected={activeTab === 'configurator-permissions'}
-              >
-                Configurator Permissions
-              </button>
+              <>
+                <button
+                  onClick={() => setActiveTab('configurator-permissions')}
+                  className={`transition-colors flex items-center justify-start border-r ${
+                    activeTab === 'configurator-permissions'
+                      ? 'bg-white font-semibold'
+                      : 'hover:bg-white/50 font-normal'
+                  }`}
+                  style={{
+                    fontSize: '12px',
+                    padding: '0 48px',
+                    height: '100%',
+                    minWidth: '140px',
+                    width: 'auto',
+                    color: 'var(--graphite-black-hex)',
+                    borderColor: 'var(--gray-250)',
+                    borderBottom: activeTab === 'configurator-permissions' ? '2px solid var(--tab-active-underline)' : 'none'
+                  }}
+                  role="tab"
+                  aria-selected={activeTab === 'configurator-permissions'}
+                >
+                  Configurator Permissions
+                </button>
+                <button
+                  onClick={() => setActiveTab('terms')}
+                  className={`transition-colors flex items-center justify-start ${
+                    activeTab === 'terms'
+                      ? 'bg-white font-semibold'
+                      : 'hover:bg-white/50 font-normal'
+                  }`}
+                  style={{
+                    fontSize: '12px',
+                    padding: '0 48px',
+                    height: '100%',
+                    minWidth: '140px',
+                    width: 'auto',
+                    color: 'var(--graphite-black-hex)',
+                    borderColor: 'var(--gray-250)',
+                    borderBottom: activeTab === 'terms' ? '2px solid var(--tab-active-underline)' : 'none'
+                  }}
+                  role="tab"
+                  aria-selected={activeTab === 'terms'}
+                >
+                  <FileText className="w-4 h-4 mr-1.5" />
+                  Terms & Conditions
+                </button>
+              </>
             )}
           </div>
         </div>
 
         {/* Form Body */}
         <div className="py-6 px-6">
-          {activeTab === 'billing' ? (
+          {activeTab === 'terms' && dealerId ? (
+            <DealerTermsTab dealerId={dealerId} />
+          ) : activeTab === 'billing' ? (
             <>
               <div className="col-span-12">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Billing Address</h3>
@@ -1372,8 +1400,8 @@ export default function DealerProfileForm() {
                               disabled={addUserSubmitting}
                               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                             >
-                              <option value="member_manager">Dealer Manager</option>
-                              <option value="member">Dealer Member</option>
+                              <option value="dealer_manager">Dealer Manager</option>
+                              <option value="dealer_member">Dealer Member</option>
                             </select>
                             <p className="text-xs text-gray-500 mt-1">{getRoleDescription(addUserRole)}</p>
                           </div>
@@ -1469,8 +1497,8 @@ export default function DealerProfileForm() {
                               disabled={editUserSubmitting}
                               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                             >
-                              <option value="member_manager">Dealer Manager</option>
-                              <option value="member">Dealer Member</option>
+                              <option value="dealer_manager">Dealer Manager</option>
+                              <option value="dealer_member">Dealer Member</option>
                             </select>
                             <p className="text-xs text-gray-500 mt-1">{getRoleDescription(editUserRole)}</p>
                           </div>

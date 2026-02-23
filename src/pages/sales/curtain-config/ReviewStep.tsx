@@ -5,6 +5,8 @@ import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import DimensionsStackView from '../../../components/DimensionsStackView';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { formatMoney, formatUom } from '../../../lib/format';
+import { useCostSettings } from '../../../hooks/useCosts';
 
 // ============================================================================
 // BOM Preview Snapshot types (from ConfiguredProducts.bom_preview_snapshot)
@@ -45,7 +47,8 @@ interface BOMPreviewSnapshot {
   items: BOMSnapshotItem[];
 }
 
-// Legacy breakdown line type (for fallback)
+// Breakdown line type. When from snapshot: qty, uom, unitPrice, totalPrice are source of truth.
+// kind + meta used for roll secondary display (≈ $/m² or ≈ $/m when roll_width_m available).
 interface BOMBreakdownLine {
   role: string;
   sku: string | null;
@@ -54,9 +57,13 @@ interface BOMBreakdownLine {
   uom: string;
   unitPrice: number;
   totalPrice: number;
+  unitCost?: number;
+  totalCost?: number;
   source: 'selected' | 'template' | 'child';
   isChild?: boolean;
   parentRole?: string;
+  kind?: 'roll' | 'parent' | 'child' | 'accessory' | 'labor' | 'other';
+  meta?: Record<string, unknown>;
 }
 
 interface ReviewStepProps {
@@ -67,13 +74,15 @@ interface ReviewStepProps {
 
 export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
-  const [fabricData, setFabricData] = useState<{
+  const { settings: costSettings } = useCostSettings();
+  const [rollData, setRollData] = useState<{
     sku?: string;
     collection_name?: string;
     variant_name?: string;
     roll_width_m?: number | null;
+    roll_pricing_mode?: string;
   } | null>(null);
-  const [loadingFabric, setLoadingFabric] = useState(false);
+  const [loadingRoll, setLoadingRoll] = useState(false);
   
   // BOM Breakdown state
   const [breakdownLines, setBreakdownLines] = useState<BOMBreakdownLine[]>([]);
@@ -100,58 +109,55 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     return null;
   };
 
-  // Load fabric data from CatalogItems
+  // Load roll (tela) item data from CatalogItems — variant has role 'fabric'
   useEffect(() => {
-    const loadFabricData = async () => {
+    const loadRollData = async () => {
       const variantId = getVariantId();
       if (!variantId || !activeOrganizationId) {
-        setFabricData(null);
+        setRollData(null);
         return;
       }
 
       try {
-        setLoadingFabric(true);
+        setLoadingRoll(true);
         const { data: catalogItem, error } = await supabase
           .from('CatalogItems')
-          .select('sku, collection_name, variant_name, roll_width_m, roll_width')
+          .select('sku, collection_name, variant_name, roll_width_m, roll_width, roll_pricing_mode, measure_basis')
           .eq('id', variantId)
           .eq('organization_id', activeOrganizationId)
-          .eq('is_active', true) // Use is_active instead of deleted
+          .eq('is_active', true)
           .maybeSingle();
 
         if (error) {
-          // Format error to avoid [circular] reference
-          const errorMsg = error?.message || error?.error_description || error?.hint || 'Error loading fabric data';
+          const errorMsg = error?.message || error?.error_description || error?.hint || 'Error loading roll data';
           const errorCode = error?.code ? ` (${error.code})` : '';
-          console.error('Error loading fabric data:', errorMsg + errorCode);
-          // Don't block - just show no fabric data
-          setFabricData(null);
+          console.error('Error loading roll data:', errorMsg + errorCode);
+          setRollData(null);
           return;
         }
 
         if (catalogItem) {
           const rw = (catalogItem as any).roll_width_m ?? (catalogItem as any).roll_width;
-          setFabricData({
+          setRollData({
             sku: catalogItem.sku || undefined,
             collection_name: catalogItem.collection_name || undefined,
             variant_name: catalogItem.variant_name || undefined,
             roll_width_m: rw != null ? Number(rw) : null,
+            roll_pricing_mode: (catalogItem as any).roll_pricing_mode || ((catalogItem as any).measure_basis === 'linear' ? 'per_linear_meter' : undefined),
           });
         } else {
-          setFabricData(null);
+          setRollData(null);
         }
       } catch (err: any) {
-        // Format error to avoid [circular] reference
-        const errorMsg = err?.message || err?.error_description || err?.hint || 'Error loading fabric data';
-        console.error('Error loading fabric data:', errorMsg);
-        // Don't block - just show no fabric data
-        setFabricData(null);
+        const errorMsg = err?.message || err?.error_description || err?.hint || 'Error loading roll data';
+        console.error('Error loading roll data:', errorMsg);
+        setRollData(null);
       } finally {
-        setLoadingFabric(false);
+        setLoadingRoll(false);
       }
     };
 
-    loadFabricData();
+    loadRollData();
   }, [config, activeOrganizationId]);
 
   // Load BOM breakdown from template components
@@ -165,6 +171,14 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   
   const hasMultipleCandidates = !explicitBomTemplateId && filteredTemplates && filteredTemplates.length > 1;
 
+  // Resolve fabric UOM from roll_pricing_mode (overrides any hardcoded 'm²' in old snapshots)
+  const fabricUom = useMemo((): string => {
+    const mode = rollData?.roll_pricing_mode;
+    if (mode === 'per_linear_meter') return 'm';
+    if (mode === 'per_unit') return 'ea';
+    return 'm²'; // per_square_meter or unknown
+  }, [rollData?.roll_pricing_mode]);
+
   // ✅ NEW: Convert snapshot items to breakdown lines (no DB queries needed!)
   const snapshotBreakdownLines = useMemo((): BOMBreakdownLine[] => {
     if (!hasValidSnapshot || !bomPreviewSnapshot) return [];
@@ -173,17 +187,26 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     const configAny = config as any;
 
     const processItem = (item: BOMSnapshotItem, isChild = false, parentRole?: string) => {
+      // For roll/fabric: always use the UOM derived from roll_pricing_mode (fixes old snapshots with hardcoded m²)
+      const resolvedUom = (item.kind === 'roll' || item.role === 'fabric')
+        ? fabricUom
+        : item.uom;
+
       lines.push({
         role: item.role,
         sku: item.sku,
         name: item.name,
         qty: item.qty,
-        uom: item.uom,
+        uom: resolvedUom,
         unitPrice: item.unit_price,
         totalPrice: item.line_total,
+        unitCost: (item.meta as any)?.unit_cost != null ? Number((item.meta as any).unit_cost) : undefined,
+        totalCost: (item.meta as any)?.line_cost != null ? Number((item.meta as any).line_cost) : undefined,
         source: item.selected ? 'selected' : isChild ? 'child' : 'template',
         isChild,
         parentRole,
+        kind: item.kind,
+        meta: item.meta,
       });
 
       // Process nested children
@@ -195,17 +218,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     bomPreviewSnapshot.items.forEach(item => processItem(item));
 
     return lines;
-  }, [hasValidSnapshot, bomPreviewSnapshot, config]);
+  }, [hasValidSnapshot, bomPreviewSnapshot, config, fabricUom]);
 
-  // Calculate total from snapshot or legacy breakdown
-  const snapshotTotal = useMemo(() => {
-    if (hasValidSnapshot && bomPreviewSnapshot?.totals) {
-      // Use the calculated total from snapshot
-      return bomPreviewSnapshot.totals.total_msrp;
-    }
-    return null;
-  }, [hasValidSnapshot, bomPreviewSnapshot]);
-  
   useEffect(() => {
     // ✅ If we have a valid snapshot, use it directly (no queries needed)
     if (hasValidSnapshot) {
@@ -369,7 +383,9 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
           const priceInfo = priceMap.get(itemId);
           const qty = calculateQty(comp);
           const unitPrice = priceInfo?.msrp || 0;
+          const unitCost = priceInfo?.cost || 0;
           const totalPrice = qty * unitPrice;
+          const totalCost = qty * unitCost;
 
           lines.push({
             role: comp.component_role || 'unknown',
@@ -379,6 +395,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             uom: comp.uom || itemInfo?.uom || 'ea',
             unitPrice,
             totalPrice: Math.round(totalPrice * 100) / 100,
+            unitCost,
+            totalCost: Math.round(totalCost * 100) / 100,
             source: selectedId ? 'selected' : 'template',
             isChild: false,
           });
@@ -393,7 +411,9 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             const childPriceInfo = priceMap.get(childItemId);
             const childQty = calculateQty(child);
             const childUnitPrice = childPriceInfo?.msrp || 0;
+            const childUnitCost = childPriceInfo?.cost || 0;
             const childTotalPrice = childQty * childUnitPrice;
+            const childTotalCost = childQty * childUnitCost;
 
             lines.push({
               role: child.component_role || 'child',
@@ -403,6 +423,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
               uom: child.uom || childItemInfo?.uom || 'ea',
               unitPrice: childUnitPrice,
               totalPrice: Math.round(childTotalPrice * 100) / 100,
+              unitCost: childUnitCost,
+              totalCost: Math.round(childTotalCost * 100) / 100,
               source: 'child',
               isChild: true,
               parentRole: comp.component_role,
@@ -410,20 +432,35 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
           });
         });
 
-        // Add fabric line if exists (variantId was captured above)
+        // Add fabric line if exists (variantId was captured above).
+        // UOM depends on roll_pricing_mode: per_linear_meter → 'm', per_unit → 'ea', else → 'm²'
         if (variantId) {
           const fabricPrice = priceMap.get(variantId);
           const fabricItem = itemMap.get(variantId);
-          const fabricQty = widthM * heightM; // m²
+          const rollPricingMode = rollData?.roll_pricing_mode || 'per_square_meter';
+          let fabricQty: number;
+          let fabricUom: string;
+          if (rollPricingMode === 'per_linear_meter') {
+            fabricQty = heightM;
+            fabricUom = 'm';
+          } else if (rollPricingMode === 'per_unit') {
+            fabricQty = 1;
+            fabricUom = 'ea';
+          } else {
+            fabricQty = widthM * heightM;
+            fabricUom = 'm²';
+          }
 
           lines.unshift({
             role: 'fabric',
-            sku: fabricData?.sku || fabricItem?.sku || null,
-            name: fabricData?.variant_name || fabricItem?.name || 'Fabric',
+            sku: rollData?.sku || fabricItem?.sku || null,
+            name: rollData?.variant_name || fabricItem?.name || 'Roll',
             qty: Math.round(fabricQty * 1000) / 1000,
-            uom: 'm²',
+            uom: fabricUom,
             unitPrice: fabricPrice?.msrp || 0,
             totalPrice: Math.round((fabricQty * (fabricPrice?.msrp || 0)) * 100) / 100,
+            unitCost: fabricPrice?.cost || 0,
+            totalCost: Math.round((fabricQty * (fabricPrice?.cost || 0)) * 100) / 100,
             source: 'selected',
           });
         }
@@ -438,52 +475,202 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     };
 
     loadBreakdown();
-  }, [bomTemplateId, activeOrganizationId, config, fabricData, hasValidSnapshot, snapshotBreakdownLines]);
+  }, [bomTemplateId, activeOrganizationId, config, rollData, hasValidSnapshot, snapshotBreakdownLines]);
 
-  // Get snapshot totals breakdown for display
-  const snapshotTotals = hasValidSnapshot ? bomPreviewSnapshot?.totals : null;
+  // ── HARD LOCK: bom_preview_snapshot.totals is PRIMARY. configured_product_totals + CP columns fallback. NO calculations.
+  const snapshotTotals = (config as any).bom_preview_snapshot?.totals ?? null;
+  const configuredProductTotals = (config as any).configured_product_totals ?? null;
+  // Prefer snapshot; fallback to configured_product_totals (e.g. createConfiguredProductPreview fallback path)
+  const totals = snapshotTotals ?? (configuredProductTotals && typeof configuredProductTotals === 'object' ? configuredProductTotals : null);
 
-  // BOM sum from snapshot items (fallback when totals.bom_total is 0 - e.g. fallback path or backend not persisting)
-  const bomSumFromItems = useMemo(() => {
-    if (!bomPreviewSnapshot?.items?.length) return 0;
-    return bomPreviewSnapshot.items.reduce((sum: number, item: any) => {
-      if (item.kind === 'roll' || item.role === 'fabric') return sum;
-      const lineTotal = Number(item.line_total) || 0;
-      const childrenTotal = Array.isArray(item.children)
-        ? item.children.reduce((s: number, c: any) => s + (Number(c?.line_total) || 0), 0)
-        : 0;
-      return sum + lineTotal + childrenTotal;
-    }, 0);
-  }, [bomPreviewSnapshot?.items]);
+  // Safety guard: warn if we have config but no totals (do NOT recalculate)
+  useEffect(() => {
+    if ((config as any).bom_preview_snapshot && !snapshotTotals && !configuredProductTotals) {
+      console.warn('[PRICING] Missing totals from bom_preview_snapshot and configured_product_totals');
+    }
+  }, [snapshotTotals, configuredProductTotals, (config as any).bom_preview_snapshot]);
 
-  // Effective totals for display: Roll + BOM + Labor = Total MSRP
-  type TotalsShape = { roll_msrp_total: number; bom_total: number; accessories_total: number; labor_pct: number; labor_amount: number; total_msrp: number };
+  // ── DISPLAY ONLY: 1) bom_preview_snapshot.totals 2) CP columns. NO calculations.
+  type TotalsShape = {
+    roll_msrp_total: number;
+    bom_total: number;
+    accessories_total: number;
+    labor_pct: number;
+    labor_amount: number;
+    msrp_product_subtotal: number;
+    total_msrp: number;
+  };
+
+  const cpDirect = config as any;
+
   const effectiveTotals: TotalsShape = useMemo(() => {
-    const base = (snapshotTotals ?? {}) as Record<string, number>;
-    const rollTotal = Number(base.roll_msrp_total) || 0;
-    const bomFromTotals = Number(base.bom_total) || 0;
-    const bomTotal = bomFromTotals > 0 ? bomFromTotals : bomSumFromItems;
-    const accessoriesTotal = Number(base.accessories_total) || 0;
-    const laborPct = Number(base.labor_pct) || 0;
-    const rollPlusBom = rollTotal + bomTotal;
-    const laborAmount = rollPlusBom * (laborPct / 100);
-    const totalMsrp = rollPlusBom + laborAmount + accessoriesTotal;
+    const t = totals as Record<string, number> | null;
+    const rollMsrp = (t?.roll_msrp_total != null ? Number(t.roll_msrp_total) : null) ?? (cpDirect.roll_msrp_total != null ? Number(cpDirect.roll_msrp_total) : null) ?? 0;
+    const bomTotal = (t?.bom_total != null ? Number(t.bom_total) : null) ?? (t?.bom_msrp_total != null ? Number(t.bom_msrp_total) : null) ?? (cpDirect.bom_total != null ? Number(cpDirect.bom_total) : null) ?? 0;
+    const accessoriesTotal = (t?.accessories_total != null ? Number(t.accessories_total) : null) ?? (cpDirect.accessories_total != null ? Number(cpDirect.accessories_total) : null) ?? 0;
+    const rawLaborPct =
+      (t?.labor_msrp_pct != null ? Number(t.labor_msrp_pct) : null) ??
+      (cpDirect.labor_msrp_pct != null ? Number(cpDirect.labor_msrp_pct) : null) ??
+      (t?.labor_pct != null ? Number(t.labor_pct) : null) ??
+      ((costSettings as any)?.labor_msrp_pct != null ? Number((costSettings as any).labor_msrp_pct) : null) ??
+      (cpDirect.labor_pct != null ? Number(cpDirect.labor_pct) : null) ??
+      ((costSettings as any)?.labor_pct != null ? Number((costSettings as any).labor_pct) : null) ??
+      0;
+    const laborPct = rawLaborPct <= 1 ? rawLaborPct : rawLaborPct / 100;
+    const laborAmount = (t?.labor_amount != null ? Number(t.labor_amount) : null) ?? (t?.labor_msrp != null ? Number(t.labor_msrp) : null) ?? (cpDirect.labor_amount != null ? Number(cpDirect.labor_amount) : null) ?? (cpDirect.labor_msrp != null ? Number(cpDirect.labor_msrp) : null) ?? 0;
+    const totalMsrp = (t?.total_msrp != null ? Number(t.total_msrp) : null) ?? (t?.unit_msrp_total != null ? Number(t.unit_msrp_total) : null) ?? (cpDirect.unit_msrp_total != null ? Number(cpDirect.unit_msrp_total) : null) ?? (cpDirect.total_msrp != null ? Number(cpDirect.total_msrp) : null) ?? 0;
+    const msrpProductSubtotal = (t?.msrp_product_subtotal != null ? Number(t.msrp_product_subtotal) : null) ?? (cpDirect.msrp_product_subtotal != null ? Number(cpDirect.msrp_product_subtotal) : null) ?? 0;
     return {
-      roll_msrp_total: rollTotal,
+      roll_msrp_total: rollMsrp,
       bom_total: bomTotal,
       accessories_total: accessoriesTotal,
-      labor_pct: laborPct,
+      labor_pct: laborPct * 100,
       labor_amount: laborAmount,
+      msrp_product_subtotal: msrpProductSubtotal,
       total_msrp: totalMsrp,
     };
-  }, [snapshotTotals, bomSumFromItems]);
+  }, [totals, cpDirect, costSettings]);
 
-  // Calculate totals - prefer effective total or snapshot total
-  const breakdownTotal = useMemo(() => {
+  // TOTAL PRODUCT MSRP (unit) — from totals/CP first; fallback: sum breakdown lines (preview without saved totals)
+  const totalProductMsrpUnit = useMemo(() => {
     if (effectiveTotals.total_msrp > 0) return effectiveTotals.total_msrp;
-    if (snapshotTotal !== null) return snapshotTotal;
-    return breakdownLines.reduce((sum, line) => sum + line.totalPrice, 0);
-  }, [breakdownLines, snapshotTotal, effectiveTotals.total_msrp]);
+    // Fallback: sum all breakdown lines visible in the table
+    if (breakdownLines.length > 0) {
+      return breakdownLines.reduce((sum, line) => sum + (Number(line.totalPrice) || 0), 0);
+    }
+    return 0;
+  }, [effectiveTotals.total_msrp, breakdownLines]);
+
+  // Line quantity (multiplicador): used when adding multiple same units to quote
+  const lineQuantity = Math.max(1, Number((config as any).quantity) || 1);
+
+  // Preview fallback for labor MSRP when totals are not persisted yet.
+  const effectiveLaborMsrpAmount = useMemo(() => {
+    if ((effectiveTotals.labor_amount || 0) > 0) return Number(effectiveTotals.labor_amount);
+    const msrpMaterials = Number(effectiveTotals.roll_msrp_total || 0) + Number(effectiveTotals.bom_total || 0) + Number(effectiveTotals.accessories_total || 0);
+    const laborPctDec = Number(effectiveTotals.labor_pct || 0) / 100;
+    if (msrpMaterials <= 0 || laborPctDec <= 0) return 0;
+    return msrpMaterials * laborPctDec;
+  }, [effectiveTotals]);
+
+  // Pricing ladder params from totals/settings
+  const t = totals as Record<string, number> | null;
+  const minimumMarginPctRaw =
+    (t?.minimum_margin_pct != null ? Number(t.minimum_margin_pct) : null) ??
+    (cpDirect.minimum_margin_pct != null ? Number(cpDirect.minimum_margin_pct) : null) ??
+    ((costSettings as any)?.minimum_margin_pct != null ? Number((costSettings as any).minimum_margin_pct) : null) ??
+    0.35;
+  const msrpMarginPctRaw =
+    (t?.msrp_margin_pct != null ? Number(t.msrp_margin_pct) : null) ??
+    (t?.default_msrp_pct != null ? Number(t.default_msrp_pct) : null) ??
+    (cpDirect.default_msrp_pct != null ? Number(cpDirect.default_msrp_pct) : null) ??
+    ((costSettings as any)?.default_msrp_pct != null ? Number((costSettings as any).default_msrp_pct) : null) ??
+    0.65;
+  const minimumMarginPct = minimumMarginPctRaw <= 1 ? minimumMarginPctRaw : minimumMarginPctRaw / 100;
+  const msrpMarginPct = msrpMarginPctRaw <= 1 ? msrpMarginPctRaw : msrpMarginPctRaw / 100;
+  const dealerFactor = Math.max(0.01, 1 - minimumMarginPct);
+  const msrpFactor = Math.max(0.01, 1 - msrpMarginPct);
+
+  // DISPLAY ONLY: 1) bom_preview_snapshot.totals 2) CP columns. No calculations.
+  const effectiveCosts = useMemo(() => {
+    const t = totals as Record<string, number> | null;
+    const rollCostFromData = (t?.roll_total_cost != null ? Number(t.roll_total_cost) : null) ?? (cpDirect.roll_total_cost != null ? Number(cpDirect.roll_total_cost) : null) ?? null;
+    const bomCostFromData = (t?.bom_total_cost != null ? Number(t.bom_total_cost) : null) ?? (cpDirect.bom_total_cost != null ? Number(cpDirect.bom_total_cost) : null) ?? null;
+    const accessoriesCost = (t?.accessories_total_cost != null ? Number(t.accessories_total_cost) : null) ?? (cpDirect.accessories_total_cost != null ? Number(cpDirect.accessories_total_cost) : null) ?? 0;
+    const productCostFromData = (t?.unit_product_cost != null ? Number(t.unit_product_cost) : null) ?? (cpDirect.unit_product_cost != null ? Number(cpDirect.unit_product_cost) : null) ?? null;
+    const laborCostFromData = (t?.unit_labor_cost != null ? Number(t.unit_labor_cost) : null) ?? (t?.labor_cost != null ? Number(t.labor_cost) : null) ?? (t?.labor_cost_snapshot != null ? Number(t.labor_cost_snapshot) : null) ?? (cpDirect.unit_labor_cost != null ? Number(cpDirect.unit_labor_cost) : null) ?? null;
+    const rawLaborCostPct =
+      (t?.labor_pct != null ? Number(t.labor_pct) : null) ??
+      (cpDirect.labor_pct != null ? Number(cpDirect.labor_pct) : null) ??
+      ((costSettings as any)?.labor_pct != null ? Number((costSettings as any).labor_pct) : null) ??
+      0;
+    const laborCostPct = rawLaborCostPct <= 1 ? rawLaborCostPct * 100 : rawLaborCostPct;
+    const totalCostFromData = (t?.total_cost != null ? Number(t.total_cost) : null) ?? (cpDirect.total_cost != null ? Number(cpDirect.total_cost) : null) ?? null;
+
+    // Preview fallback (before save): derive costs from live breakdown lines.
+    const rollCostPreview = breakdownLines
+      .filter((line) => (line.role || '').toLowerCase() === 'fabric' || line.kind === 'roll')
+      .reduce((sum, line) => sum + (Number(line.totalCost) || 0), 0);
+    const bomCostPreview = breakdownLines
+      .filter((line) => {
+        const role = (line.role || '').toLowerCase();
+        return role !== 'fabric' && role !== 'labor' && line.kind !== 'roll' && line.kind !== 'labor' && line.kind !== 'accessory';
+      })
+      .reduce((sum, line) => sum + (Number(line.totalCost) || 0), 0);
+
+    const rollCost = rollCostFromData != null && rollCostFromData > 0 ? rollCostFromData : rollCostPreview;
+    const bomCost = bomCostFromData != null && bomCostFromData > 0 ? bomCostFromData : bomCostPreview;
+    const productCost = productCostFromData != null && productCostFromData > 0 ? productCostFromData : (rollCost + bomCost + accessoriesCost);
+    const laborCost = laborCostFromData != null && laborCostFromData > 0 ? laborCostFromData : (productCost * (laborCostPct / 100));
+    const totalCost = totalCostFromData != null && totalCostFromData > 0 ? totalCostFromData : (productCost + laborCost);
+
+    return {
+      roll_cost: rollCost,
+      bom_cost: bomCost,
+      accessories_cost: accessoriesCost,
+      unit_product_cost: productCost,
+      unit_labor_cost: laborCost,
+      labor_pct: laborCostPct,
+      total_cost: totalCost,
+    };
+  }, [cpDirect, totals, breakdownLines, costSettings]);
+
+  const unitDealerPriceFromDataRaw =
+    (t?.unit_dealer_price != null ? Number(t.unit_dealer_price) : null) ??
+    (cpDirect.unit_dealer_price != null ? Number(cpDirect.unit_dealer_price) : null) ??
+    ((config as any).unit_dealer_price_snapshot != null ? Number((config as any).unit_dealer_price_snapshot) : null) ??
+    ((config as any).unit_dealer_price != null ? Number((config as any).unit_dealer_price) : null) ??
+    null;
+  const unitDealerPriceFromData =
+    unitDealerPriceFromDataRaw != null && Number(unitDealerPriceFromDataRaw) > 0
+      ? Number(unitDealerPriceFromDataRaw)
+      : null;
+  const unitMsrpFromData =
+    (t?.unit_msrp != null ? Number(t.unit_msrp) : null) ??
+    (t?.total_msrp != null ? Number(t.total_msrp) : null) ??
+    (t?.unit_msrp_total != null ? Number(t.unit_msrp_total) : null) ??
+    (cpDirect.unit_msrp_total != null ? Number(cpDirect.unit_msrp_total) : null) ??
+    (cpDirect.total_msrp != null ? Number(cpDirect.total_msrp) : null) ??
+    null;
+  const computedUnitDealerPrice =
+    unitDealerPriceFromData != null
+      ? Number(unitDealerPriceFromData)
+      : (Number(effectiveCosts.total_cost || 0) > 0
+          ? Number(effectiveCosts.total_cost || 0) / dealerFactor
+          : null);
+  const computedUnitMsrp =
+    unitMsrpFromData != null
+      ? Number(unitMsrpFromData)
+      : (computedUnitDealerPrice != null
+          ? Number(computedUnitDealerPrice) / msrpFactor
+          : null);
+  const dealerLineTotalFromDataRaw =
+    (t?.dealer_price_total != null ? Number(t.dealer_price_total) : null) ??
+    (cpDirect.dealer_price_total != null ? Number(cpDirect.dealer_price_total) : null) ??
+    ((config as any).dealer_price_total_snapshot != null ? Number((config as any).dealer_price_total_snapshot) : null) ??
+    null;
+  const dealerLineTotal =
+    dealerLineTotalFromDataRaw != null && Number(dealerLineTotalFromDataRaw) > 0
+      ? Number(dealerLineTotalFromDataRaw)
+      : (computedUnitDealerPrice != null ? Number(computedUnitDealerPrice) * lineQuantity : null);
+  const msrpLineTotalFromDataRaw =
+    (t?.msrp_total != null ? Number(t.msrp_total) : null) ??
+    ((config as any).msrp_total_snapshot != null ? Number((config as any).msrp_total_snapshot) : null) ??
+    null;
+  const msrpLineTotal =
+    msrpLineTotalFromDataRaw != null && Number(msrpLineTotalFromDataRaw) > 0
+      ? Number(msrpLineTotalFromDataRaw)
+      : (computedUnitMsrp != null ? Number(computedUnitMsrp) * lineQuantity : null);
+
+  // Total quantity of components (sum of Qty column) for Breakdown summary
+  const breakdownTotalQty = useMemo(() => {
+    const fromLines = breakdownLines.reduce((sum, line) => sum + Number(line.qty) || 0, 0);
+    const accessoriesQty = snapshotTotals && (snapshotTotals.accessories_total || 0) > 0
+      ? (config.accessories?.length || 1)
+      : 0;
+    const laborQty = snapshotTotals && (snapshotTotals.labor_amount || 0) > 0 ? 1 : 0;
+    return fromLines + accessoriesQty + laborQty;
+  }, [breakdownLines, snapshotTotals, config.accessories?.length]);
 
   const dimensionsSource = {
     width_mm: (config as any).width_mm,
@@ -495,19 +682,29 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   const widthTotalMm = measurements?.width_total_mm ?? (config as any).width_mm ?? null;
   const heightMm = measurements?.height_mm ?? (config as any).height_mm ?? null;
   const hasTotalDimensions = widthTotalMm != null && widthTotalMm > 0 && heightMm != null && heightMm > 0;
-  const hasFabricData = fabricData && (fabricData.sku || fabricData.collection_name || fabricData.variant_name);
+  const hasRollData = rollData && (rollData.sku || rollData.collection_name || rollData.variant_name);
 
-  // Total tela (m²) desde BOM snapshot para conservar como dato
-  const fabricM2 = (() => {
+  const panelsList = (config as any).measurements?.panels ?? (Array.isArray((config as any).panels) ? (config as any).panels : []);
+
+  // Total fabric = sum of all panel widths × height, in m²
+  const fabricRollInfo = (() => {
+    const totalWidthMmVal = widthTotalMm ?? (panelsList.length > 0
+      ? panelsList.reduce((s: number, p: any) => s + (Number(p?.width_mm) || 0), 0)
+      : ((config as any).width_mm ?? null));
+    const heightMmVal = heightMm ?? ((config as any).height_mm ?? null);
+    if (totalWidthMmVal != null && totalWidthMmVal > 0 && heightMmVal != null && heightMmVal > 0) {
+      const m2 = (totalWidthMmVal / 1000) * (heightMmVal / 1000);
+      return { qty: m2, uom: 'm²' as const };
+    }
     if (!hasValidSnapshot || !bomPreviewSnapshot?.items) return null;
     const roll = bomPreviewSnapshot.items.find((i: any) => i.kind === 'roll' || i.role === 'fabric');
-    return roll?.qty != null ? Number(roll.qty) : null;
+    if (roll?.qty == null) return null;
+    return { qty: Number(roll.qty), uom: fabricUom };
   })();
 
-  // Regla: ningún paño puede ser más ancho que el rollo; observación: rotar la tela si aplica
-  const panelsList = (config as any).measurements?.panels ?? (Array.isArray((config as any).panels) ? (config as any).panels : []);
-  const rollWidthMm = fabricData?.roll_width_m != null && fabricData.roll_width_m > 0
-    ? fabricData.roll_width_m * 1000
+  // Rule: no panel can be wider than the roll; note: rotate fabric if applicable
+  const rollWidthMm = rollData?.roll_width_m != null && rollData.roll_width_m > 0
+    ? rollData.roll_width_m * 1000
     : null;
   const panelsExceedingRoll = rollWidthMm != null && panelsList.length > 0
     ? panelsList
@@ -520,59 +717,95 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
         <div>
-          <Label className="text-lg font-semibold mb-4 block">CONFIGURED PRODUCT</Label>
+          <Label className="text-lg font-semibold mb-6 block">CONFIGURED PRODUCT</Label>
           
-          <div className="space-y-4">
+          <div className="space-y-5">
             {/* Fabric Technical Data Section */}
-            {hasFabricData && (
-              <div className="mb-4 pb-4 border-b border-gray-200">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">FABRIC TECHNICAL DATA</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  {fabricData.sku && (
-                    <div>
-                      <span className="font-medium text-gray-700">SKU:</span>
-                      <span className="ml-2 text-gray-900">{fabricData.sku}</span>
-                    </div>
-                  )}
-                  {fabricData.collection_name && (
-                    <div>
+            {hasRollData && (
+              <div className="pb-5 border-b border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">Roll (Fabric) – technical data</h3>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-0 text-sm">
+                  {rollData.collection_name && (
+                    <div className="py-1.5">
                       <span className="font-medium text-gray-700">Collection:</span>
-                      <span className="ml-2 text-gray-900">{fabricData.collection_name}</span>
+                      <span className="ml-2 text-gray-900">{rollData.collection_name}</span>
                     </div>
                   )}
-                  {fabricData.variant_name && (
-                    <div>
+                  {rollData.variant_name && (
+                    <div className="py-1.5">
                       <span className="font-medium text-gray-700">Variant:</span>
-                      <span className="ml-2 text-gray-900">{fabricData.variant_name}</span>
+                      <span className="ml-2 text-gray-900">{rollData.variant_name}</span>
+                    </div>
+                  )}
+                  {rollData.sku && (
+                    <div className="py-1.5">
+                      <span className="font-medium text-gray-700">SKU:</span>
+                      <span className="ml-2 text-gray-900">{rollData.sku}</span>
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Product Specifications Section */}
+            {/* Dimensions card */}
+            {(() => {
+              const pt = (config as any).productType || (config as any).product_type || '';
+              const isShadeProduct = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning'].includes(pt);
+              return (
+              <div className="border border-gray-200 rounded-lg px-4 py-3 space-y-2.5">
+                <div className="flex items-start justify-between gap-6">
+                  <div>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Panels (mm)</span>
+                    <div className="mt-1 text-gray-900 text-sm">
+                      <DimensionsStackView source={dimensionsSource} />
+                    </div>
+                  </div>
+                  {hasTotalDimensions && (
+                    <div className="text-right">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total</span>
+                      <div className="mt-1 text-sm tabular-nums text-gray-900">
+                        {Math.round(widthTotalMm)} × {Math.round(heightMm)} mm
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {isShadeProduct && rollWidthMm != null && hasRollData && (
+                  <div className="border-t border-gray-100 pt-2.5 flex items-center justify-between gap-6 text-sm">
+                    <div>
+                      <span className="text-gray-500">Max panel width:</span>{' '}
+                      <span className="tabular-nums text-gray-700 font-medium">{Math.round(rollWidthMm)} mm</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Fabric rotation:</span>{' '}
+                      <span className="text-gray-700 font-medium">
+                        {((config as any).fabric_rotation ?? (config as any).roll_rotation) ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              );
+            })()}
+
+            {/* Product Specifications */}
+            {(() => {
+              const pt = (config as any).productType || (config as any).product_type || '';
+              const isWindowFilm = pt === 'window-film';
+              const isShadeProduct = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning'].includes(pt);
+              const specRow = 'py-1.5';
+              return (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">PRODUCT SPECIFICATIONS</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="font-medium text-gray-700">Position:</span>
-                  <span className="ml-2 text-gray-900">{config.position || 'Not selected'}</span>
-                </div>
-                <div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-0 text-sm">
+                <div className={specRow}>
                   <span className="font-medium text-gray-700">Product Type:</span>
                   <span className="ml-2 text-gray-900">{config.productType || 'Not selected'}</span>
                 </div>
-                <div>
-                  <span className="font-medium text-gray-700">Fabric Drop:</span>
-                  <span className="ml-2 text-gray-900">
-                    {(() => {
-                      const v = (config as any).fabricDrop ?? (config as any).fabric_drop;
-                      if (!v) return 'Not selected';
-                      return String(v).charAt(0).toUpperCase() + String(v).slice(1).toLowerCase();
-                    })()}
-                  </span>
+                <div className={specRow}>
+                  <span className="font-medium text-gray-700">Quantity:</span>
+                  <span className="ml-2 text-gray-900">{lineQuantity}</span>
                 </div>
-                <div>
+                <div className={specRow}>
                   <span className="font-medium text-gray-700">Installation type & location:</span>
                   <span className="ml-2 text-gray-900">
                     {(() => {
@@ -586,104 +819,129 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                     })()}
                   </span>
                 </div>
-                <div className="col-span-2">
-                  <span className="font-medium text-gray-700">Dimensions (mm):</span>
-                  <div className="mt-1 text-gray-900">
-                    <DimensionsStackView source={dimensionsSource} />
-                  </div>
-                  {hasTotalDimensions && (
-                    <div className="mt-1.5 text-gray-600 text-sm">
-                      <span className="font-medium text-gray-600">Medidas totales:</span>{' '}
-                      <span className="tabular-nums">{Math.round(widthTotalMm)} × {Math.round(heightMm)} mm</span>
+                {isWindowFilm && (
+                  <>
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Film Type:</span>
+                      <span className="ml-2 text-gray-900">{(config as any).filmType || 'Not selected'}</span>
                     </div>
-                  )}
-                </div>
-                {fabricM2 != null && (
-                  <div>
-                    <span className="font-medium text-gray-700">Total tela (m²):</span>
-                    <span className="ml-2 text-gray-900">{fabricM2.toFixed(2)} m²</span>
-                  </div>
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Accessories:</span>
+                      <span className="ml-2 text-gray-900">{config.accessories?.length || 0} items</span>
+                    </div>
+                  </>
                 )}
-                {showRollWidthWarning && (
-                  <div className="col-span-2 mt-2 p-3 bg-amber-50 border border-amber-200 rounded text-sm">
-                    <p className="font-medium text-amber-800">
-                      Regla: ningún paño puede ser más ancho que el rollo ({Math.round(rollWidthMm!)} mm).
-                    </p>
-                    <p className="text-amber-700 mt-1">
-                      Paño(s) que exceden: {panelsExceedingRoll.map((p: any) => `Paño ${p.index} (${p.width_mm} mm)`).join(', ')}.
-                    </p>
-                    <p className="text-amber-700 mt-1 italic">
-                      Observación: rotar la tela si la tela lo permite.
-                    </p>
-                  </div>
-                )}
-                <div>
-                  <span className="font-medium text-gray-700">Film Type:</span>
-                  <span className="ml-2 text-gray-900">{(config as any).filmType || 'Not selected'}</span>
-                </div>
-                <div>
-                  <span className="font-medium text-gray-700">Guiding:</span>
-                  <span className="ml-2 text-gray-900">{(config as any).guidingProfile || 'Not selected'}</span>
-                </div>
-                <div>
-                  <span className="font-medium text-gray-700">Fixing:</span>
-                  <span className="ml-2 text-gray-900">{(config as any).fixingType || 'Not selected'}</span>
-                </div>
-                <div>
-                  <span className="font-medium text-gray-700">Accessories:</span>
-                  <span className="ml-2 text-gray-900">
-                    {config.accessories?.length || 0} items
-                  </span>
-                </div>
-                {(config as any).drive_type || (config as any).operatingSystem ? (
-                  <div>
-                    <span className="font-medium text-gray-700">Drive Type:</span>
-                    <span className="ml-2 text-gray-900">{(config as any).drive_type || (config as any).operatingSystem || 'Not selected'}</span>
-                  </div>
-                ) : null}
-                {(config as any).hardware_color || (config as any).hardwareColor ? (
-                  <div>
-                    <span className="font-medium text-gray-700">Hardware Color:</span>
-                    <span className="ml-2 text-gray-900">{(config as any).hardware_color || (config as any).hardwareColor || 'Not selected'}</span>
-                  </div>
-                ) : null}
-                {(config as any).bottom_rail_type ? (
-                  <div>
-                    <span className="font-medium text-gray-700">Bottom Rail Type:</span>
-                    <span className="ml-2 text-gray-900">{(config as any).bottom_rail_type || 'Not selected'}</span>
-                  </div>
-                ) : null}
-                {(config as any).cassette !== undefined ? (
-                  <div>
-                    <span className="font-medium text-gray-700">Cassette:</span>
-                    <span className="ml-2 text-gray-900">{(config as any).cassette ? 'Yes' : 'No'}</span>
-                  </div>
-                ) : null}
-                {(config as any).side_channel !== undefined ? (
-                  <div>
-                    <span className="font-medium text-gray-700">Side Channel:</span>
-                    <span className="ml-2 text-gray-900">{(config as any).side_channel ? 'Yes' : 'No'}</span>
-                    {(config as any).side_channel && (config as any).side_channel_type ? (
-                      <div className="mt-1">
-                        <span className="font-medium text-gray-700">Side Channel Type:</span>
-                        <span className="ml-2 text-gray-900">{(config as any).side_channel_type}</span>
+                {isShadeProduct && (
+                  <>
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Position:</span>
+                      <span className="ml-2 text-gray-900">{config.position ?? 'Not selected'}</span>
+                    </div>
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Fabric Drop:</span>
+                      <span className="ml-2 text-gray-900">
+                        {(() => {
+                          const v = (config as any).fabricDrop ?? (config as any).fabric_drop;
+                          if (!v) return 'Not selected';
+                          return String(v).charAt(0).toUpperCase() + String(v).slice(1).toLowerCase();
+                        })()}
+                      </span>
+                    </div>
+                    {fabricRollInfo != null && (
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Total fabric:</span>
+                        <span className="ml-2 text-gray-900">
+                          {fabricRollInfo.qty.toFixed(2)} {formatUom(fabricRollInfo.uom)}
+                        </span>
+                      </div>
+                    )}
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Accessories:</span>
+                      <span className="ml-2 text-gray-900">{config.accessories?.length || 0} items</span>
+                    </div>
+                    {(config as any).hardware_color || (config as any).hardwareColor ? (
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Hardware Color:</span>
+                        <span className="ml-2 text-gray-900">{(config as any).hardware_color || (config as any).hardwareColor || 'Not selected'}</span>
                       </div>
                     ) : null}
+                    {(config as any).drive_type || (config as any).operatingSystem ? (
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Drive Type:</span>
+                        <span className="ml-2 text-gray-900">{(config as any).drive_type || (config as any).operatingSystem || 'Not selected'}</span>
+                      </div>
+                    ) : null}
+                    {(() => {
+                      const snapItems: any[] = bomPreviewSnapshot?.items ?? [];
+                      // Only items explicitly selected by the user (selected === true in snapshot)
+                      const selectedItemForRole = (role: string) =>
+                        snapItems.find((i: any) => i.kind === 'parent' && i.role === role && i.selected === true) ?? null;
+
+                      const componentRow = (label: string, itemId: string | null | undefined, role: string) => {
+                        const snapItem = selectedItemForRole(role);
+                        // Confirm via config item_id: must be a non-empty UUID
+                        const configHasItem = typeof itemId === 'string' && itemId.trim().length > 10;
+                        const hasItem = configHasItem || snapItem !== null;
+                        const displayName = hasItem ? (snapItem?.name ?? 'Included') : 'Not included';
+                        return (
+                          <div key={role} className={specRow}>
+                            <span className="font-medium text-gray-700">{label}:</span>
+                            <span className={`ml-2 ${hasItem ? 'text-gray-900' : 'text-gray-400'}`}>{displayName}</span>
+                          </div>
+                        );
+                      };
+
+                      return (
+                        <>
+                          {componentRow('Bottom Bar', (config as any).bottom_bar_item_id, 'bottom_bar')}
+                          {componentRow('Cassette', (config as any).headbox_item_id, 'headbox')}
+                          {componentRow('Side Channel', (config as any).side_channel_item_id, 'side_channel')}
+                          {componentRow('Bottom Channel', (config as any).bottom_channel_item_id, 'bottom_channel')}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+                {!isShadeProduct && !isWindowFilm && (
+                  <>
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Position:</span>
+                      <span className="ml-2 text-gray-900">{config.position ?? 'Not selected'}</span>
+                    </div>
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Accessories:</span>
+                      <span className="ml-2 text-gray-900">{config.accessories?.length || 0} items</span>
+                    </div>
+                  </>
+                )}
+                {showRollWidthWarning && (
+                  <div className="col-span-2 mt-3 p-4 bg-amber-50 border border-amber-200 rounded text-sm">
+                    <p className="font-medium text-amber-800">
+                      Rule: no panel can be wider than the roll ({Math.round(rollWidthMm!)} mm).
+                    </p>
+                    <p className="text-amber-700 mt-1">
+                      Panel(s) exceeding: {panelsExceedingRoll.map((p: any) => `Panel ${p.index} (${p.width_mm} mm)`).join(', ')}.
+                    </p>
+                    <p className="text-amber-700 mt-1 italic">
+                      Note: rotate the fabric if applicable.
+                    </p>
                   </div>
-                ) : null}
+                )}
               </div>
             </div>
+              );
+            })()}
           </div>
         </div>
         
-        {/* BOM Breakdown Section */}
-        <div className="mt-6 pt-6 border-t border-gray-200">
+        {/* PRODUCT MSRP BREAKDOWN */}
+        <div className="pt-5 border-t border-gray-200">
           <div 
             className="flex items-center justify-between cursor-pointer"
             onClick={() => setShowBreakdown(!showBreakdown)}
           >
             <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                BOM COMPONENT BREAKDOWN
+                PRODUCT MSRP BREAKDOWN
                 {hasValidSnapshot && (
                   <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded font-normal">
                     Snapshot
@@ -731,10 +989,10 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           UOM
                         </th>
                         <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Unit Price
+                          Unit Price (MSRP)
                         </th>
                         <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Total
+                          Total (MSRP)
                         </th>
                       </tr>
                     </thead>
@@ -780,121 +1038,242 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                             {Number(line.qty).toFixed(2)}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-center text-gray-500">
-                            {line.uom}
+                            {formatUom(line.uom)}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
-                            ${line.unitPrice.toFixed(2)}
+                            <div>
+                              {formatMoney(line.unitPrice)} / {formatUom(line.uom)}
+                              {/* Roll: secondary equivalent price when roll_width_m available */}
+                              {line.kind === 'roll' && (line.meta as any)?.roll_width_m != null && Number((line.meta as any).roll_width_m) > 0 && (() => {
+                                const rw = Number((line.meta as any).roll_width_m);
+                                const uomNorm = String(line.uom || '').toLowerCase().replace('²', '2');
+                                if (uomNorm === 'm' || line.uom === 'm') {
+                                  const perM2 = line.unitPrice / rw;
+                                  return <div className="text-xs text-gray-500 mt-0.5">≈ {formatMoney(perM2)} / m²</div>;
+                                }
+                                if (uomNorm === 'm2' || line.uom === 'm²') {
+                                  const perM = line.unitPrice * rw;
+                                  return <div className="text-xs text-gray-500 mt-0.5">≈ {formatMoney(perM)} / m</div>;
+                                }
+                                return null;
+                              })()}
+                            </div>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-gray-900">
-                            ${line.totalPrice.toFixed(2)}
+                            {formatMoney(line.totalPrice)}
                           </td>
                         </tr>
                       ))}
-                      {/* Accessories as breakdown row when snapshot has total */}
-                      {snapshotTotals && (snapshotTotals.accessories_total || 0) > 0 && (
-                        <tr className="bg-gray-50 border-t border-gray-200">
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            <span className="font-medium text-gray-900">Accessories</span>
-                            {config.accessories?.length ? (
-                              <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-200 text-gray-600 rounded">
-                                {config.accessories.length} items
-                              </span>
-                            ) : null}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">—</td>
-                          <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
-                            {config.accessories?.length || 1}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap text-center text-gray-500">ea</td>
-                          <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
-                            ${((snapshotTotals.accessories_total || 0) / (config.accessories?.length || 1)).toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-gray-900">
-                            ${(snapshotTotals.accessories_total || 0).toFixed(2)}
-                          </td>
-                        </tr>
-                      )}
-                      {/* Labor as breakdown row when snapshot has amount */}
-                      {snapshotTotals && (snapshotTotals.labor_amount || 0) > 0 && (
+                      {/* Accessories are NOT part of ConfiguredProduct breakdown; they are separate QuoteLines. */}
+                      {/* Labor as breakdown row when we have a labor amount (from snapshot or derived) */}
+                      {(effectiveLaborMsrpAmount || 0) > 0 && (
                         <tr className="bg-gray-50 border-t border-gray-200">
                           <td className="px-3 py-2 whitespace-nowrap">
                             <span className="font-medium text-gray-900">
-                              Labor ({snapshotTotals.labor_pct ?? 0}%)
+                              Labor ({effectiveTotals.labor_pct ?? 0}%)
                             </span>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-gray-500">—</td>
                           <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">1</td>
                           <td className="px-3 py-2 whitespace-nowrap text-center text-gray-500">—</td>
                           <td className="px-3 py-2 whitespace-nowrap text-right text-gray-600">
-                            ${(snapshotTotals.labor_amount || 0).toFixed(2)}
+                            ${effectiveLaborMsrpAmount.toFixed(2)}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-gray-900">
-                            ${(snapshotTotals.labor_amount || 0).toFixed(2)}
+                            ${effectiveLaborMsrpAmount.toFixed(2)}
                           </td>
                         </tr>
                       )}
                     </tbody>
-                    <tfoot className="bg-gray-100">
-                      {/* Show detailed breakdown: Roll/Fabric + BOM = Total */}
-                      {snapshotTotals ? (
-                        <>
-                          {(effectiveTotals.roll_msrp_total || 0) > 0 && (
-                            <tr className="border-t border-gray-300">
-                              <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
-                                Roll/Fabric:
-                              </td>
-                              <td className="px-3 py-1 text-right text-gray-700">
-                                ${(effectiveTotals.roll_msrp_total || 0).toFixed(2)}
-                              </td>
-                            </tr>
-                          )}
-                          <tr>
-                            <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
-                              BOM Components:
-                            </td>
-                            <td className="px-3 py-1 text-right text-gray-700">
-                              ${(effectiveTotals.bom_total || 0).toFixed(2)}
-                            </td>
-                          </tr>
-                          {(effectiveTotals.accessories_total || 0) > 0 && (
-                            <tr>
-                              <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
-                                Accessories:
-                              </td>
-                              <td className="px-3 py-1 text-right text-gray-700">
-                                ${effectiveTotals.accessories_total.toFixed(2)}
-                              </td>
-                            </tr>
-                          )}
-                          {(effectiveTotals.labor_amount || 0) > 0 && (
-                            <tr>
-                              <td colSpan={5} className="px-3 py-1 text-right text-sm text-gray-600">
-                                Labor ({effectiveTotals.labor_pct ?? 0}%):
-                              </td>
-                              <td className="px-3 py-1 text-right text-gray-700">
-                                ${effectiveTotals.labor_amount.toFixed(2)}
-                              </td>
-                            </tr>
-                          )}
-                          <tr className="border-t border-gray-400">
-                            <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">
-                              Total MSRP:
-                            </td>
-                            <td className="px-3 py-2 text-right font-bold text-gray-900">
-                              ${(effectiveTotals.total_msrp || breakdownTotal || 0).toFixed(2)}
-                            </td>
-                          </tr>
-                        </>
-                      ) : (
+                    <tfoot className="border-t-2 border-gray-300">
+
+                      {/* ── MSRP SUBTOTALS ──────────────────────────────── */}
+                      <tr>
+                        <td colSpan={6} className="px-3 pt-5 pb-1.5 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                          MSRP Subtotals (unit)
+                        </td>
+                      </tr>
+                      {(effectiveTotals.roll_msrp_total || 0) > 0 && (
                         <tr>
-                          <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">
-                            Subtotal (BOM):
+                          <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                            Roll Product Subtotal MSRP
                           </td>
-                          <td className="px-3 py-2 text-right font-bold text-gray-900">
-                            ${breakdownTotal.toFixed(2)}
+                          <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                            ${(effectiveTotals.roll_msrp_total || 0).toFixed(2)}
                           </td>
                         </tr>
                       )}
+                      <tr>
+                        <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                          BOM Product Subtotal MSRP
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                          ${(effectiveTotals.bom_total || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                      {(effectiveLaborMsrpAmount || 0) > 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                            Labor MSRP
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                            ${effectiveLaborMsrpAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="border-t border-gray-200">
+                        <td colSpan={5} className="px-3 py-2.5 text-right text-sm font-bold text-gray-900">
+                          Total MSRP (per unit)
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-bold text-gray-900 tabular-nums">
+                          ${(computedUnitMsrp || totalProductMsrpUnit || 0).toFixed(2)}
+                        </td>
+                      </tr>
+
+                      {/* ── DEALER PRICING ──────────────────────────────── */}
+                      <tr className="border-t-2 border-gray-300">
+                        <td colSpan={6} className="px-3 pt-5 pb-1.5 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                          Dealer Pricing
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                          Dealer Price (unit)
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                          {computedUnitDealerPrice != null ? `$${Number(computedUnitDealerPrice).toFixed(2)}` : '—'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                          MSRP Margin (on sale)
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-gray-600 tabular-nums">
+                          {(msrpMarginPct * 100).toFixed(0)}%
+                        </td>
+                      </tr>
+                      <tr className="border-t border-gray-200">
+                        <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                          Qty
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-semibold text-gray-700 tabular-nums">
+                          {lineQuantity}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="px-3 py-1.5 text-right text-sm font-bold text-gray-900">
+                          Dealer Line Total
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-bold text-gray-900 tabular-nums">
+                          {dealerLineTotal != null ? `$${Number(dealerLineTotal).toFixed(2)}` : '—'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="px-3 pb-4 text-right text-sm font-bold text-gray-900">
+                          MSRP Line Total
+                        </td>
+                        <td className="px-3 pb-4 text-right font-bold text-gray-900 tabular-nums">
+                          {msrpLineTotal != null ? `$${Number(msrpLineTotal).toFixed(2)}` : '—'}
+                        </td>
+                      </tr>
+
+                      {/* ── COST BREAKDOWN ──────────────────────────────── */}
+                      {(effectiveCosts.unit_product_cost || effectiveCosts.roll_cost || effectiveCosts.bom_cost || effectiveCosts.unit_labor_cost || (effectiveCosts.labor_pct ?? 0) > 0) ? (
+                        <>
+                          <tr className="border-t-2 border-gray-300">
+                            <td colSpan={6} className="px-3 pt-5 pb-1.5 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                              Cost Breakdown (internal)
+                            </td>
+                          </tr>
+                          {(effectiveCosts.roll_cost || 0) > 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                                Roll Cost:
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                                ${(effectiveCosts.roll_cost || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          )}
+                          {(effectiveCosts.bom_cost || 0) > 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                                BOM Cost:
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                                ${(effectiveCosts.bom_cost || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          )}
+                          {(effectiveCosts.accessories_cost || 0) > 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                                Accessories Cost:
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                                ${(effectiveCosts.accessories_cost || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          )}
+                          <tr className="border-t border-gray-200">
+                            <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                              Materials Cost (Roll + BOM + Acc):
+                            </td>
+                            <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                              ${(effectiveCosts.unit_product_cost || 0).toFixed(2)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                              Labor Cost ({(effectiveCosts.labor_pct ?? 0).toFixed(1)}% of materials):
+                            </td>
+                            <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                              ${(effectiveCosts.unit_labor_cost || 0).toFixed(2)}
+                            </td>
+                          </tr>
+                          <tr className="border-t border-gray-200">
+                            <td colSpan={5} className="px-3 py-2.5 text-right text-sm font-bold text-gray-900">
+                              Total Cost:
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-bold text-gray-900 tabular-nums">
+                              ${(effectiveCosts.total_cost || 0).toFixed(2)}
+                            </td>
+                          </tr>
+
+                          {/* ── PROFIT ──────────────────────────────────── */}
+                          <tr className="border-t-2 border-gray-300">
+                            <td colSpan={6} className="px-3 pt-5 pb-1.5 text-right text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                              Profit (unit)
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                              Dealer Price:
+                            </td>
+                            <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                              {computedUnitDealerPrice != null ? `$${Number(computedUnitDealerPrice).toFixed(2)}` : '—'}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={5} className="px-3 py-1.5 text-right text-sm text-gray-500">
+                              Gross Profit:
+                            </td>
+                            <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                              {computedUnitDealerPrice != null ? `$${(Number(computedUnitDealerPrice) - Number(effectiveCosts.total_cost || 0)).toFixed(2)}` : '—'}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={5} className="px-3 pb-5 text-right text-sm text-gray-500">
+                              Gross Margin (Dealer):
+                            </td>
+                            <td className="px-3 pb-5 text-right text-gray-700 tabular-nums">
+                              {computedUnitDealerPrice != null && Number(computedUnitDealerPrice) > 0
+                                ? `${(((Number(computedUnitDealerPrice) - Number(effectiveCosts.total_cost || 0)) / Number(computedUnitDealerPrice)) * 100).toFixed(1)}%`
+                                : '—'}
+                            </td>
+                          </tr>
+                        </>
+                      ) : null}
                     </tfoot>
                   </table>
                 </div>

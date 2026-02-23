@@ -26,9 +26,6 @@ export default function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
-  const [sendingOtp, setSendingOtp] = useState(false);
   const [connectionTest, setConnectionTest] = useState<{ status: 'idle' | 'testing' | 'ok' | 'fail'; message?: string }>({ status: 'idle' });
 
   const params = new URLSearchParams(window.location.search);
@@ -163,124 +160,10 @@ export default function Login() {
     }
   };
 
-  const handleSendOtp = async () => {
-    if (!emailOrPhone) {
-      setLoginError("Please enter your email address");
-      return;
-    }
-
-    const email = emailOrPhone.trim().toLowerCase();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setLoginError("Please enter a valid email address");
-      return;
-    }
-
-    setSendingOtp(true);
-    setLoginError(null);
-    setError(null);
-
-    try {
-      // signInWithOtp envía un email; si recibes Magic Link en vez de código OTP,
-      // cambia en Supabase: Authentication → Email Templates → "Magic Link":
-      // usa {{ .Token }} (código 6 dígitos) en lugar de {{ .ConfirmationURL }} (link).
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: true,
-        },
-      });
-
-      if (error) throw error;
-      setOtpSent(true);
-    } catch (error: any) {
-      setLoginError(error?.message || "Failed to send OTP code");
-    } finally {
-      setSendingOtp(false);
-    }
+  const goToResetPassword = () => {
+    const nextParam = next && next !== "/dashboard" ? `&next=${encodeURIComponent(next)}` : "";
+    router.navigate(`/reset-password?email=${encodeURIComponent(emailOrPhone.trim())}${nextParam}`, true);
   };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!otpCode || otpCode.length !== 6) {
-      setLoginError("Please enter the 6-digit code");
-      return;
-    }
-
-    setIsLoading(true);
-    setLoginError(null);
-    setError(null);
-
-    try {
-      const email = emailOrPhone.trim().toLowerCase();
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: otpCode,
-        type: 'email',
-      });
-      
-      if (error) throw error;
-
-      if (data.user && data.session) {
-        setAuth(
-          {
-            id: data.user.id,
-            email: data.user.email || "",
-            name: data.user.user_metadata?.name || data.user.email || "",
-            role: "user",
-          },
-          data.session.access_token
-        );
-
-        // ✅ Check if user must change password (temp password flow)
-        const { data: orgCheck } = await supabase
-          .from('OrganizationUsers')
-          .select('must_change_password')
-          .eq('user_id', data.user.id)
-          .eq('deleted', false)
-          .maybeSingle();
-
-        const { data: portalCheck } = await supabase
-          .from('DealerUsers')
-          .select('must_change_password')
-          .eq('user_id', data.user.id)
-          .eq('deleted', false)
-          .maybeSingle();
-    
-        if (orgCheck?.must_change_password || portalCheck?.must_change_password) {
-          console.log('[Login] User must change password, redirecting to /set-password');
-          router.navigate('/set-password', true);
-          return;
-        }
-
-        const pendingInvite = sessionStorage.getItem("pending_invite_url");
-        if (pendingInvite) {
-          sessionStorage.removeItem("pending_invite_url");
-          window.location.href = pendingInvite;
-      return;
-    }
-
-        router.navigate(next, true);
-
-        getUserProfile(data.user.id)
-          .then((profile) => {
-            if (!profile) return;
-            useAuthStore.getState().updateUser({
-              name: profile.name || data.user?.email || "",
-              role: (profile.role as "user" | "admin") || "user",
-              department: profile.department,
-              position: profile.position,
-            });
-          })
-          .catch(() => {});
-      }
-    } catch (error: any) {
-      setLoginError(error?.message || "Invalid code. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
 
   return (
     <div className="min-h-screen flex">
@@ -368,7 +251,7 @@ export default function Login() {
 
               <button
                 type="submit"
-                disabled={isLoading || otpSent}
+                disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: "#404a63" }}
               >
@@ -382,7 +265,15 @@ export default function Login() {
                 )}
               </button>
 
-              <div className="mt-3 text-center">
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goToResetPassword}
+                  className="text-sm underline hover:opacity-80 transition-colors"
+                  style={{ color: "#404a63" }}
+                >
+                  ¿Olvidaste tu contraseña? Restablecer contraseña
+                </button>
                 <button
                   type="button"
                   onClick={handleTestConnection}
@@ -393,88 +284,18 @@ export default function Login() {
                   {connectionTest.status === 'testing' ? 'Probando...' : 'Probar conexión a Supabase'}
                 </button>
                 {connectionTest.status === 'ok' && connectionTest.message && (
-                  <p className="mt-2 text-xs text-green-700">{connectionTest.message}</p>
+                  <p className="text-xs text-green-700">{connectionTest.message}</p>
                 )}
                 {connectionTest.status === 'fail' && connectionTest.message && (
-                  <p className="mt-2 text-xs text-red-700">{connectionTest.message}</p>
+                  <p className="text-xs text-red-700">{connectionTest.message}</p>
                 )}
               </div>
             </form>
-
-            {otpSent ? (
-              <form onSubmit={handleVerifyOtp} className="mt-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">
-                    Enter 6-digit code
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-3 h-10 border border-gray-300 rounded text-center text-lg tracking-widest focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                    placeholder="000000"
-                    required
-                    autoFocus
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Check your email for the code
-                  </p>
-              </div>
-                <button
-                  type="submit"
-                  disabled={isLoading || otpCode.length !== 6}
-                  className="w-full flex items-center justify-center gap-2 px-4 h-8 rounded text-white transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: "#404a63" }}
-                >
-                  {isLoading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Verifying...
-                    </>
-                  ) : (
-                    "Verify Code"
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOtpSent(false);
-                    setOtpCode('');
-                  }}
-                  className="w-full text-sm hover:opacity-80 transition-colors"
-                  style={{ color: "#404a63" }}
-                >
-                  Use different email
-                </button>
-              </form>
-            ) : (
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={handleSendOtp}
-                  disabled={sendingOtp || !emailOrPhone}
-                  className="w-full flex items-center justify-center gap-2 px-4 h-8 border border-gray-300 rounded text-sm text-foreground hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {sendingOtp ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                      Sending...
-                    </>
-                  ) : (
-                    <>
-                      Send OTP code
-                      <Mail className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
           </div>
 
           <div className="text-center mt-6">
             <p className="text-sm text-muted-foreground">
-              Don't have a user account or need reset Password? Contact your administrator.
+              ¿No tienes cuenta? Contacta a tu administrador.
             </p>
           </div>
         </div>

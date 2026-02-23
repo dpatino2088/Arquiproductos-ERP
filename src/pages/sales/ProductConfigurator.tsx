@@ -12,6 +12,7 @@ import { useBOMTemplateQuestions } from '../../hooks/useBOMTemplateQuestions';
 import { UnifiedProductConfig, normalizeConfig } from './product-config/config-contract';
 import { useUIStore } from '../../stores/ui-store';
 import { createConfiguredProductPreview } from '../../lib/bom/createConfiguredProductPreview';
+import { stripCostKeys } from '../../lib/config-snapshot-schema';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useDealerConfiguratorPolicy } from '../../hooks/useDealerConfiguratorPolicy';
 import { ConfiguratorPolicyProvider } from '../../context/ConfiguratorPolicyContext';
@@ -832,8 +833,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         errors.push('Product Type is required');
       }
     } else {
-    // Core validations (full products)
-    if (!normalizedConfig.product_type_id) {
+    // Core validations (full products). product_type_id puede venir de config como productTypeId (paso PRODUCT)
+    const effectiveProductTypeId = normalizedConfig.product_type_id ?? configAny.productTypeId ?? configAny.product_type_id;
+    if (!effectiveProductTypeId) {
       errors.push('Product Type is required');
     }
     // ✅ BOM Template is NOT required in validation - it's derived automatically
@@ -936,7 +938,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         const accessoriesPayload = {
           ...finalNormalizedConfig,
           productType: 'accessories' as const,
-          position: (config as any).position ?? '',
+          area:     (config as any).area     ?? null,
+          position: (config as any).position ?? null,
           quantity: (config as any).quantity ?? 1,
           accessories: Array.isArray((config as any).accessories) ? (config as any).accessories : [],
         } as ProductConfig;
@@ -1027,15 +1030,18 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             }
           }
 
+          // ✅ config_snapshot must contain ONLY configuration (no cost/total keys)
+          const cleanConfigSnapshot = stripCostKeys(configSnapshot);
+
           // ✅ DEBUG: Log config_snapshot antes de enviar
           if (import.meta.env.DEV) {
             console.log('[ProductConfigurator] Config snapshot prepared:', {
-              hardware_color: configSnapshot.hardware_color,
-              bottom_bar_sku: configSnapshot.bottom_bar_sku,
-              headbox_sku: configSnapshot.headbox_sku,
-              motor_sku: configSnapshot.motor_sku,
-              drive_sku: configSnapshot.drive_sku,
-              tube_sku: configSnapshot.tube_sku,
+              hardware_color: cleanConfigSnapshot.hardware_color,
+              bottom_bar_sku: cleanConfigSnapshot.bottom_bar_sku,
+              headbox_sku: cleanConfigSnapshot.headbox_sku,
+              motor_sku: cleanConfigSnapshot.motor_sku,
+              drive_sku: cleanConfigSnapshot.drive_sku,
+              tube_sku: cleanConfigSnapshot.tube_sku,
               product_type_id: finalNormalizedConfig.product_type_id,
             });
           }
@@ -1043,7 +1049,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           const previewResult = await createConfiguredProductPreview({
             organization_id: activeOrganizationId,
             product_type_id: finalNormalizedConfig.product_type_id,
-            config_snapshot: configSnapshot,
+            config_snapshot: cleanConfigSnapshot,
             quote_id: quoteId || null,
           });
 

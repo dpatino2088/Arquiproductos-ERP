@@ -4,7 +4,7 @@ import { useAuthSession } from "./useAuthSession";
 import { useOrganizationContext } from "../context/OrganizationContext";
 
 type AccessUserType = "internal" | "portal" | "unknown";
-export type PortalRole = "member" | "member_manager";
+export type PortalRole = "dealer_member" | "dealer_manager";
 
 export type ModuleKey =
   | "dashboard"
@@ -38,11 +38,11 @@ type AccessContextState = {
 
 const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales"];
 
-/** Map AppUser.role_code (dealer_manager, dealer_member) or Legacy DealerUsers.role to PortalRole */
+/** Map AppUser.role_code (dealer_manager, dealer_member) or DealerUsers.role to PortalRole */
 function roleCodeToPortalRole(v: any): PortalRole | null {
   const s = (v ?? "").toString().trim().toLowerCase();
-  if (s === "member" || s === "dealer_member") return "member";
-  if (s === "member_manager" || s === "manager" || s === "dealer_manager") return "member_manager";
+  if (s === "member" || s === "dealer_member") return "dealer_member";
+  if (s === "member_manager" || s === "manager" || s === "dealer_manager") return "dealer_manager";
   return null;
 }
 
@@ -181,8 +181,43 @@ export function useAccessContext(): AccessContextState {
       }
 
       // =========================================================
-      // 2) INTERNAL SECOND (OrganizationUsers)
+      // 2) INTERNAL — AppUsers (unified: user_type='org', role_code)
       // =========================================================
+      const { data: appUserOrgRow, error: appUserOrgErr } = await supabase
+        .from("AppUsers")
+        .select("organization_id, role_code, status, deleted")
+        .eq("auth_user_id", uid)
+        .eq("user_type", "org")
+        .eq("deleted", false)
+        .in("status", ["active", "invited"])
+        .limit(1)
+        .maybeSingle();
+
+      if (!cancelled && appUserOrgRow && !appUserOrgErr) {
+        if (import.meta.env.DEV) {
+          console.log("[useAccessContext] Internal user from AppUsers:", {
+            organization_id: appUserOrgRow.organization_id,
+            role_code: appUserOrgRow.role_code,
+            status: appUserOrgRow.status,
+          });
+        }
+
+        setUserType("internal");
+        setInternalRole(appUserOrgRow.role_code ?? null);
+        setPortalRole(null);
+        setPortalOrgId(null);
+        setPortalDealerId(null);
+
+        if (!activeOrganizationId && appUserOrgRow.organization_id) {
+          setActiveOrganizationId(appUserOrgRow.organization_id);
+        }
+
+        setAccessResolved(true);
+        setLoading(false);
+        return;
+      }
+
+      // Legacy fallback: OrganizationUsers (if no AppUsers org row)
       const { data: ouRow, error: ouErr } = await supabase
         .from("OrganizationUsers")
         .select("organization_id, role, status, deleted")
@@ -191,52 +226,26 @@ export function useAccessContext(): AccessContextState {
         .in("status", ["active", "invited"])
         .maybeSingle();
 
-      if (ouErr) {
-        console.error("[useAccessContext] OrganizationUsers lookup error", {
-          message: ouErr.message,
-          details: ouErr.details,
-          hint: ouErr.hint,
-          code: ouErr.code,
-        });
-        // IMPORTANT: set a stable state so it doesn't re-fetch forever
-        if (!cancelled) {
-          setUserType("unknown");
-          setInternalRole(null);
-          setPortalRole(null);
-          setPortalOrgId(null);
-          setPortalDealerId(null);
-          setAccessResolved(true);
-          setLoading(false);
-        }
-        return;
+      if (ouErr && import.meta.env.DEV) {
+        console.debug("[useAccessContext] OrganizationUsers lookup error", ouErr.code);
       }
 
       if (!cancelled && ouRow) {
-        if (import.meta.env.DEV) {
-          console.log("[useAccessContext] OrganizationUser found:", {
-            organization_id: ouRow.organization_id,
-            role: ouRow.role,
-            status: ouRow.status
-          });
-        }
-
         setUserType("internal");
         setInternalRole(ouRow.role ?? null);
         setPortalRole(null);
         setPortalOrgId(null);
         setPortalDealerId(null);
-
         if (!activeOrganizationId && ouRow.organization_id) {
           setActiveOrganizationId(ouRow.organization_id);
         }
-
         setAccessResolved(true);
         setLoading(false);
         return;
       }
 
       // =========================================================
-      // 3) UNKNOWN - No user found in AppUsers, DealerUsers (Legacy), or OrganizationUsers
+      // 3) UNKNOWN - No user found in AppUsers (dealer/org), DealerUsers (Legacy), or OrganizationUsers
       // =========================================================
       if (!cancelled) {
         if (import.meta.env.DEV) {
@@ -280,13 +289,13 @@ export function useAccessContext(): AccessContextState {
   }, [userType]);
 
   const canApprove = useMemo(() => {
-    if (userType === "portal") return portalRole === "member_manager";
+    if (userType === "portal") return portalRole === "dealer_manager";
     return true; // Internal users: approve logic tied to permissions
   }, [userType, portalRole]);
 
   const canSeeAllDealerQuotes = useMemo(() => {
     // Only member_manager portal users can see all dealer quotes
-    return userType === "portal" && portalRole === "member_manager";
+    return userType === "portal" && portalRole === "dealer_manager";
   }, [userType, portalRole]);
 
   const canEditDirectory = useMemo(() => {
