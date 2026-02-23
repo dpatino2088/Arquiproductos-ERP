@@ -37,19 +37,21 @@ export default function AuthCallbackPage() {
     let cancelled = false;
 
     (async () => {
+      const url = new URL(window.location.href);
+      const next = safeNext(url.searchParams.get("next"));
+      const loginUrl = `/login?next=${encodeURIComponent(next)}`;
+      const goToLoginOrReset = () => {
+        if (next === "/auth/reset-password") router.navigate("/reset-password", true);
+        else router.navigate(loginUrl, true);
+      };
+
       try {
         console.log("[AuthCallback] url:", window.location.href);
         console.log("[AuthCallback] search:", window.location.search);
         console.log("[AuthCallback] hash:", window.location.hash);
 
-        const url = new URL(window.location.href);
-
-        // ✅ next + email (para detectar mismatch)
-        const next = safeNext(url.searchParams.get("next"));
+        // ✅ email (para detectar mismatch)
         const inviteEmail = normalizeEmail(url.searchParams.get("email")); // viene en tu magiclink redirect_to
-
-        // ✅ Tu ruta real de login (evita /login 404)
-        const loginUrl = `/login?next=${encodeURIComponent(next)}`;
 
         // =====================================================
         // 0) Si YA hay sesión, validar mismatch con email del link
@@ -85,7 +87,7 @@ export default function AuthCallbackPage() {
 
           if (error) {
             console.error("[AuthCallback] exchangeCodeForSession error:", error);
-            if (!cancelled) router.navigate(loginUrl, true);
+            if (!cancelled) goToLoginOrReset();
             return;
           }
         } else {
@@ -111,7 +113,7 @@ export default function AuthCallbackPage() {
 
             if (error || !data.session) {
               console.error("[AuthCallback] setSession from hash failed:", error);
-              if (!cancelled) router.navigate(loginUrl, true);
+              if (!cancelled) goToLoginOrReset();
               return;
             }
 
@@ -163,13 +165,13 @@ export default function AuthCallbackPage() {
 
         if (sessionRes.error) {
           console.error("[AuthCallback] getSession error:", sessionRes.error);
-          if (!cancelled) router.navigate(loginUrl, true);
+          if (!cancelled) goToLoginOrReset();
           return;
         }
 
         if (!sessionRes.data.session) {
           console.warn("[AuthCallback] No session after callback");
-          if (!cancelled) router.navigate(loginUrl, true);
+          if (!cancelled) goToLoginOrReset();
           return;
         }
 
@@ -232,7 +234,13 @@ export default function AuthCallbackPage() {
       } catch (e) {
         console.error("[AuthCallback] unexpected error:", e);
         if (!cancelled) {
-          router.navigate(`/login?next=${encodeURIComponent("/dashboard")}`, true);
+          // Si falló en flujo de recovery, ir a la página para pedir nuevo enlace en vez de login
+          if (next === "/auth/reset-password") {
+            router.navigate("/reset-password", true);
+          } else {
+            const fallbackNext = next && next !== "/dashboard" ? next : "/dashboard";
+            router.navigate(`/login?next=${encodeURIComponent(fallbackNext)}`, true);
+          }
         }
       }
     })();
