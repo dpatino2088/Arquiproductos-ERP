@@ -86,37 +86,36 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       const normalizedEmail = data.email.trim().toLowerCase();
       const userName: string | null = data.user_name?.trim() || null;
 
-      // ✅ Redirect del correo de invitación: usar URL base configurable en producción para evitar 404
-      // (ej. si la app está en app.adaptio.app, define VITE_APP_ORIGIN=https://app.adaptio.app)
-      const appOrigin = (import.meta.env.VITE_APP_ORIGIN ?? '').trim() || window.location.origin;
-      const redirectTo = `${appOrigin.replace(/\/$/, '')}/auth/callback?next=/set-password`;
-      const { data: inviteData, error: inviteError } = await supabase.functions.invoke('send-org-invite', {
+      // ✅ Mismo flujo que Dealer User: contraseña temporal por email (create-temp-user), no invite link
+      const { data: createData, error: createError } = await supabase.functions.invoke('create-temp-user', {
         body: {
+          kind: 'org',
           organization_id: activeOrganizationId,
+          email: normalizedEmail,
           user_email: normalizedEmail,
-          user_name: userName,
+          name: userName,
           role: data.role,
-          redirect_to: redirectTo,
         },
       });
 
-      // Edge returns 200 with ok: true even when invite email fails (org record is created)
       const errStr =
-        (typeof inviteData?.error === 'string' && inviteData.error) ||
-        (typeof (inviteError as any)?.context === 'string' && (inviteError as any).context) ||
-        (typeof inviteError?.message === 'string' && inviteError.message) ||
-        (inviteData?.ok === false ? 'Edge Function failed' : null);
-      const realMessage = typeof errStr === 'string' ? errStr : 'Failed to send invite';
-      if (inviteError && !inviteData?.ok) {
-        if (import.meta.env.DEV) console.error('[OrganizationUserNew] send-org-invite', { inviteData, inviteError, realMessage });
+        (typeof createData?.error === 'string' && createData.error) ||
+        (typeof (createError as any)?.context === 'string' && (createError as any).context) ||
+        (typeof createError?.message === 'string' && createError.message) ||
+        (createData?.ok === false ? 'Edge Function failed' : null);
+      const realMessage = typeof errStr === 'string' ? errStr : 'Error al crear usuario';
+      if (createError && !createData?.ok) {
+        if (import.meta.env.DEV) console.error('[OrganizationUserNew] create-temp-user', { createData, createError, realMessage });
         throw new Error(realMessage);
       }
 
-      const emailSent = inviteData?.email_sent === true;
-      const inviteErr = inviteData?.invite_error;
-      const message = emailSent
-        ? `Usuario creado correctamente. Se envió invitación por email a ${normalizedEmail}.`
-        : `Usuario creado correctamente y añadido a la organización.${inviteErr ? ` No se pudo enviar el correo de invitación (el usuario puede ya estar registrado).` : ' No se pudo enviar el correo de invitación.'}`;
+      const emailSent = createData?.email_sent === true;
+      let message = emailSent
+        ? `Usuario creado. Se envió email con credenciales temporales a ${normalizedEmail}.`
+        : `Usuario creado y añadido a la organización.${createData?.email_error ? ` No se pudo enviar el correo (${createData.email_error}).` : ' No se pudo enviar el correo.'}`;
+      if (createData?.temp_password) {
+        message += `\n\n🔑 Contraseña temporal: ${createData.temp_password}\n\nCopia esta contraseña y compártela con el usuario.`;
+      }
 
       useUIStore.getState().addNotification({
         type: 'success',
@@ -124,7 +123,6 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
         message,
       });
 
-      // Redirigir a la lista de usuarios de la organización
       router.navigate('/settings/organization-user');
     } catch (err: any) {
       console.error('Error creating user:', err);

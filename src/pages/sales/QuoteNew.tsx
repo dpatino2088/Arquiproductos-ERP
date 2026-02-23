@@ -584,6 +584,7 @@ function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
 export default function QuoteNew() {
   const { activeOrganizationId } = useOrganizationContext();
   const { userType, isPortal } = useAccessContext();
+  const { activeDealerId: filterDealerId } = useActiveDealer();
   const { createQuote, isCreating } = useCreateQuote();
   const { updateQuote, isUpdating } = useUpdateQuote();
   const [quoteId, setQuoteId] = useState<string | null>(null);
@@ -828,11 +829,11 @@ export default function QuoteNew() {
   }, [quoteId, activeOrganizationId, setValue]);
 
   // Load dealer info (for ALL users: portal and internal)
-  // Only load if not already loaded by loadQuoteData (edit mode)
+  // Reacts to filterDealerId changes (acting-as switcher)
   useEffect(() => {
     const loadDealerInfo = async () => {
-      // Skip if already loaded (e.g., from edit mode loadQuoteData)
-      if (dealerInfo) return;
+      // Skip if editing and dealer already loaded from quote data
+      if (quoteId && dealerInfo) return;
       
       if (!activeOrganizationId) {
         setDealerInfo(null);
@@ -882,14 +883,22 @@ export default function QuoteNew() {
             }
           }
         } else {
-          const { data: dealers, error: dealersError } = await supabase
+          // Internal user: use the acting-as dealer (filter) if set, otherwise first dealer
+          const targetDealerId = filterDealerId;
+          let query = supabase
             .from('Dealers')
             .select('id, dealer_name, dealer_no, dealer_tier_id')
             .eq('organization_id', activeOrganizationId)
             .eq('deleted', false)
-            .eq('status', 'active')
-            .order('created_at', { ascending: true })
-            .limit(1);
+            .eq('status', 'active');
+
+          if (targetDealerId) {
+            query = query.eq('id', targetDealerId);
+          } else {
+            query = query.order('created_at', { ascending: true }).limit(1);
+          }
+
+          const { data: dealers, error: dealersError } = await query;
 
           if (dealersError) {
             console.error('Error loading dealers:', dealersError);
@@ -897,12 +906,12 @@ export default function QuoteNew() {
           }
 
           if (dealers && dealers.length > 0) {
-            const firstDealer = dealers[0];
+            const dealer = dealers[0];
             setDealerInfo({
-              id: firstDealer.id,
-              name: firstDealer.dealer_name || 'Unknown Dealer',
-              number: firstDealer.dealer_no || null,
-              dealer_tier_id: firstDealer.dealer_tier_id ?? null,
+              id: dealer.id,
+              name: dealer.dealer_name || 'Unknown Dealer',
+              number: dealer.dealer_no || null,
+              dealer_tier_id: dealer.dealer_tier_id ?? null,
             });
           }
         }
@@ -912,7 +921,7 @@ export default function QuoteNew() {
     };
 
     loadDealerInfo();
-  }, [isPortal, activeOrganizationId, dealerInfo]);
+  }, [isPortal, activeOrganizationId, filterDealerId]);
 
   // Generate quote number for new quotes only (not when editing)
   useEffect(() => {

@@ -182,6 +182,55 @@ Deno.serve(async (req) => {
 
       if (error) throw new Error(`OrganizationUsers upsert failed: ${error.message}`);
       organizationUserId = orgUserRow?.id ?? null;
+
+      // AppUsers: source of truth for org roles (useCurrentOrgRole, useAccessContext)
+      const orgId = (body as any).organization_id;
+      const orgRole = String((body as any).role ?? "operator").toLowerCase();
+      const { data: existingApp } = await admin
+        .from("AppUsers")
+        .select("id")
+        .eq("organization_id", orgId)
+        .eq("user_type", "org")
+        .eq("email", email)
+        .eq("deleted", false)
+        .maybeSingle();
+
+      const appUserRow = {
+        organization_id: orgId,
+        user_type: "org",
+        dealer_id: null,
+        auth_user_id: userId,
+        email,
+        display_name: (body as any).name ?? null,
+        role_code: orgRole,
+        status: "active",
+        must_change_password: true,
+        temp_password_set_at: now,
+        updated_at: now,
+        deleted: false,
+      };
+
+      if (existingApp?.id) {
+        const { error: auErr } = await admin
+          .from("AppUsers")
+          .update({
+            auth_user_id: userId,
+            display_name: appUserRow.display_name,
+            role_code: appUserRow.role_code,
+            status: appUserRow.status,
+            must_change_password: true,
+            temp_password_set_at: now,
+            updated_at: now,
+          })
+          .eq("id", existingApp.id);
+        if (auErr) throw new Error(`AppUsers update failed: ${auErr.message}`);
+      } else {
+        const { error: auErr } = await admin.from("AppUsers").insert({
+          ...appUserRow,
+          invited_by_app_user_id: null,
+        });
+        if (auErr) throw new Error(`AppUsers insert failed: ${auErr.message}`);
+      }
     }
 
     if (body.kind === "portal") {
@@ -258,7 +307,7 @@ Deno.serve(async (req) => {
           auth_user_id: userId,
           email,
           display_name: (body as any).name ?? null,
-          role_code: roleCode,
+          role_code: dbRole,
           status: portalStatus,
           invited_by_app_user_id: null,
           deleted: false,
