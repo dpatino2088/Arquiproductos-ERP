@@ -115,8 +115,13 @@ export interface CreateConfiguredProductPreviewResult {
     bom_total: number;
     msrp_product_subtotal?: number;
     labor_pct: number;
+    labor_amount?: number;
     accessories_total: number;
     total_msrp: number;
+    unit_dealer_price?: number;
+    total_cost?: number;
+    roll_total_cost?: number;
+    bom_total_cost?: number;
   };
   // NEW: BOM Preview Snapshot for UI breakdown display
   bom_preview_snapshot?: BOMPreviewSnapshot | null;

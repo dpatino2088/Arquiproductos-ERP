@@ -80,7 +80,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
   const [dealer_id, setDealer_id] = useState<string>('');
-  const [role, setRole] = useState<CompanyPortalRole>('member');
+  const [role, setRole] = useState<CompanyPortalRole>('dealer_member');
   const [status, setStatus] = useState<string>('authorized');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -126,7 +126,7 @@ function CreatePortalUserModal({ isOpen, onClose, onSuccess, organizationId }: C
       setUser_name('');
       setUser_email('');
       setDealer_id('');
-      setRole('member');
+      setRole('dealer_member');
       setStatus('authorized');
       setSubmitError(null);
     }
@@ -387,7 +387,7 @@ function EditPortalUserModal({ isOpen, onClose, onSuccess, organizationId, user 
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
   const [dealer_id, setDealer_id] = useState<string>('');
-  const [role, setRole] = useState<CompanyPortalRole>('member');
+  const [role, setRole] = useState<CompanyPortalRole>('dealer_member');
   const [status, setStatus] = useState<string>('active');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);

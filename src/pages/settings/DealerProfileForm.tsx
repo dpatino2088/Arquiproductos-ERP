@@ -115,7 +115,7 @@ export default function DealerProfileForm() {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [addUserName, setAddUserName] = useState('');
   const [addUserEmail, setAddUserEmail] = useState('');
-  const [addUserRole, setAddUserRole] = useState<CompanyPortalRole>('member');
+  const [addUserRole, setAddUserRole] = useState<CompanyPortalRole>('dealer_member');
   const [addUserStatus, setAddUserStatus] = useState<'invited' | 'active' | 'disabled'>('invited');
   const [addUserSubmitting, setAddUserSubmitting] = useState(false);
   const [addUserError, setAddUserError] = useState<string | null>(null);
@@ -124,7 +124,7 @@ export default function DealerProfileForm() {
   const [editingUser, setEditingUser] = useState<DealerAppUser | null>(null);
   const [editUserName, setEditUserName] = useState('');
   const [editUserEmail, setEditUserEmail] = useState('');
-  const [editUserRole, setEditUserRole] = useState<CompanyPortalRole>('member');
+  const [editUserRole, setEditUserRole] = useState<CompanyPortalRole>('dealer_member');
   const [editUserStatus, setEditUserStatus] = useState<'active' | 'disabled'>('active');
   const [editUserSubmitting, setEditUserSubmitting] = useState(false);
   const [editUserError, setEditUserError] = useState<string | null>(null);
@@ -538,7 +538,7 @@ export default function DealerProfileForm() {
       setShowAddUserModal(false);
       setAddUserName('');
       setAddUserEmail('');
-      setAddUserRole('member');
+      setAddUserRole('dealer_member');
       setAddUserStatus('invited');
     } catch (err: any) {
       const msg = err?.message || 'Error creating user';
@@ -1217,8 +1217,8 @@ export default function DealerProfileForm() {
                           setAddUserError(null);
                           setAddUserName('');
                           setAddUserEmail('');
-                          setAddUserRole('member');
-                          setAddUserName(''); setAddUserEmail(''); setAddUserRole('member'); setAddUserStatus('invited'); setAddUserError(null); setShowAddUserModal(true);
+                          setAddUserRole('dealer_member');
+                          setAddUserName(''); setAddUserEmail(''); setAddUserRole('dealer_member'); setAddUserStatus('invited'); setAddUserError(null); setShowAddUserModal(true);
                         }}
                         className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors"
                       >
@@ -1244,8 +1244,8 @@ export default function DealerProfileForm() {
                             setAddUserError(null);
                             setAddUserName('');
                             setAddUserEmail('');
-                            setAddUserRole('member');
-                            setAddUserName(''); setAddUserEmail(''); setAddUserRole('member'); setAddUserStatus('invited'); setAddUserError(null); setShowAddUserModal(true);
+                            setAddUserRole('dealer_member');
+                            setAddUserName(''); setAddUserEmail(''); setAddUserRole('dealer_member'); setAddUserStatus('invited'); setAddUserError(null); setShowAddUserModal(true);
                           }}
                           className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
                         >

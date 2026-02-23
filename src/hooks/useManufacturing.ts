@@ -11,6 +11,15 @@ import { normalizeUUID } from '../utils/uuid';
 export type ManufacturingOrderStatus = 'draft' | 'planned' | 'in_production' | 'completed' | 'cancelled';
 export type ManufacturingOrderPriority = 'low' | 'normal' | 'high' | 'urgent';
 
+/** Production status from factory flow (production_status_mo enum). */
+export type ProductionStatusMO =
+  | 'Pending Review'
+  | 'Planned'
+  | 'In Production'
+  | 'Completed'
+  | 'Ready for Pickup'
+  | 'Delivered';
+
 export interface ManufacturingOrder {
   id: string;
   organization_id: string;
@@ -18,6 +27,10 @@ export interface ManufacturingOrder {
   manufacturing_order_no: string;
   status: ManufacturingOrderStatus;
   priority: ManufacturingOrderPriority;
+  /** New factory flow column (production_status_mo). */
+  production_status?: ProductionStatusMO | null;
+  /** New factory flow column (priority_code_enum: Low, Normal, High, Rush). */
+  priority_code?: string | null;
   scheduled_start_date?: string | null;
   scheduled_end_date?: string | null;
   actual_start_date?: string | null;

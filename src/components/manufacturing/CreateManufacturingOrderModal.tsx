@@ -75,14 +75,14 @@ export default function CreateManufacturingOrderModal({
     }
   }, [isOpen, reset]);
 
-  const priorityMap: Record<string, ManufacturingOrderPriority> = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Rush' };
+  const priorityMap: Record<string, ManufacturingOrderPriority> = { low: 'low', normal: 'normal', high: 'high', urgent: 'urgent' };
   const onSubmit = async (data: CreateMOFormValues) => {
     try {
       const mo = await createManufacturingOrder({
         sales_order_id: data.sales_order_id,
         scheduled_start_date: data.scheduled_start_date || undefined,
         scheduled_end_date: data.scheduled_end_date || undefined,
-        priority: priorityMap[data.priority || 'normal'] ?? 'Normal',
+        priority: priorityMap[data.priority || 'normal'] ?? 'normal',
         notes: data.notes || undefined,
       });
 

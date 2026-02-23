@@ -118,8 +118,12 @@ function getProposalIdFromPath(): string | null {
   return m ? m[1] : null;
 }
 
-export default function ProposalDetail() {
-  const proposalId = getProposalIdFromPath();
+interface ProposalDetailProps {
+  proposalIdOverride?: string | null;
+}
+
+export default function ProposalDetail({ proposalIdOverride }: ProposalDetailProps = {}) {
+  const proposalId = proposalIdOverride ?? getProposalIdFromPath();
   const { proposal, lines, addonsMap, quoteLinesMap, configuredProductsMap, quote, customer, contact, dealerLogoUrl, loading, error, refetch, setCanWrite, canWrite } =
     useProposalDetail(proposalId);
 
