@@ -837,7 +837,7 @@ export default function DealerUsers() {
     if (!activeOrganizationId) return;
     const confirmed = await showConfirm({
       title: 'Delete Dealer User',
-      message: `Are you sure you want to permanently delete "${user.display_name || user.email || 'this user'}"? This action cannot be undone.`,
+      message: `Are you sure you want to permanently delete "${user.display_name || user.email || 'this user'}"? This will also remove the user from authentication so the email can be re-invited. This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
       cancelText: 'Cancel',
@@ -846,13 +846,35 @@ export default function DealerUsers() {
     setDeletingId(user.id);
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('AppUsers')
+      const duQuery = supabase
+        .from('DealerUsers')
         .update({ deleted: true, updated_at: new Date().toISOString() })
-        .eq('id', user.id)
         .eq('organization_id', activeOrganizationId)
-        .eq('user_type', 'dealer');
-      if (error) throw error;
+        .eq('dealer_id', user.dealer_id);
+      const { error: duErr } = user.auth_user_id
+        ? await duQuery.eq('user_id', user.auth_user_id)
+        : await duQuery.ilike('portal_user_email', user.email);
+      if (duErr) throw duErr;
+
+      if (user.auth_user_id) {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const { data: session } = await supabase.auth.getSession();
+        const res = await fetch(`${supabaseUrl}/functions/v1/delete-auth-user`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.session?.access_token ?? anonKey}`,
+            apikey: anonKey ?? '',
+          },
+          body: JSON.stringify({ auth_user_id: user.auth_user_id }),
+        });
+        const fnData = await res.json().catch(() => ({}));
+        if (!res.ok || !fnData?.ok) {
+          console.warn('[DealerUsers] Auth delete failed:', fnData?.error);
+        }
+      }
+
       addNotification({ type: 'success', title: 'User Deleted', message: 'Dealer user has been deleted successfully.' });
       refetch();
     } catch (err: any) {

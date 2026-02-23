@@ -153,13 +153,30 @@ export default function DealerProfileForm() {
     },
   });
 
-  // Get dealer ID from URL if in edit mode
+  // Get dealer ID from URL if in edit mode; sync activeTab when URL has /terms
   useEffect(() => {
     const path = window.location.pathname;
     const match = path.match(/\/settings\/dealer-profile\/edit\/([^/]+)/);
     if (match && match[1]) {
       setDealerId(match[1]);
+      if (path.endsWith('/terms')) {
+        setActiveTab('terms');
+      }
     }
+  }, []);
+
+  // Sync activeTab when navigating via browser back/forward
+  useEffect(() => {
+    const onRouteChange = () => {
+      const path = window.location.pathname;
+      if (path.includes('/settings/dealer-profile/edit/') && path.endsWith('/terms')) {
+        setActiveTab('terms');
+      } else if (path.match(/\/settings\/dealer-profile\/edit\/[^/]+$/)) {
+        setActiveTab('details');
+      }
+    };
+    window.addEventListener('popstate', onRouteChange);
+    return () => window.removeEventListener('popstate', onRouteChange);
   }, []);
 
   // Load DealerConfiguratorPolicies when editing a dealer (for Configurator Permissions tab)
@@ -590,7 +607,7 @@ export default function DealerProfileForm() {
     if (!activeOrganizationId) return;
     const confirmed = await showConfirm({
       title: 'Delete user',
-      message: `Are you sure you want to delete "${user.display_name || user.email || 'this user'}"? This action cannot be undone.`,
+      message: `Are you sure you want to delete "${user.display_name || user.email || 'this user'}"? This will also remove the user from authentication so the email can be re-invited. This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
       cancelText: 'Cancel',
@@ -598,14 +615,37 @@ export default function DealerProfileForm() {
     if (!confirmed) return;
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('AppUsers')
+      // 1) Soft delete DealerUsers (trigger will sync to AppUsers)
+      const duQuery = supabase
+        .from('DealerUsers')
         .update({ deleted: true, updated_at: new Date().toISOString() })
-        .eq('id', user.id)
         .eq('organization_id', activeOrganizationId)
-        .eq('user_type', 'dealer')
         .eq('dealer_id', user.dealer_id);
-      if (error) throw error;
+      const { error: duErr } = user.auth_user_id
+        ? await duQuery.eq('user_id', user.auth_user_id)
+        : await duQuery.ilike('portal_user_email', user.email);
+      if (duErr) throw duErr;
+
+      // 2) Delete from Auth so the email can be re-invited
+      if (user.auth_user_id) {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const { data: session } = await supabase.auth.getSession();
+        const res = await fetch(`${supabaseUrl}/functions/v1/delete-auth-user`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.session?.access_token ?? anonKey}`,
+            apikey: anonKey ?? '',
+          },
+          body: JSON.stringify({ auth_user_id: user.auth_user_id }),
+        });
+        const fnData = await res.json().catch(() => ({}));
+        if (!res.ok || !fnData?.ok) {
+          console.warn('[DealerProfileForm] Auth delete failed (user already soft-deleted):', fnData?.error);
+        }
+      }
+
       useUIStore.getState().addNotification({ type: 'success', title: 'User deleted', message: 'Dealer user has been deleted.' });
       refetchDealerUsers();
     } catch (err: any) {
@@ -669,7 +709,10 @@ export default function DealerProfileForm() {
         >
           <div className="flex items-stretch h-full" role="tablist">
             <button
-              onClick={() => setActiveTab('details')}
+              onClick={() => {
+                setActiveTab('details');
+                if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}`, false);
+              }}
               className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'details'
                   ? 'bg-white font-semibold'
@@ -691,7 +734,10 @@ export default function DealerProfileForm() {
               Details
             </button>
             <button
-              onClick={() => setActiveTab('billing')}
+              onClick={() => {
+                setActiveTab('billing');
+                if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}`, false);
+              }}
               className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'billing'
                   ? 'bg-white font-semibold'
@@ -715,7 +761,10 @@ export default function DealerProfileForm() {
             {dealerId && (
               <>
                 <button
-                  onClick={() => setActiveTab('configurator-permissions')}
+                  onClick={() => {
+                    setActiveTab('configurator-permissions');
+                    if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}`, false);
+                  }}
                   className={`transition-colors flex items-center justify-start border-r ${
                     activeTab === 'configurator-permissions'
                       ? 'bg-white font-semibold'
@@ -737,7 +786,10 @@ export default function DealerProfileForm() {
                   Configurator Permissions
                 </button>
                 <button
-                  onClick={() => setActiveTab('terms')}
+                  onClick={() => {
+                    setActiveTab('terms');
+                    if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}/terms`, false);
+                  }}
                   className={`transition-colors flex items-center justify-start ${
                     activeTab === 'terms'
                       ? 'bg-white font-semibold'

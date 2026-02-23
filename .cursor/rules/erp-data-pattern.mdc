@@ -1,0 +1,29 @@
+---
+description: ERP data and cache architecture — query keys, scope, list vs detail, mutations, tabs. Follow md/docs/ERP_DATA_PATTERN.md.
+globs: "**/hooks/use*List*.ts,**/hooks/use*Detail*.ts,**/hooks/useNearViewportWarm.ts,**/lib/queryKeys.ts,**/lib/query-client.ts,**/lib/*Fetchers.ts,**/lib/warmModuleQueries.ts,**/lib/zeroLoading.ts,**/pages/**/Directory*.tsx,**/pages/**/Catalog*.tsx,**/pages/**/Sales*.tsx,md/docs/ERP_DATA_PATTERN.md"
+alwaysApply: true
+---
+
+# ERP Data Pattern
+
+When adding or changing list/detail data, React Query cache, or module tabs in this ERP:
+
+1. **Query keys**: Use versioned keys from `src/lib/queryKeys.ts` (e.g. `directoryContactsListKey(scopeKey)`). Never raw arrays with objects. Bump `LIST_QUERY_VERSION` when fetcher/response shape changes.
+
+2. **Scope**: Build scope with `buildDirectoryScopeKey` / `buildCatalogScopeKey` (primitives only). Scope must reflect the same org/dealer that RLS uses.
+
+3. **List vs detail**: List = light query (columns for table only). Detail = heavy (roles, components, etc.) in a separate hook. Avoid N+1.
+
+4. **Mutations**: Prefer `queryClient.setQueryData` to patch after a simple UPDATE only if the change does not affect sort/filters (e.g. sku/name when sorted by name → invalidate). Use `invalidateQueries` for create/delete or when the update affects order/filters; always with the specific query key from builders.
+
+5. **Sort**: Use stable string `sortKey = column:direction` (e.g. `sku:asc`), never an object in the query key.
+
+6. **Enabled**: Lists need `enabled: isScopeReady`. Search: `(q.length === 0 || q.length >= 2)`. Add `!isHydratingUser` when auth hydration is available.
+
+7. **Tabs**: Keep all tab panels mounted; toggle with `hidden`. Warm cache with `warmModuleQueries(queryClient, [...])` inside useEffect with stable deps (e.g. scopeKey) to avoid spamming ensureQueryData.
+
+8. **Overlay**: Skeleton only when `!hasData && isInitialLoading`. When `hasData && isFetching`, show "Updating…" overlay and keep existing rows. Use `placeholderData: keepPreviousData` (TanStack v5), not `keepPreviousData: true` (v4). List: refetchOnMount false; detail can stay default.
+
+9. **Zero Loading**: Warm detail cache on hover/focus/near viewport only (never in render). Use `warmDetailIfNeeded` from `src/lib/zeroLoading.ts` with cooldown (e.g. 20s). Optional: `useNearViewportWarm` for viewport. Detail panel: no skeleton if cache has data; "Updating…" only when hasData && isFetching.
+
+Full reference: **md/docs/ERP_DATA_PATTERN.md**.

@@ -16,7 +16,7 @@ const costSettingsSchema = z.object({
   labor_msrp_margin_pct: z.number().min(0).max(95).optional(),
   shipping_percentage: z.number().min(0, 'Shipping percentage must be >= 0').max(100, 'Shipping percentage must be <= 100'),
   import_tax_percent: z.number().min(0, 'Import tax percentage must be >= 0').max(100, 'Import tax percentage must be <= 100'),
-  itbms_percent: z.number().min(0, 'Tax % must be >= 0').max(100, 'Tax % must be <= 100'),
+  tax_percent: z.number().min(0, 'Tax % must be >= 0').max(100, 'Tax % must be <= 100'),
   msrp_pct: z.number().min(0, 'MSRP % must be >= 0').max(200, 'MSRP % must be <= 200'),
   min_margin_pct: z.number().min(0, 'Minimum margin must be >= 0').max(95, 'Minimum margin must be <= 95').optional(),
 });
@@ -55,7 +55,7 @@ export default function CostEngineSettings() {
       labor_msrp_margin_pct: 65,
       shipping_percentage: 15.0000,
       import_tax_percent: 0,
-      itbms_percent: 7, // Default 7% tax (0.07 in DB). Used in Proposals.
+      tax_percent: 7, // Default 7% tax (0.07 in DB). Used in Proposals.
       msrp_pct: 65, // Default 65% MSRP (0.65 in DB)
       min_margin_pct: 35, // Default 35% minimum margin (margin-on-sale, used as pricing floor)
     },
@@ -81,7 +81,7 @@ export default function CostEngineSettings() {
   const [showImportTaxFilters, setShowImportTaxFilters] = useState(false);
   const [filterImportTaxType, setFilterImportTaxType] = useState<string>('all'); // 'all', 'custom', 'default'
   // Defaults tab: which row is being edited (Dealer Tiers style)
-  const [editingDefaultKey, setEditingDefaultKey] = useState<'shipping' | 'import_tax' | 'itbms' | null>(null);
+  const [editingDefaultKey, setEditingDefaultKey] = useState<'shipping' | 'import_tax' | 'tax' | null>(null);
   const [editingLaborKey, setEditingLaborKey] = useState<'labor_cost' | 'labor_dealer' | 'labor_msrp' | null>(null);
   const [laborEditValue, setLaborEditValue] = useState<string>('');
   const [defaultEditValue, setDefaultEditValue] = useState<string>('');
@@ -152,7 +152,7 @@ export default function CostEngineSettings() {
       setValue('labor_msrp_margin_pct', Math.round(((settings as any).labor_msrp_pct ?? settings.default_msrp_pct ?? 0.65) * 100));
       setValue('shipping_percentage', Math.round(settings.shipping_pct * 100));
       setValue('import_tax_percent', Math.round(settings.global_import_tax_pct * 100));
-      setValue('itbms_percent', Math.round((settings.itbms_pct ?? 0.07) * 100));
+      setValue('tax_percent', Math.round((settings.tax_pct ?? 0.07) * 100));
       
       const msrpValue = Math.round((settings.default_msrp_pct || 0.65) * 100);
       console.log('📥 Setting msrp_pct to:', msrpValue);
@@ -180,7 +180,7 @@ export default function CostEngineSettings() {
         labor_msrp_pct: (data.labor_msrp_margin_pct ?? 65) / 100,
         shipping_pct: data.shipping_percentage / 100,
         global_import_tax_pct: data.import_tax_percent / 100,
-        itbms_pct: (data.itbms_percent ?? 7) / 100,
+        tax_pct: (data.tax_percent ?? 7) / 100,
         default_msrp_pct: msrpPct,
         minimum_margin_pct: (data.min_margin_pct ?? 35) / 100,
       };
@@ -375,7 +375,7 @@ export default function CostEngineSettings() {
                 {[
                   { key: 'shipping' as const, label: 'Shipping Percentage (%)', field: 'shipping_percentage' as const },
                   { key: 'import_tax' as const, label: 'Global Import Tax % (Fallback)', field: 'import_tax_percent' as const },
-                  { key: 'itbms' as const, label: 'Tax % (Proposals)', field: 'itbms_percent' as const, tooltip: 'General tax (Panama). Used in Proposals/Invoices.' },
+                  { key: 'tax' as const, label: 'Tax % (Proposals)', field: 'tax_percent' as const, tooltip: 'General tax (Panama). Used in Proposals/Invoices.' },
                 ].map(({ key, label, field, tooltip }) => {
                   const isEditing = editingDefaultKey === key;
                   const displayValue = watch(field) ?? 0;
@@ -398,7 +398,7 @@ export default function CostEngineSettings() {
                       await upsertSettings({
                         shipping_pct: (data.shipping_percentage ?? 15) / 100,
                         global_import_tax_pct: (data.import_tax_percent ?? 0) / 100,
-                        itbms_pct: (data.itbms_percent ?? 7) / 100,
+                        tax_pct: (data.tax_percent ?? 7) / 100,
                         default_msrp_pct: (settings?.default_msrp_pct ?? 0.65),
                         minimum_margin_pct: (settings?.minimum_margin_pct ?? 0.35),
                         labor_pct: (settings?.labor_pct ?? 0.10),
@@ -511,7 +511,7 @@ export default function CostEngineSettings() {
                         labor_msrp_pct: (data.labor_msrp_margin_pct ?? 65) / 100,
                         shipping_pct: (settings?.shipping_pct ?? 0.15),
                         global_import_tax_pct: (settings?.global_import_tax_pct ?? 0),
-                        itbms_pct: (settings?.itbms_pct ?? 0.07),
+                        tax_pct: (settings?.tax_pct ?? 0.07),
                         default_msrp_pct: (settings?.default_msrp_pct ?? 0.65),
                         minimum_margin_pct: (settings?.minimum_margin_pct ?? 0.35),
                       });

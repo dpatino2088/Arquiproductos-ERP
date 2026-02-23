@@ -34,6 +34,8 @@ import { commitConfiguredProduct } from '../../lib/quotes/commitConfiguredProduc
 import { getConfigFromQuoteLine } from '../../lib/quotes/getConfigFromQuoteLine';
 import { createConfiguredProductPreview, recalculateConfiguredProductTotals } from '../../lib/bom/createConfiguredProductPreview';
 import DimensionsStackView from '../../components/DimensionsStackView';
+import QuoteTermsDisplay from '../../components/sales/QuoteTermsDisplay';
+import { resolveDefaultTermsTemplateId, fetchTermsTemplateById } from '../../lib/terms';
 
 // ====================================================
 // UTILS: Error Serialization (Safe)
@@ -401,6 +403,7 @@ const quoteSchema = z.object({
   currency: z.string().min(1, 'Currency is required'),
   description: z.string().optional(),
   po_number: z.string().optional(),
+  exempt_tax: z.boolean().optional(),
 });
 
 type QuoteFormValues = z.infer<typeof quoteSchema>;
@@ -633,6 +636,7 @@ export default function QuoteNew() {
       currency: 'USD',
       description: '',
       po_number: '',
+      exempt_tax: false,
     },
   });
 
@@ -791,6 +795,7 @@ export default function QuoteNew() {
           setValue('currency', 'USD'); // Default for UI formatting (not stored in DB)
           setValue('description', (data as any).description ?? (data as any).notes ?? '');
           setValue('po_number', (data as any).po_number ?? '');
+          setValue('exempt_tax', (data as any).exempt_tax ?? false);
           // Load contact_id if it exists (contact_id DOES exist in Quotes table)
           if (data.contact_id) {
             setSelectedContactId(data.contact_id);
@@ -950,9 +955,10 @@ export default function QuoteNew() {
       }
 
       try {
-        // Use the utility function to generate next sequential number
+        // Per-dealer sequence: QT-0100, QT-0101... (each dealer has independent QT sequence)
         const { generateNextQuoteNumber } = await import('../../lib/sequential-numbers');
-        const quoteNo = await generateNextQuoteNumber(activeOrganizationId);
+        const dealerIdForSeq = dealerInfo?.id ?? filterDealerId ?? null;
+        const quoteNo = await generateNextQuoteNumber(activeOrganizationId, dealerIdForSeq);
         setValue('quote_no', quoteNo, { shouldValidate: true });
       } catch (err) {
         console.error('Error generating quote number:', err);
@@ -967,7 +973,7 @@ export default function QuoteNew() {
     }, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [activeOrganizationId, quoteId, setValue, watch, quoteData]);
+  }, [activeOrganizationId, quoteId, setValue, watch, quoteData, dealerInfo?.id, filterDealerId]);
 
   // Dealer tier discount: aplicado a Quote Lines (mostrar dealer price); Proposals siguen con MSRP
   const dealerDiscountPctForDisplay = useMemo(
@@ -976,8 +982,9 @@ export default function QuoteNew() {
   );
   const useDealerPrice = !!dealerInfo;
 
-  // ITBMS % from CostSettings (DB); default 7% if not set
-  const itbmsPct = costSettings?.itbms_pct ?? 0.07;
+  // Tax % from CostSettings (DB); default 7% if not set
+  const taxPct = costSettings?.tax_pct ?? 0.07;
+  const exemptTax = watch('exempt_tax') ?? false;
 
   // Calculate totals from quote lines: unit × qty (misma lógica que la tabla para que no varíe el unitario al cambiar qty)
   const totals = useMemo(() => {
@@ -992,11 +999,11 @@ export default function QuoteNew() {
         : unitMsrp * qty;
       return sum + lineTotal;
     }, 0);
-    const itbmsAmount = Math.round(subtotal * itbmsPct * 100) / 100;
-    const total = subtotal + itbmsAmount;
+    const taxAmount = exemptTax ? 0 : Math.round(subtotal * taxPct * 100) / 100;
+    const total = exemptTax ? subtotal : subtotal + taxAmount;
 
-    return { subtotal, tax: itbmsAmount, total };
-  }, [quoteLines, useDealerPrice, dealerDiscountPctForDisplay, itbmsPct]);
+    return { subtotal, tax: taxAmount, total };
+  }, [quoteLines, useDealerPrice, dealerDiscountPctForDisplay, taxPct, exemptTax]);
 
   // Handle product configuration completion
   const handleProductConfigComplete = async (productConfig: ProductConfig) => {
@@ -3029,6 +3036,21 @@ export default function QuoteNew() {
       }
       if (!dealerName) dealerName = organizationName;
 
+      // Resolve Quote Terms for PDF: use saved on quote, else from dealer's default template
+      let termsTitle = (quoteData as { terms_title?: string | null }).terms_title ?? undefined;
+      let termsContent = (quoteData as { terms_content?: string | null }).terms_content ?? undefined;
+      const effectiveDealerIdForTerms = quoteData.dealer_id ?? dealerInfo?.id ?? null;
+      if ((!termsTitle && !termsContent) && effectiveDealerIdForTerms && activeOrganizationId) {
+        const templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'quote');
+        if (templateId) {
+          const tpl = await fetchTermsTemplateById(templateId);
+          if (tpl) {
+            termsTitle = tpl.title ?? undefined;
+            termsContent = tpl.content ?? undefined;
+          }
+        }
+      }
+
       const qty = (line: any) => line.quantity ?? line.qty ?? 1;
       const dealerDiscountPct = variant === 'dealer'
         ? getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers)
@@ -3072,6 +3094,8 @@ export default function QuoteNew() {
           status: quoteData.status || watch('status'),
           currency: quoteData.currency || watch('currency'),
           notes: quoteData.description ?? quoteData.notes ?? watch('description'),
+          terms_title: termsTitle,
+          terms_content: termsContent,
           totals: quoteData.totals ?? {
             subtotal: totals.subtotal,
             tax_total: totals.tax,
@@ -3099,7 +3123,8 @@ export default function QuoteNew() {
           sellerName,
           description: quoteData.description ?? watch('description') ?? quoteData.notes ?? undefined,
           projectName: quoteData.description ?? quoteData.notes ?? watch('description') ?? undefined,
-          itbms_pct: costSettings?.itbms_pct ?? 0.07,
+          tax_pct: costSettings?.tax_pct ?? 0.07,
+          exempt_tax: (quoteData as { exempt_tax?: boolean })?.exempt_tax ?? watch('exempt_tax') ?? false,
         }
       );
 
@@ -3213,6 +3238,21 @@ export default function QuoteNew() {
       }
       if (!dealerName) dealerName = organizationName;
 
+      // Resolve Quote Terms for PDF: use saved on quote, else from dealer's default template
+      let termsTitle = (quoteData as { terms_title?: string | null }).terms_title ?? undefined;
+      let termsContent = (quoteData as { terms_content?: string | null }).terms_content ?? undefined;
+      const effectiveDealerIdForTerms = quoteData.dealer_id ?? dealerInfo?.id ?? null;
+      if ((!termsTitle && !termsContent) && effectiveDealerIdForTerms && activeOrganizationId) {
+        const templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'quote');
+        if (templateId) {
+          const tpl = await fetchTermsTemplateById(templateId);
+          if (tpl) {
+            termsTitle = tpl.title ?? undefined;
+            termsContent = tpl.content ?? undefined;
+          }
+        }
+      }
+
       const qty = (line: any) => line.quantity ?? line.qty ?? 1;
       const dealerDiscountPct = getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers);
       const pdfLines = quoteLines.map((line: any) => {
@@ -3250,6 +3290,8 @@ export default function QuoteNew() {
           status: quoteData.status || watch('status'),
           currency: quoteData.currency || watch('currency'),
           notes: quoteData.description ?? quoteData.notes ?? watch('description'),
+          terms_title: termsTitle,
+          terms_content: termsContent,
           totals: quoteData.totals ?? { subtotal: totals.subtotal, tax_total: totals.tax, total: totals.total },
           created_at: quoteData.created_at || new Date().toISOString(),
         },
@@ -3272,7 +3314,8 @@ export default function QuoteNew() {
           sellerName,
           description: quoteData.description ?? watch('description') ?? quoteData.notes ?? undefined,
           projectName: quoteData.description ?? quoteData.notes ?? watch('description') ?? undefined,
-          itbms_pct: costSettings?.itbms_pct ?? 0.07,
+          tax_pct: costSettings?.tax_pct ?? 0.07,
+          exempt_tax: (quoteData as { exempt_tax?: boolean })?.exempt_tax ?? watch('exempt_tax') ?? false,
         }
       );
 
@@ -3310,10 +3353,8 @@ export default function QuoteNew() {
     setSaveError(null);
 
     try {
-      // Quotes table columns (from DB schema):
       // id, organization_id, quote_no, status, tracking_status, customer_id, contact_id,
-      // created_by_user_id, deleted, created_at, updated_at, dealer_id, created_by_portal_user_id
-      // NOTE: currency, notes, totals are NOT stored in Quotes table
+      // created_by_user_id, deleted, created_at, updated_at, dealer_id, currency, ...
       const quoteDataPayload: any = {
         quote_no: data.quote_no,
         customer_id: data.customer_id || null,
@@ -3323,6 +3364,7 @@ export default function QuoteNew() {
         dealer_id: dealerInfo?.id || quoteData?.dealer_id || null,
         description: data.description?.trim() || null,
         po_number: data.po_number?.trim() || null,
+        exempt_tax: data.exempt_tax ?? false,
       };
 
       if (quoteId) {
@@ -3636,15 +3678,25 @@ export default function QuoteNew() {
             {quoteId && (
               <div className="col-span-12 md:col-span-4 md:col-start-9 md:row-span-1">
                 <div className="w-full max-w-xs ml-auto">
+                  <div className="flex items-center gap-2 pb-3 mb-3 border-b border-gray-100">
+                    <input
+                      type="checkbox"
+                      {...register('exempt_tax')}
+                      className="rounded border-gray-300"
+                    />
+                    <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
+                  </div>
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Subtotal:</span>
                       <span className="font-medium">{formatCurrency(totals.subtotal, watch('currency'))}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">ITBMS{itbmsPct > 0 ? ` (${Math.round(itbmsPct * 100)}%)` : ''}:</span>
-                      <span className="font-medium">{formatCurrency(totals.tax, watch('currency'))}</span>
-                    </div>
+                    {!exemptTax && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Tax{taxPct > 0 ? ` (${Math.round(taxPct * 100)}%)` : ''}:</span>
+                        <span className="font-medium">{formatCurrency(totals.tax, watch('currency'))}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-lg font-semibold border-t border-gray-200 pt-2">
                       <span>Total:</span>
                       <span>{formatCurrency(totals.total, watch('currency'))}</span>
@@ -3911,6 +3963,18 @@ export default function QuoteNew() {
       {quoteId && (
         <div className="bg-white border border-gray-200 rounded-lg mb-6">
           <QuoteProposalsSection quoteId={quoteId} />
+        </div>
+      )}
+
+      {/* Terms & Conditions (read-only, from Dealer template) */}
+      {quoteId && (
+        <div className="mb-6">
+          <QuoteTermsDisplay
+            orgId={activeOrganizationId}
+            dealerId={quoteData?.dealer_id ?? dealerInfo?.id ?? null}
+            termsTitle={quoteData?.terms_title ?? undefined}
+            termsContent={quoteData?.terms_content ?? undefined}
+          />
         </div>
       )}
 

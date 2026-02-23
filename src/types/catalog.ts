@@ -129,6 +129,7 @@ export interface Quote {
     tax: number;
     total: number;
   };
+  exempt_tax?: boolean;
   notes?: string | null;
   description?: string | null;
   po_number?: string | null;

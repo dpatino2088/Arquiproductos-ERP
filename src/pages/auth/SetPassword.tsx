@@ -84,26 +84,32 @@ export default function SetPasswordPage() {
       // ✅ IMPORTANT: Clear must_change_password in DB *before* updating password.
       // Otherwise onAuthStateChange (after updateUser) can run AuthGate while DB still has
       // needs_password=true, causing redirect back to /set-password.
-      console.log('[SetPassword] Clearing must_change_password flags in DB first...');
       const { error: orgErr } = await supabase
         .from('OrganizationUsers')
         .update(clearFlags)
         .eq('user_id', userId);
-      if (orgErr) console.warn('[SetPassword] OrganizationUsers update warning:', orgErr);
+      if (orgErr) {
+        console.error('[SetPassword] OrganizationUsers update failed:', orgErr);
+        throw new Error('No se pudo actualizar el estado. Contacta al administrador.');
+      }
 
       const { error: portalErr } = await supabase
         .from('DealerUsers')
         .update(clearFlags)
         .eq('user_id', userId);
-      if (portalErr) console.warn('[SetPassword] DealerUsers update warning:', portalErr);
+      if (portalErr) {
+        console.error('[SetPassword] DealerUsers update failed:', portalErr);
+        throw new Error('No se pudo actualizar el estado. Contacta al administrador.');
+      }
 
       const { error: appErr } = await supabase
         .from('AppUsers')
         .update(clearFlags)
         .eq('auth_user_id', userId);
-      if (appErr) console.warn('[SetPassword] AppUsers update warning:', appErr);
-
-      console.log('[SetPassword] Flags cleared, now updating password in Auth...');
+      if (appErr) {
+        console.error('[SetPassword] AppUsers update failed:', appErr);
+        throw new Error('No se pudo actualizar el estado. Contacta al administrador.');
+      }
       const { error: passwordError } = await supabase.auth.updateUser({ password });
       if (passwordError) throw passwordError;
 

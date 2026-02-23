@@ -46,13 +46,13 @@ export interface Proposal {
   subtotal_amount: number | null;
   installation_amount?: number | null;
   discount_amount: number | null;
-  itbms_amount: number | null;
-  itbms_pct?: number | null;
+  tax_amount: number | null;
+  tax_pct?: number | null;
+  exempt_tax?: boolean;
   total_amount: number | null;
   sent_at: string | null;
   snapshot_version?: number;
   created_by_user_id: string | null;
-  created_by_portal_user_id: string | null;
   deleted: boolean;
   created_at: string;
   updated_at: string;

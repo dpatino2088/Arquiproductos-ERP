@@ -550,8 +550,6 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     fetchCustomers();
   }, [fetchCustomers]);
 
-  // ✅ Estándar #3: NO limpiar data cuando scopeKey cambia - mantener previous data
-  // Solo marcar que scopeKey cambió para indicar "switching"
   useEffect(() => {
     if (!enabled) return;
     if (prevScopeKeyRef.current !== scopeKey) {
@@ -561,9 +559,8 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
           to: scopeKey,
         });
       }
+      cacheRef.current.delete(prevScopeKeyRef.current);
       prevScopeKeyRef.current = scopeKey;
-      // ✅ NO limpiar customers - mantener datos previos
-      // ✅ NO resetear hasResolvedOnce - permite diferenciar first load vs switch
       setError(null);
       setScopeState('switching');
     }

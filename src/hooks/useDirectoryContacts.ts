@@ -581,8 +581,6 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     fetchContacts();
   }, [fetchContacts]);
 
-  // ✅ Estándar #3: NO limpiar data cuando scopeKey cambia - mantener previous data
-  // Solo marcar que scopeKey cambió para indicar "switching"
   useEffect(() => {
     if (!enabled) return;
     if (prevScopeKeyRef.current !== scopeKey) {
@@ -592,9 +590,8 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
           to: scopeKey,
         });
       }
+      cacheRef.current.delete(prevScopeKeyRef.current);
       prevScopeKeyRef.current = scopeKey;
-      // ✅ NO limpiar contacts - mantener datos previos
-      // ✅ NO resetear hasResolvedOnce - permite diferenciar first load vs switch
       setError(null);
       setScopeState('switching');
     }

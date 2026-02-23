@@ -265,8 +265,14 @@
 
   /* Tablas: sin scroll lateral, todo visible en una vista */
   .table-fit-wrapper { overflow-x: hidden; }
+  /* Quotes: scroll horizontal para que Description y columnas no se monten */
+  .table-fit-wrapper.quotes-table-wrapper { overflow-x: auto; }
   .table-fit { table-layout: fixed; width: 100%; min-width: 0; }
-  .table-fit th, .table-fit td { overflow: hidden; text-overflow: ellipsis; }
+  /* Proposal Detail Lines: respetar anchos de columna (Unit Price, Line total) sin que el fixed layout reparta espacio */
+  .proposal-lines-table-wrapper { overflow-x: auto; }
+  .proposal-lines-table-wrapper .proposal-lines-table { table-layout: auto; width: auto; min-width: 100%; }
+  .proposal-lines-table-wrapper .proposal-lines-table th,
+  .proposal-lines-table-wrapper .proposal-lines-table td { overflow: visible; }
   /* Columna de acciones: íconos visibles, sin recortar */
   .table-fit th.td-actions-cell,
   .table-fit td.td-actions-cell {

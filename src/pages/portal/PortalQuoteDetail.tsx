@@ -116,7 +116,7 @@ export default function PortalQuoteDetail() {
       }
 
         // Check if user can view this quote
-        if (!canViewQuote(portalUser.portal_user_role, data, portalUser.id)) {
+        if (!canViewQuote(portalUser.portal_user_role, data, user?.id)) {
           setError('You do not have permission to view this quote');
           return;
         }
@@ -212,7 +212,7 @@ export default function PortalQuoteDetail() {
     );
   }
 
-  const canEdit = canEditQuote(portalUser.portal_user_role, quote, portalUser.id);
+  const canEdit = canEditQuote(portalUser.portal_user_role, quote, user?.id);
   const canApprove = canApproveQuote(portalUser.portal_user_role, quote);
 
   return (

@@ -486,11 +486,11 @@ export default function Quotes() {
             </div>
           </div>
         )}
-        <div className="table-fit-wrapper">
+        <div className="table-fit-wrapper quotes-table-wrapper">
           <table className="table-fit">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="w-10 py-3 px-4 text-left">
+                <th className="td-checkbox-cell w-10 py-3 px-4 text-left">
                   <input
                     type="checkbox"
                     checked={paginatedQuotes.length > 0 && paginatedQuotes.every((q) => selectedIds.has(q.id))}
@@ -498,16 +498,10 @@ export default function Quotes() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">
                   <button onClick={() => handleSort('quote_no')} className="flex items-center gap-1 hover:text-gray-900">
-                    Quote No
+                    Quote
                     {sortBy === 'quote_no' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                  </button>
-                </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
-                  <button onClick={() => handleSort('status')} className="flex items-center gap-1 hover:text-gray-900">
-                    Status
-                    {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
                 <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
@@ -519,26 +513,33 @@ export default function Quotes() {
                 <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
                   Contact
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
-                  <button onClick={() => handleSort('total')} className="flex items-center gap-1 hover:text-gray-900">
-                    Total
-                    {sortBy === 'total' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs min-w-[380px] whitespace-nowrap">Description</th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">Created By</th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[80px] whitespace-nowrap">
+                  <button onClick={() => handleSort('status')} className="flex items-center gap-1 hover:text-gray-900">
+                    Status
+                    {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">Created By</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[90px] whitespace-nowrap">
                   <button onClick={() => handleSort('created_at')} className="flex items-center gap-1 hover:text-gray-900">
                     Date
                     {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs">Actions</th>
+                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[90px] whitespace-nowrap">
+                  <button onClick={() => handleSort('total')} className="flex items-center gap-1 hover:text-gray-900">
+                    Total
+                    {sortBy === 'total' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {paginatedQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 px-6 text-center">
+                  <td colSpan={10} className="py-12 px-6 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
                       <p className="text-gray-600 mb-2">No se encontraron cotizaciones</p>
@@ -553,7 +554,7 @@ export default function Quotes() {
               ) : (
                 paginatedQuotes.map((quote) => (
                   <tr key={quote.id} className="hover:bg-gray-50">
-                    <td className="w-10 py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                    <td className="td-checkbox-cell w-10 py-4 px-4" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(quote.id)}
@@ -561,26 +562,29 @@ export default function Quotes() {
                         className="rounded border-gray-300"
                       />
                     </td>
-                    <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                    <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap">
                       {quote.quote_no}
                     </td>
+                    <td className="py-4 px-6 text-gray-700 text-sm">
+                      {quote.customer_name}
+                    </td>
+                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
+                      {(quote.contact_name ?? '').replace(/\s+/g, ' ').trim() || '—'}
+                    </td>
+                    <td className="py-4 px-6 text-gray-600 text-sm min-w-[380px] max-w-[380px] truncate text-center" title={quote.description ?? undefined}>
+                      {quote.description?.trim() || '—'}
+                    </td>
+                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">{quote.created_by ?? '—'}</td>
                     <td className="py-4 px-6">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeColor(quote.status)}`}>
                         {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
                       </span>
                     </td>
-                    <td className="py-4 px-6 text-gray-700 text-sm">
-                      {quote.customer_name}
-                    </td>
                     <td className="py-4 px-6 text-gray-600 text-sm">
-                      {quote.contact_name}
+                      {new Date(quote.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-4 px-6 text-gray-900 text-sm font-medium">
                       {formatCurrency(quote.total)}
-                    </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">{quote.created_by ?? '—'}</td>
-                    <td className="py-4 px-6 text-gray-600 text-sm">
-                      {new Date(quote.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-1 justify-end">

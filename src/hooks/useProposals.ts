@@ -11,6 +11,7 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 import { useActiveDealer } from './useActiveDealer';
 import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
+import { generateNextProposalNumber } from '../lib/sequential-numbers';
 import type { Proposal, ProposalLine, ProposalLineAddOn } from '../types/proposals';
 
 export interface ProposalListItem {
@@ -330,18 +331,42 @@ export function useProposalDetail(proposalId: string | null) {
         if (quoteData) quote = { id: quoteData.id, quote_no: quoteData.quote_no || '' };
       }
 
-      if (quoteLineIds.length > 0) {
-        const { data: qlData } = await supabase
+      // Load QuoteLines by quote_id so we have line data for the proposal's quote (more reliable than loading by ids only)
+      if (proposal.quote_id) {
+        const { data: qlData, error: qlError } = await supabase
           .from('QuoteLines')
-          .select('id, quantity, name, sku, msrp, unit_msrp, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
-          .in('id', quoteLineIds);
+          .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
+          .eq('quote_id', proposal.quote_id);
+
+        if (qlError) {
+          setState((s) => ({
+            ...s,
+            loading: false,
+            error: qlError.message || 'Error loading quote lines',
+            proposal,
+            lines,
+            addonsMap: new Map(),
+            quoteLinesMap: new Map(),
+            configuredProductsMap: {},
+            quote,
+            customer: null,
+            contact: null,
+            dealerLogoUrl: null,
+          }));
+          return;
+        }
+
         (qlData || []).forEach((ql: any) => {
+          const qty = Number(ql.quantity) || 1;
+          const lineMsrp = ql.msrp != null ? Number(ql.msrp) : null;
+          const unitSnapshot = ql.unit_msrp_total_snapshot != null ? Number(ql.unit_msrp_total_snapshot) : null;
+          const unitMsrp = unitSnapshot ?? (lineMsrp != null && qty > 0 ? lineMsrp / qty : null);
           quoteLinesMap.set(ql.id, {
-            quantity: Number(ql.quantity) || 1,
+            quantity: qty,
             name: ql.name ?? null,
             sku: ql.sku ?? null,
-            msrp: ql.msrp != null ? Number(ql.msrp) : null,
-            unit_msrp: ql.unit_msrp != null ? Number(ql.unit_msrp) : null,
+            msrp: lineMsrp,
+            unit_msrp: unitMsrp,
             area: ql.area ?? null,
             position: ql.position ?? null,
             product_type: ql.product_type ?? null,
@@ -356,9 +381,9 @@ export function useProposalDetail(proposalId: string | null) {
           });
         });
 
-        // Resolve product_type from ProductTypes when product_type is null but product_type_id is set
+        // Resolve product_type from ProductTypes: prefer name over code for display (when product_type_id is set)
         const ptIdsToResolve = (qlData || [])
-          .filter((ql: any) => ql.product_type_id && !ql.product_type)
+          .filter((ql: any) => ql.product_type_id)
           .map((ql: any) => ql.product_type_id);
         const uniquePtIds = [...new Set(ptIdsToResolve)] as string[];
         if (uniquePtIds.length > 0) {
@@ -373,7 +398,7 @@ export function useProposalDetail(proposalId: string | null) {
           });
           quoteLinesMap.forEach((ql, qlId) => {
             const ptId = ql.product_type_id;
-            if (ptId && ptMap.has(ptId) && !ql.product_type) {
+            if (ptId && ptMap.has(ptId)) {
               quoteLinesMap.set(qlId, { ...ql, product_type: ptMap.get(ptId)! });
             }
           });
@@ -574,7 +599,7 @@ export interface CreateProposalFromQuoteOptions {
 
 /**
  * Create a new Proposal from a Quote and copy its QuoteLines as ProposalLines.
- * Sets created_by_user_id or created_by_portal_user_id from auth context.
+ * Sets created_by_user_id from auth context (org and portal users).
  * Resolves dealer_id: quote.dealer_id ?? actingDealerId ?? portalUser.dealer_id (required for Proposals.dealer_id NOT NULL).
  */
 export async function createProposalFromQuote(
@@ -588,7 +613,6 @@ export async function createProposalFromQuote(
   }
 
   let createdByUserId: string | null = null;
-  let createdByPortalUserId: string | null = null;
   let portalDealerId: string | null = null;
 
   try {
@@ -603,8 +627,8 @@ export async function createProposalFromQuote(
         .eq('deleted', false)
         .limit(1)
         .single();
-      if (du) createdByPortalUserId = du.id;
-      else return { error: 'Dealer user not found' };
+      if (!du) return { error: 'Dealer user not found' };
+      createdByUserId = userId;
     } else {
       createdByUserId = userId;
     }
@@ -615,7 +639,7 @@ export async function createProposalFromQuote(
 
   const { data: quote, error: quoteErr } = await supabase
     .from('Quotes')
-    .select('id, organization_id, dealer_id, customer_id, contact_id, currency, quote_no, created_by_user_id, created_by_portal_user_id')
+    .select('id, organization_id, dealer_id, customer_id, contact_id, currency, quote_no, created_by_user_id')
     .eq('id', quoteId)
     .eq('deleted', false)
     .single();
@@ -649,23 +673,16 @@ export async function createProposalFromQuote(
     .single();
 
   const newVersion = (maxVersion?.version_no ?? 0) + 1;
-  // proposal_no must be unique per org: use quote's quote_no as base (e.g. QT-000003 -> QT-000003-V1) to avoid uq_proposals_org_proposal_no
-  const quoteNoBase = (quote.quote_no ?? 'QT-0001').trim().replace(/-V\d+$/i, '') || 'QT-0001';
-  const proposalNo = `${quoteNoBase}-V${newVersion}`;
+  // Proposal has its own sequence PR-0100, PR-0101... per dealer (independent from Quote QT-xxxx)
+  const proposalNo = await generateNextProposalNumber(orgId, dealerId);
 
-  // Constraint proposals_created_by_exactly_one_chk: exactly one of the two must be set (never both null)
-  let finalCreatedByUser: string | null = createdByPortalUserId ? null : (createdByUserId ?? userId);
-  let finalCreatedByPortal: string | null = createdByPortalUserId ?? null;
-  if (finalCreatedByUser == null && finalCreatedByPortal == null) {
-    // Fallback: copy creator from the Quote so the insert never violates the constraint
-    const q = quote as { created_by_user_id?: string | null; created_by_portal_user_id?: string | null };
-    if (q.created_by_user_id != null && q.created_by_portal_user_id == null) {
-      finalCreatedByUser = q.created_by_user_id;
-    } else if (q.created_by_portal_user_id != null && q.created_by_user_id == null) {
-      finalCreatedByPortal = q.created_by_portal_user_id;
-    } else {
-      return { error: 'Could not determine proposal creator. Please sign in again and try again.' };
-    }
+  // created_by_user_id: auth user id (org or portal). Fallback to quote's creator if needed.
+  let finalCreatedByUser: string | null = createdByUserId ?? userId;
+  if (finalCreatedByUser == null && quote.created_by_user_id != null) {
+    finalCreatedByUser = quote.created_by_user_id;
+  }
+  if (finalCreatedByUser == null) {
+    return { error: 'Could not determine proposal creator. Please sign in again and try again.' };
   }
 
   const insertProposal: Record<string, unknown> = {
@@ -679,7 +696,6 @@ export async function createProposalFromQuote(
     version_no: newVersion,
     currency: quote.currency ?? 'USD',
     created_by_user_id: finalCreatedByUser,
-    created_by_portal_user_id: finalCreatedByPortal,
   };
 
   const { data: newProposal, error: insertErr } = await supabase

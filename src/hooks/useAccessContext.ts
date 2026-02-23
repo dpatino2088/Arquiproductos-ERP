@@ -103,6 +103,8 @@ export function useAccessContext(): AccessContextState {
         .eq("deleted", false)
         .in("status", ["active", "invited"])
         .or(appUserOrFilter)
+        .order("created_at", { ascending: true })
+        .limit(1)
         .maybeSingle();
 
       if (!cancelled && appUserRow && !appUserErr) {
@@ -147,6 +149,8 @@ export function useAccessContext(): AccessContextState {
         .eq("deleted", false)
         .in("status", ["active", "invited"])
         .or(legacyOr)
+        .order("created_at", { ascending: true })
+        .limit(1)
         .maybeSingle();
 
       if (cpuErr && import.meta.env.DEV) {

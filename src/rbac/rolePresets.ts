@@ -149,17 +149,20 @@ export function isValidOrgRole(role: string): role is OrgRole {
 }
 
 /**
- * Map legacy roles to new roles
+ * Map legacy roles to new roles.
+ * Valid org roles (admin, superadmin, operator, etc.) pass through unchanged.
+ * Unknown legacy roles default to 'operator'.
  */
 export function mapLegacyRole(legacyRole: string): OrgRole {
+  const r = (legacyRole || '').toLowerCase().trim();
+  if (isValidOrgRole(r)) return r as OrgRole;
   const mapping: Record<string, OrgRole> = {
-    'owner': 'superadmin',
-    'super_admin': 'superadmin',
-    'manager': 'admin',
-    'member': 'operator',
-    'viewer': 'operator',
-    'user': 'operator',
+    owner: 'superadmin',
+    super_admin: 'superadmin',
+    manager: 'admin',
+    member: 'operator',
+    viewer: 'operator',
+    user: 'operator',
   };
-  
-  return mapping[legacyRole.toLowerCase()] || 'operator';
+  return mapping[r] ?? 'operator';
 }

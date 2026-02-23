@@ -138,6 +138,25 @@ export const getCurrentUser = async () => {
   }
 };
 
+/**
+ * Initializes session context (app.user_type, app.organization_id, app.role_code, app.dealer_id)
+ * for RLS. Must be called in the same transaction as dealer-scoped queries for correct filtering.
+ * With PostgREST each HTTP request is a new transaction, so we call this on session load and
+ * after set_acting_dealer; if RLS results are wrong, consider an RPC that runs init + SELECT.
+ */
+export const initSessionContext = async (): Promise<void> => {
+  try {
+    const { error } = await supabase.rpc('init_session_context');
+    if (error && import.meta.env.DEV) {
+      console.warn('[initSessionContext]', error.message);
+    }
+  } catch (e) {
+    if (import.meta.env.DEV) {
+      console.warn('[initSessionContext]', e);
+    }
+  }
+};
+
 export const getUserProfile = async (userId: string | null | undefined) => {
   if (!userId) return null;
 

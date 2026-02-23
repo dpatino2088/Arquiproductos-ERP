@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { supabase } from '../lib/supabase/client';
+import { supabase, initSessionContext } from '../lib/supabase/client';
 import type { Session } from "@supabase/supabase-js";
 
 type AuthState = {
@@ -62,6 +62,10 @@ export function useAuthSession(timeoutMs: number = 8000): AuthState {
         if (!mountedRef.current) return;
         setSession(nextSession);
 
+        if (nextSession) {
+          void initSessionContext();
+        }
+
         if (import.meta.env.DEV) {
           console.log("[auth] loadSession:done", {
             hasSession: !!nextSession,
@@ -100,6 +104,9 @@ export function useAuthSession(timeoutMs: number = 8000): AuthState {
       setSession(nextSession);
       setLoading(false); // IMPORTANT: no dejes loading true por eventos
       setError(null);
+      if (nextSession) {
+        void initSessionContext();
+      }
       if (import.meta.env.DEV) console.log("[auth] onAuthStateChange", event);
 
       // Link organization invites when user signs in (only once globally)

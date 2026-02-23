@@ -39,7 +39,7 @@ export interface ProposalSummaryTotals {
   discountAmount: number;
   installationAmount: number;
   subtotal: number;
-  itbmsAmount: number;
+  taxAmount: number;
   total: number;
 }
 
@@ -64,9 +64,9 @@ export interface GenerateProposalPDFOptions {
   /** For Discount label: "Discount (15%)" when set */
   global_discount_pct?: number | null;
   /** For Tax label: "Tax (7%)" when set */
-  itbms_pct?: number | null;
+  tax_pct?: number | null;
   /** If true, Tax row is hidden (tax exempt) */
-  exempt_itbms?: boolean;
+  exempt_tax?: boolean;
 }
 
 export interface ProposalPDFData {
@@ -86,9 +86,9 @@ export interface ProposalPDFData {
   subtotal_amount?: number | null;
   installation_amount?: number | null;
   discount_amount?: number | null;
-  itbms_amount?: number | null;
+  tax_amount?: number | null;
   total_amount?: number | null;
-  itbms_pct?: number | null;
+  tax_pct?: number | null;
   created_at: string;
 }
 
@@ -406,22 +406,22 @@ export function generateProposalPDF(
   const summaryLeft = pageWidth - marginX - summaryWidth;
 
   // Summary rows
-  const exemptItbms = opts.exempt_itbms ?? false;
+  const exemptTax = opts.exempt_tax ?? false;
   const useOverride = opts.overrideTotals != null;
   const totalProduct = useOverride ? opts.overrideTotals!.totalProduct : lines.reduce((sum, line) => sum + (line.line_total ?? 0), 0);
   const discountAmount = useOverride ? opts.overrideTotals!.discountAmount : (proposal.discount_amount ?? 0);
   const installationAmount = useOverride ? opts.overrideTotals!.installationAmount : (proposal.installation_amount ?? 0);
   const subtotal = useOverride ? opts.overrideTotals!.subtotal : Math.max(totalProduct - discountAmount, 0) + installationAmount;
-  const itbmsAmount = exemptItbms ? 0 : (useOverride ? opts.overrideTotals!.itbmsAmount : (proposal.itbms_amount ?? 0));
-  const total = useOverride ? opts.overrideTotals!.total : (proposal.total_amount ?? subtotal + itbmsAmount);
+  const taxAmount = exemptTax ? 0 : (useOverride ? opts.overrideTotals!.taxAmount : (proposal.tax_amount ?? 0));
+  const total = useOverride ? opts.overrideTotals!.total : (proposal.total_amount ?? subtotal + taxAmount);
   const toPctDisplay = (v: number | null | undefined): number | null =>
     v != null ? (v > 0 && v <= 1 ? Math.round(v * 100) : Math.round(v)) : null;
   const discountPctLabel = (() => {
     const n = toPctDisplay(opts.global_discount_pct) ?? toPctDisplay(proposal.global_discount_pct);
     return n != null ? ` (${n}%)` : '';
   })();
-  const itbmsPctLabel = (() => {
-    const n = toPctDisplay(opts.itbms_pct) ?? toPctDisplay(proposal.itbms_pct);
+  const taxPctLabel = (() => {
+    const n = toPctDisplay(opts.tax_pct) ?? toPctDisplay(proposal.tax_pct);
     return n != null ? ` (${n}%)` : '';
   })();
 
@@ -433,8 +433,8 @@ export function generateProposalPDF(
     summaryData.push(['Installation:', formatCurrency(installationAmount, proposal.currency)]);
   }
   summaryData.push(['Subtotal:', formatCurrency(subtotal, proposal.currency)]);
-  if (!exemptItbms) {
-    summaryData.push(['Tax' + itbmsPctLabel, formatCurrency(itbmsAmount, proposal.currency)]);
+  if (!exemptTax) {
+    summaryData.push(['Tax' + taxPctLabel, formatCurrency(taxAmount, proposal.currency)]);
   }
   summaryData.push(['Total:', formatCurrency(total, proposal.currency)]);
 

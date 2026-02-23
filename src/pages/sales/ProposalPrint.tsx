@@ -177,41 +177,41 @@ export default function ProposalPrint() {
     const discountAmount = totalProduct * (discountPct / 100);
     const installationAmount = proposal?.installation_amount ?? installationTotal ?? 0;
     const subtotal = Math.max(totalProduct - discountAmount, 0) + installationAmount;
-    const exemptItbms = (proposal as { exempt_itbms?: boolean })?.exempt_itbms ?? false;
-    if (exemptItbms) {
+    const exemptTax = proposal?.exempt_tax ?? false;
+    if (exemptTax) {
       return {
         totals: {
           totalProduct,
           discountAmount,
           installationAmount,
           subtotal,
-          itbmsAmount: 0,
+          taxAmount: 0,
           total: subtotal,
         },
         lineTotals,
       };
     }
-    if (proposal?.itbms_amount != null && proposal?.total_amount != null) {
+    if (proposal?.tax_amount != null && proposal?.total_amount != null) {
       return {
         totals: {
           totalProduct,
           discountAmount,
           installationAmount,
           subtotal,
-          itbmsAmount: proposal.itbms_amount,
+          taxAmount: proposal.tax_amount,
           total: proposal.total_amount,
         },
         lineTotals,
       };
     }
-    const itbmsPct = 0.07;
-    const itbmsAmount = subtotal * itbmsPct;
-    const total = subtotal + itbmsAmount;
+    const taxPct = 0.07;
+    const taxAmount = subtotal * taxPct;
+    const total = subtotal + taxAmount;
     return {
-      totals: { totalProduct, discountAmount, installationAmount, subtotal, itbmsAmount, total },
+      totals: { totalProduct, discountAmount, installationAmount, subtotal, taxAmount, total },
       lineTotals,
     };
-  }, [lines, addonsMap, quoteLinesMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.itbms_amount, proposal?.total_amount, proposal?.global_discount_pct, (proposal as { exempt_itbms?: boolean })?.exempt_itbms]);
+  }, [lines, addonsMap, quoteLinesMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.tax_amount, proposal?.total_amount, proposal?.global_discount_pct, proposal?.exempt_tax]);
 
   const currency = proposal?.currency || 'USD';
 
@@ -512,10 +512,10 @@ export default function ProposalPrint() {
               <span className="text-gray-600">Subtotal</span>
               <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
             </div>
-            {!(proposal as { exempt_itbms?: boolean })?.exempt_itbms && (
+            {!proposal?.exempt_tax && (
               <div className="flex justify-between py-1">
                 <span className="text-gray-600">Tax</span>
-                <span>{formatCurrency(totals.itbmsAmount ?? 0, currency)}</span>
+                <span>{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
               </div>
             )}
             <div className="flex justify-between py-2 mt-1 border-t border-gray-200 font-semibold">

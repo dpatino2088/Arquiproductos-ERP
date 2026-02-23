@@ -1,14 +1,13 @@
 /**
- * Helper reutilizable: fetch AppUsers display_name by ids (batch + cache).
+ * Helper reutilizable: fetch AppUsers display_name by auth user ids (batch + cache).
  * Usado por Quotes, QuoteLines y Proposals para columnas "Created by" / "Quote created by".
  *
+ * - Los ids recibidos son auth_user_id (auth.uid()), que coincide con Quotes.created_by_user_id y Proposals.created_by_user_id.
+ * - Busca en AppUsers por auth_user_id (no por AppUsers.id).
  * - Dedupe de ids (Set); si ids vacío retorna Map vacío y no llama a Supabase.
- * - Una sola query: .in('id', ids) a public."AppUsers".
- * - Cache en memoria (Map) por sesión para no pedir AppUsers repetido.
  * - Fallback: map.get(id) ?? 'Legacy / Imported' (null o no encontrado).
  *
- * Regla: ERP internal usa created_by_user_id; portal puede usar created_by_portal_user_id después.
- * Verificación manual: docs/CREATED_BY_VERIFICATION.md
+ * Regla: ERP y portal usan created_by_user_id; nombres vía AppUsers.auth_user_id.
  */
 
 import { supabase } from './supabase/client';
@@ -34,12 +33,13 @@ export async function getAppUsersDisplayNames(ids: string[]): Promise<Map<string
   if (missing.length > 0) {
     const { data } = await supabase
       .from('AppUsers')
-      .select('id, display_name')
-      .in('id', missing);
+      .select('auth_user_id, display_name')
+      .in('auth_user_id', missing)
+      .eq('deleted', false);
 
     for (const id of missing) {
-      const row = (data || []).find((r: { id: string }) => r.id === id);
-      const value = row?.display_name ?? 'Legacy / Imported';
+      const row = (data || []).find((r: { auth_user_id: string }) => r.auth_user_id === id);
+      const value = (row?.display_name?.trim() || row?.display_name) ?? 'Legacy / Imported';
       cache.set(id, value);
       result.set(id, value);
     }

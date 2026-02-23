@@ -10,7 +10,7 @@ export type CompanyPortalRole = 'dealer_manager' | 'dealer_member';
 export interface PortalQuote {
   id: string;
   dealer_id: string;
-  created_by_portal_user_id: string | null;
+  created_by_user_id: string | null;
   status: 'draft' | 'sent' | 'approved' | 'rejected' | 'cancelled';
   [key: string]: any;
 }
@@ -33,9 +33,9 @@ export function canCreateQuote(role: CompanyPortalRole | string | null | undefin
 export function canEditQuote(
   role: CompanyPortalRole | string | null | undefined,
   quote: PortalQuote | null | undefined,
-  portalUserId: string | null | undefined
+  authUserId: string | null | undefined
 ): boolean {
-  if (!role || !quote || !portalUserId) return false;
+  if (!role || !quote || !authUserId) return false;
 
   const normalizedRole = normalizeRole(role);
 
@@ -43,7 +43,7 @@ export function canEditQuote(
 
   if (normalizedRole === 'dealer_member') {
     return (
-      quote.created_by_portal_user_id === portalUserId &&
+      quote.created_by_user_id === authUserId &&
       quote.status === 'draft'
     );
   }
@@ -59,7 +59,7 @@ export function canEditQuote(
 export function canViewQuote(
   role: CompanyPortalRole | string | null | undefined,
   quote: PortalQuote | null | undefined,
-  portalUserId: string | null | undefined
+  authUserId: string | null | undefined
 ): boolean {
   if (!role || !quote) return false;
 
@@ -68,7 +68,7 @@ export function canViewQuote(
   if (normalizedRole === 'dealer_manager') return true;
 
   if (normalizedRole === 'dealer_member') {
-    return quote.created_by_portal_user_id === portalUserId;
+    return quote.created_by_user_id === authUserId;
   }
 
   return false;

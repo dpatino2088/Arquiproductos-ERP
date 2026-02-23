@@ -17,6 +17,8 @@ export interface QuoteListItem {
   customer_name: string;
   contact_id: string | null;
   contact_name: string;
+  /** Quote header description (optional) */
+  description?: string | null;
   total: number;
   created_at: string;
   organization_id: string;
@@ -106,13 +108,18 @@ export function useQuotes(dealerId?: string | null) {
           effectiveDealerId = selectedDealerId ?? null;
         }
 
-        // Query: misma regla que Directory — portal = dealer_id obligatorio; org = selectedDealerId o todos
+        if (import.meta.env.DEV) {
+          console.log('[useQuotes] effectiveDealerId', effectiveDealerId, effectiveDealerId ? '(filter by dealer)' : '(All dealers, RLS decides)');
+        }
+
+        // Query: misma regla que Directory — portal = dealer_id obligatorio; org = selectedDealerId o "todos" (sin filtro dealer, RLS decide)
         let query = supabase
           .from('Quotes')
-          .select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id')
+          .select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description')
           .eq('organization_id', activeOrganizationId)
           .or('deleted.is.false,deleted.is.null');
 
+        // Solo filtrar por dealer cuando hay uno seleccionado. "All dealers" = no .eq('dealer_id'), RLS devuelve lo permitido.
         if (effectiveDealerId) {
           query = query.eq('dealer_id', effectiveDealerId);
         }
@@ -138,7 +145,7 @@ export function useQuotes(dealerId?: string | null) {
         }
 
         // created_by: batched + cached AppUsers (internal ERP uses created_by_user_id).
-        // Verificación manual: ver docs/CREATED_BY_VERIFICATION.md (query Quote + AppUsers).
+        // Verificación manual: ver md/docs/CREATED_BY_VERIFICATION.md (query Quote + AppUsers).
         const createdByUserIds = quotesData
           .map((q: any) => q.created_by_user_id)
           .filter((id: any): id is string => !!id);
@@ -825,8 +832,6 @@ export function useCreateQuote() {
       }
 
       let finalDealerId = quoteData.dealer_id;
-      let createdByPortalUserId: string | null = null;
-      let createdByUserId: string | null = null;
 
       const { data: portalUser, error: portalError } = await supabase
         .from('DealerUsers')
@@ -837,15 +842,12 @@ export function useCreateQuote() {
         .maybeSingle();
 
       if (!portalError && portalUser) {
-        createdByPortalUserId = portalUser.id;
         if (!finalDealerId && portalUser.dealer_id) {
           finalDealerId = portalUser.dealer_id;
           if (import.meta.env.DEV) {
             console.log('[useCreateQuote] Auto-detected dealer_id from Dealer User:', finalDealerId);
           }
         }
-      } else {
-        createdByUserId = user.id;
       }
 
       if (!finalDealerId && quoteData.dealer_id) {
@@ -858,8 +860,7 @@ export function useCreateQuote() {
           ...quoteData,
           organization_id: activeOrganizationId,
           dealer_id: finalDealerId ?? null,
-          created_by_user_id: createdByUserId,
-          created_by_portal_user_id: createdByPortalUserId,
+          created_by_user_id: user.id,
         })
         .select()
         .single();

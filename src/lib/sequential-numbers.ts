@@ -2,7 +2,8 @@ import { supabase } from './supabase/client';
 
 /**
  * Generates the next sequential number for a given document type
- * Format: PREFIX-NNNNNN (e.g., QT-000019, OR-000001)
+ * Format: PREFIX-NNNNNN (e.g., QT-000100, OR-000001)
+ * For QT: sequence starts at 100 (QT-0100, QT-0101, ...) with 4 digits.
  * When dealerId is provided, numbering is per dealer (each dealer has independent sequence).
  *
  * @param prefix - The prefix for the number (e.g., 'QT' for Quotes)
@@ -37,18 +38,22 @@ export async function generateNextSequentialNumber(
 
     if (error) throw error;
 
-    let nextNumber = 1;
+    const isQuote = prefix === 'QT' && tableName === 'Quotes';
+    const minStart = isQuote ? 100 : 1;
+    const padLength = isQuote ? 4 : 6;
+
+    let nextNumber = minStart;
     if (data && data.length > 0) {
       const lastNo = (data[0] as any)[numberField];
       if (lastNo) {
         const match = String(lastNo).match(new RegExp(`${prefix}-(\\d+)`));
         if (match && match[1] != null) {
-          nextNumber = parseInt(match[1], 10) + 1;
+          nextNumber = Math.max(minStart, parseInt(match[1], 10) + 1);
         }
       }
     }
 
-    return `${prefix}-${String(nextNumber).padStart(6, '0')}`;
+    return `${prefix}-${String(nextNumber).padStart(padLength, '0')}`;
   } catch (err) {
     console.error(`Error generating ${prefix} number:`, err);
     return `${prefix}-${Date.now().toString().slice(-6)}`;
@@ -72,12 +77,13 @@ export async function generateNextOrderNumber(organizationId: string): Promise<s
   return generateNextSequentialNumber('OR', 'SaleOrders', 'order_no', organizationId);
 }
 
-/** Minimum proposal number (PRO-0100, PRO-0101, ...) */
+/** Minimum proposal number (PR-0100, PR-0101, ...) */
 const PROPOSAL_NUMBER_START = 100;
+const PROPOSAL_PREFIX = 'PR';
 
 /**
  * Generates the next Proposal number. Per dealer when dealerId is provided.
- * Format: PRO-NNNN starting at PRO-0100.
+ * Format: PR-NNNN starting at PR-0100. Independent from Quote (QT) numbering.
  */
 export async function generateNextProposalNumber(
   organizationId: string,
@@ -100,7 +106,7 @@ export async function generateNextProposalNumber(
         .map((row: { proposal_no: string | null }) => {
           const no = row.proposal_no;
           if (!no) return null;
-          const m = String(no).match(/^PRO-(\d+)$/i);
+          const m = String(no).match(/^(?:PR|PRO)-(\d+)$/i);
           return m ? parseInt(m[1], 10) : null;
         })
         .filter((n: number | null): n is number => n != null);
@@ -109,10 +115,10 @@ export async function generateNextProposalNumber(
       }
     }
 
-    return `PRO-${String(nextNumber).padStart(4, '0')}`;
+    return `${PROPOSAL_PREFIX}-${String(nextNumber).padStart(4, '0')}`;
   } catch (err) {
-    console.error('Error generating PRO number:', err);
-    return `PRO-${String(PROPOSAL_NUMBER_START + Math.floor(Math.random() * 900)).padStart(4, '0')}`;
+    console.error('Error generating PR number:', err);
+    return `${PROPOSAL_PREFIX}-${String(PROPOSAL_NUMBER_START + Math.floor(Math.random() * 900)).padStart(4, '0')}`;
   }
 }
 

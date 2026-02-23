@@ -509,7 +509,7 @@ export default function OrganizationUser() {
     }
   };
 
-  const handleDeleteUser = async (userId: string, userEmail?: string) => {
+  const handleDeleteUser = async (orgUser: OrganizationUser) => {
     if (!isSuperAdmin) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -530,7 +530,7 @@ export default function OrganizationUser() {
 
     const confirmed = await showConfirm({
       title: 'Delete User',
-      message: `Are you sure you want to delete user "${userEmail || userId}"? This action cannot be undone.`,
+      message: `Are you sure you want to delete user "${orgUser.user_email || orgUser.user_name || orgUser.id}"? This will also remove the user from authentication. This action cannot be undone.`,
       confirmText: 'Delete',
       cancelText: 'Cancel',
       variant: 'danger',
@@ -540,7 +540,7 @@ export default function OrganizationUser() {
       return; // Dialog already closed by showConfirm
     }
 
-    setDeletingUserId(userId);
+    setDeletingUserId(orgUser.id);
     setIsLoading(true);
     setLoading(true); // Set dialog loading state
     
@@ -549,10 +549,10 @@ export default function OrganizationUser() {
         throw new Error('No organization selected.');
       }
 
-      // Use RPC function to delete user (bypasses RLS)
+      // 1) Soft delete via RPC (bypasses RLS)
       const { data, error } = await supabase
         .rpc('delete_organization_user', {
-          p_org_user_id: userId,
+          p_org_user_id: orgUser.id,
           p_organization_id: activeOrganizationId
         });
 
@@ -560,7 +560,7 @@ export default function OrganizationUser() {
         if (import.meta.env.DEV) {
           console.error('Error deleting user via RPC:', {
             error,
-            userId,
+            userId: orgUser.id,
             organizationId: activeOrganizationId,
             errorCode: error.code,
             errorMessage: error.message,
@@ -578,6 +578,27 @@ export default function OrganizationUser() {
           ? data.error 
           : 'Could not delete user. User not found or already deleted.';
         throw new Error(errorMsg);
+      }
+
+      // 2) Delete from Auth so the email can be re-invited
+      if (orgUser.user_id) {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const { data: session } = await supabase.auth.getSession();
+        const res = await fetch(`${supabaseUrl}/functions/v1/delete-auth-user`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.session?.access_token ?? anonKey}`,
+            apikey: anonKey ?? '',
+          },
+          body: JSON.stringify({ auth_user_id: orgUser.user_id }),
+        });
+        const fnData = await res.json().catch(() => ({}));
+        if (!res.ok || !fnData?.ok) {
+          console.warn('[OrganizationUser] Auth delete failed (user already soft-deleted):', fnData?.error);
+          // Do not throw - user is already soft-deleted, they cannot access the app
+        }
       }
 
       useUIStore.getState().addNotification({
@@ -944,7 +965,7 @@ export default function OrganizationUser() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteUser(orgUser.id, orgUser.user_email);
+                                handleDeleteUser(orgUser);
                               }}
                               disabled={deletingUserId === orgUser.id}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1046,7 +1067,7 @@ export default function OrganizationUser() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeleteUser(orgUser.id, orgUser.user_email);
+                            handleDeleteUser(orgUser);
                           }}
                           disabled={deletingUserId === orgUser.id}
                           className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"

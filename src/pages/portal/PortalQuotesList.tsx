@@ -101,7 +101,7 @@ export default function PortalQuotesList() {
         // RLS will automatically filter based on role
         const { data, error: quotesError } = await supabase
           .from('Quotes')
-          .select('id, quote_no, status, dealer_id, created_by_portal_user_id, created_at')
+          .select('id, quote_no, status, dealer_id, created_by_user_id, created_at')
           .eq('dealer_id', portalUser.dealer_id)
           .eq('deleted', false)
           .order('created_at', { ascending: false });
@@ -110,7 +110,7 @@ export default function PortalQuotesList() {
 
         // Filter by role (additional client-side check)
         const filteredQuotes = (data || []).filter((quote: any) =>
-          canViewQuote(portalUser.portal_user_role, quote, portalUser.id)
+          canViewQuote(portalUser.portal_user_role, quote, user?.id)
         ) as PortalQuote[];
 
         setQuotes(filteredQuotes);

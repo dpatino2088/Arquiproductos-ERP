@@ -811,6 +811,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/settings/dealer-profile/edit/:id/terms', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     // Redirect legacy Dealer User tab to Dealer List (user management is in Dealer Detail)
     router.addRoute('/settings/dealer-profile/user', () => {
       if (isAuthenticated) {

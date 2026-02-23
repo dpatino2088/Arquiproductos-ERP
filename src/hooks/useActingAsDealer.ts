@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase/client';
+import { supabase, initSessionContext } from '../lib/supabase/client';
 
 const ACTING_DEALER_KEY = ['actingAsDealer'] as const;
 
 async function fetchCurrentDealerId(): Promise<string | null> {
-  const { data, error } = await supabase.rpc('current_dealer_id');
+  const { data, error } = await supabase.rpc('get_current_dealer_id');
   if (error) {
     if (import.meta.env.DEV) {
-      console.warn('[useActingAsDealer] current_dealer_id RPC failed:', error.message,
-        '— Run the migration 20260223_acting_as_persisted.sql in Supabase SQL Editor');
+      console.warn('[useActingAsDealer] get_current_dealer_id RPC failed:', error.message,
+        '— Run the migration 20260224_004_acting_as_session_variable.sql in Supabase SQL Editor');
     }
     return null;
   }
@@ -68,6 +68,7 @@ export function useActingAsDealer() {
     },
     onSuccess: (activeDealerId) => {
       queryClient.setQueryData(ACTING_DEALER_KEY, activeDealerId);
+      void initSessionContext();
       queryClient.invalidateQueries({ queryKey: ['directory'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['catalog'] });

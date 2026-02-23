@@ -140,7 +140,7 @@ export function getBottomChannelSku(cfg: AnyConfig): string | null {
  * Keys that MUST NOT be stored in config_snapshot.
  * config_snapshot = configuration only (dimensions, selections, options).
  * Cost/pricing comes from bom_preview_snapshot (SQL) and ConfiguredProducts columns.
- * @see docs/PRICING_CONFIGURATOR_CONTRACT.md
+ * @see md/docs/PRICING_CONFIGURATOR_CONTRACT.md
  */
 const CONFIG_SNAPSHOT_COST_KEYS = new Set([
   'roll_total_cost',

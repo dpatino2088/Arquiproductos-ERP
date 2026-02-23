@@ -19,7 +19,7 @@ export interface CostSettingsRow {
   global_import_tax_pct: number;
   minimum_margin_pct: number;
   default_msrp_pct: number; // Default MSRP % (0-1, e.g. 0.65 = 65%)
-  itbms_pct?: number;       // Tax % (0-1, e.g. 0.07 = 7%). Used in Proposals.
+  tax_pct?: number;       // Tax % (0-1, e.g. 0.07 = 7%). Used in Proposals.
   import_tax_pct?: number;  // generated = global_import_tax_pct
   /** Display/quote basis for fabric rolls. Only affects bom_preview_snapshot. */
   fabric_pricing_basis?: FabricPricingBasis;

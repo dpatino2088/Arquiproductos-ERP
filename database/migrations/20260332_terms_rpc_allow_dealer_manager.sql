@@ -1,0 +1,61 @@
+-- Allow Dealer Manager (portal user) to call set_dealer_default_terms_template for their own dealer.
+-- If your RPC currently only allows org users, apply this migration.
+--
+-- Rule: permit execution if:
+--   a) User is org user (in OrganizationUsers for this org), OR
+--   b) User is dealer user with role_code = 'dealer_manager' and p_dealer_id = their dealer_id
+--
+-- Example implementation (adjust to your RPC body):
+
+-- DROP FUNCTION IF EXISTS set_dealer_default_terms_template(uuid, text, uuid);
+-- CREATE OR REPLACE FUNCTION set_dealer_default_terms_template(
+--   p_dealer_id uuid,
+--   p_doc_type text,
+--   p_template_id uuid
+-- )
+-- RETURNS void
+-- LANGUAGE plpgsql
+-- SECURITY DEFINER
+-- AS $$
+-- DECLARE
+--   v_org_id uuid;
+--   v_is_org_user boolean;
+--   v_dealer_user_id uuid;
+--   v_dealer_manager_dealer_id uuid;
+-- BEGIN
+--   SELECT organization_id INTO v_org_id FROM "Dealers" WHERE id = p_dealer_id AND deleted = false;
+--   IF v_org_id IS NULL THEN
+--     RAISE EXCEPTION 'Dealer not found';
+--   END IF;
+--
+--   -- Check if caller is org user
+--   SELECT EXISTS(
+--     SELECT 1 FROM "OrganizationUsers" ou
+--     JOIN auth.users u ON u.id = auth.uid()
+--     WHERE ou.organization_id = v_org_id AND ou.user_id = auth.uid() AND ou.deleted = false
+--   ) INTO v_is_org_user;
+--
+--   IF v_is_org_user THEN
+--     -- Org user: allow (existing logic)
+--     NULL;
+--   ELSE
+--     -- Portal: must be dealer_manager and p_dealer_id = their dealer
+--     SELECT id, dealer_id INTO v_dealer_user_id, v_dealer_manager_dealer_id
+--     FROM "AppUsers"
+--     WHERE auth_user_id = auth.uid() AND user_type = 'dealer' AND deleted = false
+--       AND role_code = 'dealer_manager'
+--     LIMIT 1;
+--     IF v_dealer_user_id IS NULL OR v_dealer_manager_dealer_id IS DISTINCT FROM p_dealer_id THEN
+--       RAISE EXCEPTION 'Permission denied: only org users or dealer managers for their own dealer';
+--     END IF;
+--   END IF;
+--
+--   -- Upsert DealerDocumentTermsDefaults
+--   INSERT INTO "DealerDocumentTermsDefaults" (dealer_id, doc_type, template_id)
+--   VALUES (p_dealer_id, p_doc_type, p_template_id)
+--   ON CONFLICT (dealer_id, doc_type) DO UPDATE SET template_id = EXCLUDED.template_id;
+-- END;
+-- $$;
+
+-- Note: This file documents the required permission logic.
+-- If your RPC already allows dealer users, no changes needed.

@@ -89,9 +89,9 @@ export interface GenerateQuotePDFOptions {
   /** Dealer PO / order number */
   poNumber?: string | null;
   /** Tax % for label e.g. "Tax (7%)" (0–1 or 0–100) */
-  itbms_pct?: number | null;
+  tax_pct?: number | null;
   /** If true, Tax row is hidden (tax exempt) */
-  exempt_itbms?: boolean;
+  exempt_tax?: boolean;
 }
 
 function formatCurrency(amount: number, currency: string = 'USD'): string {
@@ -126,8 +126,8 @@ export function generateQuotePDF(
     sellerName,
     projectName,
     poNumber,
-    itbms_pct,
-    exempt_itbms = false,
+    tax_pct,
+    exempt_tax = false,
   } = options;
 
   const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
@@ -498,18 +498,18 @@ export function generateQuotePDF(
   const summaryLeft = marginX + termsWidth + 8;
 
   const subtotal = quote.totals?.subtotal ?? lines.reduce((s, l) => s + (l.line_total ?? 0), 0);
-  const itbmsAmount = exempt_itbms ? 0 : (quote.totals?.tax_total ?? 0);
-  const total = exempt_itbms ? subtotal : (quote.totals?.total ?? subtotal + itbmsAmount);
+  const taxAmount = exempt_tax ? 0 : (quote.totals?.tax_total ?? 0);
+  const total = exempt_tax ? subtotal : (quote.totals?.total ?? subtotal + taxAmount);
   const toPctDisplay = (v: number | null | undefined): number | null =>
     v != null ? (v > 0 && v <= 1 ? Math.round(v * 100) : Math.round(v)) : null;
-  const itbmsPctLabel = (() => {
-    const n = toPctDisplay(itbms_pct);
+  const taxPctLabel = (() => {
+    const n = toPctDisplay(tax_pct);
     return n != null ? ` (${n}%)` : '';
   })();
 
   const summaryData: [string, string][] = [
     ['Subtotal:', formatCurrency(subtotal, quote.currency)],
-    ...(exempt_itbms ? [] : [['Tax' + itbmsPctLabel, formatCurrency(itbmsAmount, quote.currency)] as [string, string]]),
+    ...(exempt_tax ? [] : [['Tax' + taxPctLabel, formatCurrency(taxAmount, quote.currency)] as [string, string]]),
     ['Total:', formatCurrency(total, quote.currency)],
   ];
 
