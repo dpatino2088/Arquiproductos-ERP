@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
 
-import { useProposalsList } from '../../hooks/useProposals';
+import { useProposalsList, fetchProposalDetailData } from '../../hooks/useProposals';
 import { useUIStore } from '../../stores/ui-store';
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { buildDirectoryScopeKey } from '../../lib/directoryScopeKey';
+import { proposalDetailKey } from '../../lib/queryKeys';
+import { warmDetailIfNeeded } from '../../lib/zeroLoading';
+import { useNearViewportWarm } from '../../hooks/useNearViewportWarm';
 import {
   Search,
   RefreshCw,
@@ -60,6 +68,38 @@ export default function Proposals() {
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
   const addNotification = useUIStore((s) => s.addNotification);
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
+  const { activeOrganizationId } = useOrganizationContext();
+  const { activeDealerId } = useActiveDealer();
+  const { userType } = useAccessContext();
+  const queryClient = useQueryClient();
+
+  const scopeKey = useMemo(
+    () =>
+      buildDirectoryScopeKey({
+        orgId: activeOrganizationId ?? null,
+        activeDealerId: activeDealerId ?? null,
+        userRole: userType,
+      }),
+    [activeOrganizationId, activeDealerId, userType]
+  );
+  const isScopeReady = !!activeOrganizationId;
+  const warmDetail = useCallback(
+    (proposalId: string) => {
+      if (!isScopeReady || !scopeKey || !proposalId) return;
+      warmDetailIfNeeded(
+        queryClient,
+        {
+          queryKey: proposalDetailKey(scopeKey, proposalId),
+          queryFn: () => fetchProposalDetailData(proposalId),
+          warmId: `${scopeKey}:${proposalId}`,
+          enabled: true,
+        },
+        { cooldownMs: 20_000 }
+      );
+    },
+    [queryClient, scopeKey, isScopeReady]
+  );
+  const rowRefForViewport = useNearViewportWarm(warmDetail, { rootMargin: '200px' });
 
   useEffect(() => {
     setGlobalLoading(loading);
@@ -347,10 +387,7 @@ export default function Proposals() {
       {/* Header: design system — title + subtitle (mb-1); actions ml-auto; same spacing as Quotes/Orders */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Proposals</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Create and manage proposals from quotes
-          </p>
+          <h1 className="text-xl font-semibold text-foreground">Proposals</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
           {selectedIds.size > 0 && (
@@ -556,6 +593,7 @@ export default function Proposals() {
                 paginatedList.map((p) => (
                   <tr
                     key={p.id}
+                    ref={rowRefForViewport(p.id)}
                     className="hover:bg-gray-50"
                   >
                     <td className="py-4 px-4 text-center" onClick={(e) => e.stopPropagation()}>

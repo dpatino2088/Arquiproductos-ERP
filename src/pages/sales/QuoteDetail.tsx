@@ -6,7 +6,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
-import LifecycleIndicator from '../../components/shared/LifecycleIndicator';
+import LifecycleIndicator, { type LifecycleStep } from '../../components/shared/LifecycleIndicator';
 import { router } from '../../lib/router';
 import { formatCurrency } from '../../lib/utils';
 import { createProposalFromQuote } from '../../hooks/useProposals';
@@ -455,14 +455,25 @@ export default function QuoteDetail() {
         { label: 'Priority', value: quote.priority ? <StatusBadge status={quote.priority} type="priority" size="sm" /> : '—' },
       ];
 
-  const lifecycleStages = [
-    { label: 'Quote', ref: quote.quote_no },
-    { label: 'Proposal', ref: proposals.length > 0 ? `${proposals.length} proposal(s)` : undefined },
-    { label: 'Sales Order', ref: salesOrder?.sales_order_no, href: salesOrder ? `/sales/orders/${salesOrder.id}` : undefined },
-    { label: 'Manufacturing', ref: undefined },
-  ];
-
   const currentLifecycleStage: 'quote' | 'proposal' | 'sales_order' | 'manufacturing' = salesOrder ? 'sales_order' : proposals.length > 0 ? 'proposal' : 'quote';
+
+  const lifecycleSteps: LifecycleStep[] = useMemo(() => {
+    const ids: ('quote' | 'proposal' | 'sales_order' | 'manufacturing')[] = ['quote', 'proposal', 'sales_order', 'manufacturing'];
+    const currentIndex = ids.indexOf(currentLifecycleStage);
+    const stages = [
+      { label: 'Quote', ref: quote.quote_no },
+      { label: 'Proposal', ref: proposals.length > 0 ? `${proposals.length} proposal(s)` : undefined },
+      { label: 'Sales Order', ref: salesOrder?.sales_order_no, href: salesOrder ? `/sales/orders/${salesOrder.id}` : undefined },
+      { label: 'Manufacturing', ref: undefined },
+    ];
+    return stages.map((s, i) => ({
+      id: ids[i],
+      label: s.label,
+      sublabel: s.ref ?? '—',
+      status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
+      href: s.href,
+    }));
+  }, [currentLifecycleStage, quote.quote_no, proposals.length, salesOrder?.sales_order_no, salesOrder?.id]);
 
   const headerStatus = <StatusBadge status={quote.status} type="quote" />;
 
@@ -547,7 +558,7 @@ export default function QuoteDetail() {
           {!isPortal && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Lifecycle</h3>
-              <LifecycleIndicator currentStage={currentLifecycleStage} stages={lifecycleStages} />
+              <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
             </div>
           )}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">

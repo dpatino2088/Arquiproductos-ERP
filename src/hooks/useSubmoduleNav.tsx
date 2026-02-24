@@ -37,6 +37,26 @@ const initialState: SubmoduleNavState = {
   breadcrumbs: []
 };
 
+const SALES_LAST_PATHS_KEY = 'sales_submodule_last_paths';
+
+function getSalesLastPaths(): Record<string, string> {
+  try {
+    const raw = sessionStorage.getItem(SALES_LAST_PATHS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setSalesLastPath(tabId: string, path: string): void {
+  const prev = getSalesLastPaths();
+  if (prev[tabId] === path) return;
+  const next = { ...prev, [tabId]: path };
+  sessionStorage.setItem(SALES_LAST_PATHS_KEY, JSON.stringify(next));
+}
+
 const SubmoduleNavContext = createContext<SubmoduleNavContextType | undefined>(undefined);
 
 export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
@@ -76,7 +96,12 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
-    
+
+    if (tabsModule === 'sales') {
+      const matchingTab = tabs.find(t => currentPath === t.href || currentPath.startsWith(t.href + '/'));
+      if (matchingTab) setSalesLastPath(matchingTab.id, currentPath);
+    }
+
     // Process tabs with active state
     // First, find the most specific matching tab (longest href that matches)
     const matchingTabs = tabs.filter(tab => 
@@ -87,15 +112,18 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
       matchingTabs[0] || { href: '', id: '' }
     );
     
-    const processedTabs = tabs.map(tab => ({
-      ...tab,
-      // Only mark as active if it's the most specific match
-      isActive: tab.id === mostSpecificTab.id && (currentPath === tab.href || currentPath.startsWith(tab.href + '/')),
-      onClick: () => {
-        // Use router.navigate instead of manual pushState
-        router.navigate(tab.href);
-      }
-    }));
+    const processedTabs = tabs.map(tab => {
+      const isSales = tabsModule === 'sales';
+      const targetPath = isSales ? (getSalesLastPaths()[tab.id] || tab.href) : tab.href;
+      return {
+        ...tab,
+        // Only mark as active if it's the most specific match
+        isActive: tab.id === mostSpecificTab.id && (currentPath === tab.href || currentPath.startsWith(tab.href + '/')),
+        onClick: () => {
+          router.navigate(targetPath);
+        }
+      };
+    });
     
     // Only update if tabs actually changed (compare by id and href)
     setState(prev => {
@@ -129,13 +157,20 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Auto-update tab active states when route changes
+  // Auto-update tab active states when route changes; persist Sales tab paths for "back to detail"
   React.useEffect(() => {
     const handleRouteChange = () => {
       const currentPath = window.location.pathname;
       
-      // Update active state of tabs based on current path
       if (state.tabs.length > 0) {
+        const firstHref = state.tabs[0]?.href ?? '';
+        if (firstHref.startsWith('/sales/')) {
+          const matchingTab = state.tabs.find(
+            tab => currentPath === tab.href || currentPath.startsWith(tab.href + '/')
+          );
+          if (matchingTab) setSalesLastPath(matchingTab.id, currentPath);
+        }
+
         // Find the most specific matching tab (longest href that matches)
         const matchingTabs = state.tabs.filter(tab => 
           currentPath === tab.href || currentPath.startsWith(tab.href + '/')

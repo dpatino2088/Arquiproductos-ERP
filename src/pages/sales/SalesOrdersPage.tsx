@@ -271,10 +271,7 @@ export default function SalesOrdersPage() {
       {/* Header: design system — title + subtitle left; actions right (ml-auto). Same structure as Quotes/Proposals. */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">{isPortal ? 'Orders' : 'Sales Orders'}</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {isPortal ? 'Track your orders and payments' : 'Manage confirmed orders and track payments'}
-          </p>
+          <h1 className="text-xl font-semibold text-foreground">{isPortal ? 'Orders' : 'Sales Orders'}</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto" />
       </div>

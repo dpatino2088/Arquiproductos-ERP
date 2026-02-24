@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { getAppUsersDisplayNames } from '../lib/appUsersDisplayNames';
 import { fetchAuthContext } from '../auth/authContext';
@@ -12,6 +13,8 @@ import { useActiveDealer } from './useActiveDealer';
 import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 import { generateNextProposalNumber } from '../lib/sequential-numbers';
+import { buildDirectoryScopeKey } from '../lib/directoryScopeKey';
+import { proposalDetailKey } from '../lib/queryKeys';
 import type { Proposal, ProposalLine, ProposalLineAddOn } from '../types/proposals';
 
 export interface ProposalListItem {
@@ -235,361 +238,362 @@ export interface ProposalDetailState {
   canWrite: boolean;
 }
 
+export type ProposalDetailData = Omit<ProposalDetailState, 'loading' | 'error' | 'canWrite'>;
+
+/** Fetcher for proposal detail; throws on error. Used by useProposalDetail and by warmDetailIfNeeded. */
+export async function fetchProposalDetailData(proposalId: string): Promise<ProposalDetailData> {
+  const { data: proposalData, error: proposalError } = await supabase
+    .from('Proposals')
+    .select('*')
+    .eq('id', proposalId)
+    .eq('deleted', false)
+    .single();
+
+  if (proposalError || !proposalData) {
+    throw new Error(proposalError?.message || 'Proposal not found');
+  }
+
+  const proposal = proposalData as Proposal;
+
+  const { data: linesData, error: linesError } = await supabase
+    .from('ProposalLines')
+    .select('*')
+    .eq('proposal_id', proposalId)
+    .eq('deleted', false)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (linesError) throw new Error(linesError.message);
+
+  const lines = (linesData || []) as ProposalLine[];
+
+  const { data: addonsData } = await supabase
+    .from('ProposalLineAddOns')
+    .select('*')
+    .eq('proposal_id', proposalId)
+    .eq('deleted', false)
+    .order('sort_order', { ascending: true });
+
+  const addonsMap = new Map<string, ProposalLineAddOn[]>();
+  (addonsData || []).forEach((a: ProposalLineAddOn) => {
+    const list = addonsMap.get(a.proposal_line_id) || [];
+    list.push(a);
+    addonsMap.set(a.proposal_line_id, list);
+  });
+  const quoteLineIds = lines.map((l) => l.quote_line_id).filter(Boolean) as string[];
+
+  let quoteLinesMap = new Map<string, QuoteLineInfoForPDF>();
+  let configuredProductsMap: Record<string, { config_snapshot: Record<string, unknown> | null }> = {};
+  let quote: { id: string; quote_no: string } | null = null;
+
+  if (proposal.quote_id) {
+    const { data: quoteData } = await supabase
+      .from('Quotes')
+      .select('id, quote_no')
+      .eq('id', proposal.quote_id)
+      .eq('deleted', false)
+      .single();
+    if (quoteData) quote = { id: quoteData.id, quote_no: quoteData.quote_no || '' };
+  }
+
+  if (proposal.quote_id) {
+    const { data: qlData, error: qlError } = await supabase
+      .from('QuoteLines')
+      .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
+      .eq('quote_id', proposal.quote_id);
+
+    if (qlError) throw new Error(qlError.message || 'Error loading quote lines');
+
+    (qlData || []).forEach((ql: any) => {
+      const qty = Number(ql.quantity) || 1;
+      const lineMsrp = ql.msrp != null ? Number(ql.msrp) : null;
+      const unitSnapshot = ql.unit_msrp_total_snapshot != null ? Number(ql.unit_msrp_total_snapshot) : null;
+      const unitMsrp = unitSnapshot ?? (lineMsrp != null && qty > 0 ? lineMsrp / qty : null);
+      quoteLinesMap.set(ql.id, {
+        quantity: qty,
+        name: ql.name ?? null,
+        sku: ql.sku ?? null,
+        msrp: lineMsrp,
+        unit_msrp: unitMsrp,
+        area: ql.area ?? null,
+        position: ql.position ?? null,
+        product_type: ql.product_type ?? null,
+        product_type_id: ql.product_type_id ?? null,
+        collection_name: ql.collection_name ?? null,
+        variant_name: ql.variant_name ?? null,
+        drive_type: ql.drive_type ?? null,
+        width_m: ql.width_m != null ? Number(ql.width_m) : null,
+        height_m: ql.height_m != null ? Number(ql.height_m) : null,
+        configured_product_id: ql.configured_product_id ?? null,
+        config_snapshot: null,
+      });
+    });
+
+    const ptIdsToResolve = (qlData || [])
+      .filter((ql: any) => ql.product_type_id)
+      .map((ql: any) => ql.product_type_id);
+    const uniquePtIds = [...new Set(ptIdsToResolve)] as string[];
+    if (uniquePtIds.length > 0) {
+      const { data: ptData } = await supabase
+        .from('ProductTypes')
+        .select('id, name, code')
+        .in('id', uniquePtIds);
+      const ptMap = new Map<string, string>();
+      (ptData || []).forEach((pt: any) => {
+        const label = (pt.name || pt.code || '').trim() || null;
+        if (label) ptMap.set(pt.id, label);
+      });
+      quoteLinesMap.forEach((ql, qlId) => {
+        const ptId = ql.product_type_id;
+        if (ptId && ptMap.has(ptId)) {
+          quoteLinesMap.set(qlId, { ...ql, product_type: ptMap.get(ptId)! });
+        }
+      });
+    }
+
+    const configuredProductIds = (qlData || [])
+      .map((ql: any) => ql.configured_product_id)
+      .filter((id: string | null | undefined) => id) as string[];
+    if (configuredProductIds.length > 0) {
+      const { data: cpData } = await supabase
+        .from('ConfiguredProducts')
+        .select('id, config_snapshot')
+        .in('id', configuredProductIds);
+      (cpData || []).forEach((cp: any) => {
+        configuredProductsMap[cp.id] = { config_snapshot: cp.config_snapshot ?? null };
+      });
+      quoteLinesMap.forEach((ql, qlId) => {
+        const cpId = ql.configured_product_id;
+        if (cpId && configuredProductsMap[cpId]?.config_snapshot) {
+          quoteLinesMap.set(qlId, { ...ql, config_snapshot: configuredProductsMap[cpId].config_snapshot });
+        }
+      });
+    }
+
+    const { data: accData } = await supabase
+      .from('QuoteLineComponents')
+      .select('quote_line_id, catalog_item_id, qty')
+      .in('quote_line_id', quoteLineIds)
+      .eq('organization_id', proposal.organization_id)
+      .eq('deleted', false)
+      .or('source.eq.accessory,component_role.eq.accessory');
+    const accByLine = new Map<string, Array<{ catalog_item_id: string; qty: number }>>();
+    (accData || []).forEach((row: any) => {
+      const list = accByLine.get(row.quote_line_id) || [];
+      list.push({
+        catalog_item_id: row.catalog_item_id,
+        qty: Number(row.qty) || 1,
+      });
+      accByLine.set(row.quote_line_id, list);
+    });
+    const allAccItemIds = (accData || [])
+      .map((r: any) => r.catalog_item_id)
+      .filter(Boolean) as string[];
+    const uniqueAccIds = [...new Set(allAccItemIds)];
+    let catalogItemMap = new Map<string, { name?: string; item_name?: string; sku?: string }>();
+    if (uniqueAccIds.length > 0) {
+      const { data: ciData } = await supabase
+        .from('CatalogItems')
+        .select('id, name, item_name, sku')
+        .in('id', uniqueAccIds)
+        .eq('organization_id', proposal.organization_id);
+      (ciData || []).forEach((ci: any) => {
+        catalogItemMap.set(ci.id, {
+          name: ci.name ?? undefined,
+          item_name: ci.item_name ?? undefined,
+          sku: ci.sku ?? undefined,
+        });
+      });
+    }
+    quoteLinesMap.forEach((ql, qlId) => {
+      const snap = ql.config_snapshot as Record<string, unknown> | null | undefined;
+      const hasAccessories = Array.isArray(snap?.accessories) && (snap!.accessories as unknown[]).length > 0;
+      if (hasAccessories) return;
+      const components = accByLine.get(qlId) || [];
+      if (components.length === 0) return;
+      const accessories = components.map((c) => {
+        const ci = catalogItemMap.get(c.catalog_item_id);
+        const name = (ci?.item_name || ci?.name || ci?.sku || '—').trim();
+        return { name, qty: c.qty };
+      });
+      const nextSnapshot = snap && typeof snap === 'object' ? { ...snap } : {};
+      (nextSnapshot as Record<string, unknown>).accessories = accessories;
+      quoteLinesMap.set(qlId, { ...ql, config_snapshot: nextSnapshot });
+    });
+  }
+
+  let customer: ProposalDetailCustomer | null = null;
+  let contact: ProposalDetailContact | null = null;
+  let customerIdToUse = proposal.customer_id;
+  let contactIdToUse = proposal.contact_id;
+  if ((!customerIdToUse || !contactIdToUse) && proposal.quote_id) {
+    const { data: quoteRow } = await supabase
+      .from('Quotes')
+      .select('customer_id, contact_id')
+      .eq('id', proposal.quote_id)
+      .eq('deleted', false)
+      .maybeSingle();
+    if (quoteRow) {
+      if (!customerIdToUse && (quoteRow as any).customer_id) customerIdToUse = (quoteRow as any).customer_id;
+      if (!contactIdToUse && (quoteRow as any).contact_id) contactIdToUse = (quoteRow as any).contact_id;
+    }
+  }
+  if (customerIdToUse && proposal.organization_id) {
+    const { data: custData } = await supabase
+      .from('DirectoryCustomers')
+      .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
+      .eq('id', customerIdToUse)
+      .eq('organization_id', proposal.organization_id)
+      .maybeSingle();
+    if (custData) {
+      const c = custData as {
+        customer_name?: string;
+        street_address_line_1?: string | null;
+        street_address_line_2?: string | null;
+        city?: string | null;
+        state?: string | null;
+        zip_code?: string | null;
+        country?: string | null;
+        customer_email?: string | null;
+        customer_phone?: string | null;
+        alt_phone?: string | null;
+      };
+      const parts = [
+        c.street_address_line_1,
+        c.street_address_line_2,
+        [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
+        c.country,
+      ].filter(Boolean) as string[];
+      customer = {
+        customer_name: c.customer_name || 'N/A',
+        address: parts.length > 0 ? parts.join(', ') : null,
+        customer_email: c.customer_email ?? null,
+        customer_phone: c.customer_phone ?? c.alt_phone ?? null,
+      };
+    }
+  }
+  if (contactIdToUse && proposal.organization_id) {
+    const { data: contData } = await supabase
+      .from('DirectoryContacts')
+      .select('contact_name, contact_email')
+      .eq('id', contactIdToUse)
+      .eq('organization_id', proposal.organization_id)
+      .maybeSingle();
+    if (contData)
+      contact = {
+        contact_name: (contData as any).contact_name ?? null,
+        contact_email: (contData as any).contact_email ?? null,
+      };
+  }
+
+  let dealerLogoUrl: string | null = null;
+  if (proposal.dealer_id) {
+    const { data: dealerData } = await supabase
+      .from('Dealers')
+      .select('logo_url')
+      .eq('id', proposal.dealer_id)
+      .maybeSingle();
+    dealerLogoUrl = (dealerData as { logo_url?: string } | null)?.logo_url?.trim() || null;
+  }
+
+  return {
+    proposal,
+    lines,
+    addonsMap,
+    quoteLinesMap,
+    configuredProductsMap,
+    quote,
+    customer,
+    contact,
+    dealerLogoUrl,
+  };
+}
+
+const EMPTY_DETAIL: ProposalDetailData = {
+  proposal: null,
+  lines: [],
+  addonsMap: new Map(),
+  quoteLinesMap: new Map(),
+  configuredProductsMap: {},
+  quote: null,
+  customer: null,
+  contact: null,
+  dealerLogoUrl: null,
+};
+
 export function useProposalDetail(proposalId: string | null) {
-  const [state, setState] = useState<ProposalDetailState>({
-    proposal: null,
-    lines: [],
-    addonsMap: new Map(),
-    quoteLinesMap: new Map(),
-    configuredProductsMap: {},
-    quote: null,
-    customer: null,
-    contact: null,
-    dealerLogoUrl: null,
-    loading: true,
-    error: null,
-    canWrite: true,
+  const { activeOrganizationId } = useOrganizationContext();
+  const { activeDealerId } = useActiveDealer();
+  const { userType } = useAccessContext();
+
+  const scopeKey = buildDirectoryScopeKey({
+    orgId: activeOrganizationId ?? null,
+    activeDealerId: activeDealerId ?? null,
+    userRole: userType,
+  });
+  const isScopeReady = !!activeOrganizationId;
+
+  const [canWrite, setCanWriteState] = useState(true);
+
+  const query = useQuery({
+    queryKey: proposalDetailKey(scopeKey, proposalId),
+    queryFn: () => fetchProposalDetailData(proposalId!),
+    enabled: !!proposalId && isScopeReady,
   });
 
-  const fetchDetail = useCallback(async () => {
-    if (!proposalId) {
-      setState((s) => ({ ...s, loading: false, error: null }));
-      return;
-    }
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const { data: proposalData, error: proposalError } = await supabase
-        .from('Proposals')
-        .select('*')
-        .eq('id', proposalId)
-        .eq('deleted', false)
-        .single();
+  const refetch = useCallback(() => {
+    query.refetch();
+  }, [query]);
 
-      if (proposalError || !proposalData) {
-        setState((s) => ({
-          ...s,
-          loading: false,
-          error: proposalError?.message || 'Proposal not found',
-          proposal: null,
-          lines: [],
-          addonsMap: new Map(),
-          quoteLinesMap: new Map(),
-          configuredProductsMap: {},
-          quote: null,
-          customer: null,
-          contact: null,
-          dealerLogoUrl: null,
-        }));
-        return;
-      }
-
-      const proposal = proposalData as Proposal;
-
-      const { data: linesData, error: linesError } = await supabase
-        .from('ProposalLines')
-        .select('*')
-        .eq('proposal_id', proposalId)
-        .eq('deleted', false)
-        .order('sort_order', { ascending: true })
-        .order('created_at', { ascending: true });
-
-      if (linesError) {
-        setState((s) => ({ ...s, loading: false, error: linesError.message, proposal, lines: [], addonsMap: new Map(), quoteLinesMap: new Map(), configuredProductsMap: {}, quote: null, customer: null, contact: null, dealerLogoUrl: null }));
-        return;
-      }
-
-      const lines = (linesData || []) as ProposalLine[];
-
-      const { data: addonsData } = await supabase
-        .from('ProposalLineAddOns')
-        .select('*')
-        .eq('proposal_id', proposalId)
-        .eq('deleted', false)
-        .order('sort_order', { ascending: true });
-
-      const addonsMap = new Map<string, ProposalLineAddOn[]>();
-      (addonsData || []).forEach((a: ProposalLineAddOn) => {
-        const list = addonsMap.get(a.proposal_line_id) || [];
-        list.push(a);
-        addonsMap.set(a.proposal_line_id, list);
-      });
-      const quoteLineIds = lines.map((l) => l.quote_line_id).filter(Boolean) as string[];
-
-      let quoteLinesMap = new Map<string, QuoteLineInfoForPDF>();
-      let configuredProductsMap: Record<string, { config_snapshot: Record<string, unknown> | null }> = {};
-      let quote: { id: string; quote_no: string } | null = null;
-
-      if (proposal.quote_id) {
-        const { data: quoteData } = await supabase
-          .from('Quotes')
-          .select('id, quote_no')
-          .eq('id', proposal.quote_id)
-          .eq('deleted', false)
-          .single();
-        if (quoteData) quote = { id: quoteData.id, quote_no: quoteData.quote_no || '' };
-      }
-
-      // Load QuoteLines by quote_id so we have line data for the proposal's quote (more reliable than loading by ids only)
-      if (proposal.quote_id) {
-        const { data: qlData, error: qlError } = await supabase
-          .from('QuoteLines')
-          .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
-          .eq('quote_id', proposal.quote_id);
-
-        if (qlError) {
-          setState((s) => ({
-            ...s,
-            loading: false,
-            error: qlError.message || 'Error loading quote lines',
-            proposal,
-            lines,
-            addonsMap: new Map(),
-            quoteLinesMap: new Map(),
-            configuredProductsMap: {},
-            quote,
-            customer: null,
-            contact: null,
-            dealerLogoUrl: null,
-          }));
-          return;
-        }
-
-        (qlData || []).forEach((ql: any) => {
-          const qty = Number(ql.quantity) || 1;
-          const lineMsrp = ql.msrp != null ? Number(ql.msrp) : null;
-          const unitSnapshot = ql.unit_msrp_total_snapshot != null ? Number(ql.unit_msrp_total_snapshot) : null;
-          const unitMsrp = unitSnapshot ?? (lineMsrp != null && qty > 0 ? lineMsrp / qty : null);
-          quoteLinesMap.set(ql.id, {
-            quantity: qty,
-            name: ql.name ?? null,
-            sku: ql.sku ?? null,
-            msrp: lineMsrp,
-            unit_msrp: unitMsrp,
-            area: ql.area ?? null,
-            position: ql.position ?? null,
-            product_type: ql.product_type ?? null,
-            product_type_id: ql.product_type_id ?? null,
-            collection_name: ql.collection_name ?? null,
-            variant_name: ql.variant_name ?? null,
-            drive_type: ql.drive_type ?? null,
-            width_m: ql.width_m != null ? Number(ql.width_m) : null,
-            height_m: ql.height_m != null ? Number(ql.height_m) : null,
-            configured_product_id: ql.configured_product_id ?? null,
-            config_snapshot: null,
-          });
-        });
-
-        // Resolve product_type from ProductTypes: prefer name over code for display (when product_type_id is set)
-        const ptIdsToResolve = (qlData || [])
-          .filter((ql: any) => ql.product_type_id)
-          .map((ql: any) => ql.product_type_id);
-        const uniquePtIds = [...new Set(ptIdsToResolve)] as string[];
-        if (uniquePtIds.length > 0) {
-          const { data: ptData } = await supabase
-            .from('ProductTypes')
-            .select('id, name, code')
-            .in('id', uniquePtIds);
-          const ptMap = new Map<string, string>();
-          (ptData || []).forEach((pt: any) => {
-            const label = (pt.name || pt.code || '').trim() || null;
-            if (label) ptMap.set(pt.id, label);
-          });
-          quoteLinesMap.forEach((ql, qlId) => {
-            const ptId = ql.product_type_id;
-            if (ptId && ptMap.has(ptId)) {
-              quoteLinesMap.set(qlId, { ...ql, product_type: ptMap.get(ptId)! });
-            }
-          });
-        }
-
-        const configuredProductIds = (qlData || [])
-          .map((ql: any) => ql.configured_product_id)
-          .filter((id: string | null | undefined) => id) as string[];
-        if (configuredProductIds.length > 0) {
-          const { data: cpData } = await supabase
-            .from('ConfiguredProducts')
-            .select('id, config_snapshot')
-            .in('id', configuredProductIds);
-          (cpData || []).forEach((cp: any) => {
-            configuredProductsMap[cp.id] = { config_snapshot: cp.config_snapshot ?? null };
-          });
-          quoteLinesMap.forEach((ql, qlId) => {
-            const cpId = ql.configured_product_id;
-            if (cpId && configuredProductsMap[cpId]?.config_snapshot) {
-              quoteLinesMap.set(qlId, { ...ql, config_snapshot: configuredProductsMap[cpId].config_snapshot });
-            }
-          });
-        }
-
-        // Resolve accessories from QuoteLineComponents when config_snapshot.accessories is missing/empty
-        const { data: accData } = await supabase
-          .from('QuoteLineComponents')
-          .select('quote_line_id, catalog_item_id, qty')
-          .in('quote_line_id', quoteLineIds)
-          .eq('organization_id', proposal.organization_id)
-          .eq('deleted', false)
-          .or('source.eq.accessory,component_role.eq.accessory');
-        const accByLine = new Map<string, Array<{ catalog_item_id: string; qty: number }>>();
-        (accData || []).forEach((row: any) => {
-          const list = accByLine.get(row.quote_line_id) || [];
-          list.push({
-            catalog_item_id: row.catalog_item_id,
-            qty: Number(row.qty) || 1,
-          });
-          accByLine.set(row.quote_line_id, list);
-        });
-        const allAccItemIds = (accData || [])
-          .map((r: any) => r.catalog_item_id)
-          .filter(Boolean) as string[];
-        const uniqueAccIds = [...new Set(allAccItemIds)];
-        let catalogItemMap = new Map<string, { name?: string; item_name?: string; sku?: string }>();
-        if (uniqueAccIds.length > 0) {
-          const { data: ciData } = await supabase
-            .from('CatalogItems')
-            .select('id, name, item_name, sku')
-            .in('id', uniqueAccIds)
-            .eq('organization_id', proposal.organization_id);
-          (ciData || []).forEach((ci: any) => {
-            catalogItemMap.set(ci.id, {
-              name: ci.name ?? undefined,
-              item_name: ci.item_name ?? undefined,
-              sku: ci.sku ?? undefined,
-            });
-          });
-        }
-        quoteLinesMap.forEach((ql, qlId) => {
-          const snap = ql.config_snapshot as Record<string, unknown> | null | undefined;
-          const hasAccessories = Array.isArray(snap?.accessories) && (snap!.accessories as unknown[]).length > 0;
-          if (hasAccessories) return;
-          const components = accByLine.get(qlId) || [];
-          if (components.length === 0) return;
-          const accessories = components.map((c) => {
-            const ci = catalogItemMap.get(c.catalog_item_id);
-            const name = (ci?.item_name || ci?.name || ci?.sku || '—').trim();
-            return { name, qty: c.qty };
-          });
-          const nextSnapshot = snap && typeof snap === 'object' ? { ...snap } : {};
-          (nextSnapshot as Record<string, unknown>).accessories = accessories;
-          quoteLinesMap.set(qlId, { ...ql, config_snapshot: nextSnapshot });
-        });
-      }
-
-      let customer: ProposalDetailCustomer | null = null;
-      let contact: ProposalDetailContact | null = null;
-      let customerIdToUse = proposal.customer_id;
-      let contactIdToUse = proposal.contact_id;
-      if ((!customerIdToUse || !contactIdToUse) && proposal.quote_id) {
-        const { data: quoteRow } = await supabase
-          .from('Quotes')
-          .select('customer_id, contact_id')
-          .eq('id', proposal.quote_id)
-          .eq('deleted', false)
-          .maybeSingle();
-        if (quoteRow) {
-          if (!customerIdToUse && (quoteRow as any).customer_id) customerIdToUse = (quoteRow as any).customer_id;
-          if (!contactIdToUse && (quoteRow as any).contact_id) contactIdToUse = (quoteRow as any).contact_id;
-        }
-      }
-      if (customerIdToUse && proposal.organization_id) {
-        const { data: custData } = await supabase
-          .from('DirectoryCustomers')
-          .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
-          .eq('id', customerIdToUse)
-          .eq('organization_id', proposal.organization_id)
-          .maybeSingle();
-        if (custData) {
-          const c = custData as {
-            customer_name?: string;
-            street_address_line_1?: string | null;
-            street_address_line_2?: string | null;
-            city?: string | null;
-            state?: string | null;
-            zip_code?: string | null;
-            country?: string | null;
-            customer_email?: string | null;
-            customer_phone?: string | null;
-            alt_phone?: string | null;
-          };
-          const parts = [
-            c.street_address_line_1,
-            c.street_address_line_2,
-            [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
-            c.country,
-          ].filter(Boolean) as string[];
-          customer = {
-            customer_name: c.customer_name || 'N/A',
-            address: parts.length > 0 ? parts.join(', ') : null,
-            customer_email: c.customer_email ?? null,
-            customer_phone: c.customer_phone ?? c.alt_phone ?? null,
-          };
-        }
-      }
-      if (contactIdToUse && proposal.organization_id) {
-        const { data: contData } = await supabase
-          .from('DirectoryContacts')
-          .select('contact_name, contact_email')
-          .eq('id', contactIdToUse)
-          .eq('organization_id', proposal.organization_id)
-          .maybeSingle();
-        if (contData) contact = {
-          contact_name: (contData as any).contact_name ?? null,
-          contact_email: (contData as any).contact_email ?? null,
-        };
-      }
-
-      // Dealer logo: filter by proposal.dealer_id so the logo matches the proposal's dealer
-      let dealerLogoUrl: string | null = null;
-      if (proposal.dealer_id) {
-        const { data: dealerData } = await supabase
-          .from('Dealers')
-          .select('logo_url')
-          .eq('id', proposal.dealer_id)
-          .maybeSingle();
-        dealerLogoUrl = (dealerData as { logo_url?: string } | null)?.logo_url?.trim() || null;
-      }
-
-      setState((s) => ({
-        ...s,
-        loading: false,
-        error: null,
-        proposal,
-        lines,
-        addonsMap,
-        quoteLinesMap,
-        configuredProductsMap,
-        quote,
-        customer,
-        contact,
-        dealerLogoUrl,
-        canWrite: true,
-      }));
-    } catch (err: any) {
-      setState((s) => ({
-        ...s,
-        loading: false,
-        error: err?.message || 'Error loading proposal',
-        proposal: null,
-        lines: [],
-        addonsMap: new Map(),
-        quoteLinesMap: new Map(),
-        configuredProductsMap: {},
-        quote: null,
-        customer: null,
-        contact: null,
-        dealerLogoUrl: null,
-      }));
-    }
-  }, [proposalId]);
-
-  useEffect(() => {
-    fetchDetail();
-  }, [fetchDetail]);
-
-  const setCanWrite = useCallback((canWrite: boolean) => {
-    setState((s) => ({ ...s, canWrite }));
+  const setCanWrite = useCallback((value: boolean) => {
+    setCanWriteState(value);
   }, []);
 
-  return { ...state, refetch: fetchDetail, setCanWrite };
+  if (!proposalId || !isScopeReady) {
+    return {
+      ...EMPTY_DETAIL,
+      loading: false,
+      error: null,
+      refetch: () => Promise.resolve(undefined),
+      setCanWrite,
+      canWrite: true,
+    };
+  }
+
+  const data = query.data;
+  const loading = query.isLoading;
+  const error = query.error ? (query.error as Error)?.message ?? 'Error loading proposal' : null;
+
+  if (loading && !data) {
+    return {
+      ...EMPTY_DETAIL,
+      loading: true,
+      error: null,
+      refetch,
+      setCanWrite,
+      canWrite,
+    };
+  }
+
+  if (query.isError || !data) {
+    return {
+      ...EMPTY_DETAIL,
+      loading: false,
+      error: error ?? 'Error loading proposal',
+      refetch,
+      setCanWrite,
+      canWrite,
+    };
+  }
+
+  return {
+    ...data,
+    loading: false,
+    error: null,
+    refetch,
+    setCanWrite,
+    canWrite,
+  };
 }
 
 export interface CreateProposalFromQuoteOptions {

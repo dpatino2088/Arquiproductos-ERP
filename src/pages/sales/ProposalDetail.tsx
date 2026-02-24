@@ -44,6 +44,7 @@ import DocumentTermsSection from '../../components/sales/DocumentTermsSection';
 import { resolveDefaultTermsTemplateId, fetchTermsTemplateById } from '../../lib/terms';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
+import { useAccessContext } from '../../hooks/useAccessContext';
 
 const PROPOSAL_STATUS_OPTIONS: { value: Proposal['status']; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -185,6 +186,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const { activeOrganizationId } = useOrganizationContext();
   const { user: authUser } = useAuth();
+  const { userType, portalRole, loading: accessLoading } = useAccessContext();
+  const stateResolved = !loading && !!proposal && !accessLoading;
 
   const refetchTimeline = useCallback(() => {
     if (!proposalId) return;
@@ -508,7 +511,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       markup_pct?: number | null;
     }) => {
       if (!canWrite) return;
-      setDraftLines((prev) => prev.map((l) => (l.id === lineId ? { ...l, ...fields } : l)));
+      setDraftLines((prev) =>
+        prev.map((l) => {
+          if (l.id !== lineId) return l;
+          const next = { ...l, ...fields };
+          if (next.line_type === 'custom' && (fields.unit_cost !== undefined || fields.markup_pct !== undefined)) {
+            const cost = fields.unit_cost !== undefined ? fields.unit_cost : (l.unit_cost ?? 0);
+            const markup = fields.markup_pct !== undefined ? fields.markup_pct : (l.markup_pct ?? 0);
+            next.unit_price = cost * (1 + (Number(markup) || 0) / 100);
+          }
+          return next;
+        })
+      );
       setLinesDirty(true);
     },
     [canWrite]
@@ -1014,7 +1028,15 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     );
   }
 
+  if (!stateResolved) {
+    return <div className="p-6">Loading...</div>;
+  }
+
   const readOnly = !canWrite;
+  const isAccepted = proposal?.status === 'accepted';
+  const canRevertStatus = isAccepted && userType === 'portal' && portalRole === 'dealer_manager';
+  const contentReadOnly = readOnly || !!isAccepted;
+  const statusDropdownDisabled = contentReadOnly && !canRevertStatus;
 
   const contactDisplay = contact
     ? [contact.contact_name, contact.contact_email].filter(Boolean).join(' · ')
@@ -1078,7 +1100,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       <button
         type="button"
         onClick={handleSave}
-        disabled={saving || readOnly}
+        disabled={saving || contentReadOnly}
         className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         title="Save"
       >
@@ -1087,7 +1109,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       <button
         type="button"
         onClick={handleSaveAndClose}
-        disabled={saving || readOnly}
+        disabled={saving || contentReadOnly}
         className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {saving ? 'Saving...' : 'Save and Close'}
@@ -1159,7 +1181,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             <Input
               value={headerForm.proposal_no}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, proposal_no: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
             />
           </div>
           <div className="col-span-12 md:col-span-2">
@@ -1167,7 +1189,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             <SelectShadcn
               value={headerForm.status}
               onValueChange={(v) => { setHeaderForm((f) => ({ ...f, status: v as Proposal['status'] })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={statusDropdownDisabled}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -1185,7 +1207,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               type="date"
               value={headerForm.valid_until}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, valid_until: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
             />
           </div>
           <div className="col-span-12">
@@ -1195,7 +1217,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               rows={2}
               value={headerForm.description}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
               placeholder="Short proposal description"
             />
           </div>
@@ -1208,7 +1230,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               max="100"
               value={headerForm.global_discount_pct}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, global_discount_pct: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
             />
           </div>
           <div className="col-span-6 md:col-span-2">
@@ -1221,7 +1243,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               placeholder="e.g. 10"
               value={headerForm.global_fee_amount}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
             />
           </div>
           <div className="col-span-6 md:col-span-2">
@@ -1234,7 +1256,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               placeholder="Installation discount"
               value={headerForm.global_installation_discount_pct}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_discount_pct: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
             />
           </div>
           <div className="col-span-6 md:col-span-2">
@@ -1247,7 +1269,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               placeholder="Installation fee"
               value={headerForm.global_installation_fee_pct}
               onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_fee_pct: e.target.value })); setHeaderDirty(true); }}
-              disabled={readOnly}
+              disabled={contentReadOnly}
             />
           </div>
         </div>
@@ -1262,7 +1284,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 rows={4}
                 value={headerForm.notes}
                 onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
-                disabled={readOnly}
+                disabled={contentReadOnly}
                 placeholder="Additional notes or comments..."
               />
             </div>
@@ -1272,7 +1294,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   type="checkbox"
                   checked={headerForm.exempt_tax}
                   onChange={(e) => { setHeaderForm((f) => ({ ...f, exempt_tax: e.target.checked })); setHeaderDirty(true); }}
-                  disabled={readOnly}
+                  disabled={contentReadOnly}
                 />
                 <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
               </div>
@@ -1348,7 +1370,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 setHeaderForm((f) => ({ ...f, terms_title: title, terms_content: content }));
                 setHeaderDirty(true);
               }}
-              readOnly={readOnly}
+              readOnly={contentReadOnly}
               hideSaveAsTemplate
               hideTitleInput
             />
@@ -1362,7 +1384,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
           <h2 className="text-xl font-semibold text-gray-900">Lines</h2>
-          {!readOnly && (
+          {!contentReadOnly && (
             <button
               onClick={addCustomLine}
               className="flex items-center gap-2 px-3 py-2 text-sm text-white rounded-lg transition-colors hover:opacity-90"
@@ -1378,7 +1400,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           <div className="py-12 px-6 text-center">
             <p className="text-gray-500 mb-4">No lines yet. Add lines from the Quote or add a custom line.</p>
             <div className="flex flex-wrap gap-3 justify-center">
-              {!readOnly && (
+              {!contentReadOnly && (
                 <button
                   onClick={addCustomLine}
                   className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors hover:opacity-90"
@@ -1450,7 +1472,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     id={line.id}
                     renderFirstCell={({ attributes, listeners }) => (
                       <td className="py-4 pl-2 pr-0 text-gray-400 w-10 align-middle" title="Drag to reorder">
-                        {!readOnly ? (
+                        {!contentReadOnly ? (
                           <span
                             {...attributes}
                             {...listeners}
@@ -1479,28 +1501,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     <td className="py-4 px-4 text-gray-700 text-sm w-24 align-middle [word-break:keep-all]">
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { area?: string } | null)?.area ?? qlInfo?.area ?? '—'
-                        : (
-                          <input
-                            className={`w-full min-w-0 max-w-[80px] border rounded px-2 py-1 text-xs ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                            value={line.area ?? ''}
-                            onChange={(e) => updateCustomLine(line.id, { area: e.target.value || null })}
-                            disabled={readOnly}
-                            placeholder="Area"
-                          />
-                        )}
+                        : (line.area ?? '—')}
                     </td>
                     <td className="py-4 pl-[21px] pr-4 text-center text-gray-700 text-sm w-24 min-w-[6rem] align-middle">
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { position?: string } | null)?.position ?? qlInfo?.position ?? '—'
-                        : (
-                          <input
-                            className={`w-full min-w-0 max-w-[80px] mx-auto border rounded px-2 py-1 text-xs text-center ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                            value={line.position ?? ''}
-                            onChange={(e) => updateCustomLine(line.id, { position: e.target.value || null })}
-                            disabled={readOnly}
-                            placeholder="Position"
-                          />
-                        )}
+                        : (line.position ?? '—')}
                     </td>
                     <td className="py-4 pl-[30px] pr-5 align-middle min-w-[447px] max-w-[447px]">
                       {line.line_type === 'from_quote' && qlInfo ? (
@@ -1520,13 +1526,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           </div>
                         ) : (
                           <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-                            <input
-                              className={`w-full border rounded px-2 py-1 text-sm ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                              value={line.description ?? ''}
-                              onChange={(e) => updateCustomLine(line.id, { description: e.target.value })}
-                              disabled={readOnly}
-                              placeholder="Description"
-                            />
+                            <span className="text-sm text-gray-900">{line.description || '—'}</span>
                             <span className="text-xs text-gray-500">
                               {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
                             </span>
@@ -1544,15 +1544,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     </td>
                     <td className="py-4 px-1.5 text-center align-middle min-w-[64px] w-[64px] tabular-nums">
                       {line.line_type === 'custom' ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          className={`w-14 border rounded px-1.5 py-1 text-sm text-center mx-auto ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                          value={line.qty ?? ''}
-                          onChange={(e) => updateCustomLine(line.id, { qty: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                          disabled={readOnly}
-                        />
+                        <span className="text-sm text-gray-900">{line.qty === 0 ? '—' : Number(line.qty)}</span>
                       ) : (
                         qlInfo?.quantity ?? '—'
                       )}
@@ -1560,15 +1552,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     <td className="w-[16px] min-w-[16px] py-4" aria-hidden></td>
                     <td className="py-4 pl-2 pr-2 text-right align-middle w-[108px] max-w-[108px] whitespace-nowrap tabular-nums">
                       {line.line_type === 'custom' ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          className={`w-20 border rounded px-2 py-1 text-sm text-right ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                          value={line.unit_price ?? ''}
-                          onChange={(e) => updateCustomLine(line.id, { unit_price: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                          disabled={readOnly}
-                        />
+                        <span className="text-sm text-gray-900" title={`Unit: ${formatCurrency(Number(line.unit_price) ?? 0, currency)}`}>
+                          {formatCurrency(Number(line.unit_price) ?? 0, currency)}
+                        </span>
                       ) : (
                         <span>
                           {hasBasePrice ? (
@@ -1593,6 +1579,53 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           <h4 className="text-sm font-semibold text-gray-700 mb-3">Cost & Pricing</h4>
                           <div className="flex flex-wrap items-end gap-4">
                             <div>
+                              <Label className="text-xs">Area</Label>
+                              <Input
+                                className="w-24"
+                                value={line.area ?? ''}
+                                onChange={(e) => updateCustomLine(line.id, { area: e.target.value || null })}
+                                disabled={contentReadOnly}
+                                placeholder="Area"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Position</Label>
+                              <Input
+                                className="w-24"
+                                value={line.position ?? ''}
+                                onChange={(e) => updateCustomLine(line.id, { position: e.target.value || null })}
+                                disabled={contentReadOnly}
+                                placeholder="Position"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Description</Label>
+                              <Input
+                                className="w-48"
+                                value={line.description ?? ''}
+                                onChange={(e) => updateCustomLine(line.id, { description: e.target.value })}
+                                disabled={contentReadOnly}
+                                placeholder="Description"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Category</Label>
+                              <SelectShadcn
+                                value={line.custom_category ?? 'other'}
+                                onValueChange={(v) => updateCustomLine(line.id, { custom_category: v as ProposalCustomCategory })}
+                                disabled={contentReadOnly}
+                              >
+                                <SelectTrigger className="w-36">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CUSTOM_CATEGORIES.map((o) => (
+                                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </SelectShadcn>
+                            </div>
+                            <div>
                               <Label className="text-xs">Cost</Label>
                               <Input
                                 type="number"
@@ -1602,7 +1635,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                 placeholder="0"
                                 value={line.unit_cost ?? ''}
                                 onChange={(e) => updateCustomLine(line.id, { unit_cost: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                                disabled={readOnly}
+                                disabled={contentReadOnly}
                               />
                             </div>
                             <div>
@@ -1615,155 +1648,39 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                 placeholder="0"
                                 value={line.markup_pct ?? ''}
                                 onChange={(e) => updateCustomLine(line.id, { markup_pct: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                                disabled={readOnly}
+                                disabled={contentReadOnly}
                               />
                             </div>
                             <div>
-                              <Label className="text-xs">Installation</Label>
-                              <SelectShadcn
-                                value={line.custom_category ?? 'other'}
-                                onValueChange={(v) => updateCustomLine(line.id, { custom_category: v as ProposalCustomCategory })}
-                                disabled={readOnly}
-                              >
-                                <SelectTrigger className="w-36">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {CUSTOM_CATEGORIES.map((o) => (
-                                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </SelectShadcn>
+                              <Label className="text-xs">Unit Price</Label>
+                              <span className="block w-24 py-2 text-sm font-medium text-gray-900 tabular-nums">
+                                {formatCurrency(
+                                  (Number(line.unit_cost) || 0) * (1 + (Number(line.markup_pct) || 0) / 100),
+                                  currency
+                                )}
+                              </span>
                             </div>
-                            <Label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={!!installationAddon}
+                            <div>
+                              <Label className="text-xs">Qty</Label>
+                              <Input
+                                type="number"
+                                step="1"
+                                min={0}
+                                className="w-20"
+                                placeholder="0"
+                                value={line.qty === 0 ? '' : line.qty}
                                 onChange={(e) => {
-                                  if (e.target.checked) {
-                                    upsertAddOn(line.id, { addon_type: 'installation', cost_amount: 0, pricing_mode: 'markup_pct', markup_pct: 100, taxable: true });
-                                  } else if (installationAddon) {
-                                    removeAddOn(installationAddon.id);
+                                  const raw = e.target.value;
+                                  if (raw === '') {
+                                    updateCustomLine(line.id, { qty: 0 });
+                                    return;
                                   }
+                                  const n = parseFloat(raw);
+                                  if (!Number.isNaN(n) && n >= 0) updateCustomLine(line.id, { qty: n });
                                 }}
-                                disabled={readOnly}
+                                disabled={contentReadOnly}
                               />
-                              Installation add-on
-                            </Label>
-                            {installationAddon && (() => {
-                              const draft = addonDraft[line.id];
-                              const cost = draft?.cost_amount ?? (installationAddon.cost_amount ?? 0);
-                              const markupPct = draft?.markup_pct ?? (installationAddon.markup_pct ?? 100);
-                              const sale = draft?.sale_amount ?? (installationAddon.sale_amount ?? 0);
-                              const pricingMode = draft?.pricing_mode ?? (installationAddon.pricing_mode ?? 'markup_pct');
-                              const taxable = draft?.taxable ?? (installationAddon.taxable ?? true);
-                              const persist = () => {
-                                const latest = addonDraftRef.current[line.id];
-                                const c = latest?.cost_amount ?? cost;
-                                const mp = latest?.markup_pct ?? markupPct;
-                                const s = latest?.sale_amount ?? sale;
-                                const pm = latest?.pricing_mode ?? pricingMode;
-                                const t = latest?.taxable ?? taxable;
-                                const newSale = pm === 'markup_pct' ? c * (1 + mp / 100) : s;
-                                upsertAddOn(line.id, { addon_type: 'installation', cost_amount: c, pricing_mode: pm, markup_pct: pm === 'markup_pct' ? mp : undefined, sale_amount: newSale, taxable: t });
-                                setAddonDraft((prev) => { const n = { ...prev }; delete n[line.id]; return n; });
-                              };
-                              return (
-                                <>
-                                  <div>
-                                    <Label className="text-xs">Add-on cost</Label>
-                                    <Input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      className="w-24"
-                                      value={String(cost)}
-                                      onChange={(e) => {
-                                        const v = parseFloat(e.target.value) || 0;
-                                        const d: AddonDraft = { cost_amount: v, markup_pct: markupPct, sale_amount: pricingMode === 'fixed_price' ? sale : v * (1 + markupPct / 100), pricing_mode: pricingMode, taxable };
-                                        addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
-                                        setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
-                                      }}
-                                      onBlur={persist}
-                                      disabled={readOnly}
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Pricing</Label>
-                                    <SelectShadcn
-                                      value={pricingMode}
-                                      onValueChange={(v: ProposalLineAddOnPricingMode) => {
-                                        const newSale = v === 'markup_pct' ? cost * (1 + markupPct / 100) : sale;
-                                        setAddonDraft((prev) => ({ ...prev, [line.id]: { cost_amount: cost, markup_pct: markupPct, sale_amount: newSale, pricing_mode: v, taxable } }));
-                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, pricing_mode: v, markup_pct: v === 'markup_pct' ? markupPct : undefined, sale_amount: newSale, taxable });
-                                      }}
-                                      disabled={readOnly}
-                                    >
-                                      <SelectTrigger className="w-36">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="markup_pct">Markup %</SelectItem>
-                                        <SelectItem value="fixed_price">Fixed sale price</SelectItem>
-                                      </SelectContent>
-                                    </SelectShadcn>
-                                  </div>
-                                  {pricingMode === 'markup_pct' && (
-                                    <div>
-                                      <Label className="text-xs">Markup %</Label>
-                                      <Input
-                                        type="number"
-                                        step="1"
-                                        min="0"
-                                        className="w-20"
-                                        value={String(markupPct)}
-                                        onChange={(e) => {
-                                          const v = parseFloat(e.target.value) || 0;
-                                          const d: AddonDraft = { cost_amount: cost, markup_pct: v, sale_amount: cost * (1 + v / 100), pricing_mode: 'markup_pct', taxable };
-                                          addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
-                                          setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
-                                        }}
-                                        onBlur={persist}
-                                        disabled={readOnly}
-                                      />
-                                    </div>
-                                  )}
-                                  {pricingMode === 'fixed_price' && (
-                                    <div>
-                                      <Label className="text-xs">Sale price</Label>
-                                      <Input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        className="w-24"
-                                        value={String(sale)}
-                                        onChange={(e) => {
-                                          const v = parseFloat(e.target.value) || 0;
-                                          const d: AddonDraft = { cost_amount: cost, markup_pct: markupPct, sale_amount: v, pricing_mode: 'fixed_price', taxable };
-                                          addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
-                                          setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
-                                        }}
-                                        onBlur={persist}
-                                        disabled={readOnly}
-                                      />
-                                    </div>
-                                  )}
-                                  <Label className="flex items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={!!taxable}
-                                      onChange={(e) => {
-                                        const v = e.target.checked;
-                                        setAddonDraft((prev) => ({ ...prev, [line.id]: { cost_amount: cost, markup_pct: markupPct, sale_amount: sale, pricing_mode: pricingMode, taxable: v } }));
-                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, pricing_mode: pricingMode, markup_pct: pricingMode === 'markup_pct' ? markupPct : undefined, sale_amount: sale, taxable: v });
-                                      }}
-                                      disabled={readOnly}
-                                    />
-                                    Taxable
-                                  </Label>
-                                </>
-                              );
-                            })()}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -1772,43 +1689,30 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   {line.line_type === 'from_quote' && isExpanded && (
                     <tr key={`${line.id}-addons`} className="bg-gray-50/80">
                       <td colSpan={11} className="py-4 px-6">
-                        <div className="rounded-lg border border-gray-200 bg-white p-4">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Add-ons</h4>
-                          <div className="flex flex-wrap items-end gap-4">
-                            <Label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={!!installationAddon}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    upsertAddOn(line.id, { addon_type: 'installation', cost_amount: 0, pricing_mode: 'markup_pct', markup_pct: 100, taxable: true });
-                                  } else if (installationAddon) {
-                                    removeAddOn(installationAddon.id);
-                                  }
-                                }}
-                                disabled={readOnly}
-                              />
-                              Installation
-                            </Label>
-                            {installationAddon && (() => {
-                              const draft = addonDraft[line.id];
-                              const cost = draft?.cost_amount ?? (installationAddon.cost_amount ?? 0);
-                              const markupPct = draft?.markup_pct ?? (installationAddon.markup_pct ?? 100);
-                              const sale = draft?.sale_amount ?? (installationAddon.sale_amount ?? 0);
-                              const pricingMode = draft?.pricing_mode ?? (installationAddon.pricing_mode ?? 'markup_pct');
-                              const taxable = draft?.taxable ?? (installationAddon.taxable ?? true);
-                              const persist = () => {
-                                const latest = addonDraftRef.current[line.id];
-                                const c = latest?.cost_amount ?? cost;
-                                const mp = latest?.markup_pct ?? markupPct;
-                                const s = latest?.sale_amount ?? sale;
-                                const pm = latest?.pricing_mode ?? pricingMode;
-                                const t = latest?.taxable ?? taxable;
-                                const newSale = pm === 'markup_pct' ? c * (1 + mp / 100) : s;
-                                upsertAddOn(line.id, { addon_type: 'installation', cost_amount: c, pricing_mode: pm, markup_pct: pm === 'markup_pct' ? mp : undefined, sale_amount: newSale, taxable: t });
-                                setAddonDraft((prev) => { const n = { ...prev }; delete n[line.id]; return n; });
-                              };
-                              return (
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+                          {/* Installation add-on */}
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Installation</h4>
+                            <div className="flex flex-wrap items-center gap-4">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={!!(installationAddon && (Number(installationAddon.sale_amount) || 0) > 1)}
+                                  onChange={(e) => {
+                                    if (contentReadOnly) return;
+                                    if (e.target.checked) {
+                                      upsertAddOn(line.id, { addon_type: 'installation', cost_amount: 0, markup_pct: 100, pricing_mode: 'markup_pct' });
+                                    } else {
+                                      const inst = (displayAddonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
+                                      if (inst) removeAddOn(inst.id);
+                                    }
+                                  }}
+                                  disabled={contentReadOnly}
+                                  className="rounded border-gray-300"
+                                />
+                                <span className="text-sm text-gray-700">Install Included</span>
+                              </label>
+                              {installationAddon && (Number(installationAddon.sale_amount) || 0) > 1 && (
                                 <>
                                   <div>
                                     <Label className="text-xs">Cost</Label>
@@ -1817,101 +1721,39 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                       step="0.01"
                                       min="0"
                                       className="w-24"
-                                      value={String(cost)}
+                                      value={installationAddon.cost_amount ?? ''}
                                       onChange={(e) => {
-                                        const v = parseFloat(e.target.value) || 0;
-                                        const d: AddonDraft = {
-                                          cost_amount: v,
-                                          markup_pct: markupPct,
-                                          sale_amount: pricingMode === 'fixed_price' ? sale : v * (1 + markupPct / 100),
-                                          pricing_mode: pricingMode,
-                                          taxable,
-                                        };
-                                        addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
-                                        setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
+                                        const cost = Math.max(0, parseFloat(e.target.value) || 0);
+                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, markup_pct: installationAddon.markup_pct ?? 100, pricing_mode: 'markup_pct' });
                                       }}
-                                      onBlur={persist}
-                                      disabled={readOnly}
+                                      disabled={contentReadOnly}
                                     />
                                   </div>
                                   <div>
-                                    <Label className="text-xs">Pricing</Label>
-                                    <SelectShadcn
-                                      value={pricingMode}
-                                      onValueChange={(v: ProposalLineAddOnPricingMode) => {
-                                        const newSale = v === 'markup_pct' ? cost * (1 + markupPct / 100) : sale;
-                                        setAddonDraft((prev) => ({ ...prev, [line.id]: { cost_amount: cost, markup_pct: markupPct, sale_amount: newSale, pricing_mode: v, taxable } }));
-                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, pricing_mode: v, markup_pct: v === 'markup_pct' ? markupPct : undefined, sale_amount: newSale, taxable });
-                                      }}
-                                      disabled={readOnly}
-                                    >
-                                      <SelectTrigger className="w-36">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="markup_pct">Markup %</SelectItem>
-                                        <SelectItem value="fixed_price">Fixed sale price</SelectItem>
-                                      </SelectContent>
-                                    </SelectShadcn>
-                                  </div>
-                                  {pricingMode === 'markup_pct' && (
-                                    <div>
-                                      <Label className="text-xs">Markup %</Label>
-                                      <Input
-                                        type="number"
-                                        step="1"
-                                        min="0"
-                                        className="w-20"
-                                        value={String(markupPct)}
-                                        onChange={(e) => {
-                                          const v = parseFloat(e.target.value) || 0;
-                                          const d: AddonDraft = { cost_amount: cost, markup_pct: v, sale_amount: cost * (1 + v / 100), pricing_mode: 'markup_pct', taxable };
-                                          addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
-                                          setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
-                                        }}
-                                        onBlur={persist}
-                                        disabled={readOnly}
-                                      />
-                                    </div>
-                                  )}
-                                  {pricingMode === 'fixed_price' && (
-                                    <div>
-                                      <Label className="text-xs">Sale price</Label>
-                                      <Input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        className="w-24"
-                                        value={String(sale)}
-                                        onChange={(e) => {
-                                          const v = parseFloat(e.target.value) || 0;
-                                          const d: AddonDraft = { cost_amount: cost, markup_pct: markupPct, sale_amount: v, pricing_mode: 'fixed_price', taxable };
-                                          addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
-                                          setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
-                                        }}
-                                        onBlur={persist}
-                                        disabled={readOnly}
-                                      />
-                                    </div>
-                                  )}
-                                  <Label className="flex items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={!!taxable}
+                                    <Label className="text-xs">Markup %</Label>
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      className="w-20"
+                                      value={installationAddon.markup_pct ?? ''}
                                       onChange={(e) => {
-                                        const v = e.target.checked;
-                                        setAddonDraft((prev) => ({ ...prev, [line.id]: { cost_amount: cost, markup_pct: markupPct, sale_amount: sale, pricing_mode: pricingMode, taxable: v } }));
-                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, pricing_mode: pricingMode, markup_pct: markupPct, sale_amount: sale, taxable: v });
+                                        const markup = Math.max(0, parseFloat(e.target.value) || 0);
+                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: installationAddon.cost_amount ?? 0, markup_pct: markup, pricing_mode: 'markup_pct' });
                                       }}
-                                      disabled={readOnly}
+                                      disabled={contentReadOnly}
                                     />
-                                    Taxable
-                                  </Label>
+                                  </div>
+                                  <span className="text-xs text-gray-500 self-end pb-2">
+                                    Sale: {formatCurrency(Number(installationAddon.sale_amount) || 0, currency)}
+                                  </span>
                                 </>
-                              );
-                            })()}
-                            <div className="w-full flex flex-wrap items-end gap-4 mt-2 pt-2 border-t border-gray-100">
-                              <div>
+                              )}
+                            </div>
+                          </div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Line Adjustments</h4>
+                          <div className="flex flex-wrap items-end gap-4">
+                            <div>
                                 <Label className="text-xs">Discount %</Label>
                                 <Input
                                   key={`disc-${line.id}-${line.line_adjustment_pct ?? 0}`}
@@ -1926,7 +1768,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                     const fee = (line.line_adjustment_pct ?? 0) > 0 ? (line.line_adjustment_pct ?? 0) : 0;
                                     updateLineAdjustment(line.id, fee - disc);
                                   }}
-                                  disabled={readOnly}
+                                  disabled={contentReadOnly}
                                   placeholder="0"
                                 />
                               </div>
@@ -1945,7 +1787,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                     const disc = (line.line_adjustment_pct ?? 0) < 0 ? -(line.line_adjustment_pct ?? 0) : 0;
                                     updateLineAdjustment(line.id, fee - disc);
                                   }}
-                                  disabled={readOnly}
+                                  disabled={contentReadOnly}
                                   placeholder="0"
                                 />
                               </div>
@@ -1954,13 +1796,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                   Base: {formatCurrency(baseAmount, currency)} → Adjusted: {formatCurrency(materialTotal, currency)}
                                 </span>
                               )}
-                            </div>
                           </div>
-                          {addonsTotal > 0 && (
-                            <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600">
-                              Material: {formatCurrency(materialTotal, currency)} (shown above). Installation: {formatCurrency(addonsTotal, currency)} → global Installation line
-                            </div>
-                          )}
                         </div>
                       </td>
                     </tr>

@@ -296,6 +296,41 @@ export default function SalesOrderDetail() {
     return btns;
   }, [so, isInternal, handleTransition, handleCreateMO]);
 
+  const moAllDelivered = so != null && mos.length > 0 && mos.every((m) => (m.status || '').toLowerCase() === 'delivered');
+  const lifecycleSteps = useMemo((): import('../../components/shared/LifecycleIndicator').LifecycleStep[] => {
+    if (!so) {
+      return [
+        { id: 'quote', label: 'Quote', sublabel: '—', status: 'pending' },
+        { id: 'proposal', label: 'Proposal', sublabel: '—', status: 'pending' },
+        { id: 'sales_order', label: 'Sales Order', sublabel: '—', status: 'pending' },
+        { id: 'manufacturing', label: 'Manufacturing', sublabel: '—', status: 'pending' },
+      ];
+    }
+    const quoteNoShort = so.Quotes?.quote_no ?? '—';
+    return [
+      {
+        id: 'quote',
+        label: 'Quote',
+        sublabel: quoteNoShort,
+        status: 'completed',
+        href: so.Quotes?.id ? `/sales/quotes/${so.Quotes.id}` : undefined,
+      },
+      { id: 'proposal', label: 'Proposal', sublabel: 'Accepted', status: 'completed' },
+      { id: 'sales_order', label: 'Sales Order', sublabel: 'Current', status: 'active' },
+      {
+        id: 'manufacturing',
+        label: 'Manufacturing',
+        sublabel:
+          mos.length === 0
+            ? 'No MOs'
+            : moAllDelivered
+              ? 'All Delivered'
+              : `${mos.length} MO${mos.length > 1 ? 's' : ''}`,
+        status: mos.length === 0 ? 'pending' : moAllDelivered ? 'completed' : 'active',
+      },
+    ];
+  }, [so, mos.length, moAllDelivered]);
+
   const currency = 'USD';
   const balance = (so?.total_amount ?? 0) - (so?.amount_paid ?? 0);
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
@@ -371,13 +406,6 @@ export default function SalesOrderDetail() {
     { label: 'Balance', value: formatCurrency(balance, currency) },
     { label: 'Priority', value: so.priority ? <StatusBadge status={so.priority} type="priority" size="sm" /> : '—' },
     { label: 'Order Date', value: new Date(so.created_at).toLocaleDateString() },
-  ];
-
-  const lifecycleStages = [
-    { label: 'Quote', ref: so.Quotes?.quote_no, href: so.Quotes?.id ? `/sales/quotes/${so.Quotes.id}` : undefined },
-    { label: 'Proposal', ref: 'Accepted' },
-    { label: 'SO', ref: so.sales_order_no },
-    { label: 'Manufacturing', ref: mos.length > 0 ? `${mos.length} MO${mos.length > 1 ? 's' : ''}` : undefined, count: mos.length },
   ];
 
   return (
@@ -478,8 +506,7 @@ export default function SalesOrderDetail() {
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Lifecycle</h3>
-            <LifecycleIndicator currentStage="sales_order" stages={lifecycleStages} />
+            <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
           </div>
         </div>
       )}

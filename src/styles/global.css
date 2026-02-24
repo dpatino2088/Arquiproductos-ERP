@@ -267,6 +267,9 @@
   .table-fit-wrapper { overflow-x: hidden; }
   /* Quotes: scroll horizontal para que Description y columnas no se monten */
   .table-fit-wrapper.quotes-table-wrapper { overflow-x: auto; }
+  /* Quote Lines (Edit Quote): columnas homogéneas, sin montar Description / System Drive */
+  .table-fit-wrapper.quote-lines-table-wrapper { overflow-x: auto; }
+  .table-fit-wrapper.quote-lines-table-wrapper .table-fit { table-layout: fixed; width: 100%; min-width: 900px; }
   .table-fit { table-layout: fixed; width: 100%; min-width: 0; }
   /* Proposal Detail Lines: respetar anchos de columna (Unit Price, Line total) sin que el fixed layout reparta espacio */
   .proposal-lines-table-wrapper { overflow-x: auto; }

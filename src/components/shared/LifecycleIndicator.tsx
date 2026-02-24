@@ -1,90 +1,96 @@
-import { Check } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
-export type Stage = 'quote' | 'proposal' | 'sales_order' | 'manufacturing';
+export type StepStatus = 'completed' | 'active' | 'pending';
 
-export interface StageRef {
+export interface LifecycleStep {
+  id: 'quote' | 'proposal' | 'sales_order' | 'manufacturing';
   label: string;
-  ref?: string;
+  sublabel: string;
+  status: StepStatus;
   href?: string;
-  count?: number;
 }
 
 export interface LifecycleIndicatorProps {
-  currentStage: Stage;
-  stages: StageRef[];
+  steps: LifecycleStep[];
+  title?: string;
 }
 
-const STAGE_ORDER: Stage[] = ['quote', 'proposal', 'sales_order', 'manufacturing'];
-
-export default function LifecycleIndicator({ currentStage, stages }: LifecycleIndicatorProps) {
-  const currentIdx = STAGE_ORDER.indexOf(currentStage);
-
+export default function LifecycleIndicator({ steps = [], title = 'Origin & Progress' }: LifecycleIndicatorProps) {
   return (
-    <div className="flex items-start gap-0 overflow-x-auto py-2">
-      {stages.map((stage, idx) => {
-        const stageKey = STAGE_ORDER[idx];
-        const isCompleted = idx < currentIdx;
-        const isCurrent = idx === currentIdx;
-        const lineCompleted = idx < currentIdx;
+    <div className="w-full min-w-0">
+      {title && (
+        <h3 className="text-sm font-medium text-gray-500 mb-3">{title}</h3>
+      )}
+      {/* Steps constrained to half container */}
+      <div className="flex items-center gap-0 max-w-[50%] min-w-0">
+        {(steps ?? []).map((step, index) => {
+          const isLast = index === steps.length - 1;
+          const isReached = step.status === 'completed' || step.status === 'active';
+          const isActive = step.status === 'active';
 
-        const content = (
-          <div className="flex flex-col items-center shrink-0">
-            <div
-              className={`flex items-center justify-center rounded-full transition-colors ${
-                isCompleted
-                  ? 'bg-green-600 text-white'
-                  : isCurrent
-                    ? 'bg-blue-600 text-white scale-110'
-                    : 'border-2 border-gray-300 bg-white text-gray-400'
-              }`}
-              style={{ width: 16, height: 16 }}
-            >
-              {isCompleted ? <Check className="w-2.5 h-2.5" strokeWidth={3} /> : null}
-            </div>
-            <span
-              className={`mt-1 text-xs font-medium ${
-                isCompleted ? 'text-green-600' : isCurrent ? 'text-blue-600' : 'text-gray-500'
-              }`}
-            >
-              {stage.label}
-            </span>
-            {(stage.ref ?? stage.count != null) && (
-              <span
-                className={`text-xs ${
-                  isCompleted ? 'text-green-600' : isCurrent ? 'text-blue-600' : 'text-gray-500'
-                }`}
-              >
-                {stage.ref}
-              </span>
-            )}
-          </div>
-        );
-
-        const stageEl = stage.href && (isCompleted || isCurrent) ? (
-          <a
-            href={stage.href}
-            className="flex flex-col items-center shrink-0 hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-1 rounded"
-          >
-            {content}
-          </a>
-        ) : (
-          content
-        );
-
-        return (
-          <div key={stageKey} className="flex items-center">
-            {idx > 0 && (
+          return (
+            <div key={step.id} className="flex items-center flex-1 min-w-0">
+              {/* Rectangular box — active uses same colors as Priority "Normal" label: bg #E6F0FF, text #366AF3 */}
               <div
-                className={`shrink-0 mx-1 h-0.5 w-4 sm:w-6 ${
-                  lineCompleted ? 'bg-green-600' : 'bg-gray-300'
-                }`}
-                aria-hidden
-              />
-            )}
-            {stageEl}
-          </div>
-        );
-      })}
+                className={cn(
+                  'flex items-center gap-1.5 py-1.5 px-2 rounded border flex-1 min-w-0',
+                  step.status === 'completed' && 'bg-gray-200 border-gray-300 text-gray-800',
+                  step.status === 'pending' && 'bg-white border-gray-200 text-gray-500'
+                )}
+                style={
+                  isActive
+                    ? { backgroundColor: '#E6F0FF', borderColor: '#E6F0FF', color: '#366AF3' }
+                    : undefined
+                }
+              >
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span
+                    className={cn('text-xs font-medium leading-tight truncate')}
+                    style={isActive ? { color: '#366AF3' } : undefined}
+                    title={step.label}
+                  >
+                    {step.label}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-[10px] leading-tight truncate',
+                      !isActive && (isReached ? 'text-gray-600' : 'text-gray-400')
+                    )}
+                    style={isActive ? { color: '#366AF3' } : undefined}
+                    title={step.sublabel}
+                  >
+                    {step.href ? (
+                      <a
+                        href={step.href}
+                        className={cn('hover:underline')}
+                        style={isActive ? { color: '#366AF3' } : undefined}
+                      >
+                        {step.sublabel}
+                      </a>
+                    ) : (
+                      step.sublabel
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* Chevron to next step */}
+              {!isLast && (
+                <ChevronRight
+                  className={cn(
+                    'w-4 h-4 flex-shrink-0 mx-0.5',
+                    !isReached && 'text-gray-300',
+                    isReached && !isActive && 'text-gray-500'
+                  )}
+                  style={isActive ? { color: '#366AF3' } : undefined}
+                  aria-hidden
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

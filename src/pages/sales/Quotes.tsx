@@ -541,10 +541,7 @@ export default function Quotes() {
       {/* Header: design system — title + subtitle (mb-1); actions ml-auto; same spacing as Proposals/Orders */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Quotes</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Create and manage quotes
-          </p>
+          <h1 className="text-xl font-semibold text-foreground">Quotes</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
           {selectedIds.size > 0 && (

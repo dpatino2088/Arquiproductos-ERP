@@ -395,13 +395,14 @@ const CURRENCY_OPTIONS = [
   { value: 'CAD', label: 'CAD - Canadian Dollar' },
 ] as const;
 
-// Schema for Quote - customer_id optional; description and po_number for Dealer
+// Schema for Quote - customer_id optional; description, notes, po_number for Dealer
 const quoteSchema = z.object({
   quote_no: z.string().min(1, 'Quote number is required'),
   customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
   status: z.enum(['draft', 'sent', 'approved', 'rejected']),
   currency: z.string().min(1, 'Currency is required'),
   description: z.string().optional(),
+  notes: z.string().optional(),
   po_number: z.string().optional(),
   exempt_tax: z.boolean().optional(),
 });
@@ -635,6 +636,7 @@ export default function QuoteNew() {
       status: 'draft',
       currency: 'USD',
       description: '',
+      notes: '',
       po_number: '',
       exempt_tax: false,
     },
@@ -793,7 +795,8 @@ export default function QuoteNew() {
           const status = data.status as QuoteStatus;
           setValue('status', (status === 'cancelled' ? 'draft' : status) || 'draft');
           setValue('currency', 'USD'); // Default for UI formatting (not stored in DB)
-          setValue('description', (data as any).description ?? (data as any).notes ?? '');
+          setValue('description', (data as any).description ?? '');
+          setValue('notes', (data as any).notes ?? '');
           setValue('po_number', (data as any).po_number ?? '');
           setValue('exempt_tax', (data as any).exempt_tax ?? false);
           // Load contact_id if it exists (contact_id DOES exist in Quotes table)
@@ -3363,6 +3366,7 @@ export default function QuoteNew() {
         organization_id: activeOrganizationId,
         dealer_id: dealerInfo?.id || quoteData?.dealer_id || null,
         description: data.description?.trim() || null,
+        notes: data.notes?.trim() || null,
         po_number: data.po_number?.trim() || null,
         exempt_tax: data.exempt_tax ?? false,
       };
@@ -3550,7 +3554,7 @@ export default function QuoteNew() {
         {/* Form Fields */}
         <div className="p-6">
           <div className="grid grid-cols-12 gap-4">
-            {/* Quote Number */}
+            {/* Quote Number | Status | Currency — same row */}
             <div className="col-span-12 md:col-span-6">
               <Label htmlFor="quote_no">Quote Number *</Label>
               <Input
@@ -3560,7 +3564,50 @@ export default function QuoteNew() {
               />
             </div>
 
-            {/* Customer (optional) */}
+            {/* Status */}
+            <div className="col-span-12 md:col-span-3">
+              <Label htmlFor="status">Status *</Label>
+            <SelectShadcn
+              value={watch('status') || 'draft'}
+              onValueChange={(value) => {
+                const validStatus = value as 'draft' | 'sent' | 'approved' | 'rejected';
+                setValue('status', validStatus);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {QUOTE_STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectShadcn>
+            </div>
+
+            {/* Currency */}
+            <div className="col-span-12 md:col-span-3">
+              <Label htmlFor="currency">Currency *</Label>
+            <SelectShadcn
+              value={watch('currency') || 'USD'}
+              onValueChange={(value) => setValue('currency', value)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CURRENCY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectShadcn>
+            </div>
+
+            {/* Customer (optional) | Contact (optional) — side by side below */}
             <div className="col-span-12 md:col-span-6">
               <Label htmlFor="customer_id">Customer (optional)</Label>
             <SelectShadcn
@@ -3609,68 +3656,36 @@ export default function QuoteNew() {
             </SelectShadcn>
             </div>
 
-            {/* Status */}
-            <div className="col-span-12 md:col-span-3">
-              <Label htmlFor="status">Status *</Label>
-            <SelectShadcn
-              value={watch('status') || 'draft'}
-              onValueChange={(value) => {
-                const validStatus = value as 'draft' | 'sent' | 'approved' | 'rejected';
-                setValue('status', validStatus);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUOTE_STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-            </div>
-
-            {/* Currency */}
-            <div className="col-span-12 md:col-span-3">
-              <Label htmlFor="currency">Currency *</Label>
-            <SelectShadcn
-              value={watch('currency') || 'USD'}
-              onValueChange={(value) => setValue('currency', value)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CURRENCY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-            </div>
-
-            {/* Description */}
-            <div className="col-span-12">
+            {/* Description — aligned with Customer (left column), same height as Contact */}
+            <div className="col-span-12 md:col-span-6">
               <Label htmlFor="description">Description</Label>
               <textarea
                 id="description"
                 {...register('description')}
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                rows={1}
+                className="w-full h-9 min-h-9 resize-none px-2.5 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                 placeholder="Quote description or comments..."
               />
             </div>
 
-            {/* PO: Dealer PO / order tracking number */}
+            {/* PO: Dealer PO / order tracking number — between Description and Notas */}
             <div className="col-span-12 md:col-span-6">
               <Label htmlFor="po_number">PO</Label>
               <Input
                 id="po_number"
                 {...register('po_number')}
                 placeholder="Dealer PO / order number (optional)"
+              />
+            </div>
+
+            {/* Notas — aligned with Customer, bottom aligned with Created by (same row as Summary) */}
+            <div className="col-span-12 md:col-span-6 flex flex-col gap-1 min-h-0">
+              <Label htmlFor="notes">Notas</Label>
+              <textarea
+                id="notes"
+                {...register('notes')}
+                className="flex-1 min-h-[8rem] w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 resize-y"
+                placeholder="Notas adicionales..."
               />
             </div>
 
@@ -3745,29 +3760,29 @@ export default function QuoteNew() {
           ) : quoteLines.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
-            <div className="table-fit-wrapper">
-              <table className="table-fit w-full">
+            <div className="table-fit-wrapper quote-lines-table-wrapper">
+              <table className="table-fit w-full quote-lines-table">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" title="Drag to reorder"> </th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs w-12 whitespace-nowrap">#</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[80px] whitespace-nowrap">
+                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" style={{ width: '2%' }} title="Drag to reorder"> </th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '4%' }}>#</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>
                       <span style={{ display: 'inline-block', width: 50, minWidth: 50 }} aria-hidden="true" />
                       <span style={{ display: 'inline-block', transform: 'translateX(-20px)' }}>Area</span>
                     </th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs min-w-[60px] whitespace-nowrap">Position</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '6%' }}>Position</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>
                       <span style={{ display: 'inline-block', transform: 'translateX(8px)' }}>Product type</span>
                     </th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[180px] whitespace-nowrap">
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '20%' }}>
                       <span style={{ display: 'inline-block', transform: 'translateX(8px)' }}>Description</span>
                     </th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs min-w-[90px] whitespace-nowrap">System Drive</th>
-                    <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">Measurements</th>
-                    <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs w-16 whitespace-nowrap">Qty</th>
-                    <th className="py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] text-center whitespace-nowrap">{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
-                    <th className="py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] text-center whitespace-nowrap">Total</th>
-                    <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs whitespace-nowrap">Action</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>System Drive</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Measurements</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Qty</th>
+                    <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
+                    <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>Total</th>
+                    <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -3831,8 +3846,8 @@ export default function QuoteNew() {
                         <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap">
                           {productTypeName}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm min-w-[180px] whitespace-nowrap">
-                          {collectionDisplay}
+                        <td className="py-4 px-6 text-gray-700 text-sm min-w-0 overflow-hidden text-ellipsis" title={collectionDisplay}>
+                          <span className="block truncate">{collectionDisplay}</span>
                         </td>
                         <td className="py-4 px-6 text-gray-700 text-sm text-center whitespace-nowrap">
                           {driveDisplay}
