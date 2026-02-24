@@ -516,7 +516,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           if (l.id !== lineId) return l;
           const next = { ...l, ...fields };
           if (next.line_type === 'custom' && (fields.unit_cost !== undefined || fields.markup_pct !== undefined)) {
-            const cost = fields.unit_cost !== undefined ? fields.unit_cost : (l.unit_cost ?? 0);
+            const cost = Number(fields.unit_cost !== undefined ? fields.unit_cost : (l.unit_cost ?? 0)) || 0;
             const markup = fields.markup_pct !== undefined ? fields.markup_pct : (l.markup_pct ?? 0);
             next.unit_price = cost * (1 + (Number(markup) || 0) / 100);
           }
@@ -1668,7 +1668,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                 min={0}
                                 className="w-20"
                                 placeholder="0"
-                                value={line.qty === 0 ? '' : line.qty}
+                                value={line.qty == null || line.qty === 0 ? '' : line.qty}
                                 onChange={(e) => {
                                   const raw = e.target.value;
                                   if (raw === '') {
