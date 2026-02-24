@@ -3,17 +3,20 @@ import { router } from '../../lib/router';
 
 import { useQuotes, approveQuote, waitForSalesOrder, type QuoteListItem } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAccessContext } from '../../hooks/useAccessContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { getSupabaseErrorMessage, isRLSError, safeError } from '../../lib/supabase-error-utils';
 import { 
-  Search, Plus, Upload, List, Grid3X3, Edit, Trash2, Archive, 
+  Search, Plus, Upload, List, Grid3X3, Edit, Trash2, Archive, RotateCcw,
   ShoppingCart, FileText, RefreshCw, Filter,
-  SortAsc, SortDesc
+  SortAsc, SortDesc, Eye
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
+import StatusBadge from '../../components/shared/StatusBadge';
+import StatusTabs from '../../components/shared/StatusTabs';
 
 /** Usado en la tabla; mismo shape que useQuotes devuelve (QuoteListItem) */
 type EnrichedQuote = QuoteListItem;
@@ -38,11 +41,33 @@ const formatCurrency = (amount: number) => {
 
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
+  const { isInternal } = useAccessContext();
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
 
   // Una sola fuente de verdad: filtro por dealer y enriquecimiento en useQuotes
   const { quotes: hookQuotes, loading, error, refetch } = useQuotes();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+
+  const [dealerById, setDealerById] = useState<Record<string, { dealer_name: string; dealer_no?: string | null }>>({});
+  useEffect(() => {
+    if (!isInternal || hookQuotes.length === 0) {
+      setDealerById({});
+      return;
+    }
+    const dealerIds = [...new Set(hookQuotes.map((q) => q.dealer_id).filter(Boolean))] as string[];
+    if (dealerIds.length === 0) {
+      setDealerById({});
+      return;
+    }
+    (async () => {
+      const { data } = await supabase.from('Dealers').select('id, dealer_name, dealer_no').in('id', dealerIds);
+      const map: Record<string, { dealer_name: string; dealer_no?: string | null }> = {};
+      (data || []).forEach((r: { id: string; dealer_name?: string; dealer_no?: string | null }) => {
+        map[r.id] = { dealer_name: r.dealer_name ?? '—', dealer_no: r.dealer_no ?? null };
+      });
+      setDealerById(map);
+    })();
+  }, [isInternal, hookQuotes]);
 
   useEffect(() => {
     setGlobalLoading(loading);
@@ -57,8 +82,72 @@ export default function Quotes() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedStatus, setSelectedStatus] = useState<QuoteStatus[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [statusTab, setStatusTab] = useState('all');
 
   const quotes = hookQuotes;
+
+  const [proposalStatusMap, setProposalStatusMap] = useState<Record<string, string>>({});
+  const [soNumberMap, setSONumberMap] = useState<Record<string, { id: string; no: string }>>({});
+
+  useEffect(() => {
+    if (!quotes.length || !activeOrganizationId) return;
+    const ids = quotes.map(q => q.id);
+
+    supabase
+      .from('Proposals')
+      .select('quote_id, status')
+      .in('quote_id', ids)
+      .or('deleted.is.false,deleted.is.null')
+      .order('updated_at', { ascending: false })
+      .then(({ data }: { data: any }) => {
+        if (!data) return;
+        const m: Record<string, string> = {};
+        data.forEach((p: any) => { if (!m[p.quote_id]) m[p.quote_id] = p.status; });
+        setProposalStatusMap(m);
+      });
+
+    supabase
+      .from('SalesOrders')
+      .select('id, quote_id, sales_order_no')
+      .in('quote_id', ids)
+      .eq('deleted', false)
+      .then(({ data }: { data: any }) => {
+        if (!data) return;
+        const m: Record<string, { id: string; no: string }> = {};
+        data.forEach((so: any) => { if (so.quote_id) m[so.quote_id] = { id: so.id, no: so.sales_order_no }; });
+        setSONumberMap(m);
+      });
+  }, [quotes, activeOrganizationId]);
+
+  const nonArchivedQuotes = useMemo(() => quotes.filter((q) => !(q as EnrichedQuote).archived), [quotes]);
+  const archivedQuotesCount = useMemo(() => quotes.filter((q) => (q as EnrichedQuote).archived).length, [quotes]);
+
+  const statusTabCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: nonArchivedQuotes.length };
+    nonArchivedQuotes.forEach((q) => {
+      counts[q.status] = (counts[q.status] || 0) + 1;
+    });
+    return counts;
+  }, [nonArchivedQuotes]);
+
+  const quotesStatusTabs = useMemo(
+    () => [
+      { label: 'All', value: 'all', count: statusTabCounts.all || 0 },
+      { label: 'Draft', value: 'draft', count: statusTabCounts.draft || 0 },
+      { label: 'Pending Confirmation', value: 'approved', count: statusTabCounts.approved || 0 },
+      { label: 'Confirmed', value: 'converted', count: statusTabCounts.converted || 0 },
+      { label: 'Cancelled', value: 'cancelled', count: (statusTabCounts.cancelled || 0) + (statusTabCounts.canceled || 0) },
+      { label: 'Expired', value: 'expired', count: statusTabCounts.expired || 0 },
+      { label: 'Archived', value: 'archived', count: archivedQuotesCount },
+    ],
+    [statusTabCounts, archivedQuotesCount]
+  );
+
+  /** Solo se puede archivar cuando el status es cancelled, rejected o expired */
+  const canArchiveQuote = useCallback((q: EnrichedQuote) => {
+    const s = (q.status || '').toLowerCase();
+    return s === 'cancelled' || s === 'canceled' || s === 'rejected' || s === 'expired';
+  }, []);
 
   /** Returns quote IDs that have at least one (non-deleted) proposal */
   const getQuoteIdsWithProposals = useCallback(async (quoteIds: string[]): Promise<Set<string>> => {
@@ -163,6 +252,75 @@ export default function Quotes() {
       setDialogLoading(false);
     }
   };
+
+  const handleArchive = useCallback(
+    async (quote: EnrichedQuote, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!canArchiveQuote(quote)) return;
+      const confirmed = await showConfirm({
+        title: 'Archivar cotización',
+        message: `¿Archivar ${quote.quote_no}? No se eliminará, solo se ocultará de la lista activa.`,
+        variant: 'info',
+        confirmText: 'Archivar',
+        cancelText: 'Cancelar',
+      });
+      if (!confirmed) return;
+      try {
+        setDialogLoading(true);
+        const { error: err } = await supabase.from('Quotes').update({ archived: true }).eq('id', quote.id);
+        if (err) throw err;
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Archivado',
+          message: 'Cotización archivada correctamente.',
+        });
+        await refetch();
+      } catch (err: any) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: getSupabaseErrorMessage(err),
+        });
+      } finally {
+        setDialogLoading(false);
+      }
+    },
+    [showConfirm, setDialogLoading, refetch, canArchiveQuote]
+  );
+
+  const handleRestore = useCallback(
+    async (quote: EnrichedQuote, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const confirmed = await showConfirm({
+        title: 'Restaurar cotización',
+        message: `¿Restaurar ${quote.quote_no}? Volverá a la lista activa.`,
+        variant: 'info',
+        confirmText: 'Restaurar',
+        cancelText: 'Cancelar',
+      });
+      if (!confirmed) return;
+      try {
+        setDialogLoading(true);
+        const { error: err } = await supabase.from('Quotes').update({ archived: false }).eq('id', quote.id);
+        if (err) throw err;
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Restaurado',
+          message: 'Cotización restaurada correctamente.',
+        });
+        await refetch();
+      } catch (err: any) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: getSupabaseErrorMessage(err),
+        });
+      } finally {
+        setDialogLoading(false);
+      }
+    },
+    [showConfirm, setDialogLoading, refetch]
+  );
 
   // === BULK DELETE ===
   const handleDeleteSelected = useCallback(async () => {
@@ -280,7 +438,21 @@ export default function Quotes() {
 
   // === FILTERED & SORTED QUOTES ===
   const filteredQuotes = useMemo(() => {
-    let result = quotes;
+    let result: EnrichedQuote[];
+
+    if (statusTab === 'archived') {
+      result = quotes.filter((q) => (q as EnrichedQuote).archived).map((q) => q as EnrichedQuote);
+    } else {
+      result = [...nonArchivedQuotes] as EnrichedQuote[];
+      // StatusTabs filter (primary)
+      if (statusTab !== 'all') {
+        if (statusTab === 'cancelled') {
+          result = result.filter((q) => q.status === 'cancelled' || q.status === ('canceled' as any));
+        } else {
+          result = result.filter((q) => q.status === statusTab);
+        }
+      }
+    }
 
     // Search filter
     if (searchTerm) {
@@ -293,7 +465,7 @@ export default function Quotes() {
       );
     }
 
-    // Status filter
+    // Legacy status filter (from filter panel)
     if (selectedStatus.length > 0) {
       result = result.filter(q => selectedStatus.includes(q.status));
     }
@@ -315,7 +487,7 @@ export default function Quotes() {
     });
 
     return result;
-  }, [quotes, searchTerm, selectedStatus, sortBy, sortOrder]);
+  }, [quotes, nonArchivedQuotes, searchTerm, selectedStatus, sortBy, sortOrder, statusTab]);
 
   // Pagination
   const totalPages = Math.ceil(filteredQuotes.length / itemsPerPage);
@@ -366,44 +538,45 @@ export default function Quotes() {
 
   return (
     <div className="py-6 px-6">
-      {/* Header */}
+      {/* Header: design system — title + subtitle (mb-1); actions ml-auto; same spacing as Proposals/Orders */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Quotes</h1>
-          <p className="text-sm text-gray-500">
-            {filteredQuotes.length} cotizaciones
+          <h1 className="text-xl font-semibold text-foreground mb-1">Quotes</h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+            Create and manage quotes
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto">
           {selectedIds.size > 0 && (
             <button
               onClick={handleDeleteSelected}
-              className="flex items-center gap-2 px-3 py-2 border border-red-300 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 text-sm"
+              className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 style={{ width: 14, height: 14 }} />
               Eliminar seleccionados ({selectedIds.size})
             </button>
           )}
-          <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-sm">
-            <Upload className="w-4 h-4" />
+          <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors">
+            <Upload style={{ width: 14, height: 14 }} />
             Import
           </button>
           <button
             onClick={() => router.navigate('/sales/quotes/new')}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-white text-sm hover:opacity-90 transition-colors"
+            className="flex items-center gap-2 px-2 py-1 rounded text-white text-sm hover:opacity-90 transition-colors"
             style={{ backgroundColor: 'var(--primary-brand-hex)' }}
           >
-            <Plus className="w-4 h-4" />
+            <Plus style={{ width: 14, height: 14 }} />
             Add Quote
           </button>
         </div>
       </div>
 
-      {/* Search and Filters */}
-      <div className="mb-4">
-        <div className={`bg-white border border-gray-200 py-4 px-4 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
+      <StatusTabs tabs={quotesStatusTabs} activeTab={statusTab} onChange={setStatusTab} />
+
+      {/* Search and Filters — card py-6 px-6; botones px-2 py-1, icon 14px */}
+      <div className="mb-4 mt-4">
+        <div className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
           <div className="flex items-center gap-3">
-            {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -411,19 +584,18 @@ export default function Quotes() {
                 placeholder="Buscar por número, cliente o contacto..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
-            {/* Filter button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+              className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
                 showFilters || selectedStatus.length > 0
                   ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
               }`}
             >
-              <Filter className="w-4 h-4" />
+              <Filter style={{ width: 14, height: 14 }} />
               Filters
               {selectedStatus.length > 0 && (
                 <span className="bg-white text-blue-600 rounded-full px-2 py-0.5 text-xs font-semibold">
@@ -431,13 +603,12 @@ export default function Quotes() {
                 </span>
               )}
             </button>
-            {/* Refresh button */}
             <button
               onClick={() => refetch()}
-              className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50"
+              className="flex items-center justify-center p-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors"
               title="Actualizar"
             >
-              <RefreshCw className="w-4 h-4 text-gray-600" />
+              <RefreshCw style={{ width: 14, height: 14 }} />
             </button>
           </div>
 
@@ -488,9 +659,28 @@ export default function Quotes() {
         )}
         <div className="table-fit-wrapper quotes-table-wrapper">
           <table className="table-fit">
+            <colgroup>
+              <col style={{ width: '4%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '9%' }} />
+              {isInternal ? (
+                <>
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '7%' }} />
+                </>
+              ) : (
+                <col style={{ width: '12%' }} />
+              )}
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '9%' }} />
+            </colgroup>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="td-checkbox-cell w-10 py-3 px-4 text-left">
+                <th className="py-3 px-4 text-center">
                   <input
                     type="checkbox"
                     checked={paginatedQuotes.length > 0 && paginatedQuotes.every((q) => selectedIds.has(q.id))}
@@ -498,48 +688,53 @@ export default function Quotes() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">
                   <button onClick={() => handleSort('quote_no')} className="flex items-center gap-1 hover:text-gray-900">
-                    Quote
+                    Quote #
                     {sortBy === 'quote_no' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
-                  <button onClick={() => handleSort('customer_name')} className="flex items-center gap-1 hover:text-gray-900">
-                    Customer
-                    {sortBy === 'customer_name' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                  </button>
-                </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
-                  Contact
-                </th>
-                <th className="text-center py-3 px-6 font-medium text-gray-700 text-xs min-w-[380px] whitespace-nowrap">Description</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">Created By</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[80px] whitespace-nowrap">
-                  <button onClick={() => handleSort('status')} className="flex items-center gap-1 hover:text-gray-900">
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                  <button onClick={() => handleSort('status')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
                     Status
                     {sortBy === 'status' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[90px] whitespace-nowrap">
-                  <button onClick={() => handleSort('created_at')} className="flex items-center gap-1 hover:text-gray-900">
+                {isInternal ? (
+                  <>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Dealer</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Dealer No</th>
+                  </>
+                ) : (
+                  <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                    <button onClick={() => handleSort('customer_name')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
+                      Customer
+                      {sortBy === 'customer_name' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                    </button>
+                  </th>
+                )}
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Proposal</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">SO #</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Priority</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                  <button onClick={() => handleSort('created_at')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
                     Date
                     {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs min-w-[90px] whitespace-nowrap">
-                  <button onClick={() => handleSort('total')} className="flex items-center gap-1 hover:text-gray-900">
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                  <button onClick={() => handleSort('total')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
                     Total
                     {sortBy === 'total' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs min-w-[100px] whitespace-nowrap">Actions</th>
+                <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {paginatedQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 px-6 text-center">
+                  <td colSpan={isInternal ? 11 : 10} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
                       <p className="text-gray-600 mb-2">No se encontraron cotizaciones</p>
@@ -554,7 +749,7 @@ export default function Quotes() {
               ) : (
                 paginatedQuotes.map((quote) => (
                   <tr key={quote.id} className="hover:bg-gray-50">
-                    <td className="td-checkbox-cell w-10 py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                    <td className="py-4 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(quote.id)}
@@ -562,55 +757,116 @@ export default function Quotes() {
                         className="rounded border-gray-300"
                       />
                     </td>
-                    <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap">
-                      {quote.quote_no}
+                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-left">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/quotes/${quote.id}`); }}
+                        className="text-primary hover:underline"
+                      >
+                        {quote.quote_no}
+                      </button>
                     </td>
-                    <td className="py-4 px-6 text-gray-700 text-sm">
-                      {quote.customer_name}
+                    <td className="py-4 px-4 text-center">
+                      <StatusBadge status={quote.status} type="quote" size="sm" />
                     </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
-                      {(quote.contact_name ?? '').replace(/\s+/g, ' ').trim() || '—'}
+                    {isInternal ? (
+                      <>
+                        <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_name ?? '—') : '—'}</span></td>
+                        <td className="py-4 px-4 text-gray-700 text-sm text-center font-mono"><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_no ?? '—') : '—'}</span></td>
+                      </>
+                    ) : (
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
+                    )}
+                    <td className="py-4 px-4 text-center">
+                      {proposalStatusMap[quote.id]
+                        ? <StatusBadge status={proposalStatusMap[quote.id]} type="proposal" size="sm" />
+                        : <span className="text-gray-400 text-sm">—</span>}
                     </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm min-w-[380px] max-w-[380px] truncate text-center" title={quote.description ?? undefined}>
-                      {quote.description?.trim() || '—'}
+                    <td className="py-4 px-4 text-sm text-center">
+                      {soNumberMap[quote.id]
+                        ? <button onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/orders/${soNumberMap[quote.id].id}`); }} className="text-primary hover:underline font-medium">{soNumberMap[quote.id].no}</button>
+                        : <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">{quote.created_by ?? '—'}</td>
-                    <td className="py-4 px-6">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeColor(quote.status)}`}>
-                        {quote.status.charAt(0).toUpperCase() + quote.status.slice(1)}
-                      </span>
+                    <td className="py-4 px-4 text-center">
+                      {quote.priority && quote.priority.toLowerCase() !== 'normal'
+                        ? <StatusBadge status={quote.priority} type="priority" size="sm" />
+                        : <span className="text-gray-400 text-sm">—</span>}
                     </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm">
+                    <td className="py-4 px-4 text-gray-600 text-sm text-center">
                       {new Date(quote.created_at).toLocaleDateString()}
                     </td>
-                    <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
                       {formatCurrency(quote.total)}
                     </td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-1 justify-end">
-                        {quote.status === 'approved' && (
-                          <button 
-                            onClick={(e) => handleCreateSaleOrder(quote, e)}
-                            className="p-2 hover:bg-blue-50 rounded text-blue-600"
-                            title="Crear Orden de Venta"
-                          >
-                            <ShoppingCart className="w-4 h-4" />
-                          </button>
+                    <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 justify-end flex-nowrap">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/quotes/${quote.id}`); }}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                          title="View"
+                        >
+                          <Eye style={{ width: 14, height: 14 }} />
+                        </button>
+                        {statusTab === 'archived' ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => handleEdit(quote, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit style={{ width: 14, height: 14 }} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleRestore(quote, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Restore"
+                            >
+                              <RotateCcw style={{ width: 14, height: 14 }} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {quote.status === 'approved' && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleCreateSaleOrder(quote, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                                style={{ color: 'var(--primary-brand-hex)' }}
+                                title="Create Sales Order"
+                              >
+                                <ShoppingCart style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleEdit(quote, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit style={{ width: 14, height: 14 }} />
+                            </button>
+                            {canArchiveQuote(quote) && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleArchive(quote, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Archive"
+                              >
+                                <Archive style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleDelete(quote, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 style={{ width: 14, height: 14 }} />
+                            </button>
+                          </>
                         )}
-                        <button 
-                          onClick={(e) => handleEdit(quote, e)}
-                          className="p-2 hover:bg-gray-100 rounded text-gray-600"
-                          title="Editar"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={(e) => handleDelete(quote, e)}
-                          className="p-2 hover:bg-red-50 rounded text-red-600"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -621,8 +877,8 @@ export default function Quotes() {
         </div>
       </div>
 
-      {/* Pagination */}
-      <div className="bg-white border border-gray-200 rounded-lg py-4 px-6">
+      {/* Pagination — mt-4 = space between table container and footer */}
+      <div className="mt-4 bg-white border border-gray-200 rounded-lg py-4 px-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">Show:</span>
@@ -632,7 +888,7 @@ export default function Quotes() {
                 setItemsPerPage(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="px-3 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>

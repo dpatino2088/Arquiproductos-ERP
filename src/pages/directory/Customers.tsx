@@ -528,11 +528,8 @@ export default function Customers() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Customers Directory</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {isFirstLoad ? 'Loading…' : `Manage your ${filteredCustomers.length} customers${filteredCustomers.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
-          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto">
           <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
@@ -561,7 +558,7 @@ export default function Customers() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search customers by company name, contact, email, or phone..."
+                placeholder="Search customers by company name, email, or phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
@@ -847,20 +844,17 @@ export default function Customers() {
           <div className="table-fit-wrapper">
             <table className="table-fit">
               <colgroup>
-                <col style={{ width: '14%' }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '24%' }} />
+                <col style={{ width: '10%' }} />
                 <col style={{ width: '12%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '14%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '5%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '12%' }} />
               </colgroup>
               <thead className="bg-gray-100 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('companyName')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -869,29 +863,26 @@ export default function Customers() {
                       {sortBy === 'companyName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Contact Name</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Primary Phone</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Email</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Country</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">City</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Customer Type</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs truncate">Created By</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Primary Phone</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Country</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Customer Type</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      className="flex items-center gap-1 hover:text-gray-700 justify-center w-full"
                     >
                       Date Added
                       {sortBy === 'dateAdded' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {showEmptyState ? (
                   <tr>
-                    <td colSpan={10} className="py-12 px-6 text-center">
+                    <td colSpan={7} className="py-12 px-4 text-center">
                       <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No customers found</p>
                       <p className="text-sm text-gray-500">
@@ -903,12 +894,12 @@ export default function Customers() {
                   </tr>
                 ) : filteredCustomers.length === 0 && isSearchSettling ? (
                   <tr>
-                    <td colSpan={10} className="py-8 px-6 text-center text-sm text-muted-foreground">Updating search…</td>
+                    <td colSpan={7} className="py-8 px-4 text-center text-sm text-muted-foreground">Updating search…</td>
                   </tr>
                 ) : (
                   paginatedCustomers.map((customer) => (
                     <tr key={customer.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-4 px-6 text-gray-900 text-sm">
+                      <td className="py-4 px-4 text-gray-900 text-sm">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="relative flex-shrink-0">
                             <div 
@@ -932,31 +923,28 @@ export default function Customers() {
                           <span className="font-medium text-gray-900 text-sm truncate">{customer.companyName}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate" title={customer.contactName || 'N/A'}>{customer.contactName || 'N/A'}</span></td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        <div className="flex items-center gap-1 min-w-0">
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                        <div className="flex items-center gap-1 min-w-0 justify-center">
                           <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{customer.phone || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        <div className="flex items-center gap-1 min-w-0">
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                        <div className="flex items-center gap-1 min-w-0 justify-center">
                           <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                          <span className="truncate">{customer.email || 'N/A'}</span>
+                          <span className="break-all">{customer.email || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{customer.country || 'N/A'}</span></td>
-                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{customer.city || 'N/A'}</span></td>
-                      <td className="py-4 px-6">
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{customer.country || 'N/A'}</span></td>
+                      <td className="py-4 px-4 text-center">
                         {(() => {
                           const type = (customer as any).customer_type_name;
                           if (!type) return <span className="text-gray-400 text-xs">N/A</span>;
                           return getCustomerTypeBadge(formatCustomerTypeLabel(type));
                         })()}
                       </td>
-                      <td className="py-4 px-6 text-gray-600 text-sm"><span className="block truncate" title={customer.createdBy || '—'}>{customer.createdBy || '—'}</span></td>
-                      <td className="py-4 px-6 text-gray-600 text-sm">{customer.dateAdded ? new Date(customer.dateAdded).toLocaleDateString() : 'N/A'}</td>
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-4 px-4 text-gray-600 text-sm text-center">{customer.dateAdded ? new Date(customer.dateAdded).toLocaleDateString() : 'N/A'}</td>
+                      <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
                           {canEditCustomersFinal && (
                             <>
@@ -1050,7 +1038,6 @@ export default function Customers() {
                       <h3 className="text-sm font-semibold text-gray-900 group-hover:text-primary transition-colors">
                         {customer.companyName}
                       </h3>
-                      <p className="text-xs text-gray-600 truncate">{customer.contactName || 'N/A'}</p>
                       <div className="mt-1 flex gap-1">
                         {getStatusBadge(customer.status)}
                         {(() => {

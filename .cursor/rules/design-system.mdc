@@ -1,0 +1,325 @@
+# Adaptio ERP Design System
+
+When building or modifying any UI in this ERP, follow these exact patterns. Reference: DirectoryCustomers page, `docs/components/ui/index.ts`, and `src/styles/global.css`.
+
+---
+
+## Brand Colors (CSS Variables — never hardcode hex)
+
+| Token | Variable | Value | Usage |
+|-------|----------|-------|-------|
+| Primary | `--primary-brand-hex` | `#008DD2` | Buttons (Add, Create, Save), links, active tabs, focus rings |
+| Primary Hover | `--primary-brand-hover` | `#00678d` | Primary button :hover |
+| Secondary | `--secondary-brand-hex` / `--neutral-gray` | `#5C8DA6` | Inactive badges, secondary text |
+| Save & Close | `--save-close-hex` | `#27ae60` | "Save and Close" button only |
+| Graphite Black | `--graphite-black-hex` | `#333333` | Main body text |
+| Sidebar BG | `--navy-900` | `#0D202D` | Sidebar background |
+| Sidebar Base | `--sidebar-base` | `#404a63` | Sidebar principal; tab underline, active accent |
+| Sidebar Hover | `--navy-800` | `#132B3B` | Sidebar item hover |
+
+## Status Colors (for badges)
+
+| Status | Variable | BG Class | Text Class |
+|--------|----------|----------|------------|
+| Active / Success | `--status-green` `#27ae60` | `bg-green-50` | `text-status-green` |
+| Info / Primary | `--status-cyan` `#008DD2` | `bg-cyan-50` | `text-status-cyan` |
+| Sent / Open | `--status-blue` `#2563eb` | `bg-blue-50` | `text-blue-700` |
+| Warning / On Hold | `--status-yellow` | `bg-orange-50` | `text-orange-700` |
+| Error / Cancelled | `--status-red` `#b91c1c` | `bg-red-50` | `text-red-700` |
+| Inactive / Draft | `--status-gray` `#5C8DA6` | `bg-gray-50` | `text-status-gray` |
+| Archived | `--status-purple` `#9333ea` | `bg-purple-50` | `text-purple-700` |
+| In Production | — | `bg-indigo-50` | `text-indigo-700` |
+
+## Typography
+
+- **Font family**: `Inter, Helvetica Neue, sans-serif` (via `--font-family`)
+- **Body text**: `14px` (`text-sm`) — default for all body content
+- **Small text**: `12px` (`text-xs`) — table headers, badges, pagination, captions
+- **Heading**: `16px` — section headings inside pages
+- **Page title**: `20px` (`text-xl font-semibold text-foreground`)
+- **Card title**: `text-lg font-semibold text-gray-900`
+- **Subtitle/count**: `text-xs` + `color: var(--gray-500)`
+- **Label**: `text-sm font-medium text-gray-900 mb-0.5`
+
+## Logos and app chrome
+
+- **Logos**: Use **gray** for all app logos and chrome icons (sidebar logo, user avatar in top bar). Do not use brand color (primary-brand-hex) for these; keep them neutral: `color: 'var(--gray-500)'` for icons, `backgroundColor: 'var(--gray-500)'` for avatar circles. This keeps a consistent neutral chrome; brand color is for primary actions and links only.
+
+## Border Radius
+
+All border-radius is `0` (square corners) via Tailwind config. Use `rounded-lg` only for cards/containers (maps to `0`). For pill badges, use `rounded-full` explicitly.
+
+## Spacing
+
+- **Page padding**: `py-6 px-6` (content area)
+- **Card padding**: `p-6` (standard), `p-4` (compact), `p-3` (tight)
+- **Table header cells**: `py-3 px-6`
+- **Table body cells**: `py-4 px-6`
+- **Gap between items**: `gap-3` (buttons), `gap-2` (icons), `gap-1` (tight actions)
+- **Margin below header**: `mb-6`
+- **Margin below search/filter bar**: `mb-4`
+
+---
+
+## Component Patterns
+
+### Page Header
+- **Header actions**: Always align to the right (pegado al padding derecho). Use `ml-auto` on the actions container: `className="flex items-center gap-3 ml-auto"`.
+```tsx
+<div className="flex items-center justify-between mb-6">
+  <div>
+    <h1 className="text-xl font-semibold text-foreground mb-1">Page Title</h1>
+    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>X items</p>
+  </div>
+  <div className="flex items-center gap-3 ml-auto">
+    {/* Secondary button */}
+    <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
+      <Icon className="w-4 h-4" /> Import
+    </button>
+    {/* Primary button */}
+    <button className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90"
+      style={{ backgroundColor: 'var(--primary-brand-hex)' }}>
+      <Plus className="w-4 h-4" /> Add Item
+    </button>
+  </div>
+</div>
+```
+
+### Search Bar
+```tsx
+<div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+  <div className="flex items-center gap-3">
+    <div className="flex-1 relative">
+      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+      <input className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+        placeholder="Search..." />
+    </div>
+    {/* Filter toggle */}
+    <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm bg-white text-gray-700 hover:bg-gray-50">
+      <Filter className="w-4 h-4" /> Filters
+    </button>
+  </div>
+</div>
+```
+
+### Table (standard ERP list)
+
+- **First column**: The content of the **first column** (entity name / primary identifier: e.g. Contact Name, Customer Name, Proposal / Quote) must be **pegado al margen izquierdo** — use `text-left` for both `<th>` and `<td>`. Do not center the first column.
+- **Other columns**: Use `text-center` for headers and cells so content is centered in the column. Use `<colgroup>` with explicit widths for homogeneous spacing (e.g. Directory, Proposals).
+- **Actions column**: The **Actions** header and the action icons (View, Edit, Delete, etc.) must be **pegados al padding derecho** — use `text-right` for the Actions `<th>`, and `text-right` on the `<td>` with `justify-end` on the flex container so the last icon (e.g. Delete) sits against the right padding. This keeps the column visually consistent.
+- **Padding**: Prefer `py-3 px-4` (headers) and `py-4 px-4` (cells); use `px-4` for consistent spacing.
+
+```tsx
+<div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+  <table className="table-fit">
+    <colgroup>
+      <col style={{ width: '14%' }} />
+      {/* … */}
+    </colgroup>
+    <thead className="bg-gray-100 border-b border-gray-200">
+      <tr>
+        <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Name / ID</th>
+        <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">…</th>
+        <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+        <td className="py-4 px-4 text-gray-900 text-sm text-left">Primary text</td>
+        <td className="py-4 px-4 text-gray-700 text-sm text-center">…</td>
+        <td className="py-4 px-4 text-right">…</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+```
+
+### Status Badge (pill with dot)
+```tsx
+<span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
+  Active
+</span>
+```
+
+### Action Buttons (in table rows)
+- **All row actions** (View, Edit, Delete/Trash, Link, etc.) use the **same gray style**: `text-gray-600`, `hover:bg-gray-100`, `p-1.5`, icon 14px (`style={{ width: 14, height: 14 }}`). Do **not** use red for delete/trash; keep it neutral gray like the rest of the chrome.
+- **Alignment**: The Actions column content must be **pegado al padding derecho**: use `text-right` on the cell and `justify-end` on the flex container so the group of icons (and the last icon, Delete) sits against the right padding.
+- **Header “Eliminar seleccionados”** (bulk delete): use secondary button style — `border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50`, icon 14px.
+
+```tsx
+<th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
+// ...
+<td className="py-4 px-4 text-right">
+  <div className="flex items-center gap-1 justify-end">
+    <button className="p-1.5 hover:bg-gray-100 rounded text-gray-600" title="Edit">
+      <Edit style={{ width: 14, height: 14 }} />
+    </button>
+    <button className="p-1.5 hover:bg-gray-100 rounded text-gray-600" title="Delete">
+      <Trash2 style={{ width: 14, height: 14 }} />
+    </button>
+  </div>
+</td>
+```
+
+### Pagination
+```tsx
+<div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
+  <div className="flex items-center justify-between">
+    <div className="flex items-center gap-3">
+      <span className="text-xs text-gray-600">Show:</span>
+      <select className="border border-gray-200 rounded px-2 py-1 text-xs">...</select>
+      <span className="text-xs text-gray-600">Showing 1-25 of 100</span>
+    </div>
+    <div className="flex items-center gap-3">
+      <button className="flex items-center gap-1 px-2 py-1 border border-gray-300 rounded text-xs text-gray-700 hover:bg-gray-50">Previous</button>
+      {/* Active page */}
+      <button className="w-6 h-6 text-xs rounded flex items-center justify-center bg-gray-300 text-black">1</button>
+      {/* Inactive page */}
+      <button className="w-6 h-6 text-xs rounded flex items-center justify-center border border-gray-300 text-gray-700 hover:bg-gray-50">2</button>
+      <button className="flex items-center gap-1 px-2 py-1 border border-gray-300 rounded text-xs text-gray-700 hover:bg-gray-50">Next</button>
+    </div>
+  </div>
+</div>
+```
+
+### Empty State
+```tsx
+<div className="py-12 px-6 text-center">
+  <Icon className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+  <p className="text-gray-600 mb-2">No items found</p>
+  <p className="text-sm text-gray-500">Create your first item to get started</p>
+</div>
+```
+
+### Card
+```tsx
+<div className="bg-white border border-gray-200 rounded-lg p-6">
+  <h3 className="text-lg font-semibold text-gray-900 mb-4">Card Title</h3>
+  {/* content */}
+</div>
+```
+
+### Input Field
+```tsx
+<div>
+  <label className="block text-sm font-medium text-gray-900 mb-0.5">
+    Field Label <span className="text-red-600 ml-1">*</span>
+  </label>
+  <input className="w-full px-0 py-1.5 pb-1 text-xs bg-transparent rounded-none border-0 border-b border-gray-300 focus:border-[var(--primary-brand-hex)] focus:ring-0 focus:outline-none" />
+</div>
+```
+
+### Save Buttons
+```tsx
+{/* Save (primary brand cyan) */}
+<button className="btn-save px-3 py-1.5 rounded text-white text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+  Save
+</button>
+{/* Save and Close (green neon) */}
+<button className="btn-save-close px-3 py-1.5 rounded text-white text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
+  Save and Close
+</button>
+```
+
+### Loading Overlay (over existing content, never unmount table)
+```tsx
+<div className="absolute inset-0 bg-white/90 z-10 flex items-center justify-center rounded-lg">
+  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+</div>
+```
+
+### Tab Styles (Module Tabs & StatusTabs)
+
+**Unified pattern:** Gray bar + white active tab ("sobresalir en blanco") + underline color from sidebar.
+
+| Element | Style |
+|---------|-------|
+| **Container** | `bg-gray-100`, `border-b border-gray-200` |
+| **Active tab** | `bg-white` (sobresalir en blanco), `font-semibold`, `borderBottom: 2px solid var(--sidebar-base)` |
+| **Inactive tab** | `hover:bg-white/50`, `font-normal`, `borderBottom: 2px solid transparent` |
+| **Text** | `color: #1c1f26`, `fontSize: 12px` |
+
+**Important:** Underline uses `var(--sidebar-base)` (#404a63), not primary brand. Active tab "sobresale" in white over the gray bar.
+
+### Top Module Tabs (Layout secondary nav — Quotes | Proposals | Orders)
+
+```tsx
+<div className="border-b" style={{ backgroundColor: 'var(--gray-100)', borderColor: 'var(--gray-250)' }}>
+  <div className="flex items-stretch h-full">
+    <button
+      className={isActive ? 'bg-white font-semibold' : 'hover:bg-white/50 font-normal'}
+      style={{
+        fontSize: '12px',
+        padding: '0 48px',
+        height: '100%',
+        minWidth: '140px',
+        color: '#1c1f26',
+        borderBottom: isActive ? '2px solid var(--sidebar-base)' : 'none',
+      }}
+    >
+      {label}
+    </button>
+  </div>
+</div>
+```
+
+### Status Filter Tabs (StatusTabs component)
+
+Used on list pages (Quotes, Proposals, Sales Orders, Manufacturing Orders). Same visual pattern as top module tabs.
+
+```tsx
+<StatusTabs
+  tabs={[
+    { label: 'All', value: 'all', count: 42 },
+    { label: 'Draft', value: 'draft', count: 15 },
+    { label: 'Pending Confirmation', value: 'approved', count: 3 },
+  ]}
+  activeTab={activeTab}
+  onChange={setActiveTab}
+/>
+```
+
+**StatusTabs implementation:** `src/components/shared/StatusTabs.tsx`
+- Container: `overflow-x-auto border-b border-gray-200 mb-4 bg-gray-100`
+- Active: `bg-white font-semibold`, `borderBottom: 2px solid var(--sidebar-base)`
+- Inactive: `hover:bg-white/50`, `borderBottom: 2px solid transparent`
+- Tab: `height: 40px`, `padding: 0 16px`, `fontSize: 12px`, `color: #1c1f26`
+
+Place StatusTabs between the page header and the search bar.
+
+### Detail Page Tabs (internal tabs within a detail page)
+
+Used on detail pages (QuoteDetail, ProposalDetail, SalesOrderDetail) to switch between content sections. Same underline style.
+
+```tsx
+{/* Tab bar */}
+<div className="flex items-center gap-1 border-b border-gray-200 mb-6">
+  <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-[var(--sidebar-base)] text-[var(--primary-brand-hex)]">
+    Overview
+  </button>
+  <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+    Lines
+  </button>
+</div>
+
+{/* Tab content — keep all panels mounted, toggle with display */}
+<div style={{ display: activeTab === 'overview' ? undefined : 'none' }}>
+  {/* Overview content */}
+</div>
+<div style={{ display: activeTab === 'lines' ? undefined : 'none' }}>
+  {/* Lines content */}
+</div>
+```
+
+---
+
+## Rules
+
+1. **Never hardcode hex colors** — always use CSS variables (`var(--primary-brand-hex)`) or Tailwind semantic classes (`text-primary`, `bg-primary`).
+2. **Never invent new button styles** — use `btn-save` / `btn-save-close` classes or the inline `backgroundColor: var(--primary-brand-hex)` pattern.
+3. **Tables use `table-fit`** class for consistent column sizing.
+4. **Never unmount list content during loading** — use overlay pattern with `bg-white/90`.
+5. **Icons are always 16px** (`w-4 h-4`) in buttons and 12-14px (`w-3.5 h-3.5`) in compact contexts.
+6. **Status badges** use `rounded-full` with light background + dark text, always `text-xs font-medium`.
+7. **All interactive elements** have `transition-colors` for smooth state changes.
+8. **Pagination** always sits below the table in its own bordered card.

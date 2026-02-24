@@ -1,0 +1,689 @@
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { supabase, initSessionContext } from '../../lib/supabase/client';
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useUIStore } from '../../stores/ui-store';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import DetailPageLayout from '../../components/shared/DetailPageLayout';
+import StatusBadge from '../../components/shared/StatusBadge';
+import TimelineView from '../../components/shared/TimelineView';
+import LifecycleIndicator from '../../components/shared/LifecycleIndicator';
+import { router } from '../../lib/router';
+import { formatCurrency } from '../../lib/utils';
+import { createProposalFromQuote } from '../../hooks/useProposals';
+import { useSOActions } from '../../hooks/useSOActions';
+import { useAuth } from '../../hooks/useAuth';
+import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { FileText, ShoppingBag } from 'lucide-react';
+
+const SALES_SUBMODULES = [
+  { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
+  { id: 'proposals', label: 'Proposals', href: '/sales/proposals', icon: FileText },
+  { id: 'orders', label: 'Orders', href: '/sales/orders', icon: ShoppingBag },
+];
+
+function formatCurrencyDisplay(amount: number | null | undefined): string {
+  if (amount == null) return '---';
+  return formatCurrency(amount, 'USD');
+}
+
+function getQuoteIdFromPath(): string | null {
+  const match = window.location.pathname.match(/\/sales\/quotes\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
+interface Quote {
+  id: string;
+  quote_no: string;
+  status: string;
+  customer_id: string | null;
+  contact_id: string | null;
+  dealer_id: string | null;
+  description: string | null;
+  notes: string | null;
+  priority: string | null;
+  subtotal: number | null;
+  tax_amount: number | null;
+  total_amount: number | null;
+  expires_at: string | null;
+  approved_at: string | null;
+  converted_at: string | null;
+  created_at: string;
+  created_by_user_id: string | null;
+}
+
+interface QuoteLine {
+  id: string;
+  name: string | null;
+  sku: string | null;
+  product_type: string | null;
+  width_m: number | null;
+  height_m: number | null;
+  quantity: number;
+  unit_msrp: number | null;
+  msrp: number | null;
+  unit_dealer_price_snapshot?: number | null;
+  dealer_price_total?: number | null;
+}
+
+interface Proposal {
+  id: string;
+  proposal_no: string;
+  version_no: number;
+  status: string;
+  sent_at: string | null;
+  valid_until: string | null;
+  total_amount: number | null;
+}
+
+interface SalesOrder {
+  id: string;
+  sales_order_no: string;
+  status: string | null;
+  payment_status: string | null;
+  total_amount: number | null;
+  amount_paid: number | null;
+  expected_delivery_date: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+}
+
+interface TimelineEvent {
+  id: string;
+  action: string;
+  description: string;
+  user_name?: string | null;
+  created_at: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+export default function QuoteDetail() {
+  const quoteId = getQuoteIdFromPath();
+  const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
+  const { user } = useAuth();
+  const { isPortal } = useAccessContext();
+  const addNotification = useUIStore((s) => s.addNotification);
+  const { registerSubmodules } = useSubmoduleNav();
+
+  useEffect(() => {
+    registerSubmodules('Sales', SALES_SUBMODULES);
+  }, [registerSubmodules]);
+
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [lines, setLines] = useState<QuoteLine[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [salesOrder, setSalesOrder] = useState<SalesOrder | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [customerName, setCustomerName] = useState<string | null>(null);
+  const [contactName, setContactName] = useState<string | null>(null);
+  const [createdByName, setCreatedByName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [acting, setActing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  const loadedQuoteIdRef = useRef<string | null>(null);
+
+  const { createSOFromQuote } = useSOActions();
+
+  const refetch = useCallback(async () => {
+    if (!quoteId || !activeOrganizationId) {
+      setLoading(false);
+      return;
+    }
+    const myId = ++requestIdRef.current;
+    setLoading(true);
+    setError(null);
+    setRefreshError(null);
+    try {
+      await initSessionContext();
+      const quoteRes = await supabase
+        .from('Quotes')
+        .select('id, quote_no, status, customer_id, contact_id, dealer_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id')
+        .eq('id', quoteId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .single();
+
+      if (myId !== requestIdRef.current) return;
+
+      if (quoteRes.error) throw quoteRes.error;
+      if (!quoteRes.data) throw new Error('Quote not found');
+      setQuote(quoteRes.data as Quote);
+      loadedQuoteIdRef.current = quoteId;
+
+      const [linesRes, proposalsRes, soRes, timelineRes] = await Promise.all([
+        supabase
+          .from('QuoteLines')
+          .select('id, name, sku, product_type, width_m, height_m, quantity, unit_msrp, msrp, unit_dealer_price_snapshot, dealer_price_total')
+          .eq('quote_id', quoteId)
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('Proposals')
+          .select('id, proposal_no, version_no, status, sent_at, valid_until, total_amount')
+          .eq('quote_id', quoteId)
+          .or('deleted.is.false,deleted.is.null')
+          .order('version_no', { ascending: false }),
+        supabase
+          .from('SalesOrders')
+          .select('id, sales_order_no, status, payment_status, total_amount, amount_paid, expected_delivery_date, completed_at, created_at')
+          .eq('quote_id', quoteId)
+          .eq('deleted', false)
+          .maybeSingle(),
+        supabase
+          .from('ActivityTimeline')
+          .select('id, action, description, user_name, created_at, metadata')
+          .eq('entity_type', 'quote')
+          .eq('entity_id', quoteId)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (myId !== requestIdRef.current) return;
+
+      // Secondary fetches: tolerar fallos de RLS/dealer para que el detalle siempre muestre el quote
+      if (linesRes.error) {
+        if (import.meta.env.DEV) console.warn('[QuoteDetail] QuoteLines error:', linesRes.error);
+      } else {
+        setLines((linesRes.data ?? []) as QuoteLine[]);
+      }
+      if (proposalsRes.error) {
+        if (import.meta.env.DEV) console.warn('[QuoteDetail] Proposals error:', proposalsRes.error);
+      } else {
+        setProposals((proposalsRes.data ?? []) as Proposal[]);
+      }
+      if (soRes.error) {
+        if (import.meta.env.DEV) console.warn('[QuoteDetail] SalesOrders error:', soRes.error);
+      } else {
+        setSalesOrder(soRes.data as SalesOrder | null);
+      }
+      setTimeline((timelineRes.error ? [] : (timelineRes.data ?? [])) as TimelineEvent[]);
+
+      const q = quoteRes.data as Quote;
+      if (q.customer_id) {
+        const custRes = await supabase.from('DirectoryCustomers').select('customer_name').eq('id', q.customer_id).eq('deleted', false).maybeSingle();
+        if (myId !== requestIdRef.current) return;
+        setCustomerName(custRes.data?.customer_name ?? null);
+      } else {
+        setCustomerName(null);
+      }
+      if (q.contact_id) {
+        const contRes = await supabase.from('DirectoryContacts').select('contact_name').eq('id', q.contact_id).eq('deleted', false).maybeSingle();
+        if (myId !== requestIdRef.current) return;
+        setContactName(contRes.data?.contact_name ?? null);
+      } else {
+        setContactName(null);
+      }
+      if (q.created_by_user_id) {
+        const { data: appUser } = await supabase.from('AppUsers').select('display_name').eq('id', q.created_by_user_id).maybeSingle();
+        if (myId !== requestIdRef.current) return;
+        setCreatedByName(appUser?.display_name ?? null);
+      } else {
+        setCreatedByName(null);
+      }
+    } catch (e: unknown) {
+      if (myId !== requestIdRef.current) return;
+      let msg = e instanceof Error ? e.message : 'Failed to load quote';
+      const err = e as { code?: string; message?: string };
+      if (err?.code === 'PGRST116' || (err?.message && String(err.message).includes('0 rows'))) {
+        msg = 'Quote not found or access denied. If viewing as a specific dealer, try selecting "All dealers".';
+      }
+      if (loadedQuoteIdRef.current === quoteId) {
+        setRefreshError(msg);
+      } else {
+        setError(msg);
+        setQuote(null);
+      }
+    } finally {
+      if (myId === requestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [quoteId, activeOrganizationId]);
+
+  useEffect(() => {
+    loadedQuoteIdRef.current = null;
+    refetch();
+  }, [refetch]);
+
+  const hasActiveProposal = useMemo(() => {
+    return proposals.some((p) => ['draft', 'sent'].includes((p.status || '').toLowerCase()));
+  }, [proposals]);
+
+  const handleCreateProposal = useCallback(async () => {
+    if (!quoteId || acting) return;
+    setActing(true);
+    try {
+      const result = await createProposalFromQuote(quoteId);
+      if ('error' in result) {
+        addNotification({ type: 'error', title: 'Error', message: result.error });
+        return;
+      }
+      addNotification({ type: 'success', title: 'Proposal Created', message: 'Proposal created from quote.' });
+      router.navigate(`/sales/proposals/${result.proposalId}`);
+    } finally {
+      setActing(false);
+    }
+  }, [quoteId, acting, addNotification]);
+
+  const handleCreateSalesOrder = useCallback(async () => {
+    if (!quoteId || !user?.id || acting) return;
+    setActing(true);
+    try {
+      const data = await createSOFromQuote(quoteId, user.id, user.name);
+      if (data?.sales_order_id) {
+        router.navigate(`/sales/orders/${data.sales_order_id}`);
+      } else {
+        refetch();
+      }
+    } finally {
+      setActing(false);
+    }
+  }, [quoteId, user, createSOFromQuote, refetch, acting]);
+
+  const handleCancel = useCallback(async () => {
+    if (!quoteId || !activeOrganizationId || acting) return;
+    setActing(true);
+    try {
+      const { error: updateErr } = await supabase
+        .from('Quotes')
+        .update({ status: 'cancelled' })
+        .eq('id', quoteId)
+        .eq('organization_id', activeOrganizationId);
+      if (updateErr) throw updateErr;
+      addNotification({ type: 'success', title: 'Quote Cancelled', message: 'Quote has been cancelled.' });
+      refetch();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to cancel quote';
+      addNotification({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setActing(false);
+    }
+  }, [quoteId, activeOrganizationId, acting, refetch, addNotification]);
+
+  const onBack = () => router.navigate('/sales/quotes');
+
+  const status = (quote?.status || '').toLowerCase();
+  const canCancel = ['draft', 'approved'].includes(status);
+  const canCreateProposal = status === 'draft' && !hasActiveProposal;
+  const canCreateSO = status === 'approved' && !salesOrder;
+
+  const actionButtons = useMemo(() => {
+    if (isPortal) return null;
+    const btns: React.ReactNode[] = [];
+    btns.push(
+      <button
+        key="edit"
+        type="button"
+        onClick={() => router.navigate(`/sales/quotes/${quoteId}/edit`)}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+      >
+        Edit
+      </button>
+    );
+    if (canCreateProposal) {
+      btns.push(
+        <button
+          key="create-proposal"
+          type="button"
+          onClick={handleCreateProposal}
+          disabled={acting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+        >
+          Create Proposal
+        </button>
+      );
+    }
+    if (canCreateSO) {
+      btns.push(
+        <button
+          key="create-so"
+          type="button"
+          onClick={handleCreateSalesOrder}
+          disabled={acting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+        >
+          Create Sales Order
+        </button>
+      );
+    }
+    if (canCancel) {
+      btns.push(
+        <button
+          key="cancel"
+          type="button"
+          onClick={handleCancel}
+          disabled={acting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      );
+    }
+    return <div className="flex items-center gap-2">{btns}</div>;
+  }, [isPortal, quoteId, canCreateProposal, canCreateSO, canCancel, acting, handleCreateProposal, handleCreateSalesOrder, handleCancel]);
+
+  if (!quoteId) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium">Invalid URL</p>
+          <p className="text-sm text-red-700">Quote ID is required.</p>
+        </div>
+        <button onClick={onBack} className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+          Back to Quotes
+        </button>
+      </div>
+    );
+  }
+
+  const isWaitingForOrg = !activeOrganizationId && orgLoading;
+  const isFetchingQuote = loading && !quote;
+
+  if (isWaitingForOrg || isFetchingQuote) {
+    return (
+      <div className="p-6 flex flex-col items-center gap-4">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <p className="text-sm text-gray-600">
+          {isWaitingForOrg ? 'Loading organization...' : 'Loading quote...'}
+        </p>
+      </div>
+    );
+  }
+
+  if (error || !quote) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm text-red-800 font-medium">Error</p>
+          <p className="text-sm text-red-700">{error || 'Quote not found'}</p>
+        </div>
+        <button onClick={onBack} className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+          Back to Quotes
+        </button>
+      </div>
+    );
+  }
+
+  const tabs = isPortal
+    ? [
+        { id: 'overview', label: 'Overview' },
+        { id: 'lines', label: 'Lines', count: lines.length },
+        { id: 'proposals', label: 'Proposals', count: proposals.length },
+        { id: 'timeline', label: 'Timeline' },
+      ]
+    : [
+        { id: 'overview', label: 'Overview' },
+        { id: 'lines', label: 'Lines', count: lines.length },
+        { id: 'proposals', label: 'Proposals', count: proposals.length },
+        { id: 'timeline', label: 'Timeline' },
+      ];
+
+  const displayTotal = lines.length > 0
+    ? lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
+    : (quote.total_amount ?? 0);
+
+  const summaryItems = isPortal
+    ? [
+        { label: 'Customer', value: customerName ?? '—' },
+        { label: 'Contact', value: contactName ?? '—' },
+        { label: 'Date', value: new Date(quote.created_at).toLocaleDateString() },
+        { label: 'Total', value: formatCurrencyDisplay(displayTotal) },
+        ...(salesOrder
+          ? [
+              {
+                label: 'SO #',
+                value: (
+                  <button
+                    type="button"
+                    onClick={() => router.navigate(`/sales/orders/${salesOrder.id}`)}
+                    className="text-primary hover:underline font-medium"
+                  >
+                    {salesOrder.sales_order_no}
+                  </button>
+                ),
+              },
+            ]
+          : []),
+      ]
+    : [
+        { label: 'Customer', value: customerName ?? '—' },
+        { label: 'Contact', value: contactName ?? '—' },
+        { label: 'Created By', value: createdByName ?? '—' },
+        { label: 'Date', value: new Date(quote.created_at).toLocaleDateString() },
+        { label: 'Total', value: formatCurrencyDisplay(displayTotal) },
+        { label: 'Priority', value: quote.priority ? <StatusBadge status={quote.priority} type="priority" size="sm" /> : '—' },
+      ];
+
+  const lifecycleStages = [
+    { label: 'Quote', ref: quote.quote_no },
+    { label: 'Proposal', ref: proposals.length > 0 ? `${proposals.length} proposal(s)` : undefined },
+    { label: 'Sales Order', ref: salesOrder?.sales_order_no, href: salesOrder ? `/sales/orders/${salesOrder.id}` : undefined },
+    { label: 'Manufacturing', ref: undefined },
+  ];
+
+  const currentLifecycleStage: 'quote' | 'proposal' | 'sales_order' | 'manufacturing' = salesOrder ? 'sales_order' : proposals.length > 0 ? 'proposal' : 'quote';
+
+  const headerStatus = <StatusBadge status={quote.status} type="quote" />;
+
+  return (
+    <DetailPageLayout
+      title={quote.quote_no}
+      subtitle="Quote"
+      status={headerStatus}
+      {...(!isPortal && salesOrder?.payment_status ? { paymentStatus: <StatusBadge status={salesOrder.payment_status} type="payment" /> } : {})}
+      summaryItems={summaryItems}
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onBack={onBack}
+      actions={actionButtons}
+    >
+      {refreshError && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center justify-between gap-3">
+          <p className="text-sm text-amber-800">{refreshError}</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="shrink-0 px-3 py-1.5 text-sm font-medium text-amber-800 bg-amber-100 border border-amber-300 rounded-lg hover:bg-amber-200"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          {isPortal && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Sales Order</h3>
+              {salesOrder ? (
+                <p className="text-sm text-gray-700">
+                  This quote has a sales order.{' '}
+                  <button
+                    type="button"
+                    onClick={() => router.navigate(`/sales/orders/${salesOrder.id}`)}
+                    className="text-primary hover:underline font-medium"
+                  >
+                    View order {salesOrder.sales_order_no}
+                  </button>
+                </p>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <div className="h-2 w-2 rounded-full bg-amber-400" />
+                  <span>Your order is being processed. A sales order will be created soon.</span>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Description & Notes</h3>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{quote.description || '—'}</p>
+              {quote.notes && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 font-medium">Notes</p>
+                  <p className="text-sm text-gray-600 whitespace-pre-wrap">{quote.notes}</p>
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Financial Summary</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Subtotal</dt>
+                  <dd className="font-mono">{formatCurrencyDisplay(lines.length > 0 ? displayTotal : quote.subtotal)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Tax</dt>
+                  <dd className="font-mono">{formatCurrencyDisplay(quote.tax_amount)}</dd>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="text-gray-500">Total</dt>
+                  <dd className="font-semibold">{formatCurrencyDisplay(displayTotal)}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+          {!isPortal && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Lifecycle</h3>
+              <LifecycleIndicator currentStage={currentLifecycleStage} stages={lifecycleStages} />
+            </div>
+          )}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Key Dates</h3>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Created</dt>
+                <dd>{new Date(quote.created_at).toLocaleDateString()}</dd>
+              </div>
+              {quote.expires_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Expires</dt>
+                  <dd>{new Date(quote.expires_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+              {!isPortal && quote.approved_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Approved</dt>
+                  <dd>{new Date(quote.approved_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+              {!isPortal && quote.converted_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Converted</dt>
+                  <dd>{new Date(quote.converted_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'lines' && (
+        <div className="rounded-lg border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    No lines
+                  </td>
+                </tr>
+              ) : (
+                lines.map((line, idx) => {
+                  const qty = Number(line.quantity) || 0;
+                  const unitPrice = line.unit_dealer_price_snapshot ?? line.unit_msrp ?? (line.dealer_price_total != null && qty > 0 ? Number(line.dealer_price_total) / qty : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : null));
+                  const lineTotal = line.dealer_price_total ?? line.msrp ?? (unitPrice != null ? unitPrice * qty : null);
+                  const dims = [line.width_m, line.height_m].filter((v) => v != null);
+                  return (
+                    <tr key={line.id} className="border-t hover:bg-gray-50">
+                      <td className="px-4 py-3">{idx + 1}</td>
+                      <td className="px-4 py-3">
+                        <div>{line.name ?? '—'}</div>
+                        {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
+                      </td>
+                      <td className="px-4 py-3">{line.product_type ?? '—'}</td>
+                      <td className="px-4 py-3">{dims.length ? `${line.width_m} x ${line.height_m}` : '—'}</td>
+                      <td className="px-4 py-3 text-right">{qty}</td>
+                      <td className="px-4 py-3 text-right font-mono">{formatCurrencyDisplay(unitPrice)}</td>
+                      <td className="px-4 py-3 text-right font-mono">{formatCurrencyDisplay(lineTotal)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+            {lines.length > 0 && (
+              <tfoot className="bg-gray-50 border-t-2">
+                <tr>
+                  <td colSpan={6} className="px-4 py-3 text-right font-medium text-gray-700">
+                    Total
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold">
+                    {formatCurrencyDisplay(
+                      lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
+                    )}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+
+      {activeTab === 'proposals' && (
+        <div className="rounded-lg border border-gray-200 overflow-hidden">
+          {proposals.length === 0 ? (
+            <div className="px-4 py-12 text-center text-gray-500">No proposals yet</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Proposal #</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Version</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Status</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Sent Date</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Valid Until</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {proposals.map((p) => (
+                  <tr
+                    key={p.id}
+                    className="border-t hover:bg-gray-50 cursor-pointer"
+                    onClick={() => router.navigate(`/sales/proposals/${p.id}`)}
+                  >
+                    <td className="px-4 py-3 font-medium text-primary">{p.proposal_no}</td>
+                    <td className="px-4 py-3">{p.version_no}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={p.status} type="proposal" size="sm" />
+                    </td>
+                    <td className="px-4 py-3">{p.sent_at ? new Date(p.sent_at).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3">{p.valid_until ? new Date(p.valid_until).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3 text-right font-mono">{formatCurrencyDisplay(p.total_amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'timeline' && (
+        <TimelineView events={timeline} loading={loading && timeline.length === 0} emptyMessage="No activity yet" />
+      )}
+    </DetailPageLayout>
+  );
+}

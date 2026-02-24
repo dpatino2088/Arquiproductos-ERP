@@ -50,7 +50,6 @@ export default function ApprovedBOMList() {
     if (currentPath.startsWith('/manufacturing')) {
       // Always register submodules to ensure tabs are visible
       registerSubmodules('Manufacturing', [
-        { id: 'order-list', label: 'Order List', href: '/manufacturing/order-list' },
         { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
         { id: 'material', label: 'Material', href: '/manufacturing/material' },
       ]);

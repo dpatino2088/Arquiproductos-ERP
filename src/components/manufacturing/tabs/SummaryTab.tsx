@@ -207,21 +207,24 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
       </div>
 
       {/* Sale Order Totals */}
-      {manufacturingOrder.SaleOrders && (
+      {((manufacturingOrder as any).SalesOrders ?? (manufacturingOrder as any).SaleOrders) && (
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Sale Order Information</h3>
           <div className="space-y-2">
             <div className="flex justify-between">
               <span className="text-sm text-gray-700">Sale Order:</span>
               <span className="text-sm font-medium text-gray-900">
-                {manufacturingOrder.SaleOrders.sale_order_no}
+                {(manufacturingOrder as any).SalesOrders?.sales_order_no ?? (manufacturingOrder as any).SaleOrders?.sale_order_no ?? 'N/A'}
               </span>
             </div>
-            {manufacturingOrder.SaleOrders.total && (
+            {((manufacturingOrder as any).SalesOrders?.total_amount ?? (manufacturingOrder as any).SaleOrders?.total) != null && (
               <div className="flex justify-between">
                 <span className="text-sm text-gray-700">Total:</span>
                 <span className="text-sm font-medium text-gray-900">
-                  {formatCurrency(manufacturingOrder.SaleOrders.total, manufacturingOrder.SaleOrders.currency || 'USD')}
+                  {formatCurrency(
+                    (manufacturingOrder as any).SalesOrders?.total_amount ?? (manufacturingOrder as any).SaleOrders?.total ?? 0,
+                    (manufacturingOrder as any).SalesOrders?.currency ?? (manufacturingOrder as any).SaleOrders?.currency ?? 'USD'
+                  )}
                 </span>
               </div>
             )}

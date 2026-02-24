@@ -632,7 +632,7 @@ export default function Contacts() {
             {isFirstLoad ? 'Loading…' : `Manage your ${filteredContacts.length} contacts${filteredContacts.length > itemsPerPage ? ` (Page ${currentPage} of ${totalPages})` : ''}`}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto">
           <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm">
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
@@ -1017,31 +1017,27 @@ export default function Contacts() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Name</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Customer Name</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Phone</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Email</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Type</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created By</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created At</th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Contact Name</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs" style={{ paddingRight: 30 }}>Customer Name</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Primary Phone</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Country</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Contact Type</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Created At</th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-100">
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-28" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-32" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-20" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-20" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-24" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-20" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-gray-200 rounded animate-pulse w-16" /></td>
+                    <td className="py-4 px-4 text-left"><div className="h-4 bg-gray-200 rounded animate-pulse w-28" /></td>
+                    <td className="py-4 px-4 text-center" style={{ paddingRight: 30 }}><div className="h-4 bg-gray-200 rounded animate-pulse w-24 mx-auto" /></td>
+                    <td className="py-4 px-4 text-center"><div className="h-4 bg-gray-200 rounded animate-pulse w-24 mx-auto" /></td>
+                    <td className="py-4 px-4 text-center"><div className="h-4 bg-gray-200 rounded animate-pulse w-32 mx-auto" /></td>
+                    <td className="py-4 px-4 text-center"><div className="h-4 bg-gray-200 rounded animate-pulse w-20 mx-auto" /></td>
+                    <td className="py-4 px-4 text-center"><div className="h-4 bg-gray-200 rounded animate-pulse w-24 mx-auto" /></td>
+                    <td className="py-4 px-4 text-center"><div className="h-4 bg-gray-200 rounded animate-pulse w-20 mx-auto" /></td>
+                    <td className="py-4 px-4 text-center"><div className="h-4 bg-gray-200 rounded animate-pulse w-16 mx-auto" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -1054,9 +1050,19 @@ export default function Contacts() {
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="table-fit-wrapper">
             <table className="table-fit">
+              <colgroup>
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '12%' }} />
+              </colgroup>
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('firstName')}
                       className="flex items-center gap-1 hover:text-gray-700"
@@ -1065,37 +1071,35 @@ export default function Contacts() {
                       {sortBy === 'firstName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs" style={{ paddingRight: 30 }}>
                     <button
                       onClick={() => handleSort('company')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      className="flex items-center gap-1 hover:text-gray-700 justify-center w-full"
                     >
                       Customer Name
                       {sortBy === 'company' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Primary Phone</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Email</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Country</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">City</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Contact Type</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Created By</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Primary Phone</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Email</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Country</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">Contact Type</th>
+                  <th className="text-center py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('dateAdded')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      className="flex items-center gap-1 hover:text-gray-700 justify-center w-full"
                     >
                       Created At
                       {sortBy === 'dateAdded' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {showEmptyState ? (
                   <tr>
-                    <td colSpan={10} className="py-12 px-6 text-center">
+                    <td colSpan={8} className="py-12 px-4 text-center">
                       <Contact className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                       <p className="text-gray-600 mb-2">No contacts found</p>
                       <p className="text-sm text-gray-500">
@@ -1107,7 +1111,7 @@ export default function Contacts() {
                   </tr>
                 ) : filteredContacts.length === 0 && isSearchSettling ? (
                   <tr>
-                    <td colSpan={10} className="py-8 px-6 text-center text-sm text-muted-foreground">Updating search…</td>
+                    <td colSpan={8} className="py-8 px-4 text-center text-sm text-muted-foreground">Updating search…</td>
                   </tr>
                 ) : (
                   paginatedContacts.map((contact) => (
@@ -1115,38 +1119,36 @@ export default function Contacts() {
                       key={contact.id} 
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
-                      <td className="py-4 px-6 text-gray-900 text-sm"><span className="block truncate font-medium" title={contact.firstName}>{contact.firstName}</span></td>
-                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate" title={contact.company || '— Not linked'}>{contact.company || '— Not linked'}</span></td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        <div className="flex items-center gap-1 min-w-0">
+                      <td className="py-4 px-4 text-gray-900 text-sm text-left"><span className="block truncate font-medium" title={contact.firstName}>{contact.firstName}</span></td>
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center" style={{ paddingRight: 30 }}><span className="block truncate" title={contact.company || '— Not linked'}>{contact.company || '— Not linked'}</span></td>
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                        <div className="flex items-center gap-1 min-w-0 justify-center">
                           <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{(contact as any).primary_phone || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        <div className="flex items-center gap-1 min-w-0">
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                        <div className="flex items-center gap-1 min-w-0 justify-center">
                           <Mail className="w-3 h-3 text-gray-400 flex-shrink-0" />
                           <span className="truncate">{contact.email || 'N/A'}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{(contact as any).contact_country || 'N/A'}</span></td>
-                      <td className="py-4 px-6 text-gray-700 text-sm"><span className="block truncate">{(contact as any).contact_city || 'N/A'}</span></td>
-                      <td className="py-4 px-6">
-                        <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${
+                      <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{(contact as any).contact_country || 'N/A'}</span></td>
+                      <td className="py-4 px-4 text-center">
+                        <span className={`inline-block px-1.5 py-0.5 rounded-full text-xs font-medium ${
                           getContactTypeBadgeColor((contact as any).contact_type || '')
                         }`}>
                           {formatContactTypeLabel((contact as any).contact_type || 'architect')}
                         </span>
                       </td>
-                      <td className="py-4 px-6 text-gray-600 text-sm"><span className="block truncate" title={contact.createdBy || '—'}>{contact.createdBy || '—'}</span></td>
-                      <td className="py-4 px-6 text-gray-600 text-sm">
+                      <td className="py-4 px-4 text-gray-600 text-sm text-center">
                         {(contact as any).created_at 
                           ? new Date((contact as any).created_at).toLocaleDateString() 
                           : contact.dateAdded 
                             ? new Date(contact.dateAdded).toLocaleDateString() 
                             : 'N/A'}
                       </td>
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
                           <button 
                             onClick={(e) => handleEditContact(contact, e)}

@@ -45,13 +45,12 @@ const CompanyReports = lazy(() => import('./pages/reports/CompanyReports'));
 // New module pages
 const Sales = lazy(() => import('./pages/sales/Sales'));
 const SalesDirectory = lazy(() => import('./pages/sales/SalesDirectory'));
-const Orders = lazy(() => import('./pages/sales/Orders'));
 const Quotes = lazy(() => import('./pages/sales/Quotes'));
+const QuoteDetail = lazy(() => import('./pages/sales/QuoteDetail'));
 const QuoteNew = lazy(() => import('./pages/sales/QuoteNew'));
 const Proposals = lazy(() => import('./pages/sales/Proposals'));
 const ProposalPrint = lazy(() => import('./pages/sales/ProposalPrint'));
-const SaleOrders = lazy(() => import('./pages/sales/SaleOrders'));
-const SaleOrderNew = lazy(() => import('./pages/sales/SaleOrderNew'));
+const SalesOrderDetail = lazy(() => import('./pages/sales/SalesOrderDetail'));
 
 const Catalog = lazy(() => import('./pages/catalog/Catalog'));
 const CatalogModule = lazy(() => import('./pages/catalog/CatalogModule'));
@@ -73,7 +72,6 @@ const Warehouse = lazy(() => import('./pages/inventory/Warehouse'));
 const Manufacturing = lazy(() => import('./pages/manufacturing/Manufacturing'));
 const BillOfMaterials = lazy(() => import('./pages/manufacturing/BillOfMaterials'));
 const ApprovedBOMList = lazy(() => import('./pages/catalog/ApprovedBOMList'));
-const OrderList = lazy(() => import('./pages/manufacturing/OrderList'));
 const Financials = lazy(() => import('./pages/financials/Financials'));
 
 const CompanySettings = lazy(() => import('./pages/settings/CompanySettings'));
@@ -408,56 +406,6 @@ function App() {
         setCurrentPage('login');
       }
     });
-    // Sale Orders routes (independent module)
-    router.addRoute('/sale-orders', () => {
-      if (isAuthenticated) {
-        setCurrentPage('sale-orders');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/sale-orders/new', () => {
-      if (isAuthenticated) {
-        setCurrentPage('sale-order-new');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/sale-orders/edit/:id', () => {
-      if (isAuthenticated) {
-        setCurrentPage('sale-order-new');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    // Keep old routes for backward compatibility (redirect to new routes)
-    router.addRoute('/sales/sale-orders', () => {
-      if (isAuthenticated) {
-        router.navigate('/sale-orders');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/sales/sale-orders/new', () => {
-      if (isAuthenticated) {
-        router.navigate('/sale-orders/new');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/sales/sale-orders/edit/:id', () => {
-      if (isAuthenticated) {
-        const path = router.getCurrentRoute();
-        const match = path.match(/\/sales\/sale-orders\/edit\/([^/]+)/);
-        if (match && match[1]) {
-          router.navigate(`/sale-orders/edit/${match[1]}`);
-        } else {
-          router.navigate('/sale-orders');
-        }
-      } else {
-        setCurrentPage('login');
-      }
-    });
     router.addRoute('/sales/quotes', () => {
       if (isAuthenticated) {
         setCurrentPage('quotes');
@@ -479,6 +427,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/sales/quotes/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('quote-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/sales/proposals', () => {
       if (isAuthenticated) {
         setCurrentPage('proposals');
@@ -495,7 +450,21 @@ function App() {
     });
     router.addRoute('/sales/proposals/:id', () => {
       if (isAuthenticated) {
-        setCurrentPage('proposals'); // same as list — ProposalsWithDetail keeps both mounted
+        setCurrentPage('proposals');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('orders');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/sales/orders/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('order-detail');
       } else {
         setCurrentPage('login');
       }
@@ -616,8 +585,7 @@ function App() {
     // Manufacturing routes
     router.addRoute('/manufacturing', () => {
       if (isAuthenticated) {
-        // Redirect to first sub-module (Order List)
-        router.navigate('/manufacturing/order-list', false);
+        router.navigate('/manufacturing/manufacturing-orders', false);
       } else {
         setCurrentPage('login');
       }
@@ -675,7 +643,7 @@ function App() {
     });
     router.addRoute('/manufacturing/order-list', () => {
       if (isAuthenticated) {
-        setCurrentPage('order-list');
+        router.navigate('/manufacturing/manufacturing-orders', false);
       } else {
         setCurrentPage('login');
       }
@@ -996,19 +964,19 @@ function App() {
       // Sales module pages (protected but accessible to portal)
       case 'sales':
         return <RequireModule module="sales"><Sales /></RequireModule>;
-      case 'orders':
-        return <RequireModule module="sales"><Orders /></RequireModule>;
       case 'quotes':
         return <RequireModule module="sales"><SalesDirectory activeTab="quotes" /></RequireModule>;
+      case 'quote-detail':
+        return <RequireModule module="sales"><QuoteDetail /></RequireModule>;
       case 'quote-new':
         return <RequireModule module="sales"><QuoteNew /></RequireModule>;
       case 'proposals':
       case 'proposal-detail':
         return <RequireModule module="sales"><SalesDirectory activeTab="proposals" /></RequireModule>;
-      case 'sale-orders':
-        return <RequireModule module="sales"><SaleOrders /></RequireModule>;
-      case 'sale-order-new':
-        return <RequireModule module="sales"><SaleOrderNew /></RequireModule>;
+      case 'orders':
+        return <RequireModule module="sales"><SalesDirectory activeTab="orders" /></RequireModule>;
+      case 'order-detail':
+        return <RequireModule module="sales"><SalesOrderDetail /></RequireModule>;
       case 'catalog':
         return <RequireModule module="catalog"><Catalog /></RequireModule>;
       case 'items':
@@ -1036,8 +1004,6 @@ function App() {
         const moId = sessionStorage.getItem('currentManufacturingOrderId');
         return <RequireModule module="manufacturing">{moId ? <ManufacturingOrderDetail moId={moId} /> : <ManufacturingOrders />}</RequireModule>;
       }
-      case 'order-list':
-        return <RequireModule module="manufacturing"><OrderList /></RequireModule>;
       case 'material':
         return <RequireModule module="manufacturing"><ApprovedBOMList /></RequireModule>;
       case 'bill-of-materials':

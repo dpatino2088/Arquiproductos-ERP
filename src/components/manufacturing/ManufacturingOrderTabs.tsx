@@ -61,7 +61,7 @@ export default function ManufacturingOrderTabs({ moId }: ManufacturingOrderTabsP
             moId={moId}
             saleOrderId={manufacturingOrder?.sales_order_id || null}
             moStatus={manufacturingOrder?.status || 'draft'}
-            currency={manufacturingOrder?.SaleOrders?.currency || 'USD'}
+            currency={(manufacturingOrder as any)?.SalesOrders?.currency ?? (manufacturingOrder as any)?.SaleOrders?.currency ?? 'USD'}
           />
         )}
         {activeTab === 'cut-list' && (

@@ -9,13 +9,18 @@ import {
   Filter,
   SortAsc,
   SortDesc,
-  Eye,
+  Edit,
   ExternalLink,
   Trash2,
+  Archive,
+  RotateCcw,
 } from 'lucide-react';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import { supabase } from '../../lib/supabase/client';
 import { getSupabaseErrorMessage } from '../../lib/supabase-error-utils';
+import StatusBadge from '../../components/shared/StatusBadge';
+import StatusTabs from '../../components/shared/StatusTabs';
 
 const STATUS_OPTIONS = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const;
 type ProposalStatusOption = (typeof STATUS_OPTIONS)[number];
@@ -69,6 +74,36 @@ export default function Proposals() {
   const [sortBy, setSortBy] = useState<'proposal_no' | 'status' | 'customer_name' | 'total' | 'updated_at'>('updated_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [statusTab, setStatusTab] = useState('all');
+
+  const nonArchivedList = useMemo(() => list.filter((p) => !p.archived), [list]);
+  const archivedCount = useMemo(() => list.filter((p) => p.archived).length, [list]);
+
+  const proposalStatusCounts = useMemo(() => {
+    const c: Record<string, number> = { all: nonArchivedList.length };
+    nonArchivedList.forEach((p) => {
+      c[p.status] = (c[p.status] || 0) + 1;
+    });
+    return c;
+  }, [nonArchivedList]);
+
+  const proposalStatusTabs = useMemo(
+    () => [
+      { label: 'All', value: 'all', count: proposalStatusCounts.all || 0 },
+      { label: 'Draft', value: 'draft', count: proposalStatusCounts.draft || 0 },
+      { label: 'Sent', value: 'sent', count: proposalStatusCounts.sent || 0 },
+      { label: 'Accepted', value: 'accepted', count: proposalStatusCounts.accepted || 0 },
+      { label: 'Rejected', value: 'rejected', count: proposalStatusCounts.rejected || 0 },
+      { label: 'Expired', value: 'expired', count: proposalStatusCounts.expired || 0 },
+      { label: 'Archived', value: 'archived', count: archivedCount },
+    ],
+    [proposalStatusCounts, archivedCount]
+  );
+
+  const canArchiveProposal = useCallback((p: { status?: string | null }) => {
+    const s = (p.status || '').toLowerCase();
+    return s === 'cancelled' || s === 'rejected' || s === 'expired';
+  }, []);
 
   const handleSort = useCallback((field: typeof sortBy) => {
     setSortBy(field);
@@ -82,7 +117,12 @@ export default function Proposals() {
   }, []);
 
   const filteredList = useMemo(() => {
-    let result = list;
+    let result =
+      statusTab === 'archived' ? list.filter((p) => p.archived) : nonArchivedList;
+
+    if (statusTab !== 'all' && statusTab !== 'archived') {
+      result = result.filter((p) => p.status === statusTab);
+    }
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -119,7 +159,7 @@ export default function Proposals() {
     });
 
     return result;
-  }, [list, searchTerm, selectedStatus, sortBy, sortOrder]);
+  }, [list, nonArchivedList, searchTerm, selectedStatus, sortBy, sortOrder, statusTab]);
 
   const totalPages = Math.max(1, Math.ceil(filteredList.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -190,6 +230,68 @@ export default function Proposals() {
     },
     [showConfirm, deleteProposal, setDialogLoading, addNotification]
   );
+
+  const handleArchive = useCallback(
+    async (p: (typeof list)[0], e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!canArchiveProposal(p)) return;
+      const confirmed = await showConfirm({
+        title: 'Archivar propuesta',
+        message: `¿Archivar ${p.proposal_no || p.id.slice(0, 8)}? No se eliminará, solo se ocultará de la lista activa.`,
+        variant: 'info',
+        confirmText: 'Archivar',
+        cancelText: 'Cancelar',
+      });
+      if (!confirmed) return;
+      try {
+        setDialogLoading(true);
+        const { error: err } = await supabase.from('Proposals').update({ archived: true }).eq('id', p.id);
+        if (err) throw err;
+        addNotification({ type: 'success', title: 'Archivado', message: 'Propuesta archivada correctamente.' });
+        await refetch();
+      } catch (err: any) {
+        addNotification({
+          type: 'error',
+          title: 'Error',
+          message: getSupabaseErrorMessage(err) || 'No se pudo archivar.',
+        });
+      } finally {
+        setDialogLoading(false);
+      }
+    },
+    [showConfirm, setDialogLoading, refetch, addNotification, canArchiveProposal]
+  );
+
+  const handleRestore = useCallback(
+    async (p: (typeof list)[0], e: React.MouseEvent) => {
+      e.stopPropagation();
+      const confirmed = await showConfirm({
+        title: 'Restaurar propuesta',
+        message: `¿Restaurar ${p.proposal_no || p.id.slice(0, 8)}? Volverá a la lista activa.`,
+        variant: 'info',
+        confirmText: 'Restaurar',
+        cancelText: 'Cancelar',
+      });
+      if (!confirmed) return;
+      try {
+        setDialogLoading(true);
+        const { error: err } = await supabase.from('Proposals').update({ archived: false }).eq('id', p.id);
+        if (err) throw err;
+        addNotification({ type: 'success', title: 'Restaurado', message: 'Propuesta restaurada correctamente.' });
+        await refetch();
+      } catch (err: any) {
+        addNotification({
+          type: 'error',
+          title: 'Error',
+          message: getSupabaseErrorMessage(err) || 'No se pudo restaurar.',
+        });
+      } finally {
+        setDialogLoading(false);
+      }
+    },
+    [showConfirm, setDialogLoading, refetch, addNotification]
+  );
+
   const handleDeleteSelected = useCallback(async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
@@ -242,39 +344,40 @@ export default function Proposals() {
 
   return (
     <div className="py-6 px-6">
-      {/* Header: mismo formato que Quotes */}
+      {/* Header: design system — title + subtitle (mb-1); actions ml-auto; same spacing as Quotes/Orders */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Proposals</h1>
-          <p className="text-sm text-gray-500">
-            {filteredList.length} {filteredList.length === 1 ? 'propuesta' : 'propuestas'}
+          <h1 className="text-xl font-semibold text-foreground mb-1">Proposals</h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+            Create and manage proposals from quotes
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto">
           {selectedIds.size > 0 && (
             <button
               onClick={handleDeleteSelected}
-              className="flex items-center gap-2 px-3 py-2 border border-red-300 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 text-sm"
+              className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 style={{ width: 14, height: 14 }} />
               Eliminar seleccionados ({selectedIds.size})
             </button>
           )}
           <button
             onClick={() => refetch()}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-sm"
+            className="flex items-center justify-center p-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors"
             title="Actualizar"
           >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
+            <RefreshCw style={{ width: 14, height: 14 }} />
           </button>
         </div>
       </div>
 
-      {/* Search and Filters: misma barra que Quotes */}
-      <div className="mb-4">
+      <StatusTabs tabs={proposalStatusTabs} activeTab={statusTab} onChange={setStatusTab} />
+
+      {/* Search and Filters — card py-6 px-6; botones px-2 py-1, icon 14px */}
+      <div className="mb-4 mt-4">
         <div
-          className={`bg-white border border-gray-200 py-4 px-4 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}
+          className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}
         >
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
@@ -284,18 +387,18 @@ export default function Proposals() {
                 placeholder="Buscar por número, cliente o quote..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+              className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
                 showFilters || selectedStatus.length > 0
                   ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
               }`}
             >
-              <Filter className="w-4 h-4" />
+              <Filter style={{ width: 14, height: 14 }} />
               Filters
               {selectedStatus.length > 0 && (
                 <span className="bg-white text-blue-600 rounded-full px-2 py-0.5 text-xs font-semibold">
@@ -305,10 +408,10 @@ export default function Proposals() {
             </button>
             <button
               onClick={() => refetch()}
-              className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50"
+              className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
               title="Actualizar"
             >
-              <RefreshCw className="w-4 h-4 text-gray-600" />
+              <RefreshCw style={{ width: 14, height: 14 }} />
             </button>
           </div>
 
@@ -358,9 +461,20 @@ export default function Proposals() {
         )}
         <div className="table-fit-wrapper">
           <table className="table-fit">
+            <colgroup>
+              <col style={{ width: '4%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '11%' }} />
+              <col style={{ width: '11%' }} />
+            </colgroup>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="w-10 py-3 px-4 text-left">
+                <th className="py-3 px-4 text-center">
                   <input
                     type="checkbox"
                     checked={paginatedList.length > 0 && paginatedList.every((p) => selectedIds.has(p.id))}
@@ -368,7 +482,7 @@ export default function Proposals() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs" style={{ paddingRight: 0 }}>
                   <button
                     onClick={() => handleSort('proposal_no')}
                     className="flex items-center gap-1 hover:text-gray-900"
@@ -378,55 +492,55 @@ export default function Proposals() {
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('status')}
-                    className="flex items-center gap-1 hover:text-gray-900"
+                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
                   >
                     Status
                     {sortBy === 'status' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('customer_name')}
-                    className="flex items-center gap-1 hover:text-gray-900"
+                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
                   >
                     Customer
                     {sortBy === 'customer_name' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
-                  <button
-                    onClick={() => handleSort('total')}
-                    className="flex items-center gap-1 hover:text-gray-900"
-                  >
-                    Total
-                    {sortBy === 'total' &&
-                      (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                  </button>
-                </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Created by</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Quote created by</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('updated_at')}
-                    className="flex items-center gap-1 hover:text-gray-900"
+                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
                   >
                     Date
                     {sortBy === 'updated_at' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">Created by</th>
-                <th className="text-left py-3 px-6 font-medium text-gray-700 text-xs">Quote created by</th>
-                <th className="text-right py-3 px-6 font-medium text-gray-700 text-xs">Actions</th>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                  <button
+                    onClick={() => handleSort('total')}
+                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
+                  >
+                    Total
+                    {sortBy === 'total' &&
+                      (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  </button>
+                </th>
+                <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {paginatedList.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 px-6 text-center">
+                  <td colSpan={9} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
                       <p className="text-gray-600 mb-2">No se encontraron propuestas</p>
@@ -442,10 +556,9 @@ export default function Proposals() {
                 paginatedList.map((p) => (
                   <tr
                     key={p.id}
-                    className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(`/sales/proposals/${p.id}`)}
+                    className="hover:bg-gray-50"
                   >
-                    <td className="w-10 py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                    <td className="py-4 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(p.id)}
@@ -453,57 +566,79 @@ export default function Proposals() {
                         className="rounded border-gray-300"
                       />
                     </td>
-                    <td className="py-4 px-6 text-gray-900 text-sm font-medium">
-                      <span className="block">{p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}</span>
+                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-left" style={{ paddingRight: 0 }}>
+                      <span className="block truncate">{p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}</span>
                       {p.quote_no && (
-                        <span className="text-xs text-gray-500 font-normal">Quote: {p.quote_no}</span>
+                        <span className="text-xs text-gray-500 font-normal block truncate">Quote: {p.quote_no}</span>
                       )}
                     </td>
-                    <td className="py-4 px-6">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeColor(p.status)}`}
-                      >
-                        {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
-                      </span>
+                    <td className="py-4 px-4 text-center">
+                      <StatusBadge status={p.status} type="proposal" size="sm" />
                     </td>
-                    <td className="py-4 px-6 text-gray-700 text-sm">{p.customer_name ?? '—'}</td>
-                    <td className="py-4 px-6 text-gray-900 text-sm font-medium">
+                    <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{p.customer_name ?? '—'}</span></td>
+                    <td className="py-4 px-4 text-gray-600 text-sm text-center"><span className="block truncate">{p.proposal_created_by ?? '—'}</span></td>
+                    <td className="py-4 px-4 text-gray-600 text-sm text-center"><span className="block truncate">{p.quote_created_by ?? '—'}</span></td>
+                    <td className="py-4 px-4 text-gray-600 text-sm text-center">{formatDate(p.updated_at)}</td>
+                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
                       {formatCurrency(p.total_amount)}
                     </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm">{formatDate(p.updated_at)}</td>
-                    <td className="py-4 px-6 text-gray-600 text-sm">{p.proposal_created_by ?? '—'}</td>
-                    <td className="py-4 px-6 text-gray-600 text-sm">{p.quote_created_by ?? '—'}</td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-1 justify-end">
+                    <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 justify-end flex-nowrap">
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             router.navigate(`/sales/proposals/${p.id}`);
                           }}
-                          className="p-2 hover:bg-gray-100 rounded text-gray-600"
-                          title="Ver"
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                          title="Edit"
                         >
-                          <Eye className="w-4 h-4" />
+                          <Edit style={{ width: 14, height: 14 }} />
                         </button>
-                        {p.quote_id && (
+                        {statusTab === 'archived' ? (
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.navigate(`/sales/quotes/${p.quote_id}/edit`);
-                            }}
-                            className="p-2 hover:bg-gray-100 rounded text-gray-600"
-                            title="Ir a Quote"
+                            type="button"
+                            onClick={(e) => handleRestore(p, e)}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                            title="Restore"
                           >
-                            <ExternalLink className="w-4 h-4" />
+                            <RotateCcw style={{ width: 14, height: 14 }} />
                           </button>
+                        ) : (
+                          <>
+                            {p.quote_id && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.navigate(`/sales/quotes/${p.quote_id}/edit`);
+                                }}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Go to Quote"
+                              >
+                                <ExternalLink style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                            {canArchiveProposal(p) && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleArchive(p, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Archive"
+                              >
+                                <Archive style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteOne(p, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 style={{ width: 14, height: 14 }} />
+                            </button>
+                          </>
                         )}
-                        <button
-                          onClick={(e) => handleDeleteOne(p, e)}
-                          className="p-2 hover:bg-red-50 rounded text-red-600"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -514,8 +649,8 @@ export default function Proposals() {
         </div>
       </div>
 
-      {/* Pagination: mismo formato que Quotes */}
-      <div className="bg-white border border-gray-200 rounded-lg py-4 px-6">
+      {/* Pagination — mt-4 = space between table container and footer */}
+      <div className="mt-4 bg-white border border-gray-200 rounded-lg py-4 px-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-700">Show:</span>

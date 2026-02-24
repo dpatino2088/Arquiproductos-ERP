@@ -3,6 +3,7 @@ import { router } from '../../lib/router';
 import { useManufacturingOrder } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useUIStore } from '../../stores/ui-store';
+import { useAccessContext } from '../../hooks/useAccessContext';
 import ManufacturingOrderTabs from '../../components/manufacturing/ManufacturingOrderTabs';
 import { ArrowLeft } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
@@ -18,6 +19,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { manufacturingOrder, loading, error } = useManufacturingOrder(moId);
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+  const { userType } = useAccessContext();
+  const isDealerPortal = userType === 'portal';
 
   useEffect(() => {
     setGlobalLoading(loading);
@@ -65,7 +68,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
       registerSubmodules('Manufacturing', [
-        { id: 'order-list', label: 'Order List', href: '/manufacturing/order-list' },
         { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
         { id: 'material', label: 'Material', href: '/manufacturing/material' },
       ]);

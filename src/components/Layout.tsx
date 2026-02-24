@@ -60,15 +60,23 @@ interface LayoutProps {
 const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
   '/dashboard': [],
   '/directory': [
-    { label: 'Contacts', href: '/directory/contacts' },
     { label: 'Customers', href: '/directory/customers' },
+    { label: 'Contacts', href: '/directory/contacts' },
   ],
   '/sales/quotes': [
     { label: 'Quotes', href: '/sales/quotes' },
     { label: 'Proposals', href: '/sales/proposals' },
+    { label: 'Orders', href: '/sales/orders' },
   ],
-  '/sale-orders': [
-    { label: 'Sales Orders', href: '/sale-orders' },
+  '/sales/proposals': [
+    { label: 'Quotes', href: '/sales/quotes' },
+    { label: 'Proposals', href: '/sales/proposals' },
+    { label: 'Orders', href: '/sales/orders' },
+  ],
+  '/sales/orders': [
+    { label: 'Quotes', href: '/sales/quotes' },
+    { label: 'Proposals', href: '/sales/proposals' },
+    { label: 'Orders', href: '/sales/orders' },
   ],
   '/catalog': [
     { label: 'Items', href: '/catalog/items' },
@@ -82,7 +90,6 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Adjustments', href: '/inventory/adjustments' },
   ],
   '/manufacturing': [
-    { label: 'Order List', href: '/manufacturing/order-list' },
     { label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
     { label: 'Material', href: '/manufacturing/material' },
   ],
@@ -283,8 +290,6 @@ function Layout({ children }: LayoutProps) {
       setLastRouteForModule('/directory', route);
     } else if (route.startsWith('/sales')) {
       setLastRouteForModule('/sales', route);
-    } else if (route.startsWith('/sale-orders')) {
-      setLastRouteForModule('/sale-orders', route);
     } else if (route.startsWith('/catalog')) {
       setLastRouteForModule('/catalog', route);
     } else if (route.startsWith('/inventory')) {
@@ -378,11 +383,7 @@ function Layout({ children }: LayoutProps) {
         // Directory is active if we're on any directory route
         return currentRoute.includes('/directory');
       case 'Sales':
-        // Sales is active if we're on any sales/quotes or sales/proposals route
-        return currentRoute.includes('/sales/quotes') || currentRoute.includes('/sales/proposals');
-      case 'Sales Orders':
-        // Sales Orders is active if we're on any sale-orders route
-        return currentRoute.includes('/sale-orders');
+        return currentRoute.startsWith('/sales');
       case 'Catalog':
         // Catalog is active if we're on any catalog route
         return currentRoute.includes('/catalog');
@@ -425,7 +426,6 @@ function Layout({ children }: LayoutProps) {
       dashboardItem ? { ...dashboardItem, module: undefined } : { name: 'Dashboard', href: '/dashboard', icon: Home },
       { name: 'Directory', href: '/directory', icon: BookOpen, module: 'directory' },
       { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, module: 'sales' },
-      { name: 'Sales Orders', href: '/sale-orders', icon: FileText, module: 'sales' }, // Uses 'sales' module for permissions
       { name: 'Catalog', href: '/catalog', icon: Book, module: 'catalog' },
       { name: 'Inventory', href: '/inventory', icon: Package, module: 'inventory' },
       { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, module: 'manufacturing' },
@@ -468,12 +468,7 @@ function Layout({ children }: LayoutProps) {
       if (!item.module) return true;
       
       // ✅ REGLA CORRECTA: Portal users - solo allowedModules (ignorar RBAC)
-      // IMPORTANTE: Portal users NO deben ver Sales Orders, solo Sales
       if (userType === "portal") {
-        // Portal users: explícitamente excluir Sales Orders
-        if (item.name === "Sales Orders") {
-          return false;
-        }
         const visible = allowedModules.includes(item.module);
         if (import.meta.env.DEV && item.name === "Financials") {
           console.log("[Sidebar] Portal user - Financials:", visible, "allowedModules:", allowedModules);
@@ -635,21 +630,15 @@ function Layout({ children }: LayoutProps) {
         lastRoute === '/directory/contacts' || 
         lastRoute === '/directory/customers'
       );
-      const actualPath = (isListPage ? lastRoute : null) || '/directory/contacts';
+      const actualPath = (isListPage ? lastRoute : null) || '/directory/customers';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
-    } else if (path === '/sales' || path === '/sales/quotes') {
-      // Navigate to quotes list
+    } else if (path.startsWith('/sales')) {
+      // Single Sales module: redirect to last visited tab or quotes
       const lastRoute = getLastRouteForModule('/sales');
-      const isListPage = lastRoute && (lastRoute === '/sales/quotes' || lastRoute === '/sales');
-      const actualPath = (isListPage ? lastRoute : null) || '/sales/quotes';
-      router.navigate(actualPath);
-      setCurrentRoute(actualPath);
-    } else if (path === '/sale-orders') {
-      // Navigate to sale orders list
-      const lastRoute = getLastRouteForModule('/sale-orders');
-      const isListPage = lastRoute && lastRoute === '/sale-orders';
-      const actualPath = (isListPage ? lastRoute : null) || '/sale-orders';
+      const validTabs = ['/sales/quotes', '/sales/proposals', '/sales/orders'];
+      const isListOrDetail = lastRoute && (validTabs.includes(lastRoute) || lastRoute.startsWith('/sales/quotes/') || lastRoute.startsWith('/sales/proposals/') || lastRoute.startsWith('/sales/orders/'));
+      const actualPath = (isListOrDetail ? lastRoute : null) || '/sales/quotes';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/catalog') {
@@ -663,8 +652,8 @@ function Layout({ children }: LayoutProps) {
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/manufacturing') {
-      // Always redirect to Order List (first sub-module) when entering Manufacturing module
-      const actualPath = '/manufacturing/order-list';
+      const lastRoute = getLastRouteForModule('/manufacturing');
+      const actualPath = lastRoute || '/manufacturing/manufacturing-orders';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/financials') {
@@ -788,7 +777,7 @@ function Layout({ children }: LayoutProps) {
               }}
             >
               <div className="flex items-center justify-center" style={{ width: '27px', height: '27px', flexShrink: 0 }}>
-                <Box size={27} style={{ color: 'var(--primary-brand-hex)' }} />
+                <Box size={27} style={{ color: 'var(--gray-500)' }} />
               </div>
                           <span
               className="absolute transition-opacity duration-300 whitespace-nowrap font-normal"
@@ -1007,7 +996,7 @@ function Layout({ children }: LayoutProps) {
                   style={{ 
                     width: '28px', 
                     height: '28px',
-                                         backgroundColor: 'var(--primary-brand-hex)'
+                    backgroundColor: 'var(--gray-500)'
                   }}
                   aria-label={`My Account${isUserMenuOpen ? ' (menu open)' : ' (menu closed)'}`}
                   aria-expanded={isUserMenuOpen}
@@ -1146,7 +1135,7 @@ function Layout({ children }: LayoutProps) {
                           width: 'auto',
                           color: '#1c1f26',
                           borderColor: 'var(--gray-250)',
-                          borderBottom: tab.isActive ? '2px solid var(--tab-active-underline)' : 'none'
+                          borderBottom: tab.isActive ? '2px solid var(--sidebar-base)' : 'none'
                         }}
                         role="tab"
                         aria-selected={tab.isActive}

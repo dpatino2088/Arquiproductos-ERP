@@ -59,3 +59,43 @@ export function termsTemplatesListKey(dealerId: string | null, docType: string):
 export function dealerTermsDefaultKey(dealerId: string | null, docType: string): unknown[] {
   return ['settings', 'dealer-terms-default', LIST_QUERY_VERSION, dealerId ?? '', docType];
 }
+
+/** BOM Templates list for an organization */
+export function bomTemplatesListKey(scopeKey: string): unknown[] {
+  return ['catalog', 'bom-templates', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** BOM Template detail (template + components) */
+export function bomTemplateDetailKey(scopeKey: string, templateId: string): unknown[] {
+  return ['catalog', 'bom-templates', 'detail', DETAIL_QUERY_VERSION, scopeKey, templateId];
+}
+
+/** Sales Orders list */
+export function salesOrdersListKey(scopeKey: string): unknown[] {
+  return ['sales', 'orders', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Sales Order detail */
+export function salesOrderDetailKey(scopeKey: string, soId: string): unknown[] {
+  return ['sales', 'orders', 'detail', DETAIL_QUERY_VERSION, scopeKey, soId];
+}
+
+/** Manufacturing Orders list */
+export function manufacturingOrdersListKey(scopeKey: string): unknown[] {
+  return ['manufacturing', 'orders', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Manufacturing Order detail */
+export function manufacturingOrderDetailKey(scopeKey: string, moId: string): unknown[] {
+  return ['manufacturing', 'orders', 'detail', DETAIL_QUERY_VERSION, scopeKey, moId];
+}
+
+/** Payments for a Sales Order */
+export function paymentsListKey(scopeKey: string, soId: string): unknown[] {
+  return ['sales', 'payments', 'list', LIST_QUERY_VERSION, scopeKey, soId];
+}
+
+/** Activity timeline for an entity */
+export function timelineKey(entityType: string, entityId: string): unknown[] {
+  return ['timeline', entityType, entityId, LIST_QUERY_VERSION];
+}

@@ -264,7 +264,7 @@ export default function ContactNew() {
     <div className="py-6">
       {/* Header - Matching Contacts page layout */}
       <div className="flex items-center justify-between mb-6" style={{ paddingLeft: '1.1875rem', paddingRight: '1.1875rem' }}>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold text-foreground mb-1">
             Contact Details
           </h1>
@@ -273,8 +273,8 @@ export default function ContactNew() {
           </p>
         </div>
         
-        {/* Action Buttons - Matching Contacts page */}
-        <div className="flex items-center gap-3">
+        {/* Action Buttons — pegados al padding derecho (ml-auto) */}
+        <div className="flex items-center gap-3 ml-auto">
           <button
             type="button"
             onClick={() => router.navigate('/directory/contacts')}

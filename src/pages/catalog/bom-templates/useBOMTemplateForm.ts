@@ -1,0 +1,734 @@
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { supabase } from '../../../lib/supabase/client';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { useUIStore } from '../../../stores/ui-store';
+import { useProductTypes } from '../../../hooks/useProductTypes';
+import { useCatalogItems, useItemCategories, useLeafItemCategories } from '../../../hooks/useCatalog';
+import { useBOMComponents } from '../../../hooks/useBOM';
+import { normalizeRole, isValidRole, CANONICAL_COMPONENT_ROLES, VALID_CHILD_ROLES } from '../../../lib/bom/roles';
+import { normalizeUom } from '../../../lib/uom';
+import { useOnVisibilityChange } from '../../../lib/app-persistence';
+import type {
+  BOMComponentDraft,
+  ComponentFormData,
+  EngineeringData,
+  ChildFormData,
+  ComponentGroupedByCategory,
+  BOMQtyType,
+} from './types';
+import {
+  INITIAL_FORM_DATA,
+  INITIAL_ENGINEERING_DATA,
+  INITIAL_CHILD_FORM_DATA,
+} from './types';
+
+export function useBOMTemplateForm(editingTemplateId: string | null) {
+  const { activeOrganizationId } = useOrganizationContext();
+  const { productTypes } = useProductTypes();
+  const { items: catalogItems } = useCatalogItems();
+  const { categories } = useItemCategories();
+  const { categories: leafCategories = [] } = useLeafItemCategories();
+  const { components: existingComponents } = useBOMComponents(editingTemplateId || null);
+
+  // --- Template fields ---
+  const [productTypeId, setProductTypeId] = useState('');
+  const [templateCode, setTemplateCode] = useState('');
+  const [templateName, setTemplateName] = useState('');
+  const [templateDescription, setTemplateDescription] = useState('');
+  const [templateHardwareColor, setTemplateHardwareColor] = useState('');
+  const [templatePanelCount, setTemplatePanelCount] = useState<1 | 2 | 3>(1);
+
+  // --- Components ---
+  const [components, setComponents] = useState<BOMComponentDraft[]>([]);
+  const [componentsToDelete, setComponentsToDelete] = useState<string[]>([]);
+  const initialComponentsRef = useRef<BOMComponentDraft[]>([]);
+
+  // --- Component form ---
+  const [showAddComponentForm, setShowAddComponentForm] = useState(false);
+  const [editingComponentId, setEditingComponentId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<ComponentFormData>({ ...INITIAL_FORM_DATA });
+  const [componentSearchTerm, setComponentSearchTerm] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+  const [showComponentDropdown, setShowComponentDropdown] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  // --- Engineering modal ---
+  const [showEngineeringModal, setShowEngineeringModal] = useState(false);
+  const [editingEngineeringComponentId, setEditingEngineeringComponentId] = useState<string | null>(null);
+  const [engineeringData, setEngineeringData] = useState<EngineeringData>({ ...INITIAL_ENGINEERING_DATA });
+
+  // --- Children modal ---
+  const [showChildrenModal, setShowChildrenModal] = useState(false);
+  const [editingParentComponentId, setEditingParentComponentId] = useState<string | null>(null);
+  const [childComponents, setChildComponents] = useState<BOMComponentDraft[]>([]);
+  const [showAddChildForm, setShowAddChildForm] = useState(false);
+  const [editingChildId, setEditingChildId] = useState<string | null>(null);
+  const [childFormData, setChildFormData] = useState<ChildFormData>({ ...INITIAL_CHILD_FORM_DATA });
+  const [childSearchTerm, setChildSearchTerm] = useState('');
+  const [showChildDropdown, setShowChildDropdown] = useState(false);
+
+  // --- Save state ---
+  const [isSaving, setIsSaving] = useState(false);
+
+  // --- Draft persistence ---
+  const draftKey = `bomTemplateDraft:${editingTemplateId || 'new'}`;
+  const isInitialMount = useRef(true);
+
+  // ========== DERIVED DATA ==========
+
+  const childrenByParent = useMemo(() => {
+    const grouped: Record<string, BOMComponentDraft[]> = {};
+    (components || [])
+      .filter(c => c.parent_component_id)
+      .forEach(child => {
+        const pid = child.parent_component_id!;
+        if (!grouped[pid]) grouped[pid] = [];
+        grouped[pid].push(child);
+      });
+    Object.values(grouped).forEach(list =>
+      list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    );
+    return grouped;
+  }, [components]);
+
+  const displayComponents = useMemo(
+    () => (components || []).filter(c => !c.parent_component_id),
+    [components]
+  );
+
+  const componentsByCategory = useMemo((): ComponentGroupedByCategory[] => {
+    if (!displayComponents.length) return [];
+    const groups = new Map<string | null, ComponentGroupedByCategory>();
+    const blockTypeLabels: Record<string, string> = {
+      tube: 'TUBO', drive: 'DRIVE', brackets: 'BRACKET',
+      cassette: 'CASSETTE', bottom_rail: 'BOTTOM_RAIL', side_channel: 'SIDE_CHANNEL',
+    };
+    displayComponents.forEach(component => {
+      const componentItem = catalogItems.find(i => i.id === component.component_item_id) || component.catalog_item;
+      const blockType = (component as any).block_type;
+      const categoryId = (componentItem as any)?.item_category_id || null;
+      let groupKey: string | null, categoryName: string, categoryCode: string | null;
+      if (blockType) {
+        groupKey = `block_type_${blockType}`;
+        categoryName = blockTypeLabels[blockType] || blockType.toUpperCase();
+        categoryCode = blockType;
+      } else {
+        const category = categories.find(c => c.id === categoryId);
+        groupKey = categoryId;
+        categoryName = category?.name || 'Uncategorized';
+        categoryCode = category?.code || null;
+      }
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, { category_id: groupKey, category_name: categoryName, category_code: categoryCode, components: [] });
+      }
+      groups.get(groupKey)!.components.push(component);
+    });
+    const blockTypeOrder = ['tube', 'drive', 'brackets', 'cassette', 'bottom_rail', 'side_channel'];
+    const sorted = Array.from(groups.values()).sort((a, b) => {
+      const aBlock = a.category_code && blockTypeOrder.includes(a.category_code);
+      const bBlock = b.category_code && blockTypeOrder.includes(b.category_code);
+      if (aBlock && bBlock) return blockTypeOrder.indexOf(a.category_code!) - blockTypeOrder.indexOf(b.category_code!);
+      if (aBlock) return -1;
+      if (bBlock) return 1;
+      return a.category_name.localeCompare(b.category_name);
+    });
+    sorted.forEach(g => g.components.sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0)));
+    return sorted;
+  }, [displayComponents, catalogItems, categories]);
+
+  const isDirty = useMemo(() => {
+    const initial = initialComponentsRef.current;
+    if (components.length !== initial.length) return true;
+    if (componentsToDelete.length > 0) return true;
+    return components.some((c, i) => {
+      const orig = initial[i];
+      if (!orig) return true;
+      return c.component_item_id !== orig.component_item_id
+        || c.component_role !== orig.component_role
+        || c.qty_type !== orig.qty_type
+        || c.qty_value !== orig.qty_value
+        || c.uom !== orig.uom
+        || c.depends_on_role !== orig.depends_on_role
+        || c.cut_axis !== orig.cut_axis
+        || c.cut_delta_mm !== orig.cut_delta_mm;
+    });
+  }, [components, componentsToDelete]);
+
+  // ========== FLAT FILTERED ITEMS (autocomplete) ==========
+
+  const flatFilteredItems = useMemo(() => {
+    const items: Array<{ id: string; sku: string; name: string; category: string; categoryCode: string | null; uom: string }> = [];
+    const searchTerm = componentSearchTerm.trim();
+    const normalizedSearch = searchTerm.toLowerCase().replace(/[-_\s]/g, '');
+    const filtered = catalogItems.filter(item => {
+      if (editingComponentId) {
+        const editing = components.find(c => c.id === editingComponentId);
+        if (!(editing && editing.component_item_id === item.id) && components.some(c => c.component_item_id === item.id)) return false;
+      } else {
+        if (components.some(c => c.component_item_id === item.id)) return false;
+      }
+      if (selectedCategoryFilter) {
+        const catId = item.category_id || item.item_category_id;
+        if (catId !== selectedCategoryFilter) return false;
+      }
+      if (normalizedSearch) {
+        const skuNorm = (item.sku || '').toLowerCase().replace(/[-\s]/g, '');
+        const skuExact = (item.sku || '').toLowerCase();
+        const itemName = (item.name || item.item_name || '').toLowerCase();
+        const catId = item.category_id || item.item_category_id;
+        const cat = categories.find(c => c.id === catId);
+        const catName = (cat?.name || '').toLowerCase();
+        const catCode = (cat?.code || '').toLowerCase();
+        const searchLower = searchTerm.toLowerCase();
+        if (!(skuExact.includes(searchLower) || skuNorm.includes(normalizedSearch) || itemName.includes(searchLower) || catName.includes(searchLower) || catCode.includes(searchLower)))
+          return false;
+      }
+      return true;
+    });
+    const categoryMap = new Map<string | null, { category: any; items: any[] }>();
+    filtered.forEach(item => {
+      const catId = item.category_id || item.item_category_id || null;
+      const cat = categories.find(c => c.id === catId) || { id: null, name: 'Uncategorized', code: null };
+      if (!categoryMap.has(catId)) categoryMap.set(catId, { category: cat, items: [] });
+      categoryMap.get(catId)!.items.push(item);
+    });
+    categoryMap.forEach(group => {
+      group.items.forEach(item => {
+        items.push({ id: item.id, sku: item.sku || '', name: item.name || item.item_name || 'Unnamed', category: group.category.name, categoryCode: group.category.code, uom: item.uom || 'ea' });
+      });
+    });
+    return items;
+  }, [catalogItems, componentSearchTerm, selectedCategoryFilter, components, categories, editingComponentId]);
+
+  // ========== LOAD TEMPLATE DATA ==========
+
+  useEffect(() => {
+    if (editingTemplateId && activeOrganizationId) {
+      supabase.from('BOMTemplates').select('*').eq('id', editingTemplateId).single()
+        .then(({ data, error }: any) => {
+          if (!error && data) {
+            setProductTypeId(data.product_type_id);
+            setTemplateCode(data.code || '');
+            setTemplateName(data.name || '');
+            setTemplateDescription(data.description || '');
+            setTemplateHardwareColor(data.hardware_color || '');
+            const pc = data.panel_count_min ?? data.panel_count_max ?? 1;
+            setTemplatePanelCount(Math.min(3, Math.max(1, Number(pc) || 1)) as 1 | 2 | 3);
+          }
+        });
+    } else if (!editingTemplateId) {
+      setProductTypeId('');
+      setTemplateCode('');
+      setTemplateName('');
+      setTemplateDescription('');
+      setTemplateHardwareColor('');
+      setTemplatePanelCount(1);
+      setComponents([]);
+      setComponentsToDelete([]);
+      initialComponentsRef.current = [];
+    }
+  }, [editingTemplateId, activeOrganizationId]);
+
+  useEffect(() => {
+    if (!editingTemplateId) { setComponents([]); setComponentsToDelete([]); initialComponentsRef.current = []; return; }
+    setComponents([]);
+    setComponentsToDelete([]);
+    setEditingComponentId(null);
+    setShowAddComponentForm(false);
+    initialComponentsRef.current = [];
+  }, [editingTemplateId]);
+
+  useEffect(() => {
+    if (!editingTemplateId || !existingComponents?.length) return;
+    const mapped: BOMComponentDraft[] = existingComponents.map((comp: any) => ({
+      id: comp.id,
+      parent_component_id: comp.parent_component_id || null,
+      component_item_id: comp.component_item_id || null,
+      component_role: comp.component_role || null,
+      qty_type: comp.qty_type || 'fixed',
+      qty_value: comp.qty_value || 1,
+      qty_delta_mm: comp.qty_delta_mm || 0,
+      waste_pct: comp.waste_pct || 0,
+      depends_on_role: comp.depends_on_role || null,
+      cut_axis: comp.cut_axis || null,
+      cut_delta_mm: comp.cut_delta_mm || 0,
+      uom: comp.uom || 'ea',
+      sort_order: comp.sort_order || 0,
+      sequence_order: comp.sort_order || 0,
+      is_required: comp.is_required !== false,
+      auto_select: false,
+      catalog_item: comp.component_item || null,
+    }));
+    const unique = Array.from(new Map(mapped.map(c => [c.id, c])).values());
+    setComponents(unique);
+    setComponentsToDelete([]);
+    initialComponentsRef.current = unique.map(c => ({ ...c }));
+  }, [editingTemplateId, existingComponents]);
+
+  // ========== DRAFT PERSISTENCE ==========
+
+  useEffect(() => {
+    if (isInitialMount.current) {
+      try {
+        const raw = sessionStorage.getItem(draftKey);
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p.productTypeId) setProductTypeId(p.productTypeId);
+          if (p.templateCode) setTemplateCode(p.templateCode);
+          if (p.templateName) setTemplateName(p.templateName);
+          if (p.templateDescription) setTemplateDescription(p.templateDescription);
+          if (p.templateHardwareColor !== undefined) setTemplateHardwareColor(p.templateHardwareColor || '');
+          if (p.templatePanelCount !== undefined) setTemplatePanelCount(Math.min(3, Math.max(1, Number(p.templatePanelCount) || 1)) as 1 | 2 | 3);
+          if (p.components && (!editingTemplateId || p.components.length > 0)) setComponents(p.components);
+        }
+      } catch { /* ignore */ }
+      isInitialMount.current = false;
+    }
+  }, [draftKey, editingTemplateId]);
+
+  useEffect(() => {
+    if (isInitialMount.current) return;
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify({
+        productTypeId, templateCode, templateName, templateDescription,
+        templateHardwareColor, templatePanelCount, components,
+      }));
+    } catch { /* ignore */ }
+  }, [draftKey, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, components]);
+
+  useOnVisibilityChange(useCallback(() => {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p.productTypeId) setProductTypeId(p.productTypeId);
+        if (p.templateCode) setTemplateCode(p.templateCode);
+        if (p.templateName) setTemplateName(p.templateName);
+        if (p.templateDescription) setTemplateDescription(p.templateDescription);
+        if (p.templateHardwareColor !== undefined) setTemplateHardwareColor(p.templateHardwareColor || '');
+        if (p.templatePanelCount !== undefined) setTemplatePanelCount(Math.min(3, Math.max(1, Number(p.templatePanelCount) || 1)) as 1 | 2 | 3);
+        if (p.components && (!editingTemplateId || p.components.length > 0)) setComponents(p.components);
+      }
+    } catch { /* ignore */ }
+  }, [draftKey, editingTemplateId]));
+
+  const clearDraft = useCallback(() => { sessionStorage.removeItem(draftKey); }, [draftKey]);
+
+  // ========== COMPONENT FORM HANDLERS ==========
+
+  const resetForm = useCallback(() => {
+    setEditingComponentId(null);
+    setFormData({ ...INITIAL_FORM_DATA, sequence_order: components.length });
+    setShowAddComponentForm(false);
+    setComponentSearchTerm('');
+    setSelectedCategoryFilter('');
+    setShowComponentDropdown(false);
+    setHighlightedIndex(-1);
+  }, [components.length]);
+
+  const handleSelectComponent = useCallback((itemId: string) => {
+    const sel = catalogItems.find(i => i.id === itemId);
+    if (!sel) return;
+    const autoRole = normalizeRole(sel.item_role) || '';
+    const isFabric = sel.is_fabric || autoRole === 'fabric';
+    const catalogUom = isFabric ? 'm' : (sel.unit_of_measure || sel.uom || 'ea');
+    setFormData(prev => ({ ...prev, component_item_id: itemId, component_role: autoRole || prev.component_role, uom: catalogUom }));
+    setComponentSearchTerm(`${sel.sku} - ${sel.name || sel.item_name || ''}`);
+    setShowComponentDropdown(false);
+    setHighlightedIndex(-1);
+  }, [catalogItems]);
+
+  const handleAddComponent = useCallback(() => {
+    if (!formData.component_item_id) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Selecciona un componente (SKU)' }); return; }
+    if (!formData.component_role || !isValidRole(formData.component_role)) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Component role is required and must be valid.' }); return; }
+    if (!formData.qty_type) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Quantity Type is required.' }); return; }
+    if (formData.qty_type === 'fixed' && (!formData.qty_value || formData.qty_value <= 0)) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Quantity Value must be > 0.' }); return; }
+
+    const role = normalizeRole(formData.component_role) || formData.component_role;
+    const isFabric = role === 'fabric';
+    const finalUom = isFabric ? 'm' : (normalizeUom(formData.uom) || 'ea');
+    const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
+    const sel = catalogItems.find(i => i.id === formData.component_item_id);
+
+    const newComp: BOMComponentDraft = {
+      id: `temp-${crypto.randomUUID()}`,
+      parent_component_id: null,
+      component_item_id: formData.component_item_id,
+      component_role: role,
+      qty_type: finalQty,
+      qty_value: finalQty === 'fixed' ? (formData.qty_value || 1) : 1,
+      qty_delta_mm: 0,
+      waste_pct: 0,
+      depends_on_role: null,
+      cut_axis: null,
+      cut_delta_mm: 0,
+      uom: finalUom,
+      sort_order: formData.sequence_order ?? 0,
+      sequence_order: formData.sequence_order ?? 0,
+      is_required: formData.is_required ?? true,
+      auto_select: false,
+      catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : null,
+    };
+    setComponents(prev => [...prev, newComp]);
+    resetForm();
+  }, [formData, catalogItems, resetForm]);
+
+  const handleUpdateComponent = useCallback(() => {
+    if (!editingComponentId) return;
+    if (!formData.component_item_id) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Selecciona un componente (SKU)' }); return; }
+
+    let role = formData.component_role;
+    if (!role && formData.component_item_id) {
+      const sel = catalogItems.find(i => i.id === formData.component_item_id);
+      role = sel ? (normalizeRole(sel.item_role) || '') : '';
+    }
+    if (!role || !isValidRole(role)) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Component role is required and must be valid.' }); return; }
+
+    const normalized = normalizeRole(role) || role;
+    const isFabric = normalized === 'fabric';
+    const finalUom = isFabric ? 'm' : (normalizeUom(formData.uom) || 'ea');
+    const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
+    const sel = catalogItems.find(i => i.id === formData.component_item_id);
+
+    setComponents(prev => prev.map(c => {
+      if (c.id !== editingComponentId) return c;
+      return {
+        ...c,
+        component_item_id: formData.component_item_id,
+        component_role: normalized,
+        qty_type: finalQty,
+        qty_value: formData.qty_value || 1,
+        uom: finalUom,
+        sort_order: formData.sequence_order ?? 0,
+        sequence_order: formData.sequence_order ?? 0,
+        is_required: formData.is_required ?? true,
+        catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : c.catalog_item,
+      };
+    }));
+    resetForm();
+  }, [editingComponentId, formData, catalogItems, resetForm]);
+
+  const handleDeleteComponent = useCallback((component: BOMComponentDraft) => {
+    const id = component.id;
+    const childIds = components.filter(c => c.parent_component_id === id).map(c => c.id);
+    setComponents(prev => prev.filter(c => c.id !== id && !childIds.includes(c.id)));
+    if (!id.startsWith('temp-')) {
+      setComponentsToDelete(prev => {
+        const s = new Set(prev);
+        s.add(id);
+        childIds.filter(cid => !cid.startsWith('temp-')).forEach(cid => s.add(cid));
+        return Array.from(s);
+      });
+    }
+  }, [components]);
+
+  const handleEditComponent = useCallback((component: BOMComponentDraft) => {
+    if (showChildrenModal) handleCloseChildrenModal();
+    const itemId = component.component_item_id || '';
+    const item = catalogItems.find(i => i.id === itemId);
+    const display = item
+      ? `${item.sku || 'N/A'} - ${item.name || 'Unnamed'}`
+      : component.catalog_item ? `${component.catalog_item.sku || 'N/A'} - ${component.catalog_item.name || 'Unnamed'}` : '';
+    const isFabric = component.component_role === 'fabric';
+    const uomNorm = isFabric ? 'm' : (normalizeUom(component.uom) || 'ea');
+    setEditingComponentId(component.id);
+    setComponentSearchTerm(display);
+    setFormData({
+      component_item_id: itemId,
+      component_role: component.component_role || '',
+      qty_type: (component.qty_type || 'fixed') as BOMQtyType,
+      qty_value: component.qty_type === 'fixed' ? (component.qty_value || 1) : null,
+      uom: uomNorm,
+      sequence_order: component.sort_order || component.sequence_order || 0,
+      is_required: component.is_required ?? true,
+    });
+    setShowAddComponentForm(true);
+    setSelectedCategoryFilter('');
+    setShowComponentDropdown(false);
+    setHighlightedIndex(-1);
+  }, [catalogItems, showChildrenModal]);
+
+  // ========== ENGINEERING MODAL ==========
+
+  const handleOpenEngineeringModal = useCallback((componentId: string) => {
+    const comp = components.find(c => c.id === componentId);
+    if (!comp) return;
+    const axis = comp.cut_axis || 'none';
+    setEditingEngineeringComponentId(componentId);
+    setEngineeringData({
+      depends_on_role: axis === 'none' ? '' : (comp.depends_on_role || ''),
+      cut_axis: axis as any,
+      cut_delta_mm: comp.cut_delta_mm || null,
+      cut_delta_scope: (comp.cut_delta_scope as any) || 'none',
+    });
+    setShowEngineeringModal(true);
+  }, [components]);
+
+  const handleSaveEngineeringRules = useCallback(() => {
+    if (!editingEngineeringComponentId) return;
+    const finalRole = engineeringData.cut_axis === 'none' ? null : normalizeRole(engineeringData.depends_on_role);
+    setComponents(prev => prev.map(c => {
+      if (c.id !== editingEngineeringComponentId) return c;
+      return {
+        ...c,
+        depends_on_role: finalRole,
+        cut_axis: engineeringData.cut_axis === 'none' ? null : engineeringData.cut_axis,
+        cut_delta_mm: engineeringData.cut_delta_mm || 0,
+        cut_delta_scope: engineeringData.cut_delta_scope === 'none' ? null : engineeringData.cut_delta_scope,
+      };
+    }));
+    setShowEngineeringModal(false);
+    setEditingEngineeringComponentId(null);
+    setEngineeringData({ ...INITIAL_ENGINEERING_DATA });
+  }, [editingEngineeringComponentId, engineeringData]);
+
+  const handleCloseEngineeringModal = useCallback(() => {
+    setShowEngineeringModal(false);
+    setEditingEngineeringComponentId(null);
+    setEngineeringData({ ...INITIAL_ENGINEERING_DATA });
+  }, []);
+
+  // ========== CHILDREN MODAL ==========
+
+  const handleOpenChildrenModal = useCallback((parentComponentId: string) => {
+    if (!parentComponentId) return;
+    setEditingParentComponentId(parentComponentId);
+    setShowChildrenModal(true);
+    setChildComponents(childrenByParent[parentComponentId] || []);
+  }, [childrenByParent]);
+
+  const handleCloseChildrenModal = useCallback(() => {
+    setShowChildrenModal(false);
+    setEditingParentComponentId(null);
+    setChildComponents([]);
+    setShowAddChildForm(false);
+    setEditingChildId(null);
+    setChildFormData({ ...INITIAL_CHILD_FORM_DATA });
+    setChildSearchTerm('');
+    setShowChildDropdown(false);
+  }, []);
+
+  const handleAddChild = useCallback(() => {
+    if (!editingParentComponentId || !activeOrganizationId) return;
+    if (!childFormData.child_item_id) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Select a child item.' }); return; }
+    if (!childFormData.child_role || !isValidRole(childFormData.child_role)) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Child role is required and must be valid.' }); return; }
+    if (!childFormData.qty || childFormData.qty <= 0) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Quantity must be > 0.' }); return; }
+
+    const normalizedChildRole = normalizeRole(childFormData.child_role) || childFormData.child_role;
+    const sel = catalogItems.find(i => i.id === childFormData.child_item_id);
+    const uom = normalizeUom(childFormData.uom) || 'ea';
+    const sortOrder = childComponents.find(c => c.id === editingChildId)?.sort_order ?? childComponents.length;
+
+    const childPayload: BOMComponentDraft = {
+      id: editingChildId || `temp-${crypto.randomUUID()}`,
+      parent_component_id: editingParentComponentId,
+      component_item_id: childFormData.child_item_id,
+      component_role: normalizedChildRole,
+      qty_type: 'fixed',
+      qty_value: childFormData.qty || 1,
+      qty_delta_mm: 0,
+      waste_pct: 0,
+      depends_on_role: null,
+      cut_axis: null,
+      cut_delta_mm: 0,
+      uom,
+      sort_order: sortOrder,
+      sequence_order: sortOrder,
+      is_required: childFormData.required !== false,
+      auto_select: false,
+      catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : null,
+    };
+
+    if (editingChildId) {
+      setComponents(prev => prev.map(c => c.id === editingChildId ? childPayload : c));
+      setChildComponents(prev => prev.map(c => c.id === editingChildId ? childPayload : c));
+    } else {
+      setComponents(prev => [...prev, childPayload]);
+      setChildComponents(prev => [...prev, childPayload]);
+    }
+
+    setShowAddChildForm(false);
+    setEditingChildId(null);
+    setChildFormData({ ...INITIAL_CHILD_FORM_DATA });
+    setChildSearchTerm('');
+    useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: editingChildId ? 'Child updated' : 'Child added' });
+  }, [editingParentComponentId, activeOrganizationId, childFormData, catalogItems, editingChildId, childComponents]);
+
+  const handleDeleteChild = useCallback((childId: string) => {
+    setComponents(prev => prev.filter(c => c.id !== childId));
+    setChildComponents(prev => prev.filter(c => c.id !== childId));
+    if (!childId.startsWith('temp-')) {
+      setComponentsToDelete(prev => [...new Set([...prev, childId])]);
+    }
+    if (editingChildId === childId) {
+      setEditingChildId(null);
+      setShowAddChildForm(false);
+      setChildFormData({ ...INITIAL_CHILD_FORM_DATA });
+      setChildSearchTerm('');
+    }
+  }, [editingChildId]);
+
+  // ========== SAVE (using batch RPC) ==========
+
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (!activeOrganizationId) { useUIStore.getState().addNotification({ type: 'error', title: 'Organization Required', message: 'Please select an organization.' }); return false; }
+    if (!productTypeId) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Please select a Product Type' }); return false; }
+    if (!templateCode.trim()) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Template Code is required' }); return false; }
+    if (!templateHardwareColor.trim()) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Hardware Color is required' }); return false; }
+
+    const invalidRoles = components.filter(c => c.component_role && !c.id.startsWith('temp-') ? false : (c.component_role ? !isValidRole(c.component_role) : false));
+    if (invalidRoles.length) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: `Invalid roles found in ${invalidRoles.length} component(s).` }); return false; }
+
+    setIsSaving(true);
+    try {
+      const normalizedCode = templateCode.trim();
+      const normalizedName = templateName.trim() || normalizedCode;
+      const normalizedColor = templateHardwareColor.trim().charAt(0).toUpperCase() + templateHardwareColor.trim().slice(1).toLowerCase();
+
+      const templatePayload: Record<string, any> = {
+        product_type_id: productTypeId,
+        code: normalizedCode,
+        name: normalizedName,
+        description: templateDescription.trim() || null,
+        hardware_color: normalizedColor,
+        panel_count_min: templatePanelCount,
+        panel_count_max: templatePanelCount,
+        is_active: true,
+      };
+      if (editingTemplateId) templatePayload.id = editingTemplateId;
+
+      const componentsPayload = components.map(c => {
+        const role = normalizeRole(c.component_role || '') || c.component_role || null;
+        const isFabric = role === 'fabric';
+        return {
+          id: c.id.startsWith('temp-') ? null : c.id,
+          temp_id: c.id.startsWith('temp-') ? c.id : null,
+          parent_component_id: (c.parent_component_id && !c.parent_component_id.startsWith('temp-')) ? c.parent_component_id : null,
+          parent_temp_id: (c.parent_component_id && c.parent_component_id.startsWith('temp-')) ? c.parent_component_id : null,
+          component_item_id: c.component_item_id || null,
+          component_role: role,
+          qty_type: c.qty_type || 'fixed',
+          qty_value: c.qty_value || 1,
+          qty_delta_mm: c.qty_delta_mm || 0,
+          waste_pct: c.waste_pct || 0,
+          depends_on_role: c.depends_on_role || null,
+          cut_axis: c.cut_axis || null,
+          cut_delta_mm: c.cut_delta_mm || 0,
+          uom: isFabric ? 'm' : (c.uom || 'ea'),
+          sort_order: c.sort_order || c.sequence_order || 0,
+          is_required: c.is_required !== false,
+        };
+      });
+
+      const deleteIds = componentsToDelete.filter(id => !id.startsWith('temp-'));
+
+      const { data, error } = await supabase.rpc('save_bom_template_batch', {
+        p_organization_id: activeOrganizationId,
+        p_template: templatePayload,
+        p_components_upsert: componentsPayload,
+        p_component_ids_delete: deleteIds,
+      });
+
+      if (error) throw new Error(error.message || 'Error saving BOM template');
+
+      const result = data as { template_id: string; id_map: Record<string, string>; components: any[] };
+
+      if (result?.components) {
+        const refreshed: BOMComponentDraft[] = result.components.map((comp: any) => ({
+          id: comp.id,
+          parent_component_id: comp.parent_component_id || null,
+          component_item_id: comp.component_item_id || null,
+          component_role: comp.component_role || null,
+          qty_type: comp.qty_type || 'fixed',
+          qty_value: comp.qty_value || 1,
+          qty_delta_mm: comp.qty_delta_mm || 0,
+          waste_pct: comp.waste_pct || 0,
+          depends_on_role: comp.depends_on_role || null,
+          cut_axis: comp.cut_axis || null,
+          cut_delta_mm: comp.cut_delta_mm || 0,
+          uom: comp.uom || 'ea',
+          sort_order: comp.sort_order || 0,
+          sequence_order: comp.sort_order || 0,
+          is_required: comp.is_required !== false,
+          auto_select: false,
+        }));
+        setComponents(refreshed);
+        initialComponentsRef.current = refreshed.map(c => ({ ...c }));
+      }
+      setComponentsToDelete([]);
+      clearDraft();
+      useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: 'BOM Template saved successfully.' });
+      return true;
+    } catch (err: any) {
+      console.error('Error saving BOM:', err);
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'Error saving BOM template' });
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [activeOrganizationId, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, editingTemplateId, components, componentsToDelete, clearDraft]);
+
+  // ========== RETURN ==========
+
+  return {
+    // Template fields
+    productTypeId, setProductTypeId,
+    templateCode, setTemplateCode: (v: string) => setTemplateCode(v.toUpperCase().replace(/\s+/g, '_')),
+    templateName, setTemplateName,
+    templateDescription, setTemplateDescription,
+    templateHardwareColor, setTemplateHardwareColor,
+    templatePanelCount, setTemplatePanelCount,
+    productTypes,
+    catalogItems,
+    categories,
+    leafCategories,
+
+    // Components
+    components, displayComponents, componentsByCategory, childrenByParent,
+
+    // Component form
+    showAddComponentForm, setShowAddComponentForm,
+    editingComponentId, setEditingComponentId,
+    formData, setFormData,
+    componentSearchTerm, setComponentSearchTerm,
+    selectedCategoryFilter, setSelectedCategoryFilter,
+    showComponentDropdown, setShowComponentDropdown,
+    highlightedIndex, setHighlightedIndex,
+    flatFilteredItems,
+    handleSelectComponent,
+    handleAddComponent,
+    handleUpdateComponent,
+    handleDeleteComponent,
+    handleEditComponent,
+    resetForm,
+
+    // Engineering
+    showEngineeringModal,
+    editingEngineeringComponentId,
+    engineeringData, setEngineeringData,
+    handleOpenEngineeringModal,
+    handleSaveEngineeringRules,
+    handleCloseEngineeringModal,
+
+    // Children
+    showChildrenModal,
+    editingParentComponentId,
+    childComponents, setChildComponents,
+    showAddChildForm, setShowAddChildForm,
+    editingChildId, setEditingChildId,
+    childFormData, setChildFormData,
+    childSearchTerm, setChildSearchTerm,
+    showChildDropdown, setShowChildDropdown,
+    handleOpenChildrenModal,
+    handleCloseChildrenModal,
+    handleAddChild,
+    handleDeleteChild,
+
+    // Save
+    isSaving,
+    isDirty,
+    handleSave,
+    clearDraft,
+  };
+}

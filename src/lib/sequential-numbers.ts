@@ -2,8 +2,8 @@ import { supabase } from './supabase/client';
 
 /**
  * Generates the next sequential number for a given document type
- * Format: PREFIX-NNNNNN (e.g., QT-000100, OR-000001)
- * For QT: sequence starts at 100 (QT-0100, QT-0101, ...) with 4 digits.
+ * Format: PREFIX-NNNNN (e.g., QT-00100, PR-00100, SO-00100)
+ * QT/PR/SO: sequence starts at 100 (00100, 00101, ...) with 5 digits.
  * When dealerId is provided, numbering is per dealer (each dealer has independent sequence).
  *
  * @param prefix - The prefix for the number (e.g., 'QT' for Quotes)
@@ -38,9 +38,8 @@ export async function generateNextSequentialNumber(
 
     if (error) throw error;
 
-    const isQuote = prefix === 'QT' && tableName === 'Quotes';
-    const minStart = isQuote ? 100 : 1;
-    const padLength = isQuote ? 4 : 6;
+    const minStart = 100; // QT/PR/SO start at 00100
+    const padLength = 5;
 
     let nextNumber = minStart;
     if (data && data.length > 0) {
@@ -77,13 +76,13 @@ export async function generateNextOrderNumber(organizationId: string): Promise<s
   return generateNextSequentialNumber('OR', 'SaleOrders', 'order_no', organizationId);
 }
 
-/** Minimum proposal number (PR-0100, PR-0101, ...) */
+/** Minimum proposal number (PR-00100, PR-00101, ...) */
 const PROPOSAL_NUMBER_START = 100;
 const PROPOSAL_PREFIX = 'PR';
 
 /**
  * Generates the next Proposal number. Per dealer when dealerId is provided.
- * Format: PR-NNNN starting at PR-0100. Independent from Quote (QT) numbering.
+ * Format: PR-NNNNN starting at PR-00100. Independent from Quote (QT) numbering.
  */
 export async function generateNextProposalNumber(
   organizationId: string,
@@ -115,10 +114,10 @@ export async function generateNextProposalNumber(
       }
     }
 
-    return `${PROPOSAL_PREFIX}-${String(nextNumber).padStart(4, '0')}`;
+    return `${PROPOSAL_PREFIX}-${String(nextNumber).padStart(5, '0')}`;
   } catch (err) {
     console.error('Error generating PR number:', err);
-    return `${PROPOSAL_PREFIX}-${String(PROPOSAL_NUMBER_START + Math.floor(Math.random() * 900)).padStart(4, '0')}`;
+    return `${PROPOSAL_PREFIX}-${String(PROPOSAL_NUMBER_START + Math.floor(Math.random() * 900)).padStart(5, '0')}`;
   }
 }
 

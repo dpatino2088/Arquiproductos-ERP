@@ -1,0 +1,186 @@
+# Directory Design Standards (Contacts & Customers)
+
+When building or modifying **Contacts Directory** (`src/pages/directory/Contacts.tsx`) or **Customers Directory** (`src/pages/directory/Customers.tsx`), follow these exact patterns. These rules define padding, alignment, header bar, and action buttons so both modules stay consistent.
+
+---
+
+## 1. Page container
+
+- **Wrapper**: `<div className="py-6">` — vertical padding only; horizontal padding comes from layout.
+- **Header block**: `<div className="flex items-center justify-between mb-6">` — title left, actions right, margin below.
+
+---
+
+## 2. Header bar (title + actions)
+
+- **Alignment**: The action buttons must be **pegados al padding derecho** (flush right). Use `ml-auto` on the actions container so they are never centered; same rule for Directory (Contacts, Customers), Sales (Quotes, Proposals), and detail/form headers (Contact Details, Customer Details).
+
+### 2.1 Title block
+
+- **Customers**: Only the title. No subtitle (no "Manage your X customers").
+  ```tsx
+  <div>
+    <h1 className="text-xl font-semibold text-foreground mb-1">Customers Directory</h1>
+  </div>
+  ```
+- **Contacts**: Title + optional subtitle with count.
+  ```tsx
+  <div>
+    <h1 className="text-xl font-semibold text-foreground mb-1">Contacts Directory</h1>
+    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+      {isFirstLoad ? 'Loading…' : `Manage your ${filteredContacts.length} contacts…`}
+    </p>
+  </div>
+  ```
+
+### 2.2 Action buttons (header right)
+
+- **Container**: `className="flex items-center gap-3 ml-auto"` — `ml-auto` ensures the block is aligned to the right (pegado al padding derecho); do not center the actions.
+- **Import (secondary)**:
+  - `className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm"`
+  - Icon: `style={{ width: '14px', height: '14px' }}` (e.g. `Upload`).
+- **Primary (Add Customer / New Contact)**:
+  - `className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"`
+  - `style={{ backgroundColor: 'var(--primary-brand-hex)' }}`
+  - Icon: `style={{ width: '14px', height: '14px' }}` (e.g. `Plus`).
+
+**Padding rule for header buttons**: Always `px-2 py-1` (8px horizontal, 4px vertical). Do not use `px-3`/`px-4` or `py-2` for these two buttons.
+
+---
+
+## 3. Search and filters bar
+
+- **Outer container**: `className="mb-4"`.
+- **Card**: `className="bg-white border border-gray-200 py-6 px-6 rounded-lg"` (use `rounded-t-lg` when filters are open).
+  - **Padding**: `py-6 px-6` for the bar and the expanded filters panel.
+- **Inner row**: `className="flex items-center justify-between gap-3"`.
+- **Search input**: `className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"`.
+- **Filters button**: Same padding as header secondary: `px-2 py-1`, `gap-2`, icon 14px.
+- **View toggle (list/grid)**: `className="flex border border-gray-200 rounded overflow-hidden"`; each button `p-1.5`, icon `w-4 h-4`.
+
+---
+
+## 4. Table structure
+
+### 4.1 Table wrapper
+
+- Container: `className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4"`.
+- Use `table-fit-wrapper` and `table className="table-fit"` when using fixed column widths via `<colgroup>`.
+
+### 4.2 Column widths (`<colgroup>`)
+
+Define explicit widths so the Actions column stays visible and Email has enough space.
+
+**Customers (7 columns)**:
+
+| Column          | Width |
+|-----------------|-------|
+| Customer Name   | 18%   |
+| Primary Phone   | 10%   |
+| Email           | 24%   |
+| Country         | 10%   |
+| Customer Type   | 12%   |
+| Date Added      | 9%    |
+| Actions         | 12%   |
+
+**Contacts (8 columns)**:
+
+| Column          | Width |
+|-----------------|-------|
+| Contact Name    | 13%   |
+| Customer Name   | 18%   |
+| Primary Phone   | 10%   |
+| Email           | 18%   |
+| Country         | 9%    |
+| Contact Type    | 11%   |
+| Created At      | 9%    |
+| Actions         | 12%   |
+
+Example:
+
+```tsx
+<colgroup>
+  <col style={{ width: '18%' }} />
+  <col style={{ width: '10%' }} />
+  <col style={{ width: '24%' }} />
+  {/* … */}
+</colgroup>
+```
+
+### 4.3 Header cells (`<thead>`)
+
+- **Row container**: `className="bg-gray-100 border-b border-gray-200"` (Customers) or `bg-gray-50 border-b border-gray-200` (Contacts).
+- **Every `<th>`**:
+  - **Padding**: `py-3 px-4` (12px vertical, 16px horizontal). Do not use `px-6`.
+  - **Text**: `font-medium text-gray-900 text-xs`.
+
+**Alignment by column type**:
+
+- **First column (entity name — Customer Name, Contact Name, Proposal / Quote, etc.)**:
+  - Content **pegado al margen izquierdo**: use `text-left` for both `<th>` and `<td>`. Do not center. Applies to Directory (Contacts, Customers) and Sales (Quotes, Proposals, Orders) tables.
+  - No extra `paddingRight`/`style`.
+- **Second column (Contact: Customer Name; Customer: first data column)**:
+  - `text-center`.
+  - **Extra spacing**: `style={{ paddingRight: 30 }}` so the column content is visually shifted left and consistent with the rest of the grid.
+- **All other headers (including sortable)**: `text-center`.
+- **Actions**: `text-right` (pegado al padding derecho), no sort icon.
+
+### 4.4 Body cells (`<tbody>`)
+
+- **Padding**: Every `<td>` uses `py-4 px-4` (16px vertical, 16px horizontal). Do not use `px-6`.
+- **Row**: `className="border-b border-gray-100 hover:bg-gray-50 transition-colors"`.
+
+**Alignment (must match headers)**:
+
+- **First column (name)**: `text-left`. Content can use `truncate` if needed.
+- **Second column (Customer Name in Contacts, or first data in Customers)**: `text-center` and `style={{ paddingRight: 30 }}`.
+- **All other data columns**: `text-center`.
+- **Actions column**: `text-right` (header and cell), flex `justify-end` in the cell; add `onClick={(e) => e.stopPropagation()}` so row click and button click don’t conflict.
+
+### 4.5 Email column (content)
+
+- **Customers**: Use `break-all` on the email `<span>` so long addresses show in full (no ellipsis). Column width 24% supports this.
+- **Contacts**: Use `truncate` if preferred; column 18%. If full email is required, use `break-all` and consider increasing width.
+
+### 4.6 Icons in cells (phone, email)
+
+- Wrapper: `className="flex items-center gap-1 min-w-0 justify-center"`.
+- Icon: `className="w-3 h-3 text-gray-400 flex-shrink-0"` (e.g. `Phone`, `Mail`).
+- Text: `truncate` or `break-all` as above for email.
+
+### 4.7 Empty and loading rows
+
+- **Empty state / no results**: Single `<td colSpan={N} className="py-12 px-4 text-center">` where `N` = total number of columns (7 for Customers, 8 for Contacts).
+- **Search settling**: `<td colSpan={N} className="py-8 px-4 text-center text-sm text-muted-foreground">`.
+
+---
+
+## 5. Action buttons (table row)
+
+- **Container**: `className="flex items-center gap-1 justify-end"` inside the Actions `<td>` so the group of icons (and the last one, Delete) sits against the right padding.
+- **Each icon button**:
+  - `className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"`
+  - Icon: `className="w-4 h-4"` (e.g. `Edit`, `Copy`, `Trash2`).
+- **Padding**: `p-1.5` (6px) for tap target; do not use `p-2` or `p-1` for these row actions.
+- Include `aria-label` and `title` for accessibility (e.g. "Editar [name]").
+
+---
+
+## 6. Summary
+
+| Element              | Rule |
+|----------------------|------|
+| Page wrapper         | `py-6` |
+| Header margin        | `mb-6` |
+| Header buttons       | `px-2 py-1`, gap-3, icon 14px |
+| Search/filter card   | `py-6 px-6` |
+| Table `<th>`         | `py-3 px-4`, `text-xs` |
+| Table `<td>`         | `py-4 px-4` |
+| First column         | `text-left`, no extra padding |
+| Second column       | `text-center` + `paddingRight: 30` |
+| Other data columns   | `text-center` |
+| Actions column      | `text-right`, flex `justify-end`, buttons `p-1.5`, icon `w-4 h-4` |
+| Email (Customers)   | Column 24%, content `break-all` |
+| Empty/loading row   | `colSpan` = column count, cell `py-12 px-4` or `py-8 px-4` |
+
+Reference implementations: `src/pages/directory/Contacts.tsx`, `src/pages/directory/Customers.tsx`.

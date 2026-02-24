@@ -18,8 +18,8 @@ export default function Directory({ activeTab }: Props) {
 
   useEffect(() => {
     registerSubmodules('Directory', [
-      { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
       { id: 'customers', label: 'Customers', href: '/directory/customers' },
+      { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
     ]);
   }, [registerSubmodules]);
 

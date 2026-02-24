@@ -10,6 +10,8 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { usePermissions } from '../../hooks/usePermissions';
 import { Search, Eye, Trash2, SortAsc, SortDesc } from 'lucide-react';
 import Input from '../../components/ui/Input';
+import StatusBadge from '../../components/shared/StatusBadge';
+import StatusTabs from '../../components/shared/StatusTabs';
 
 // ============================================================================
 // TYPES
@@ -73,6 +75,26 @@ export default function ManufacturingOrders() {
   const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'scheduled_start_date' | 'priority'>('manufacturing_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedStatus, setSelectedStatus] = useState<(ManufacturingOrderStatus | ProductionStatusMO)[]>([]);
+  const [statusTab, setStatusTab] = useState('all');
+
+  const moStatusCounts = useMemo(() => {
+    const c: Record<string, number> = { all: manufacturingOrders.length };
+    manufacturingOrders.forEach(mo => {
+      const s = mo.status || 'draft';
+      c[s] = (c[s] || 0) + 1;
+    });
+    return c;
+  }, [manufacturingOrders]);
+
+  const moStatusTabs = useMemo(() => [
+    { label: 'All', value: 'all', count: moStatusCounts.all || 0 },
+    { label: 'Inbox', value: 'planned', count: moStatusCounts.planned || 0 },
+    { label: 'Active', value: 'in_production', count: moStatusCounts.in_production || 0 },
+    { label: 'QC', value: 'quality_check', count: moStatusCounts.quality_check || 0 },
+    { label: 'Ready', value: 'ready_for_pickup', count: moStatusCounts.ready_for_pickup || 0 },
+    { label: 'Delivered', value: 'delivered', count: (moStatusCounts.delivered || 0) + (moStatusCounts.completed || 0) },
+    { label: 'Cancelled', value: 'cancelled', count: moStatusCounts.cancelled || 0 },
+  ], [moStatusCounts]);
 
   // Permission checks
   const canRead = can('manufacturing.read');
@@ -84,7 +106,6 @@ export default function ManufacturingOrders() {
     if (currentPath.startsWith('/manufacturing')) {
       // Always register submodules to ensure tabs are visible
       registerSubmodules('Manufacturing', [
-        { id: 'order-list', label: 'Order List', href: '/manufacturing/order-list' },
         { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
         { id: 'material', label: 'Material', href: '/manufacturing/material' },
       ]);
@@ -122,6 +143,21 @@ export default function ManufacturingOrders() {
   // Filter and sort
   const filteredAndSorted = useMemo(() => {
     let filtered = displayOrders;
+
+    // StatusTabs filter
+    if (statusTab !== 'all') {
+      if (statusTab === 'delivered') {
+        filtered = filtered.filter(mo => {
+          const s = String(mo.status || '').toLowerCase();
+          return s === 'delivered' || s === 'completed';
+        });
+      } else {
+        filtered = filtered.filter(mo => {
+          const s = (mo.status || '').toLowerCase().replace(/\s+/g, '_');
+          return s === statusTab;
+        });
+      }
+    }
 
     // Search filter
     if (searchTerm) {
@@ -161,7 +197,7 @@ export default function ManufacturingOrders() {
     });
 
     return filtered;
-  }, [displayOrders, searchTerm, selectedStatus, sortBy, sortOrder]);
+  }, [displayOrders, searchTerm, selectedStatus, sortBy, sortOrder, statusTab]);
 
   // Pagination
   const paginated = useMemo(() => {
@@ -262,8 +298,10 @@ export default function ManufacturingOrders() {
         </div>
       </div>
 
+      <StatusTabs tabs={moStatusTabs} activeTab={statusTab} onChange={setStatusTab} />
+
       {/* Search */}
-      <div className="mb-4">
+      <div className="mb-4 mt-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
@@ -398,9 +436,7 @@ export default function ManufacturingOrders() {
                       {mo.manufacturingOrderNo}
                     </td>
                     <td className="py-4 px-6">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(mo.status)}`}>
-                        {(mo.status ?? 'Pending Review').toString().replace('_', ' ')}
-                      </span>
+                      <StatusBadge status={(mo.status || 'draft').toString()} type="manufacturing" size="sm" />
                     </td>
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.saleOrderNo}</td>
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.customerName}</td>

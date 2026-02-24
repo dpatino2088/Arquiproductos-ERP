@@ -32,6 +32,7 @@ export interface ProposalListItem {
   quote_created_at?: string | null;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') for quote creator */
   quote_created_by?: string;
+  archived?: boolean;
 }
 
 export function useProposalsList() {
@@ -69,22 +70,19 @@ export function useProposalsList() {
           return;
         }
       } else {
-        // Internal users: always filter by dealer_id. If no dealer selected, show no proposals.
         effectiveDealerId = activeDealerId ?? null;
-        if (effectiveDealerId == null) {
-          setList([]);
-          setLoading(false);
-          return;
-        }
       }
 
       let query = supabase
         .from('Proposals')
-        .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, created_by_user_id')
+        .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, created_by_user_id, archived')
         .eq('organization_id', activeOrganizationId)
-        .eq('dealer_id', effectiveDealerId)
         .or('deleted.is.false,deleted.is.null')
         .order('created_at', { ascending: false });
+
+      if (effectiveDealerId) {
+        query = query.eq('dealer_id', effectiveDealerId);
+      }
 
       const { data, error: e } = await query;
 
@@ -486,18 +484,19 @@ export function useProposalDetail(proposalId: string | null) {
           .select('customer_id, contact_id')
           .eq('id', proposal.quote_id)
           .eq('deleted', false)
-          .single();
+          .maybeSingle();
         if (quoteRow) {
           if (!customerIdToUse && (quoteRow as any).customer_id) customerIdToUse = (quoteRow as any).customer_id;
           if (!contactIdToUse && (quoteRow as any).contact_id) contactIdToUse = (quoteRow as any).contact_id;
         }
       }
-      if (customerIdToUse) {
+      if (customerIdToUse && proposal.organization_id) {
         const { data: custData } = await supabase
           .from('DirectoryCustomers')
           .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
           .eq('id', customerIdToUse)
-          .single();
+          .eq('organization_id', proposal.organization_id)
+          .maybeSingle();
         if (custData) {
           const c = custData as {
             customer_name?: string;
@@ -525,12 +524,13 @@ export function useProposalDetail(proposalId: string | null) {
           };
         }
       }
-      if (contactIdToUse) {
+      if (contactIdToUse && proposal.organization_id) {
         const { data: contData } = await supabase
           .from('DirectoryContacts')
           .select('contact_name, contact_email')
           .eq('id', contactIdToUse)
-          .single();
+          .eq('organization_id', proposal.organization_id)
+          .maybeSingle();
         if (contData) contact = {
           contact_name: (contData as any).contact_name ?? null,
           contact_email: (contData as any).contact_email ?? null,

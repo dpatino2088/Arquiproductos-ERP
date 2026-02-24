@@ -342,6 +342,7 @@ export default function ProposalPrint() {
                   customer?.customer_name,
                   contact?.contact_name,
                   contact?.contact_email,
+                  customer?.address ?? null,
                 ]) || '—'}
               </div>
             </div>

@@ -19,6 +19,9 @@ import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye } from 'lucide-react';
+import DetailPageLayout from '../../components/shared/DetailPageLayout';
+import StatusBadge from '../../components/shared/StatusBadge';
+import TimelineView from '../../components/shared/TimelineView';
 import {
   DndContext,
   closestCenter,
@@ -40,6 +43,7 @@ import { Tooltip } from '../../components/ui/Tooltip';
 import DocumentTermsSection from '../../components/sales/DocumentTermsSection';
 import { resolveDefaultTermsTemplateId, fetchTermsTemplateById } from '../../lib/terms';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAuth } from '../../hooks/useAuth';
 
 const PROPOSAL_STATUS_OPTIONS: { value: Proposal['status']; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -131,7 +135,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     useProposalDetail(proposalId);
 
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
-  /** Draft state: edits stay in React until Save. Synced from server when not dirty. */
   const [draftLines, setDraftLines] = useState<ProposalLine[]>([]);
   const [draftAddonsMap, setDraftAddonsMap] = useState<Map<string, ProposalLineAddOn[]>>(new Map());
   const [linesDirty, setLinesDirty] = useState(false);
@@ -165,6 +168,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const [saving, setSaving] = useState(false);
   const [headerDirty, setHeaderDirty] = useState(false);
   const [printDropdownOpen, setPrintDropdownOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [timeline, setTimeline] = useState<{ id: string; action: string; description: string; user_name?: string | null; created_at: string; metadata?: Record<string, unknown> | null }[]>([]);
   const printDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -177,7 +182,24 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [printDropdownOpen]);
+
   const { activeOrganizationId } = useOrganizationContext();
+  const { user: authUser } = useAuth();
+
+  const refetchTimeline = useCallback(() => {
+    if (!proposalId) return;
+    supabase
+      .from('ActivityTimeline')
+      .select('id, action, description, user_name, created_at, metadata')
+      .eq('entity_type', 'proposal')
+      .eq('entity_id', proposalId)
+      .order('created_at', { ascending: false })
+      .then((res: { data: unknown }) => setTimeline((res.data ?? []) as { id: string; action: string; description: string; user_name?: string | null; created_at: string; metadata?: Record<string, unknown> | null }[]));
+  }, [proposalId]);
+
+  useEffect(() => {
+    refetchTimeline();
+  }, [refetchTimeline]);
   const [headerForm, setHeaderForm] = useState<{
     proposal_no: string;
     status: Proposal['status'];
@@ -306,6 +328,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const handleSave = useCallback(async () => {
     if (!proposal || !canWrite) return;
+    if (!headerDirty && !linesDirty && !addonsDirty) {
+      useUIStore.getState().addNotification({ type: 'info', title: 'Guardar', message: 'No hay cambios que guardar.' });
+      return;
+    }
     setSaving(true);
     try {
       let ok = true;
@@ -317,22 +343,28 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       if (ok && linesDirty) {
         for (const line of draftLines) {
           if (line.id.startsWith('temp-')) {
+            const hasMarkup = line.markup_pct != null && !Number.isNaN(line.markup_pct);
+            const overrideMode = hasMarkup ? 'markup_pct' : 'inherit';
+            const insertPayload: Record<string, unknown> = {
+              organization_id: proposal.organization_id,
+              dealer_id: proposal.dealer_id,
+              proposal_id: proposal.id,
+              line_type: 'custom',
+              override_mode: overrideMode,
+              area: line.area?.trim() || null,
+              position: line.position?.trim() || null,
+              description: line.description ?? 'New line',
+              qty: line.qty ?? 1,
+              unit_cost: line.unit_cost ?? null,
+              unit_price: line.unit_price ?? 0,
+              sort_order: draftLines.indexOf(line),
+            };
+            if (overrideMode === 'markup_pct') {
+              insertPayload.markup_pct = Math.max(0, Math.min(100, Number(line.markup_pct)));
+            }
             const { data: inserted, error: e } = await supabase
               .from('ProposalLines')
-              .insert({
-                organization_id: proposal.organization_id,
-                dealer_id: proposal.dealer_id,
-                proposal_id: proposal.id,
-                line_type: 'custom',
-                area: line.area?.trim() || null,
-                position: line.position?.trim() || null,
-                description: line.description ?? 'New line',
-                qty: line.qty ?? 1,
-                unit_cost: line.unit_cost ?? null,
-                markup_pct: line.markup_pct ?? null,
-                unit_price: line.unit_price ?? 0,
-                sort_order: draftLines.indexOf(line),
-              })
+              .insert(insertPayload)
               .select('id')
               .single();
             if (e || !inserted?.id) {
@@ -340,18 +372,26 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               ok = false;
             } else tempToNewId.set(line.id, inserted.id);
           } else {
-            const { error: e } = await supabase.from('ProposalLines').update({
+            const hasMarkup = line.markup_pct != null && !Number.isNaN(line.markup_pct);
+            const overrideMode = hasMarkup ? 'markup_pct' : 'inherit';
+            const updatePayload: Record<string, unknown> = {
+              override_mode: overrideMode,
               line_adjustment_pct: line.line_adjustment_pct,
               area: line.area?.trim() || null,
               position: line.position?.trim() || null,
               description: line.description,
               qty: line.qty,
               unit_cost: line.unit_cost ?? null,
-              markup_pct: line.markup_pct ?? null,
               unit_price: line.unit_price,
               custom_category: line.custom_category,
               sort_order: draftLines.indexOf(line),
-            }).eq('id', line.id);
+            };
+            if (overrideMode === 'markup_pct') {
+              updatePayload.markup_pct = Math.max(0, Math.min(100, Number(line.markup_pct)));
+            } else {
+              updatePayload.markup_pct = null;
+            }
+            const { error: e } = await supabase.from('ProposalLines').update(updatePayload).eq('id', line.id);
             if (e && isRLSError(e)) setCanWrite(false);
             if (e) {
               useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessage(e) });
@@ -415,12 +455,27 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         setLinesDirty(false);
         setAddonsDirty(false);
         await refetch();
+        const action = headerDirty ? 'status_changed' : 'updated';
+        const description = headerDirty
+          ? `Status changed to ${headerForm.status}`
+          : 'Proposal updated';
+        const { error: timelineErr } = await supabase.from('ActivityTimeline').insert({
+          organization_id: proposal.organization_id,
+          entity_type: 'proposal',
+          entity_id: proposal.id,
+          action,
+          description,
+          user_id: authUser?.id ?? null,
+          user_name: authUser?.name ?? authUser?.email ?? null,
+        });
+        if (!timelineErr) refetchTimeline();
+        else if (import.meta.env.DEV) console.warn('[ProposalDetail] ActivityTimeline insert failed', timelineErr);
         useUIStore.getState().addNotification({ type: 'success', title: 'Saved', message: 'Proposal saved.' });
       }
     } finally {
       setSaving(false);
     }
-  }, [proposal, canWrite, headerDirty, linesDirty, addonsDirty, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite]);
+  }, [proposal, canWrite, headerDirty, linesDirty, addonsDirty, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite, headerForm.status, authUser, refetchTimeline]);
 
   const handleSaveAndClose = useCallback(async () => {
     await handleSave();
@@ -965,120 +1020,120 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     ? [contact.contact_name, contact.contact_email].filter(Boolean).join(' · ')
     : '';
 
-  return (
-    <div className="py-6 px-6 max-w-6xl mx-auto">
-      {/* Top row: "Proposal" title + Print dropdown (right) + Close + Save and Close */}
-      <div className="flex items-center justify-between mb-2">
-        <h1 className="text-xl font-semibold text-foreground">Proposal</h1>
-        <div className="flex items-center gap-2">
-          <div className="relative" ref={printDropdownRef}>
+  const actionButtons = (
+    <div className="flex items-center gap-2">
+      <div className="relative" ref={printDropdownRef}>
+        <button
+          type="button"
+          onClick={() => setPrintDropdownOpen((v) => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50"
+          title="Print"
+          aria-expanded={printDropdownOpen}
+          aria-haspopup="true"
+        >
+          <Printer className="w-4 h-4 shrink-0 text-gray-600" />
+          <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+        </button>
+        {printDropdownOpen && (
+          <div
+            className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+            role="menu"
+          >
+            <div className="px-3 py-1.5 text-xs font-medium text-gray-500 border-b border-gray-100">Preview in browser</div>
             <button
               type="button"
-              onClick={() => setPrintDropdownOpen((v) => !v)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50"
-              title="Print"
-              aria-expanded={printDropdownOpen}
-              aria-haspopup="true"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => {
+                handlePreviewPDF('internal');
+                setPrintDropdownOpen(false);
+              }}
             >
-              <Printer className="w-4 h-4 shrink-0 text-gray-600" />
-              <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+              <Eye className="w-4 h-4 shrink-0 text-gray-500" />
+              Full Detail
             </button>
-            {printDropdownOpen && (
-              <div
-                className="absolute right-0 top-full mt-1 z-50 min-w-[200px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-                role="menu"
-              >
-                <div className="px-3 py-1.5 text-xs font-medium text-gray-500 border-b border-gray-100">Preview in browser</div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                  onClick={() => {
-                    handlePreviewPDF('internal');
-                    setPrintDropdownOpen(false);
-                  }}
-                >
-                  <Eye className="w-4 h-4 shrink-0 text-gray-500" />
-                  Full Detail
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                  onClick={() => {
-                    handlePreviewPDF('customer');
-                    setPrintDropdownOpen(false);
-                  }}
-                >
-                  <Eye className="w-4 h-4 shrink-0 text-gray-500" />
-                  Without Measurements
-                </button>
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => router.navigate('/sales/proposals')}
-            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-            title="Close"
-          >
-            Close
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || readOnly || (!headerDirty && !linesDirty && !addonsDirty)}
-            className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Save"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveAndClose}
-            disabled={saving || readOnly}
-            className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? 'Saving...' : 'Save and Close'}
-          </button>
-        </div>
-      </div>
-
-      {/* Breadcrumb: Proposals / no · Quote · Customer · Contact · email */}
-      <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-gray-500" style={{ marginTop: '4mm' }}>
-        <button onClick={() => router.navigate('/sales/proposals')} className="hover:text-gray-700 whitespace-nowrap">
-          Proposals
-        </button>
-        <span>/</span>
-        <span className="text-gray-900 font-medium">{proposal.proposal_no || proposal.id.slice(0, 8)}</span>
-        {quote && (
-          <>
-            <span>·</span>
             <button
-              onClick={() => router.navigate(`/sales/quotes/${quote.id}/edit`)}
-              className="text-blue-600 hover:underline whitespace-nowrap"
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => {
+                handlePreviewPDF('customer');
+                setPrintDropdownOpen(false);
+              }}
             >
-              Quote {quote.quote_no}
+              <Eye className="w-4 h-4 shrink-0 text-gray-500" />
+              Without Measurements
             </button>
-          </>
-        )}
-        {customer && (
-          <>
-            <span>·</span>
-            <span className="text-gray-700">{customer.customer_name}</span>
-          </>
-        )}
-        {contactDisplay && (
-          <>
-            <span>·</span>
-            <span className="text-gray-600 truncate max-w-[200px] sm:max-w-none" title={contactDisplay}>
-              {contactDisplay}
-            </span>
-          </>
+          </div>
         )}
       </div>
+      <button
+        type="button"
+        onClick={() => router.navigate('/sales/proposals')}
+        className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
+        title="Close"
+      >
+        Close
+      </button>
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving || readOnly}
+        className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Save"
+      >
+        {saving ? 'Saving...' : 'Save'}
+      </button>
+      <button
+        type="button"
+        onClick={handleSaveAndClose}
+        disabled={saving || readOnly}
+        className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {saving ? 'Saving...' : 'Save and Close'}
+      </button>
+    </div>
+  );
 
-      {/* Header card: mismo estilo que Quotes/ERP; logo alineado con la P de Proposal No */}
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'lines', label: 'Lines', count: displayLines.length },
+    { id: 'timeline', label: 'Timeline' },
+  ];
+
+  const summaryItems = [
+    {
+      label: 'Quote',
+      value: quote ? (
+        <button onClick={() => router.navigate(`/sales/quotes/${quote.id}`)} className="text-blue-600 hover:underline">
+          {quote.quote_no}
+        </button>
+      ) : (
+        '—'
+      ),
+    },
+    { label: 'Customer', value: customer?.customer_name ?? '—' },
+    { label: 'Contact', value: contactDisplay || '—' },
+    { label: 'Valid Until', value: proposal.valid_until ? new Date(proposal.valid_until).toLocaleDateString() : '—' },
+    { label: 'Version', value: proposal.version_no ?? '—' },
+    { label: 'Total', value: formatCurrency(proposal.total_amount ?? totals.total ?? 0, currency) },
+  ];
+
+  return (
+    <DetailPageLayout
+      title={proposal.proposal_no || proposal.id.slice(0, 8)}
+      subtitle="Proposal"
+      status={<StatusBadge status={proposal.status} type="proposal" />}
+      summaryItems={summaryItems}
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onBack={() => router.navigate('/sales/proposals')}
+      actions={actionButtons}
+    >
+      {activeTab === 'overview' && (
+        <div className="space-y-6 w-full max-w-full">
+          {/* Header card: logo, Proposal No, Status, Valid until, Description, financial fields */}
       <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
         <div className="flex items-start gap-4 mb-4 -ml-0">
           <div className="logo-slot flex-shrink-0 self-start">
@@ -1198,6 +1253,111 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         </div>
       </div>
 
+          {/* Notes (left) + Summary (right) - in Overview */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            <div className="lg:col-span-2 min-w-0 bg-white border border-gray-200 rounded-lg p-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Notes</h3>
+              <textarea
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm min-h-[120px]"
+                rows={4}
+                value={headerForm.notes}
+                onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
+                disabled={readOnly}
+                placeholder="Additional notes or comments..."
+              />
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-6 w-full lg:col-span-1 shrink-0 self-start">
+              <div className="flex items-center gap-2 pb-3 mb-3 border-b border-gray-100">
+                <input
+                  type="checkbox"
+                  checked={headerForm.exempt_tax}
+                  onChange={(e) => { setHeaderForm((f) => ({ ...f, exempt_tax: e.target.checked })); setHeaderDirty(true); }}
+                  disabled={readOnly}
+                />
+                <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
+              </div>
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-600">Total Product</span>
+                <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
+              </div>
+              {(totals.discountAmount ?? 0) > 0 && (
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
+                  <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+                </div>
+              )}
+              {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
+                <>
+                  {((totals.laborDiscountAmount ?? 0) > 0 || (totals.laborFeeAmount ?? 0) > 0) ? (
+                    <>
+                      <div className="flex justify-between py-1 text-sm">
+                        <span className="text-gray-600">Installation</span>
+                        <span>{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
+                      </div>
+                      {(totals.laborDiscountAmount ?? 0) > 0 && (
+                        <div className="flex justify-between py-1 text-sm">
+                          <span className="text-gray-600">Labor discount {totals.instDiscountPct != null ? `(${totals.instDiscountPct}%)` : ''}</span>
+                          <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
+                        </div>
+                      )}
+                      {(totals.laborFeeAmount ?? 0) > 0 && (
+                        <div className="flex justify-between py-1 text-sm">
+                          <span className="text-gray-600">Labor fee {totals.instFeePct != null ? `(${totals.instFeePct}%)` : ''}</span>
+                          <span>{formatCurrency(totals.laborFeeAmount ?? 0, currency)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between py-1 text-sm font-medium">
+                        <span className="text-gray-700">Installation (net)</span>
+                        <span>{formatCurrency(totals.installationNet ?? 0, currency)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex justify-between py-1 text-sm">
+                      <span className="text-gray-600">Installation</span>
+                      <span>{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-600">Subtotal</span>
+                <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
+              </div>
+              {!headerForm.exempt_tax && (
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Tax</span>
+                  <span>{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
+                <span>Total {currency ? `(${currency})` : ''}</span>
+                <span>{formatCurrency(totals.total, currency)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Terms & Conditions - in Overview */}
+          <div>
+            <DocumentTermsSection
+              docType="proposal"
+              orgId={activeOrganizationId}
+              dealerId={proposal?.dealer_id ?? null}
+              termsTitle={headerForm.terms_title}
+              termsContent={headerForm.terms_content}
+              onTermsChange={(title, content) => {
+                setHeaderForm((f) => ({ ...f, terms_title: title, terms_content: content }));
+                setHeaderDirty(true);
+              }}
+              readOnly={readOnly}
+              hideSaveAsTemplate
+              hideTitleInput
+            />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'lines' && (
+        <div className="space-y-6 w-full max-w-full">
       {/* Lines: misma tabla y bordes que listas */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
@@ -1205,7 +1365,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           {!readOnly && (
             <button
               onClick={addCustomLine}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
+              className="flex items-center gap-2 px-3 py-2 text-sm text-white rounded-lg transition-colors hover:opacity-90"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
               <Plus className="w-4 h-4" />
               Add Custom Line
@@ -1220,7 +1381,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               {!readOnly && (
                 <button
                   onClick={addCustomLine}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors hover:opacity-90"
+                  style={{ backgroundColor: 'var(--primary-brand-hex)' }}
                 >
                   <Plus className="w-4 h-4" />
                   Add Custom Line
@@ -1349,7 +1511,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                               {dims && <span className="text-xs text-gray-500">{dims}</span>}
                             </div>
                             {installationAddon && (Number(installationAddon.sale_amount) || 0) > 1 ? (
-                              <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 w-fit">
+                              <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green w-fit">
                                 Install Included
                               </span>
                             ) : (
@@ -1357,7 +1519,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                             )}
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-1 flex-1 min-w-0">
+                          <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                             <input
                               className={`w-full border rounded px-2 py-1 text-sm ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
                               value={line.description ?? ''}
@@ -1365,26 +1527,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                               disabled={readOnly}
                               placeholder="Description"
                             />
-                            {isExpanded ? (
-                              <SelectShadcn
-                                value={line.custom_category ?? 'other'}
-                                onValueChange={(v) => updateCustomLine(line.id, { custom_category: v as ProposalCustomCategory })}
-                                disabled={readOnly}
-                              >
-                                <SelectTrigger className="w-36 h-8">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {CUSTOM_CATEGORIES.map((o) => (
-                                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </SelectShadcn>
-                            ) : (
-                              <span className="text-xs text-gray-500">
-                                {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
-                              </span>
-                            )}
+                            <span className="text-xs text-gray-500">
+                              {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
+                            </span>
                           </div>
                         )}
                     </td>
@@ -1392,28 +1537,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { product_type?: string } | null)?.product_type ?? qlInfo?.product_type ?? '—'
                         : (
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              placeholder="Cost"
-                              className={`w-14 border rounded px-1.5 py-1 text-xs ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                              value={line.unit_cost ?? ''}
-                              onChange={(e) => updateCustomLine(line.id, { unit_cost: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                              disabled={readOnly}
-                            />
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              placeholder="Markup%"
-                              className={`w-14 border rounded px-1.5 py-1 text-xs ${isCustomInvalid ? 'border-red-400 bg-red-50' : 'border-gray-200'}`}
-                              value={line.markup_pct ?? ''}
-                              onChange={(e) => updateCustomLine(line.id, { markup_pct: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                              disabled={readOnly}
-                            />
-                          </div>
+                          <span className="text-gray-700">
+                            {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
+                          </span>
                         )}
                     </td>
                     <td className="py-4 px-1.5 text-center align-middle min-w-[64px] w-[64px] tabular-nums">
@@ -1460,6 +1586,189 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     </td>
                     <td className="py-4 pl-2 pr-5 text-right font-medium text-gray-900 text-sm align-middle min-w-[108px] whitespace-nowrap tabular-nums">{formatCurrency(lineTotal, currency)}</td>
                   </SortableRow>
+                  {line.line_type === 'custom' && isExpanded && (
+                    <tr key={`${line.id}-costs`} className="bg-gray-50/80">
+                      <td colSpan={11} className="py-4 px-6">
+                        <div className="rounded-lg border border-gray-200 bg-white p-4">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Cost & Pricing</h4>
+                          <div className="flex flex-wrap items-end gap-4">
+                            <div>
+                              <Label className="text-xs">Cost</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="w-24"
+                                placeholder="0"
+                                value={line.unit_cost ?? ''}
+                                onChange={(e) => updateCustomLine(line.id, { unit_cost: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                disabled={readOnly}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Markup %</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="w-24"
+                                placeholder="0"
+                                value={line.markup_pct ?? ''}
+                                onChange={(e) => updateCustomLine(line.id, { markup_pct: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                disabled={readOnly}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Installation</Label>
+                              <SelectShadcn
+                                value={line.custom_category ?? 'other'}
+                                onValueChange={(v) => updateCustomLine(line.id, { custom_category: v as ProposalCustomCategory })}
+                                disabled={readOnly}
+                              >
+                                <SelectTrigger className="w-36">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CUSTOM_CATEGORIES.map((o) => (
+                                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </SelectShadcn>
+                            </div>
+                            <Label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={!!installationAddon}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    upsertAddOn(line.id, { addon_type: 'installation', cost_amount: 0, pricing_mode: 'markup_pct', markup_pct: 100, taxable: true });
+                                  } else if (installationAddon) {
+                                    removeAddOn(installationAddon.id);
+                                  }
+                                }}
+                                disabled={readOnly}
+                              />
+                              Installation add-on
+                            </Label>
+                            {installationAddon && (() => {
+                              const draft = addonDraft[line.id];
+                              const cost = draft?.cost_amount ?? (installationAddon.cost_amount ?? 0);
+                              const markupPct = draft?.markup_pct ?? (installationAddon.markup_pct ?? 100);
+                              const sale = draft?.sale_amount ?? (installationAddon.sale_amount ?? 0);
+                              const pricingMode = draft?.pricing_mode ?? (installationAddon.pricing_mode ?? 'markup_pct');
+                              const taxable = draft?.taxable ?? (installationAddon.taxable ?? true);
+                              const persist = () => {
+                                const latest = addonDraftRef.current[line.id];
+                                const c = latest?.cost_amount ?? cost;
+                                const mp = latest?.markup_pct ?? markupPct;
+                                const s = latest?.sale_amount ?? sale;
+                                const pm = latest?.pricing_mode ?? pricingMode;
+                                const t = latest?.taxable ?? taxable;
+                                const newSale = pm === 'markup_pct' ? c * (1 + mp / 100) : s;
+                                upsertAddOn(line.id, { addon_type: 'installation', cost_amount: c, pricing_mode: pm, markup_pct: pm === 'markup_pct' ? mp : undefined, sale_amount: newSale, taxable: t });
+                                setAddonDraft((prev) => { const n = { ...prev }; delete n[line.id]; return n; });
+                              };
+                              return (
+                                <>
+                                  <div>
+                                    <Label className="text-xs">Add-on cost</Label>
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      className="w-24"
+                                      value={String(cost)}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value) || 0;
+                                        const d: AddonDraft = { cost_amount: v, markup_pct: markupPct, sale_amount: pricingMode === 'fixed_price' ? sale : v * (1 + markupPct / 100), pricing_mode: pricingMode, taxable };
+                                        addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
+                                        setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
+                                      }}
+                                      onBlur={persist}
+                                      disabled={readOnly}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Pricing</Label>
+                                    <SelectShadcn
+                                      value={pricingMode}
+                                      onValueChange={(v: ProposalLineAddOnPricingMode) => {
+                                        const newSale = v === 'markup_pct' ? cost * (1 + markupPct / 100) : sale;
+                                        setAddonDraft((prev) => ({ ...prev, [line.id]: { cost_amount: cost, markup_pct: markupPct, sale_amount: newSale, pricing_mode: v, taxable } }));
+                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, pricing_mode: v, markup_pct: v === 'markup_pct' ? markupPct : undefined, sale_amount: newSale, taxable });
+                                      }}
+                                      disabled={readOnly}
+                                    >
+                                      <SelectTrigger className="w-36">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="markup_pct">Markup %</SelectItem>
+                                        <SelectItem value="fixed_price">Fixed sale price</SelectItem>
+                                      </SelectContent>
+                                    </SelectShadcn>
+                                  </div>
+                                  {pricingMode === 'markup_pct' && (
+                                    <div>
+                                      <Label className="text-xs">Markup %</Label>
+                                      <Input
+                                        type="number"
+                                        step="1"
+                                        min="0"
+                                        className="w-20"
+                                        value={String(markupPct)}
+                                        onChange={(e) => {
+                                          const v = parseFloat(e.target.value) || 0;
+                                          const d: AddonDraft = { cost_amount: cost, markup_pct: v, sale_amount: cost * (1 + v / 100), pricing_mode: 'markup_pct', taxable };
+                                          addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
+                                          setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
+                                        }}
+                                        onBlur={persist}
+                                        disabled={readOnly}
+                                      />
+                                    </div>
+                                  )}
+                                  {pricingMode === 'fixed_price' && (
+                                    <div>
+                                      <Label className="text-xs">Sale price</Label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className="w-24"
+                                        value={String(sale)}
+                                        onChange={(e) => {
+                                          const v = parseFloat(e.target.value) || 0;
+                                          const d: AddonDraft = { cost_amount: cost, markup_pct: markupPct, sale_amount: v, pricing_mode: 'fixed_price', taxable };
+                                          addonDraftRef.current = { ...addonDraftRef.current, [line.id]: d };
+                                          setAddonDraft((prev) => ({ ...prev, [line.id]: d }));
+                                        }}
+                                        onBlur={persist}
+                                        disabled={readOnly}
+                                      />
+                                    </div>
+                                  )}
+                                  <Label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!taxable}
+                                      onChange={(e) => {
+                                        const v = e.target.checked;
+                                        setAddonDraft((prev) => ({ ...prev, [line.id]: { cost_amount: cost, markup_pct: markupPct, sale_amount: sale, pricing_mode: pricingMode, taxable: v } }));
+                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, pricing_mode: pricingMode, markup_pct: pricingMode === 'markup_pct' ? markupPct : undefined, sale_amount: sale, taxable: v });
+                                      }}
+                                      disabled={readOnly}
+                                    />
+                                    Taxable
+                                  </Label>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {line.line_type === 'from_quote' && isExpanded && (
                     <tr key={`${line.id}-addons`} className="bg-gray-50/80">
                       <td colSpan={11} className="py-4 px-6">
@@ -1673,107 +1982,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           <span>Some lines have no base price. Check QuoteLine MSRP / unit MSRP on the Quote.</span>
         </div>
       )}
-
-      {/* Notes (left) + Summary (right) - aligned */}
-      <div className="flex flex-col md:flex-row gap-6 items-stretch mb-6">
-        <div className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg p-6">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Notes</h3>
-          <textarea
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm min-h-[120px]"
-            rows={4}
-            value={headerForm.notes}
-            onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
-            disabled={readOnly}
-            placeholder="Additional notes or comments..."
-          />
         </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-6 w-full md:w-auto shrink-0 md:min-w-[284px] md:max-w-[284px] self-start">
-          <div className="flex items-center gap-2 pb-3 mb-3 border-b border-gray-100">
-            <input
-              type="checkbox"
-              checked={headerForm.exempt_tax}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, exempt_tax: e.target.checked })); setHeaderDirty(true); }}
-              disabled={readOnly}
-            />
-            <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
-          </div>
-          <div className="flex justify-between py-1 text-sm">
-            <span className="text-gray-600">Total Product</span>
-            <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
-          </div>
-          {(totals.discountAmount ?? 0) > 0 && (
-            <div className="flex justify-between py-1 text-sm">
-              <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
-              <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
-            </div>
-          )}
-          {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
-            <>
-              {((totals.laborDiscountAmount ?? 0) > 0 || (totals.laborFeeAmount ?? 0) > 0) ? (
-                <>
-                  <div className="flex justify-between py-1 text-sm">
-                    <span className="text-gray-600">Installation</span>
-                    <span>{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
-                  </div>
-                  {(totals.laborDiscountAmount ?? 0) > 0 && (
-                    <div className="flex justify-between py-1 text-sm">
-                      <span className="text-gray-600">Labor discount {totals.instDiscountPct != null ? `(${totals.instDiscountPct}%)` : ''}</span>
-                      <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
-                    </div>
-                  )}
-                  {(totals.laborFeeAmount ?? 0) > 0 && (
-                    <div className="flex justify-between py-1 text-sm">
-                      <span className="text-gray-600">Labor fee {totals.instFeePct != null ? `(${totals.instFeePct}%)` : ''}</span>
-                      <span>{formatCurrency(totals.laborFeeAmount ?? 0, currency)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between py-1 text-sm font-medium">
-                    <span className="text-gray-700">Installation (net)</span>
-                    <span>{formatCurrency(totals.installationNet ?? 0, currency)}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Installation</span>
-                  <span>{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
-                </div>
-              )}
-            </>
-          )}
-          <div className="flex justify-between py-1 text-sm">
-            <span className="text-gray-600">Subtotal</span>
-            <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
-          </div>
-          {!headerForm.exempt_tax && (
-            <div className="flex justify-between py-1 text-sm">
-              <span className="text-gray-600">Tax</span>
-              <span>{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
-            </div>
-          )}
-          <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
-            <span>Total {currency ? `(${currency})` : ''}</span>
-            <span>{formatCurrency(totals.total, currency)}</span>
-          </div>
-        </div>
-      </div>
+      )}
 
-      {/* Terms & Conditions - at end of page */}
-      <div className="mb-6">
-        <DocumentTermsSection
-          docType="proposal"
-          orgId={activeOrganizationId}
-          dealerId={proposal?.dealer_id ?? null}
-          termsTitle={headerForm.terms_title}
-          termsContent={headerForm.terms_content}
-          onTermsChange={(title, content) => {
-            setHeaderForm((f) => ({ ...f, terms_title: title, terms_content: content }));
-            setHeaderDirty(true);
-          }}
-          readOnly={readOnly}
-          hideSaveAsTemplate
-          hideTitleInput
-        />
-      </div>
-    </div>
+      {activeTab === 'timeline' && (
+        <TimelineView events={timeline} loading={loading && timeline.length === 0} emptyMessage="No activity yet" />
+      )}
+    </DetailPageLayout>
   );
 }

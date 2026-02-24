@@ -217,10 +217,9 @@ export function useManufacturingOrders(dealerId?: string | null) {
             *,
             SalesOrders:sales_order_id (
               id,
-              sale_order_no,
+              sales_order_no,
               customer_id,
-              total,
-              currency,
+              total_amount,
               DirectoryCustomers:customer_id (
                 id,
                 customer_name
@@ -311,10 +310,9 @@ export function useManufacturingOrder(moId: string | null) {
             *,
             SalesOrders:sales_order_id (
               id,
-              sale_order_no,
+              sales_order_no,
               customer_id,
-              total,
-              currency,
+              total_amount,
               DirectoryCustomers:customer_id (
                 id,
                 customer_name

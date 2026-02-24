@@ -6,7 +6,7 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRY_OPTIONS, COUNTRIES } from '../../lib/constants';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, Plus, Edit, Unlink } from 'lucide-react';
 import { useDeleteCustomer } from '../../hooks/useDirectory';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import Input from '../../components/ui/Input';
@@ -85,6 +85,13 @@ interface Contact {
   contact_type?: string | null;
 }
 
+interface RelatedContact {
+  id: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_primary_phone: string | null;
+}
+
 export default function CustomerNew() {
   const [activeTab, setActiveTab] = useState<'details' | 'billing'>('details');
   const [isSaving, setIsSaving] = useState(false);
@@ -92,6 +99,8 @@ export default function CustomerNew() {
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
+  const [relatedContacts, setRelatedContacts] = useState<RelatedContact[]>([]);
+  const [loadingRelatedContacts, setLoadingRelatedContacts] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
   const { createCustomer, updateCustomer } = useDirectoryCustomers({ organizationId: activeOrganizationId ?? undefined });
@@ -306,6 +315,53 @@ export default function CustomerNew() {
     loadContacts();
   }, [activeOrganizationId]);
 
+  // Load related contacts (contacts linked to this customer) when editing
+  const loadRelatedContacts = async () => {
+    if (!customerId || !activeOrganizationId) {
+      setRelatedContacts([]);
+      return;
+    }
+    setLoadingRelatedContacts(true);
+    try {
+      const { data, error } = await supabase
+        .from('DirectoryContacts')
+        .select('id, contact_name, contact_email, contact_primary_phone')
+        .eq('customer_id', customerId)
+        .eq('organization_id', activeOrganizationId)
+        .or('deleted.is.false,deleted.is.null')
+        .order('contact_name', { ascending: true });
+      if (error) throw error;
+      setRelatedContacts((data as RelatedContact[]) || []);
+    } catch (err) {
+      console.error('Error loading related contacts', err);
+      setRelatedContacts([]);
+    } finally {
+      setLoadingRelatedContacts(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRelatedContacts();
+  }, [customerId, activeOrganizationId]);
+
+  const handleUnlinkContact = async (contactId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!activeOrganizationId) return;
+    try {
+      const { error } = await supabase
+        .from('DirectoryContacts')
+        .update({ customer_id: null, updated_at: new Date().toISOString() })
+        .eq('id', contactId)
+        .eq('organization_id', activeOrganizationId);
+      if (error) throw error;
+      useUIStore.getState().addNotification({ type: 'success', title: 'Contact unlinked', message: 'Contact has been unlinked from this customer.' });
+      loadRelatedContacts();
+    } catch (err: any) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message ?? 'Could not unlink contact.' });
+    }
+  };
+
   // Show message if no organization is selected
   if (!activeOrganizationId) {
     return (
@@ -458,8 +514,8 @@ export default function CustomerNew() {
           </p>
         </div>
         
-        {/* Action Buttons - Matching Contacts page */}
-        <div className="flex items-center gap-3">
+        {/* Action Buttons — pegados al padding derecho (ml-auto) */}
+        <div className="flex items-center gap-3 ml-auto">
           <button
             type="button"
             onClick={() => router.navigate('/directory/customers')}
@@ -856,6 +912,70 @@ export default function CustomerNew() {
           )}
         </div>
       </div>
+
+      {/* Related Contacts — solo en modo edición */}
+      {customerId && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+          <div className="py-4 px-6 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Related Contacts</h3>
+            <button
+              type="button"
+              onClick={() => router.navigate(`/directory/contacts/new?customerId=${customerId}`)}
+              className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
+            >
+              <Plus style={{ width: 14, height: 14 }} />
+              Link contact
+            </button>
+          </div>
+          <div className="px-6 py-4">
+            {loadingRelatedContacts ? (
+              <p className="text-sm text-gray-500">Loading related contacts…</p>
+            ) : relatedContacts.length === 0 ? (
+              <p className="text-sm text-gray-500">No contacts linked. Use “Link contact” to add a contact to this customer.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="border-b border-gray-200">
+                  <tr>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Contact Name</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Email</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Primary Phone</th>
+                    <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {relatedContacts.map((rc) => (
+                    <tr key={rc.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-3 px-4 text-gray-900">{rc.contact_name ?? '—'}</td>
+                      <td className="py-3 px-4 text-gray-700">{rc.contact_email ?? '—'}</td>
+                      <td className="py-3 px-4 text-gray-700">{rc.contact_primary_phone ?? '—'}</td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); router.navigate(`/directory/contacts/edit/${rc.id}`); }}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                            title="Edit contact"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleUnlinkContact(rc.id, e)}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                            title="Unlink from customer"
+                          >
+                            <Unlink className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

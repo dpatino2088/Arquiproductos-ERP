@@ -3,6 +3,7 @@ import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useManufacturingOrders } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { Search, SortAsc, SortDesc, Plus } from 'lucide-react';
@@ -58,6 +59,7 @@ const getStatusLabel = (status: 'needs_mo' | 'has_mo') => {
 export default function OrderList() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
+  const { user } = useAuth();
   // Note: We don't actually need refetchMO here, but keeping for consistency
   const { refetch: refetchMO } = useManufacturingOrders();
   // IMPORTANT: This state contains ALL Confirmed Sales Orders (with and without MO)
@@ -137,88 +139,28 @@ export default function OrderList() {
         console.log('🔍 OrderList: Loading Confirmed Sales Orders for organization:', activeOrganizationId);
       }
       
-      // Get all Sales Orders that should appear in OrderList (factory flow)
-      // order_status: Open, On Hold = active inbox; Completed, Closed = when showCompleted
-      const orderStatusesToLoad = showCompleted
-        ? ['Open', 'On Hold', 'Completed', 'Closed']
-        : ['Open', 'On Hold'];
-      
-      let allSaleOrders: any[] | null = null;
-      let soError: any = null;
+      const statusesToLoad = showCompleted
+        ? ['confirmed', 'on_hold', 'delivered', 'closed']
+        : ['confirmed', 'on_hold'];
 
-      // Try with new columns first (order_status from migration)
-      const result1 = await supabase
+      const { data: allSaleOrders, error: soError } = await supabase
         .from('SalesOrders')
-        .select(`id, sales_order_no, order_status, payment_status, created_at, quote_id, Quotes:quote_id (id, customer_id)`)
+        .select(`
+          id, sales_order_no, status, payment_status, created_at, quote_id, customer_id,
+          DirectoryCustomers:customer_id (id, customer_name)
+        `)
         .eq('organization_id', activeOrganizationId)
-        .in('order_status', orderStatusesToLoad)
+        .in('status', statusesToLoad)
         .eq('deleted', false)
         .order('created_at', { ascending: false });
 
-      if (!result1.error) {
-        allSaleOrders = result1.data;
-      } else {
-        if (import.meta.env.DEV) console.warn('OrderList: order_status query failed, falling back to *', result1.error.message);
-        const result2 = await supabase
-          .from('SalesOrders')
-          .select(`*, Quotes:quote_id (id, customer_id)`)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-        allSaleOrders = result2.data;
-        soError = result2.error;
-      }
-
       if (soError) {
-        if (import.meta.env.DEV) console.error('❌ OrderList: Error loading SaleOrders:', soError);
+        if (import.meta.env.DEV) console.error('OrderList: Error loading SalesOrders:', soError);
         setSaleOrdersWithoutMO([]);
         return;
       }
 
-      // Resolve customer names in batch
-      const custIds = [...new Set((allSaleOrders || []).map((so: any) => so.Quotes?.customer_id).filter(Boolean))];
-      const custMap = new Map<string, string>();
-      if (custIds.length > 0) {
-        const { data: custs } = await supabase.from('DirectoryCustomers').select('id, customer_name').in('id', custIds);
-        if (custs) custs.forEach((c: any) => custMap.set(c.id, c.customer_name));
-      }
-      allSaleOrders = (allSaleOrders || []).map((so: any) => {
-        const cid = so.Quotes?.customer_id;
-        return { ...so, DirectoryCustomers: cid && custMap.has(cid) ? { id: cid, customer_name: custMap.get(cid) } : null };
-      });
-
-      if (import.meta.env.DEV) {
-        console.log('✅ OrderList: Found', allSaleOrders?.length || 0, 'Confirmed Sales Orders');
-        if (allSaleOrders && allSaleOrders.length > 0) {
-          console.log('📋 OrderList: Sales Orders:', allSaleOrders.map((so: any) => ({
-            id: so.id,
-            sale_order_no: so.sales_order_no ?? so.sale_order_no,
-            order_status: so.order_status,
-            customer: so.DirectoryCustomers?.customer_name
-          })));
-        } else {
-          if (import.meta.env.DEV) {
-            console.log('⚠️ OrderList: No Confirmed Sales Orders found. Checking Draft orders...');
-          }
-          // Debug: Check if there are Draft orders
-          const { data: draftOrders } = await supabase
-            .from('SalesOrders')
-            .select('id, sales_order_no, order_status')
-            .eq('organization_id', activeOrganizationId)
-            .eq('order_status', 'Open')
-            .eq('deleted', false)
-            .limit(5);
-          if (draftOrders && draftOrders.length > 0) {
-            if (import.meta.env.DEV) {
-              console.log('ℹ️ OrderList: Found', draftOrders.length, 'Open Sales Orders.');
-              console.log('📋 Orders:', draftOrders.map((so: any) => ({
-                sales_order_no: so.sales_order_no || so.sale_order_no,
-                order_status: so.order_status
-              })));
-            }
-          }
-        }
-      }
+      const ordersWithCustomers = allSaleOrders || [];
 
       // Get all ManufacturingOrders to show status (but don't filter out SaleOrders)
       // IMPORTANT: This query must include ALL MOs, including newly created ones
@@ -229,38 +171,26 @@ export default function OrderList() {
         .eq('deleted', false)
         .order('created_at', { ascending: false }); // Most recent first for debugging
 
-      if (moError) {
-        if (import.meta.env.DEV) {
-          console.error('Error loading ManufacturingOrders:', moError);
-        }
-        // Continue anyway - we'll show all Sales Orders
+      if (moError && import.meta.env.DEV) {
+        console.warn('[OrderList] ManufacturingOrders error:', moError);
       }
 
-      // Create a map of SalesOrder IDs to their Manufacturing Orders
-      // IMPORTANT: Use the MOST RECENT MO if there are multiple (shouldn't happen, but just in case)
       const saleOrderToMO = new Map<string, any>();
-      if (manufacturingOrders && manufacturingOrders.length > 0) {
-        if (import.meta.env.DEV) {
-          console.log('📋 OrderList: Found', manufacturingOrders.length, 'ManufacturingOrders');
-        }
+      if (manufacturingOrders) {
         manufacturingOrders.forEach((mo: any) => {
           if (mo.sales_order_id) {
-            // If multiple MOs exist for same SO, keep the most recent one
-            const existingMO = saleOrderToMO.get(mo.sales_order_id);
-            if (!existingMO || (mo.created_at && existingMO.created_at && mo.created_at > existingMO.created_at)) {
+            const existing = saleOrderToMO.get(mo.sales_order_id);
+            if (!existing || (mo.created_at && existing.created_at && mo.created_at > existing.created_at)) {
               saleOrderToMO.set(mo.sales_order_id, mo);
             }
           }
         });
-        if (import.meta.env.DEV) {
-          console.log('📋 OrderList: Mapped', saleOrderToMO.size, 'Sales Orders to Manufacturing Orders');
-        }
       }
 
       // Show ALL Confirmed Sales Orders (with or without MO)
       // IMPORTANT: NO FILTERING - all confirmed Sales Orders must appear
       // Enrich each Sales Order with its MO info if it exists
-      const enrichedSaleOrders = (allSaleOrders || []).map((so: any) => {
+      const enrichedSaleOrders = ordersWithCustomers.map((so: any) => {
         const mo = saleOrderToMO.get(so.id) || null;
         return {
           ...so,
@@ -268,22 +198,6 @@ export default function OrderList() {
         };
       });
 
-      if (import.meta.env.DEV) {
-        console.log('✅ OrderList: Setting', enrichedSaleOrders.length, 'enriched Sales Orders');
-        console.log('📊 OrderList: Breakdown:', {
-          total: enrichedSaleOrders.length,
-          withMO: enrichedSaleOrders.filter((so: any) => so.ManufacturingOrder !== null).length,
-          withoutMO: enrichedSaleOrders.filter((so: any) => so.ManufacturingOrder === null).length
-        });
-        // Log each Sales Order to verify they're all there
-        enrichedSaleOrders.forEach((so: any) => {
-          console.log('  📋', so.sale_order_no, ':', so.ManufacturingOrder ? `Has MO (${so.ManufacturingOrder.manufacturing_order_no})` : 'Needs MO');
-        });
-        console.log('✅ OrderList: State updated with', enrichedSaleOrders.length, 'Sales Orders');
-      }
-
-      // CRITICAL: Always set ALL enriched Sales Orders, NEVER filter them out
-      // This ensures Sales Orders remain visible even after MO creation
       setSaleOrdersWithoutMO(enrichedSaleOrders);
     } catch (err: any) {
       if (import.meta.env.DEV) {
@@ -365,29 +279,30 @@ export default function OrderList() {
   };
 
 
-  // Handle Release to Manufacturing (creates MO via RPC)
   const handleCreateMO = async (saleOrderId: string, saleOrderNo: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    
+    if (!user?.id) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'User not authenticated.' });
+      return;
+    }
     try {
-      if (import.meta.env.DEV) {
-        console.log('🔍 Release to Manufacturing:', { sales_order_id: saleOrderId, sale_order_no: saleOrderNo });
-      }
-
       const { data: rpcResult, error: rpcError } = await supabase
-        .rpc('release_sales_order_to_manufacturing', { p_sales_order_id: saleOrderId });
+        .rpc('create_manufacturing_order', {
+          p_sales_order_id: saleOrderId,
+          p_user_id: user.id,
+          p_user_name: user.name ?? null,
+        });
 
       if (rpcError) {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Cannot Release',
-          message: rpcError.message || 'Failed to release to manufacturing.',
+          message: rpcError.message || 'Failed to create manufacturing order.',
         });
         return;
       }
 
-      const moId = rpcResult?.[0]?.mo_id ?? rpcResult?.mo_id;
-      const moNumber = rpcResult?.[0]?.mo_number ?? rpcResult?.mo_number ?? 'MO';
+      const moNumber = rpcResult?.mo_number ?? 'MO';
 
       useUIStore.getState().addNotification({
         type: 'success',
@@ -395,12 +310,11 @@ export default function OrderList() {
         message: `Created ${moNumber}. You can generate BOM from the MO detail.`,
       });
       refetch();
-      return;
     } catch (err: any) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: err?.message || 'Failed to release to manufacturing.',
+        message: err?.message || 'Failed to create manufacturing order.',
       });
     }
   };

@@ -9,7 +9,6 @@ export default function BillOfMaterials() {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
       registerSubmodules('Manufacturing', [
-        { id: 'order-list', label: 'Order List', href: '/manufacturing/order-list' },
         { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
         { id: 'material', label: 'Material', href: '/manufacturing/material' },
       ]);

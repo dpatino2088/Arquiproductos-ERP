@@ -19,12 +19,15 @@ export interface QuoteListItem {
   contact_name: string;
   /** Quote header description (optional) */
   description?: string | null;
+  /** low | normal | high | urgent | rush */
+  priority?: string | null;
   total: number;
   created_at: string;
   organization_id: string;
   dealer_id: string | null;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') */
   created_by: string;
+  archived?: boolean;
   [key: string]: unknown;
 }
 
@@ -115,7 +118,7 @@ export function useQuotes(dealerId?: string | null) {
         // Query: misma regla que Directory — portal = dealer_id obligatorio; org = selectedDealerId o "todos" (sin filtro dealer, RLS decide)
         let query = supabase
           .from('Quotes')
-          .select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description')
+          .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived')
           .eq('organization_id', activeOrganizationId)
           .or('deleted.is.false,deleted.is.null');
 
@@ -193,12 +196,12 @@ export function useQuotes(dealerId?: string | null) {
         // Obtener QuoteLines por separado
         // Note: QuoteLines does NOT have a 'deleted' column in the schema
         const quoteIds = quotesData.map((q: any) => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
+        let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; dealer_price_total: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
         
         if (quoteIds.length > 0) {
           const { data: linesData } = await supabase
             .from('QuoteLines')
-            .select('id, quote_id, msrp, roll_msrp_snapshot, bom_msrp_snapshot')
+            .select('id, quote_id, msrp, dealer_price_total, roll_msrp_snapshot, bom_msrp_snapshot')
             .in('quote_id', quoteIds);
 
           if (linesData) {
@@ -209,6 +212,7 @@ export function useQuotes(dealerId?: string | null) {
               quoteLinesMap.get(line.quote_id)!.push({
                 id: line.id,
                 msrp: Number(line.msrp ?? 0),
+                dealer_price_total: Number(line.dealer_price_total ?? 0),
                 roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
                 bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
               });
@@ -216,10 +220,14 @@ export function useQuotes(dealerId?: string | null) {
           }
         }
 
-        // Enriquecer quotes con datos para lista (una sola fuente de verdad: dealer + customer_name, contact_name, total, created_by)
+        // Enriquecer quotes con datos para lista: total = Dealer Price (dealer_price_total), fallback a MSRP
         const enrichedQuotes = quotesData.map((quote: any) => {
           const lines = quoteLinesMap.get(quote.id) || [];
-          const total = lines.reduce((sum: number, l: any) => sum + Number(l.msrp ?? 0), 0);
+          const total = lines.reduce((sum: number, l: any) => {
+            const dealerTotal = Number(l.dealer_price_total ?? 0);
+            const msrpTotal = Number(l.msrp ?? 0);
+            return sum + (dealerTotal > 0 ? dealerTotal : msrpTotal);
+          }, 0);
           const createdBy = quote.created_by_user_id
             ? (appUsersMap.get(quote.created_by_user_id) ?? 'Legacy / Imported')
             : 'Legacy / Imported';
@@ -1102,6 +1110,7 @@ export async function approveQuote(quoteId: string, organizationId: string): Pro
     .from('Quotes')
     .update({
       status: 'approved',
+      tracking_status: 'pending_confirmation',
       updated_at: new Date().toISOString(),
     })
     .eq('id', quoteId)
@@ -1124,7 +1133,24 @@ export async function approveQuote(quoteId: string, organizationId: string): Pro
     updated_at: data.updated_at,
   });
 
-  // Esperar a que se cree el SalesOrder
+  // Crear SO con líneas al aprobar (RPC que no requiere propuesta aceptada)
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id ?? null;
+    const userName = authData?.user?.email ?? authData?.user?.user_metadata?.name ?? null;
+    const { error: rpcError } = await supabase.rpc('create_sales_order_on_quote_approve', {
+      p_quote_id: quoteId,
+      p_user_id: userId,
+      p_user_name: userName,
+    });
+    if (rpcError) {
+      console.warn('[approveQuote] create_sales_order_on_quote_approve:', rpcError.message);
+    }
+  } catch (e) {
+    console.warn('[approveQuote] create_sales_order_on_quote_approve error:', e);
+  }
+
+  // Esperar a que se cree el SalesOrder (por si el RPC lo creó)
   const salesOrder = await waitForSalesOrder(quoteId, organizationId);
 
   if (salesOrder) {
