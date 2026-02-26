@@ -792,8 +792,10 @@ export default function QuoteNew() {
           const quoteNo = (data as any).quote_no || '';
           setValue('quote_no', quoteNo, { shouldValidate: true });
           setValue('customer_id', data.customer_id || '');
-          const status = data.status as QuoteStatus;
-          setValue('status', (status === 'cancelled' ? 'draft' : status) || 'draft');
+          const rawStatus = data.status as string;
+          type FormStatus = 'draft' | 'sent' | 'approved' | 'canceled';
+          const formStatus: FormStatus = rawStatus === 'rejected' || rawStatus === 'cancelled' ? 'canceled' : (['draft', 'sent', 'approved', 'canceled'].includes(rawStatus) ? (rawStatus as FormStatus) : 'draft');
+          setValue('status', (formStatus === 'canceled' ? 'draft' : formStatus) || 'draft');
           setValue('currency', 'USD'); // Default for UI formatting (not stored in DB)
           setValue('description', (data as any).description ?? '');
           setValue('notes', (data as any).notes ?? '');

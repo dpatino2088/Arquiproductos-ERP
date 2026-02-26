@@ -80,14 +80,16 @@ export default function Invoices() {
             ? supabase.from('SalesOrders').select('id, sales_order_no').in('id', soIds)
             : { data: [] },
         ]);
-        const dealerMap = new Map((dealersRes.data ?? []).map((d: any) => [d.id, d]));
-        const soMap = new Map((soRes.data ?? []).map((s: any) => [s.id, s]));
+        type DealerRow = { id: string; dealer_name: string; dealer_no: string | null };
+        type SORow = { id: string; sales_order_no: string };
+        const dealerMap = new Map<string, DealerRow>((dealersRes.data ?? []).map((d: DealerRow) => [d.id, d]));
+        const soMap = new Map<string, SORow>((soRes.data ?? []).map((s: SORow) => [s.id, s]));
 
         setInvoices(rows.map((r) => ({
           ...r,
           Dealers: dealerMap.get(r.dealer_id) ?? null,
           SalesOrders: r.sales_order_id ? soMap.get(r.sales_order_id) ?? null : null,
-        })));
+        })) as DealerInvoice[]);
       } else {
         setInvoices([]);
       }

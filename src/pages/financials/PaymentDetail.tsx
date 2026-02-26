@@ -146,7 +146,8 @@ export default function PaymentDetail() {
           .from('DealerInvoices')
           .select('id, invoice_number, total, status')
           .in('id', invIds);
-        const invMap = new Map((invData ?? []).map((inv: any) => [inv.id, inv]));
+        type InvRow = { id: string; invoice_number: string; total: number; status: string };
+        const invMap = new Map<string, InvRow>((invData ?? []).map((inv: InvRow) => [inv.id, inv]));
         setApplications(apps.map((a) => ({
           ...a,
           Invoice: (() => { const inv = invMap.get(a.invoice_id); return inv ? { invoice_number: inv.invoice_number, total: inv.total, status: inv.status } : null; })(),
@@ -168,7 +169,7 @@ export default function PaymentDetail() {
     supabase.from('Dealers').select('id, dealer_name, dealer_no')
       .eq('organization_id', activeOrganizationId).eq('deleted', false).eq('status', 'active')
       .order('dealer_name', { ascending: true })
-      .then(({ data }) => { if (data) setDealersList(data); });
+      .then(({ data }: { data: { id: string; dealer_name: string; dealer_no: string | null }[] | null }) => { if (data) setDealersList(data); });
   }, [activeOrganizationId]);
 
   const handleAssignDealer = async () => {

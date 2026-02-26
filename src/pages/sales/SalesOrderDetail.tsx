@@ -195,6 +195,30 @@ export default function SalesOrderDetail() {
 
       if (linesRes.error) {
         if (import.meta.env.DEV) console.warn('[SalesOrderDetail] SaleOrderLines error:', linesRes.error);
+        // Fallback: fetch lines without embed (e.g. if FK CatalogItems not yet applied), then resolve name/sku
+        const fallback = await supabase
+          .from('SaleOrderLines')
+          .select('id, sales_order_id, line_number, description, collection_name, variant_name, product_type, width_m, height_m, quantity, unit_price, line_total, catalog_item_id')
+          .eq('sales_order_id', salesOrderId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .order('line_number', { ascending: true, nullsFirst: false });
+        if (fallback.error) {
+          setLines([]);
+        } else {
+          const rows = (fallback.data ?? []) as (SalesOrderLine & { catalog_item_id?: string | null })[];
+          const itemIds = [...new Set(rows.map((r) => r.catalog_item_id).filter(Boolean))] as string[];
+          const itemMap = new Map<string, { name: string; sku: string }>();
+          if (itemIds.length > 0) {
+            const { data: items } = await supabase.from('CatalogItems').select('id, name, sku').in('id', itemIds);
+            (items ?? []).forEach((i: { id: string; name: string; sku: string }) => itemMap.set(i.id, { name: i.name, sku: i.sku }));
+          }
+          const merged: SalesOrderLine[] = rows.map((r) => ({
+            ...r,
+            CatalogItems: r.catalog_item_id ? itemMap.get(r.catalog_item_id) ?? null : null,
+          }));
+          setLines(merged);
+        }
       } else {
         setLines((linesRes.data ?? []) as SalesOrderLine[]);
       }

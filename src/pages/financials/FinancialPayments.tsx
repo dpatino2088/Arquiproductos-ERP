@@ -119,7 +119,7 @@ export default function FinancialPayments() {
     supabase.from('Dealers').select('id, dealer_name, dealer_no')
       .eq('organization_id', activeOrganizationId).eq('deleted', false).eq('status', 'active')
       .order('dealer_name', { ascending: true })
-      .then(({ data }) => { if (data) setDealers(data); });
+      .then(({ data }: { data: { id: string; dealer_name: string; dealer_no: string | null }[] | null }) => { if (data) setDealers(data); });
   }, [activeOrganizationId]);
 
   const handleRecordPayment = async () => {

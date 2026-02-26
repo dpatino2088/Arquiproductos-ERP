@@ -167,7 +167,8 @@ export default function InvoiceDetail() {
           .from('Payments')
           .select('id, payment_date, payment_method, reference_number, recorded_by_name')
           .in('id', payIds);
-        const payMap = new Map((payData ?? []).map((p: any) => [p.id, p]));
+        type PayRow = { id: string; payment_date: string; payment_method: string; reference_number: string | null; recorded_by_name: string | null };
+        const payMap = new Map<string, PayRow>((payData ?? []).map((p: PayRow) => [p.id, p]));
         setApplications(apps.map((a) => ({
           ...a,
           Payments: (() => { const p = payMap.get(a.payment_id); return p ? { payment_date: p.payment_date, method: p.payment_method, reference: p.reference_number, recorded_by_name: p.recorded_by_name } : null; })(),

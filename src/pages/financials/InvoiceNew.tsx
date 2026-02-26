@@ -114,7 +114,7 @@ export default function InvoiceNew() {
       .eq('deleted', false)
       .eq('status', 'active')
       .order('dealer_name', { ascending: true })
-      .then(({ data }) => { if (data) setDealers(data as DealerOption[]); });
+      .then(({ data }: { data: DealerOption[] | null }) => { if (data) setDealers(data); });
   }, [activeOrganizationId]);
 
   const loadFromSalesOrder = useCallback(async (soId: string) => {
