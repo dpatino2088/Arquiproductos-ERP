@@ -1,6 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useImperativeHandle, forwardRef, useRef } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+
+export interface ManufacturersRef {
+  openNewModal: () => void;
+}
 import { useManufacturersCRUD } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
@@ -21,7 +25,7 @@ import {
   Book,
 } from 'lucide-react';
 
-export default function Manufacturers() {
+const Manufacturers = forwardRef<ManufacturersRef, object>(function Manufacturers(_, ref) {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
@@ -97,6 +101,8 @@ export default function Manufacturers() {
     setShowNewModal(true);
   };
 
+  useImperativeHandle(ref, () => ({ openNewModal: handleNew }), []);
+
   const handleEdit = (manufacturer: any) => {
     setFormData({
       name: manufacturer.name,
@@ -167,28 +173,10 @@ export default function Manufacturers() {
   };
 
   return (
-    <div className="py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-title font-semibold text-foreground mb-1">Manufacturers</h1>
-          <p className="text-small text-muted-foreground">Manage product manufacturers and BOM</p>
-        </div>
-        <button
-          onClick={handleNew}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add New Manufacturer
-        </button>
-      </div>
-
-      {/* Manufacturers Content */}
-      <>
-
-      {/* Search Bar */}
-      <div className="mb-4">
-        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+    <div>
+      {/* Search Bar — spacing from status bar: mt-4 from parent */}
+      <div className="mb-2">
+        <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg">
           <div className="flex items-center gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -428,7 +416,6 @@ export default function Manufacturers() {
           </div>
         </div>
       )}
-      </>
 
       {/* Confirm Dialog */}
       <ConfirmDialog
@@ -444,5 +431,6 @@ export default function Manufacturers() {
       />
     </div>
   );
-}
+});
 
+export default Manufacturers;

@@ -383,7 +383,7 @@ const QUOTE_STATUS_OPTIONS = [
   { value: 'draft', label: 'Draft' },
   { value: 'sent', label: 'Sent' },
   { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'canceled', label: 'Cancelled' },
 ] as const;
 
 // Currency options
@@ -399,7 +399,7 @@ const CURRENCY_OPTIONS = [
 const quoteSchema = z.object({
   quote_no: z.string().min(1, 'Quote number is required'),
   customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
-  status: z.enum(['draft', 'sent', 'approved', 'rejected']),
+  status: z.enum(['draft', 'sent', 'approved', 'canceled']),
   currency: z.string().min(1, 'Currency is required'),
   description: z.string().optional(),
   notes: z.string().optional(),
@@ -619,7 +619,7 @@ export default function QuoteNew() {
   const [dealerInfo, setDealerInfo] = useState<{ id: string; name: string; number: string | null; dealer_tier_id: string | null } | null>(null);
   const configuratorDraftKey = quoteId ? `productConfiguratorDraft:${quoteId}` : null;
 
-  const { lines: quoteLines, loading: loadingLines, refetch: refetchLines } = useQuoteLines(quoteId);
+  const { lines: quoteLines, loading: loadingLines, error: errorLines, refetch: refetchLines } = useQuoteLines(quoteId);
   const { settings: costSettings } = useCostSettings();
   const { tiers: dealerTiers } = useDealerTiers();
 
@@ -3044,7 +3044,10 @@ export default function QuoteNew() {
       let termsContent = (quoteData as { terms_content?: string | null }).terms_content ?? undefined;
       const effectiveDealerIdForTerms = quoteData.dealer_id ?? dealerInfo?.id ?? null;
       if ((!termsTitle && !termsContent) && effectiveDealerIdForTerms && activeOrganizationId) {
-        const templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'quote');
+        let templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'quote');
+        if (!templateId) {
+          templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'proposal');
+        }
         if (templateId) {
           const tpl = await fetchTermsTemplateById(templateId);
           if (tpl) {
@@ -3246,7 +3249,10 @@ export default function QuoteNew() {
       let termsContent = (quoteData as { terms_content?: string | null }).terms_content ?? undefined;
       const effectiveDealerIdForTerms = quoteData.dealer_id ?? dealerInfo?.id ?? null;
       if ((!termsTitle && !termsContent) && effectiveDealerIdForTerms && activeOrganizationId) {
-        const templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'quote');
+        let templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'quote');
+        if (!templateId) {
+          templateId = await resolveDefaultTermsTemplateId(activeOrganizationId, effectiveDealerIdForTerms, 'proposal');
+        }
         if (templateId) {
           const tpl = await fetchTermsTemplateById(templateId);
           if (tpl) {
@@ -3570,7 +3576,7 @@ export default function QuoteNew() {
             <SelectShadcn
               value={watch('status') || 'draft'}
               onValueChange={(value) => {
-                const validStatus = value as 'draft' | 'sent' | 'approved' | 'rejected';
+                const validStatus = value as 'draft' | 'sent' | 'approved' | 'canceled';
                 setValue('status', validStatus);
               }}
             >
@@ -3757,6 +3763,14 @@ export default function QuoteNew() {
 
           {loadingLines ? (
             <div className="p-6 text-center text-gray-500">Loading lines...</div>
+          ) : errorLines ? (
+            <div className="p-6 text-center">
+              <p className="text-red-600 mb-2">Error loading lines.</p>
+              <p className="text-sm text-gray-500 mb-3">{errorLines}</p>
+              <button type="button" onClick={() => refetchLines()} className="text-sm font-medium text-primary hover:underline">
+                Retry
+              </button>
+            </div>
           ) : quoteLines.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
@@ -3765,20 +3779,13 @@ export default function QuoteNew() {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" style={{ width: '2%' }} title="Drag to reorder"> </th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '4%' }}>#</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>
-                      <span style={{ display: 'inline-block', width: 50, minWidth: 50 }} aria-hidden="true" />
-                      <span style={{ display: 'inline-block', transform: 'translateX(-20px)' }}>Area</span>
-                    </th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '6%' }}>Position</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>
-                      <span style={{ display: 'inline-block', transform: 'translateX(8px)' }}>Product type</span>
-                    </th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '20%' }}>
-                      <span style={{ display: 'inline-block', transform: 'translateX(8px)' }}>Description</span>
-                    </th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>System Drive</th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Measurements</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">#</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>Area</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '6%' }}>Position</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[120px]" style={{ width: '10%' }}>Product type</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '20%' }}>Description</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>System Drive</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>Measurements</th>
                     <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Qty</th>
                     <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
                     <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>Total</th>
@@ -3834,26 +3841,26 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-400 w-10" title="Drag to reorder" onClick={(e) => e.stopPropagation()}>
                           <GripVertical className="w-4 h-4" />
                         </td>
-                        <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12">
+                        <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">
                           {index + 1}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm whitespace-nowrap">
+                        <td className="py-4 px-4 text-gray-700 text-sm whitespace-nowrap text-left">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm text-center whitespace-nowrap">
+                        <td className="py-4 px-4 text-gray-700 text-sm text-left whitespace-nowrap">
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap">
+                        <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap text-left">
                           {productTypeName}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm min-w-0 overflow-hidden text-ellipsis" title={collectionDisplay}>
+                        <td className="py-4 px-6 text-gray-700 text-sm min-w-0 overflow-hidden text-ellipsis text-left" title={collectionDisplay}>
                           <span className="block truncate">{collectionDisplay}</span>
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm text-center whitespace-nowrap">
+                        <td className="py-4 px-6 text-gray-700 text-sm text-left whitespace-nowrap">
                           {driveDisplay}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-center whitespace-nowrap">
-                          <div className="w-fit mx-auto" style={{ transform: 'translateX(-8px)' }}>
+                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-left whitespace-nowrap min-w-[100px]">
+                          <div className="w-fit">
                             <DimensionsStackView
                               source={{
                                 width_m: line.width_m,

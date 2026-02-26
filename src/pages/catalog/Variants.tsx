@@ -213,8 +213,7 @@ export default function Variants() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-title font-semibold text-foreground mb-1">Variants</h1>
-          <p className="text-small text-muted-foreground">Manage product variants (colors) by collection</p>
+          <h1 className="text-title font-semibold text-foreground">Variants</h1>
         </div>
         <button
           onClick={handleNew}

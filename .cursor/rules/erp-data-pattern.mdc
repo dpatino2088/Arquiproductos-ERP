@@ -26,4 +26,6 @@ When adding or changing list/detail data, React Query cache, or module tabs in t
 
 9. **Zero Loading**: Warm detail cache on hover/focus/near viewport only (never in render). Use `warmDetailIfNeeded` from `src/lib/zeroLoading.ts` with cooldown (e.g. 20s). Optional: `useNearViewportWarm` for viewport. Detail panel: no skeleton if cache has data; "Updating…" only when hasData && isFetching.
 
+10. **Hydration & acting-as**: Never block layout by hydration (no early-return to blank UI due to `!hasHydrated`). Skeleton only inside the table container when `!hasData && isInitialLoading`; overlay "Updating… / Switching dealer…" when `hasData && isFetching`. Effective scope: `effectiveDealerId = activeDealerId ?? lastKnownDealerId ?? null`; in scopeKey use `effectiveDealerId ?? 'all'` so list fetch does not wait for RPC. Reconcile: when `current_dealer_id()` arrives, if it differs from the one used → show "Switching dealer…" overlay and refetch; keep previous rows (keep-previous). **Guardrail for optimistic scope (localStorage):** use `lastKnownDealerId` only if `lastKnownOrgId === activeOrganizationId`; otherwise fallback to `'all'`. If optimistic scope briefly shows wrong dealer data, UI shows overlay "Switching dealer…", not fullscreen skeleton.
+
 Full reference: **md/docs/ERP_DATA_PATTERN.md**.

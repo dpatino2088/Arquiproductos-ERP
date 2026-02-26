@@ -1,191 +1,450 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
-import { useManufacturingOrder } from '../../hooks/useManufacturing';
+import { supabase } from '../../lib/supabase/client';
+import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
-import ManufacturingOrderTabs from '../../components/manufacturing/ManufacturingOrderTabs';
-import { ArrowLeft } from 'lucide-react';
+import { useAuth } from '../../hooks/useAuth';
+import DetailPageLayout from '../../components/shared/DetailPageLayout';
+import StatusBadge from '../../components/shared/StatusBadge';
+import SummaryTab from '../../components/manufacturing/tabs/SummaryTab';
+import MaterialsTab from '../../components/manufacturing/tabs/MaterialsTab';
+import CutListTab from '../../components/manufacturing/tabs/CutListTab';
+import ProductionStepsTab from '../../components/manufacturing/tabs/ProductionStepsTab';
+import NotesTab from '../../components/manufacturing/tabs/NotesTab';
+import TimelineView from '../../components/shared/TimelineView';
+import { ChevronDown } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
+import { formatCurrency } from '../../lib/utils';
 
 interface ManufacturingOrderDetailProps {
   moId?: string;
 }
 
+interface TimelineEvent {
+  id: string;
+  action: string;
+  description: string;
+  user_name: string | null;
+  created_at: string;
+  metadata?: Record<string, any> | null;
+}
+
+interface MOLine {
+  id: string;
+  sales_order_line_id: string | null;
+  status: string;
+  quantity: number;
+  SaleOrderLine?: {
+    description: string | null;
+    collection_name: string | null;
+    variant_name: string | null;
+    quantity: number;
+    unit_price: number | null;
+    CatalogItems?: { name: string; sku: string } | null;
+  } | null;
+}
+
+const MFG_SUBMODULES = [
+  { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
+  { id: 'material', label: 'Material', href: '/manufacturing/material' },
+];
+
 export default function ManufacturingOrderDetail({ moId: propMoId }: ManufacturingOrderDetailProps) {
-  // Normalize propMoId if provided
   const normalizedPropMoId = propMoId ? normalizeUUID(propMoId) : null;
   const [moId, setMoId] = useState<string | null>(normalizedPropMoId);
-  const { manufacturingOrder, loading, error } = useManufacturingOrder(moId);
-  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
-  const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
-  const { userType } = useAccessContext();
-  const isDealerPortal = userType === 'portal';
+  const { manufacturingOrder: mo, loading, error, refetch } = useManufacturingOrder(moId);
+  const { materials } = useManufacturingMaterials(moId ?? '');
+  const { transitionStatus, isTransitioning } = useTransitionMOStatus();
+  const { registerSubmodules } = useSubmoduleNav();
+  const addNotification = useUIStore((s) => s.addNotification);
+  const { isInternal } = useAccessContext();
+  const { user } = useAuth();
 
-  useEffect(() => {
-    setGlobalLoading(loading);
-    return () => setGlobalLoading(false);
-  }, [loading, setGlobalLoading]);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [moLines, setMoLines] = useState<MOLine[]>([]);
+  const [cancelReason, setCancelReason] = useState('');
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
 
-  // Get MO ID from URL if not provided
+  useEffect(() => { registerSubmodules('Manufacturing', MFG_SUBMODULES); }, [registerSubmodules]);
+
   useEffect(() => {
     if (!moId) {
       const path = window.location.pathname;
       const match = path.match(/\/manufacturing\/manufacturing-orders\/([^/]+)/);
       if (match) {
-        const rawUrlMoId = match[1];
-        const normalizedMoId = normalizeUUID(rawUrlMoId);
-        
-        if (import.meta.env.DEV && rawUrlMoId !== normalizedMoId) {
-          console.log('🔍 UUID normalized in ManufacturingOrderDetail', {
-            raw: rawUrlMoId,
-            normalized: normalizedMoId,
-            rawLength: rawUrlMoId?.length,
-            normalizedLength: normalizedMoId?.length,
-          });
-        }
-        
-        if (normalizedMoId) {
-          setMoId(normalizedMoId);
-          sessionStorage.setItem('currentManufacturingOrderId', normalizedMoId);
-        } else {
-          console.warn('⚠️ Invalid manufacturingOrderId after normalization:', rawUrlMoId);
-        }
+        const normalized = normalizeUUID(match[1]);
+        if (normalized) { setMoId(normalized); sessionStorage.setItem('currentManufacturingOrderId', normalized); }
       } else {
-        const storedId = sessionStorage.getItem('currentManufacturingOrderId');
-        if (storedId) {
-          const normalizedStoredId = normalizeUUID(storedId);
-          if (normalizedStoredId) {
-            setMoId(normalizedStoredId);
-          }
-        }
+        const stored = sessionStorage.getItem('currentManufacturingOrderId');
+        if (stored) { const n = normalizeUUID(stored); if (n) setMoId(n); }
       }
     }
   }, [moId]);
 
-  // Register Manufacturing submodules
-  useEffect(() => {
-    const currentPath = window.location.pathname;
-    if (currentPath.startsWith('/manufacturing')) {
-      registerSubmodules('Manufacturing', [
-        { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'material', label: 'Material', href: '/manufacturing/material' },
-      ]);
-    }
-    
-    return () => {
-      const path = window.location.pathname;
-      if (!path.startsWith('/manufacturing')) {
-        clearSubmoduleNav();
+  const fetchTimeline = useCallback(async () => {
+    if (!moId) return;
+    const { data } = await supabase
+      .from('ActivityTimeline')
+      .select('id, action, description, user_name, created_at, metadata')
+      .eq('entity_type', 'manufacturing_order')
+      .eq('entity_id', moId)
+      .order('created_at', { ascending: false });
+    setTimeline((data ?? []) as TimelineEvent[]);
+  }, [moId]);
+
+  const fetchMOLines = useCallback(async () => {
+    if (!moId) return;
+    const { data: molData } = await supabase
+      .from('ManufacturingOrderLines')
+      .select('id, sales_order_line_id, status, quantity')
+      .eq('manufacturing_order_id', moId)
+      .eq('deleted', false)
+      .order('created_at', { ascending: true });
+    if (!molData || molData.length === 0) { setMoLines([]); return; }
+
+    const solIds = [...new Set(molData.map((m: any) => m.sales_order_line_id).filter(Boolean))];
+    let solMap = new Map<string, any>();
+    if (solIds.length > 0) {
+      const { data: solData } = await supabase
+        .from('SaleOrderLines')
+        .select('id, description, collection_name, variant_name, quantity, unit_price, catalog_item_id')
+        .in('id', solIds);
+      if (solData) {
+        const catIds = [...new Set(solData.map((s: any) => s.catalog_item_id).filter(Boolean))];
+        let catMap = new Map<string, any>();
+        if (catIds.length > 0) {
+          const { data: catData } = await supabase.from('CatalogItems').select('id, name, sku').in('id', catIds);
+          if (catData) catMap = new Map(catData.map((c: any) => [c.id, c]));
+        }
+        solMap = new Map(solData.map((s: any) => [s.id, { ...s, CatalogItems: s.catalog_item_id ? catMap.get(s.catalog_item_id) ?? null : null }]));
       }
-    };
-  }, [registerSubmodules, clearSubmoduleNav]);
+    }
+
+    setMoLines(molData.map((m: any) => ({
+      ...m,
+      SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
+    })));
+  }, [moId]);
+
+  useEffect(() => { fetchTimeline(); fetchMOLines(); }, [fetchTimeline, fetchMOLines]);
+
+  const handleTransition = useCallback(async (newStatus: string) => {
+    if (!moId || !user?.id) return;
+    setActionsOpen(false);
+    try {
+      await transitionStatus(moId, newStatus, user.id, user.name);
+      addNotification({ type: 'success', title: 'Status Updated', message: `MO moved to ${newStatus.replace(/_/g, ' ')}.` });
+      refetch();
+      fetchTimeline();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to update status' });
+    }
+  }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification]);
+
+  const handleCancel = useCallback(async () => {
+    if (!moId || !user?.id) return;
+    setShowCancelDialog(false);
+    try {
+      await transitionStatus(moId, 'cancelled', user.id, user.name);
+      addNotification({ type: 'success', title: 'MO Cancelled', message: 'Manufacturing order has been cancelled.' });
+      refetch();
+      fetchTimeline();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to cancel MO' });
+    }
+  }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification]);
 
   if (!moId) {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error</p>
           <p className="text-sm text-red-700">Manufacturing order ID is required</p>
         </div>
-        <button
-          onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
-          className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-        >
+        <button onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
+          className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
           Back to Manufacturing Orders
         </button>
       </div>
     );
   }
 
-  if (loading) return <div className="py-6 px-6" />;
+  if (loading && !mo) {
+    return <div className="p-6"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
+  }
 
-  if (error || !manufacturingOrder) {
+  if (error || !mo) {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-sm text-red-800 font-medium mb-2">Error</p>
-          <p className="text-sm text-red-700">
-            {error || 'Manufacturing order not found'}
-          </p>
+          <p className="text-sm text-red-700">{error || 'Manufacturing order not found'}</p>
         </div>
-        <button
-          onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
-          className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-        >
+        <button onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
+          className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
           Back to Manufacturing Orders
         </button>
       </div>
     );
   }
 
+  const status = mo.status;
+  const so = mo.SalesOrders;
+  const customer = so?.DirectoryCustomers?.customer_name ?? '—';
+
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'lines', label: 'Lines', count: moLines.length },
+    { id: 'materials', label: 'Materials', count: materials.length },
+    { id: 'steps', label: 'Production Steps' },
+    { id: 'notes', label: 'Notes' },
+    { id: 'timeline', label: 'Timeline', count: timeline.length },
+  ];
+
+  const actionItems: { label: string; onClick: () => void; danger?: boolean }[] = [];
+  if (isInternal && status !== 'cancelled' && status !== 'delivered') {
+    if (status === 'draft') actionItems.push({ label: 'Advance to Planned', onClick: () => handleTransition('planned') });
+    if (status === 'planned') actionItems.push({ label: 'Start Production', onClick: () => handleTransition('in_production') });
+    if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
+    if (status === 'quality_check') actionItems.push({ label: 'Ready for Pickup', onClick: () => handleTransition('ready_for_pickup') });
+    if (status === 'ready_for_pickup') actionItems.push({ label: 'Mark Delivered', onClick: () => handleTransition('delivered') });
+    if (['draft', 'planned', 'in_production'].includes(status)) {
+      actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
+    }
+  }
+
   return (
-    <div className="py-6 px-6">
-      {/* Header */}
-      <div className="mb-6">
-        <button
-          onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
-          className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Manufacturing Orders
-        </button>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground mb-1">
-              {manufacturingOrder.manufacturing_order_no}
-            </h1>
-            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-              Manufacturing Order Details
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-              (manufacturingOrder.production_status ?? manufacturingOrder.status) === 'Completed' || (manufacturingOrder as { status?: string }).status === 'completed' ? 'bg-green-100 text-green-800' :
-              (manufacturingOrder.production_status ?? manufacturingOrder.status) === 'In Production' || (manufacturingOrder as { status?: string }).status === 'in_production' ? 'bg-yellow-100 text-yellow-800' :
-              (manufacturingOrder.production_status ?? manufacturingOrder.status) === 'Planned' || (manufacturingOrder as { status?: string }).status === 'planned' ? 'bg-blue-100 text-blue-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {(manufacturingOrder.production_status ?? manufacturingOrder.status ?? 'Pending Review').replace('_', ' ')}
-            </span>
+    <DetailPageLayout
+      title={mo.manufacturing_order_no}
+      subtitle="Manufacturing Order"
+      status={<StatusBadge status={status} type="manufacturing" />}
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onBack={() => router.navigate('/manufacturing/manufacturing-orders')}
+      contentClassName="pt-2 pb-6"
+      actions={actionItems.length > 0 ? (
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setActionsOpen(!actionsOpen)}
+            disabled={isTransitioning}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            Actions <ChevronDown className="w-4 h-4" />
+          </button>
+          {actionsOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[180px] py-1">
+                {actionItems.map((item, i) => (
+                  <button key={i} type="button" onClick={item.onClick}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      ) : undefined}
+    >
+      {/* Cancel confirmation */}
+      {showCancelDialog && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 mb-4">
+          <h4 className="text-sm font-semibold text-red-800 mb-2">Cancel Manufacturing Order?</h4>
+          <p className="text-xs text-red-700 mb-3">The Sales Order will keep its current status. You can create a new MO from the Sales Order if needed.</p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Reason for cancellation (optional)..."
+            rows={2}
+            className="w-full px-3 py-2 border border-red-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-red-200 resize-none"
+          />
+          <div className="flex gap-2">
+            <button type="button" onClick={handleCancel} disabled={isTransitioning}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">
+              {isTransitioning ? 'Cancelling...' : 'Confirm Cancel'}
+            </button>
+            <button type="button" onClick={() => { setShowCancelDialog(false); setCancelReason(''); }}
+              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+              Go Back
+            </button>
           </div>
         </div>
+      )}
 
-        {/* Order Info */}
-        <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="text-xs font-medium text-gray-700">Sale Order</label>
-              <div className="mt-1 text-sm text-gray-900">
-                {(manufacturingOrder as any).SalesOrders?.sales_order_no ?? manufacturingOrder.SaleOrders?.sale_order_no ?? 'N/A'}
+      {/* Cancelled banner */}
+      {status === 'cancelled' && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 mb-4">
+          <p className="text-sm font-medium text-red-800">This manufacturing order has been cancelled.</p>
+        </div>
+      )}
+
+      {/* Overview tab */}
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Info</h3>
+            <dl className="space-y-2 text-sm">
+              {so && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Sales Order</dt>
+                  <dd>
+                    <button type="button" onClick={() => router.navigate(`/sales/orders/${so.id}`)}
+                      className="text-primary hover:underline font-medium">{so.sales_order_no}</button>
+                  </dd>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Customer</dt>
+                <dd className="font-medium text-gray-900">{customer}</dd>
               </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-700">Customer</label>
-              <div className="mt-1 text-sm text-gray-900">
-                {(manufacturingOrder as any)._resolvedCustomer?.customer_name ?? (manufacturingOrder as any).SalesOrders?.Quotes?.DirectoryCustomers?.customer_name ?? manufacturingOrder.SaleOrders?.DirectoryCustomers?.customer_name ?? 'N/A'}
+              <div className="flex justify-between">
+                <dt className="text-gray-500">MO Type</dt>
+                <dd>{mo.mo_type ? <StatusBadge status={mo.mo_type} type="moType" size="sm" /> : '—'}</dd>
               </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-700">Priority</label>
-              <div className="mt-1">
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  (manufacturingOrder.priority_code ?? manufacturingOrder.priority) === 'Rush' || (manufacturingOrder as { priority?: string }).priority === 'urgent' ? 'bg-red-100 text-red-800' :
-                  (manufacturingOrder.priority_code ?? manufacturingOrder.priority) === 'High' || (manufacturingOrder as { priority?: string }).priority === 'high' ? 'bg-orange-100 text-orange-800' :
-                  (manufacturingOrder.priority_code ?? manufacturingOrder.priority) === 'Low' || (manufacturingOrder as { priority?: string }).priority === 'low' ? 'bg-gray-100 text-gray-800' :
-                  'bg-blue-100 text-blue-800'
-                }`}>
-                  {(manufacturingOrder.priority_code ?? manufacturingOrder.priority ?? 'Normal').toString()}
-                </span>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Priority</dt>
+                <dd><StatusBadge status={mo.priority ?? 'normal'} type="priority" size="sm" /></dd>
               </div>
-            </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Product</dt>
+                <dd className="text-gray-900">{mo.product_name ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Quantity</dt>
+                <dd className="text-gray-900">{mo.quantity ?? '—'}</dd>
+              </div>
+              {so?.total_amount != null && (
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="text-gray-500">SO Total</dt>
+                  <dd className="font-mono font-medium text-gray-900">{formatCurrency(so.total_amount, 'USD')}</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Schedule & Status</h3>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Status</dt>
+                <dd><StatusBadge status={status} type="manufacturing" size="sm" /></dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Created</dt>
+                <dd className="text-gray-900">{new Date(mo.created_at).toLocaleDateString()}</dd>
+              </div>
+              {mo.released_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Released (Planned)</dt>
+                  <dd className="text-gray-900">{new Date(mo.released_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+              {mo.production_started_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Production Started</dt>
+                  <dd className="text-gray-900">{new Date(mo.production_started_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+              {mo.completed_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Completed</dt>
+                  <dd className="text-gray-900">{new Date(mo.completed_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+              {mo.delivered_at && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Delivered</dt>
+                  <dd className="text-gray-900">{new Date(mo.delivered_at).toLocaleDateString()}</dd>
+                </div>
+              )}
+              <div className="flex justify-between border-t pt-2">
+                <dt className="text-gray-500">BOM Lines</dt>
+                <dd className="font-medium text-gray-900">{materials.length}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">MO Lines</dt>
+                <dd className="font-medium text-gray-900">{moLines.length}</dd>
+              </div>
+            </dl>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Tabs */}
-      <ManufacturingOrderTabs moId={moId} />
-    </div>
+      {/* Lines tab */}
+      {activeTab === 'lines' && (
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Product</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {moLines.length === 0 ? (
+                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No manufacturing order lines</td></tr>
+              ) : (
+                moLines.map((line, idx) => {
+                  const sol = line.SaleOrderLine;
+                  const name = sol?.CatalogItems?.name || sol?.description || sol?.collection_name || sol?.variant_name || 'Item';
+                  const sku = sol?.CatalogItems?.sku;
+                  return (
+                    <tr key={line.id} className="border-t hover:bg-gray-50">
+                      <td className="px-4 py-4 text-gray-400 tabular-nums">{idx + 1}</td>
+                      <td className="px-4 py-4">
+                        <div className="font-medium text-gray-900">{name}</div>
+                        {sku && <div className="text-xs text-gray-500">{sku}</div>}
+                      </td>
+                      <td className="px-4 py-4 text-right tabular-nums">{line.quantity ?? sol?.quantity ?? '—'}</td>
+                      <td className="px-4 py-4 text-center">
+                        <StatusBadge status={line.status ?? 'planned'} type="moLineStatus" size="sm" />
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Materials tab */}
+      {activeTab === 'materials' && (
+        <MaterialsTab
+          moId={moId}
+          saleOrderId={mo.sales_order_id || null}
+          moStatus={status}
+          currency="USD"
+        />
+      )}
+
+      {/* Production Steps tab */}
+      {activeTab === 'steps' && (
+        <ProductionStepsTab moId={moId} />
+      )}
+
+      {/* Notes tab */}
+      {activeTab === 'notes' && (
+        <NotesTab moId={moId} />
+      )}
+
+      {/* Timeline tab */}
+      {activeTab === 'timeline' && (
+        <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+          {timeline.length === 0 ? (
+            <div className="px-4 py-8 text-center text-gray-500">No activity yet</div>
+          ) : (
+            <TimelineView events={timeline} />
+          )}
+        </div>
+      )}
+    </DetailPageLayout>
   );
 }

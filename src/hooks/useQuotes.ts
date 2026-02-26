@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { getAppUsersDisplayNames } from '../lib/appUsersDisplayNames';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useDealerScope } from './useDealerScope';
 import { useActiveDealer } from './useActiveDealer';
 import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
@@ -41,241 +42,162 @@ export function useQuotes(dealerId?: string | null) {
   const [quotes, setQuotes] = useState<QuoteListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { scopeKey, activeDealerId, effectiveDealerId, hasHydrated } = useDealerScope();
   const { userType } = useAccessContext();
-  const selectedDealerId = dealerId ?? activeDealerId;
+  const selectedDealerId = dealerId ?? effectiveDealerId ?? activeDealerId;
+  const fetchQuotesRef = useRef<(signal?: AbortSignal) => Promise<void>>(null!);
 
-  // ✅ OPTIMIZACIÓN: Refetch simplificado - solo incrementar trigger y dejar que useEffect maneje todo
-  const refetch = useCallback(() => {
-    if (import.meta.env.DEV) {
-      console.log('[useQuotes] refetch called');
+  const fetchQuotes = useCallback(async (signal?: AbortSignal) => {
+    if (!activeOrganizationId) {
+      setLoading(false);
+      setQuotes([]);
+      setError(null);
+      return;
     }
-    // Solo incrementar trigger - el useEffect manejará loading y limpieza de datos
-    setRefreshTrigger(prev => {
-      const next = prev + 1;
-      if (import.meta.env.DEV) {
-        console.log('[useQuotes] refreshTrigger:', prev, '->', next);
-      }
-      return next;
-    });
-  }, []);
+    if (signal?.aborted) return;
 
-  useEffect(() => {
-    if (userType === 'internal' && !hasHydrated) return;
-    let isMounted = true; // ✅ Flag para evitar actualizaciones de estado si el componente se desmonta
-    
-    async function fetchQuotes() {
-      if (import.meta.env.DEV) {
-        console.log('[useQuotes] fetchQuotes triggered', {
-          activeOrganizationId,
+    setLoading(true);
+    setError(null);
+
+    try {
+      let effectiveDealerId: string | null = null;
+      if (userType === 'portal') {
+        const effective = await getEffectiveOrgAndDealer(supabase, {
+          activeOrgId: activeOrganizationId,
           userType,
-          selectedDealerId,
-          refreshTrigger,
+          activeDealerId: null,
         });
-      }
-      
-      if (!activeOrganizationId) {
-        if (isMounted) {
-          setLoading(false);
+        if (signal?.aborted) return;
+        effectiveDealerId = effective.dealerId;
+        if (effectiveDealerId == null) {
           setQuotes([]);
-          setError(null);
+          setLoading(false);
+          return;
         }
+      } else {
+        effectiveDealerId = selectedDealerId ?? null;
+      }
+
+      let query = supabase
+        .from('Quotes')
+        .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived')
+        .eq('organization_id', activeOrganizationId)
+        .or('deleted.is.false,deleted.is.null');
+
+      if (effectiveDealerId) {
+        query = query.eq('dealer_id', effectiveDealerId);
+      }
+
+      const { data: quotesData, error: quotesError } = await query
+        .order('created_at', { ascending: false });
+
+      if (quotesError) throw quotesError;
+      if (signal?.aborted) return;
+
+      if (!quotesData || quotesData.length === 0) {
+        setQuotes([]);
+        setLoading(false);
         return;
       }
 
-      if (isMounted) {
-        // ✅ NO vaciar quotes — mantener datos previos mientras carga (evita flash)
-        setLoading(true);
-        setError(null);
-      }
+      const createdByUserIds = quotesData
+        .map((q: any) => q.created_by_user_id)
+        .filter((id: any): id is string => !!id);
+      const appUsersMap = await getAppUsersDisplayNames(createdByUserIds);
+      if (signal?.aborted) return;
 
-      try {
-        let effectiveDealerId: string | null = null;
-        if (userType === 'portal') {
-          const effective = await getEffectiveOrgAndDealer(supabase, {
-            activeOrgId: activeOrganizationId,
-            userType,
-            activeDealerId: null,
-          });
-          effectiveDealerId = effective.dealerId;
-          if (effectiveDealerId == null) {
-            if (isMounted) {
-              setQuotes([]);
-              setLoading(false);
-            }
-            return;
-          }
-        } else {
-          effectiveDealerId = selectedDealerId ?? null;
-        }
+      const customerIds = [...new Set(
+        quotesData.map((q: any) => q.customer_id).filter((id: any): id is string => !!id)
+      )];
+      const contactIds = [...new Set(
+        quotesData.map((q: any) => q.contact_id).filter((id: any): id is string => !!id)
+      )];
 
-        if (import.meta.env.DEV) {
-          console.log('[useQuotes] effectiveDealerId', effectiveDealerId, effectiveDealerId ? '(filter by dealer)' : '(All dealers, RLS decides)');
-        }
+      const [customersRes, contactsRes] = await Promise.all([
+        customerIds.length > 0
+          ? supabase.from('DirectoryCustomers').select('id, customer_name').in('id', customerIds).or('deleted.is.false,deleted.is.null')
+          : Promise.resolve({ data: [] }),
+        contactIds.length > 0
+          ? supabase.from('DirectoryContacts').select('id, contact_name').in('id', contactIds).eq('deleted', false)
+          : Promise.resolve({ data: [] }),
+      ]);
+      if (signal?.aborted) return;
 
-        // Query: misma regla que Directory — portal = dealer_id obligatorio; org = selectedDealerId o "todos" (sin filtro dealer, RLS decide)
-        let query = supabase
-          .from('Quotes')
-          .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived')
-          .eq('organization_id', activeOrganizationId)
-          .or('deleted.is.false,deleted.is.null');
+      const customersMap = new Map<string, string>();
+      const contactsMap = new Map<string, string>();
+      (customersRes.data || []).forEach((c: any) => customersMap.set(c.id, c.customer_name ?? 'Sin nombre'));
+      (contactsRes.data || []).forEach((c: any) => contactsMap.set(c.id, (c.contact_name ?? '').toString().trim() || 'Sin nombre'));
 
-        // Solo filtrar por dealer cuando hay uno seleccionado. "All dealers" = no .eq('dealer_id'), RLS devuelve lo permitido.
-        if (effectiveDealerId) {
-          query = query.eq('dealer_id', effectiveDealerId);
-        }
-
-        const { data: quotesData, error: quotesError } = await query
-          .order('created_at', { ascending: false });
-
-        if (quotesError) {
-          console.error('[useQuotes] Error fetching Quotes:', quotesError);
-          throw quotesError;
-        }
-
-        if (import.meta.env.DEV) {
-          console.log('[useQuotes] Quotes loaded:', quotesData?.length || 0);
-        }
-
-        if (!quotesData || quotesData.length === 0) {
-          if (import.meta.env.DEV) {
-            console.log('[useQuotes] No quotes found, setting empty array');
-          }
-          setQuotes([]);
-          return;
-        }
-
-        // created_by: batched + cached AppUsers (internal ERP uses created_by_user_id).
-        // Verificación manual: ver md/docs/CREATED_BY_VERIFICATION.md (query Quote + AppUsers).
-        const createdByUserIds = quotesData
-          .map((q: any) => q.created_by_user_id)
-          .filter((id: any): id is string => !!id);
-        const appUsersMap = await getAppUsersDisplayNames(createdByUserIds);
-
-        // Obtener customer names y contact names por separado (para lista única fuente de verdad)
-        const customerIds = [...new Set(
-          quotesData
-            .map((q: any) => q.customer_id)
-            .filter((id: any): id is string => !!id)
-        )];
-        const contactIds = [...new Set(
-          quotesData
-            .map((q: any) => q.contact_id)
-            .filter((id: any): id is string => !!id)
-        )];
-
-        let customersMap = new Map<string, string>();
-        let contactsMap = new Map<string, string>();
-
-        const [customersRes, contactsRes] = await Promise.all([
-          customerIds.length > 0
-            ? supabase
-                .from('DirectoryCustomers')
-                .select('id, customer_name')
-                .in('id', customerIds)
-                .or('deleted.is.false,deleted.is.null')
-            : Promise.resolve({ data: [] }),
-          contactIds.length > 0
-            ? supabase
-                .from('DirectoryContacts')
-                .select('id, contact_name')
-                .in('id', contactIds)
-                .eq('deleted', false)
-            : Promise.resolve({ data: [] }),
-        ]);
-
-        (customersRes.data || []).forEach((c: any) => {
-          customersMap.set(c.id, c.customer_name ?? 'Sin nombre');
-        });
-        (contactsRes.data || []).forEach((c: any) => {
-          contactsMap.set(c.id, (c.contact_name ?? '').toString().trim() || 'Sin nombre');
-        });
-
-        // Obtener QuoteLines por separado
-        // Note: QuoteLines does NOT have a 'deleted' column in the schema
-        const quoteIds = quotesData.map((q: any) => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; dealer_price_total: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
-        
-        if (quoteIds.length > 0) {
-          const { data: linesData } = await supabase
-            .from('QuoteLines')
-            .select('id, quote_id, msrp, dealer_price_total, roll_msrp_snapshot, bom_msrp_snapshot')
-            .in('quote_id', quoteIds);
-
-          if (linesData) {
-            linesData.forEach((line: any) => {
-              if (!quoteLinesMap.has(line.quote_id)) {
-                quoteLinesMap.set(line.quote_id, []);
-              }
-              quoteLinesMap.get(line.quote_id)!.push({
-                id: line.id,
-                msrp: Number(line.msrp ?? 0),
-                dealer_price_total: Number(line.dealer_price_total ?? 0),
-                roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
-                bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
-              });
+      const quoteIds = quotesData.map((q: any) => q.id);
+      let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; dealer_price_total: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
+      if (quoteIds.length > 0) {
+        const { data: linesData } = await supabase
+          .from('QuoteLines')
+          .select('id, quote_id, msrp, dealer_price_total, roll_msrp_snapshot, bom_msrp_snapshot')
+          .in('quote_id', quoteIds);
+        if (signal?.aborted) return;
+        if (linesData) {
+          linesData.forEach((line: any) => {
+            if (!quoteLinesMap.has(line.quote_id)) quoteLinesMap.set(line.quote_id, []);
+            quoteLinesMap.get(line.quote_id)!.push({
+              id: line.id,
+              msrp: Number(line.msrp ?? 0),
+              dealer_price_total: Number(line.dealer_price_total ?? 0),
+              roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
+              bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
             });
-          }
-        }
-
-        // Enriquecer quotes con datos para lista: total = Dealer Price (dealer_price_total), fallback a MSRP
-        const enrichedQuotes = quotesData.map((quote: any) => {
-          const lines = quoteLinesMap.get(quote.id) || [];
-          const total = lines.reduce((sum: number, l: any) => {
-            const dealerTotal = Number(l.dealer_price_total ?? 0);
-            const msrpTotal = Number(l.msrp ?? 0);
-            return sum + (dealerTotal > 0 ? dealerTotal : msrpTotal);
-          }, 0);
-          const createdBy = quote.created_by_user_id
-            ? (appUsersMap.get(quote.created_by_user_id) ?? 'Legacy / Imported')
-            : 'Legacy / Imported';
-          return {
-            ...quote,
-            DirectoryCustomers: quote.customer_id ? { id: quote.customer_id, customer_name: customersMap.get(quote.customer_id) || 'Cliente no encontrado' } : null,
-            QuoteLines: lines,
-            customer_name: quote.customer_id ? (customersMap.get(quote.customer_id) || 'Cliente no encontrado') : 'Consumidor Final',
-            contact_name: quote.contact_id ? (contactsMap.get(quote.contact_id) || 'Contacto no encontrado') : '-',
-            total,
-            created_by: createdBy,
-          };
-        });
-
-        if (import.meta.env.DEV) {
-          console.log('[useQuotes] Setting enriched quotes:', enrichedQuotes.length);
-        }
-
-        if (isMounted) {
-          setQuotes(enrichedQuotes as QuoteListItem[]);
-        }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading quotes';
-        console.error('[useQuotes] Error:', errorMessage);
-        if (import.meta.env.DEV) {
-          console.error('[useQuotes] Full error:', err);
-        }
-        if (isMounted) {
-          setError(errorMessage);
-          setQuotes([]); // ✅ Establecer array vacío en caso de error
-        }
-      } finally {
-        if (isMounted) {
-          if (import.meta.env.DEV) {
-            console.log('[useQuotes] fetchQuotes completed, setting loading = false');
-          }
-          setLoading(false);
+          });
         }
       }
-    }
 
-    fetchQuotes();
-    
-    // ✅ Cleanup: marcar como unmounted para evitar actualizaciones de estado
+      const enrichedQuotes = quotesData.map((quote: any) => {
+        const lines = quoteLinesMap.get(quote.id) || [];
+        const total = lines.reduce((sum: number, l: any) => {
+          const dealerTotal = Number(l.dealer_price_total ?? 0);
+          const msrpTotal = Number(l.msrp ?? 0);
+          return sum + (dealerTotal > 0 ? dealerTotal : msrpTotal);
+        }, 0);
+        const createdBy = quote.created_by_user_id
+          ? (appUsersMap.get(quote.created_by_user_id) ?? 'Legacy / Imported')
+          : 'Legacy / Imported';
+        return {
+          ...quote,
+          DirectoryCustomers: quote.customer_id ? { id: quote.customer_id, customer_name: customersMap.get(quote.customer_id) || 'Cliente no encontrado' } : null,
+          QuoteLines: lines,
+          customer_name: quote.customer_id ? (customersMap.get(quote.customer_id) || 'Cliente no encontrado') : 'Consumidor Final',
+          contact_name: quote.contact_id ? (contactsMap.get(quote.contact_id) || 'Contacto no encontrado') : '-',
+          total,
+          created_by: createdBy,
+        };
+      });
+
+      setQuotes(enrichedQuotes as QuoteListItem[]);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      const errorMessage = err instanceof Error ? err.message : 'Error loading quotes';
+      console.error('[useQuotes] Error:', errorMessage);
+      setError(errorMessage);
+      setQuotes([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [activeOrganizationId, userType, selectedDealerId]);
+
+  fetchQuotesRef.current = fetchQuotes;
+
+  const refetch = useCallback(() => {
+    fetchQuotesRef.current();
+  }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchQuotesRef.current(ctrl.signal);
+
     return () => {
-      isMounted = false;
+      ctrl.abort();
     };
-  }, [activeOrganizationId, selectedDealerId, userType, refreshTrigger, hasHydrated]);
+  }, [scopeKey, userType]);
 
   return { quotes, loading, error, refetch };
 }
@@ -302,7 +224,6 @@ export function useApprovedQuotesWithProgress(dealerId?: string | null) {
   }, []);
 
   useEffect(() => {
-    if (userType === 'internal' && !hasHydrated) return;
     async function fetchApprovedQuotes() {
       if (!activeOrganizationId) {
         setLoading(false);
@@ -514,6 +435,9 @@ export function useQuoteLines(quoteId: string | null) {
         }
 
         if (!data || data.length === 0) {
+          if (import.meta.env.DEV) {
+            console.log('[useQuoteLines] No rows for quote_id:', quoteId);
+          }
           setLines([]);
           return;
         }

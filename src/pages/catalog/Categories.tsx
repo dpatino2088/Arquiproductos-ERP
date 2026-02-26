@@ -1,5 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+
+export interface CategoriesRef {
+  openNew: () => void;
+  openNewParent: () => void;
+}
 import { useItemCategoriesCRUD } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
@@ -24,7 +29,7 @@ import {
   Eye,
 } from 'lucide-react';
 
-export default function Categories() {
+const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref) {
   const { registerSubmodules } = useSubmoduleNav();
   const { categories, loading, error, createCategory, updateCategory, deleteCategory, isCreating, isDeleting } = useItemCategoriesCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
@@ -175,6 +180,11 @@ export default function Categories() {
     setEditingId(null);
     setShowNewModal(true);
   };
+
+  useImperativeHandle(ref, () => ({
+    openNew: () => handleNew(),
+    openNewParent: () => handleNew(undefined, true),
+  }), []);
 
   const handleEdit = (category: any) => {
     setFormData({
@@ -343,34 +353,10 @@ export default function Categories() {
   };
 
   return (
-    <div className="py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-title font-semibold text-foreground mb-1">Categories</h1>
-          <p className="text-small text-muted-foreground">Manage product categories (nested structure)</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleNew(undefined, true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Parent Group
-          </button>
-          <button
-            onClick={() => handleNew()}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Category
-          </button>
-        </div>
-      </div>
-
-      {/* Search Bar */}
-      <div className="mb-4">
-        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+    <div>
+      {/* Search Bar — spacing from status bar: mt-4 from parent */}
+      <div className="mb-2">
+        <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg">
           <div className="flex items-center gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -589,5 +575,7 @@ export default function Categories() {
       />
     </div>
   );
-}
+});
+
+export default Categories;
 

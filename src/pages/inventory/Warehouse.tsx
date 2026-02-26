@@ -259,8 +259,7 @@ export default function Warehouse() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-title font-semibold text-foreground mb-1">Warehouse</h1>
-          <p className="text-small text-muted-foreground">Manage warehouse locations and capacity</p>
+          <h1 className="text-title font-semibold text-foreground">Warehouse</h1>
         </div>
         <div className="flex items-center gap-3">
           <button

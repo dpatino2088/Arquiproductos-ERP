@@ -84,7 +84,7 @@ export function useBOMMonitoring(saleOrderId?: string | null): UseBOMMonitoringR
       // Step 1: Get the latest BomInstance for this SaleOrder
       // Following the same pattern as useManufacturingMaterials
       const { data: saleOrderLines, error: solError } = await supabase
-        .from('SalesOrderLines')
+        .from('SaleOrderLines')
         .select('id')
         .eq('sales_order_id', saleOrderId)
         .eq('organization_id', activeOrganizationId)

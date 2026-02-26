@@ -52,8 +52,7 @@ export default function Inbox() {
   return (
     <div className="p-6">
       <div className="mb-8">
-        <h1 className="text-xl font-semibold text-foreground mb-1">Inbox</h1>
-        <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Manage your messages and communications</p>
+        <h1 className="text-xl font-semibold text-foreground">Inbox</h1>
       </div>
 
       {/* Inbox Stats */}

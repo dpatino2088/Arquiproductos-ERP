@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
-import { useCompany } from './useCompany';
+import { useActiveDealer } from './useActiveDealer';
 import { logger } from '../lib/logger';
 
 export interface Branch {
@@ -30,13 +30,13 @@ interface UseBranchesResult {
 }
 
 export const useBranches = (): UseBranchesResult => {
-  const { currentCompany } = useCompany();
+  const { activeDealerId } = useActiveDealer();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchBranches = async () => {
-    if (!currentCompany?.id) {
+    if (!activeDealerId) {
       setBranches([]);
       setIsLoading(false);
       return;
@@ -50,14 +50,14 @@ export const useBranches = (): UseBranchesResult => {
       setError(null);
 
       if (import.meta.env.DEV) {
-        console.log('🔍 Fetching branches for company:', currentCompany.id);
+        console.log('🔍 Fetching branches for dealer:', activeDealerId);
       }
 
       // Fetch branches from Supabase - OPTIMIZED: Solo columnas necesarias
       const { data, error: fetchError } = await supabase
         .from('branches')
         .select('id, branch_name, branch_address, latitude, longitude, country, timezone, radius_meters, type, is_active, created_at')
-        .eq('dealer_id', currentCompany.id)
+        .eq('dealer_id', activeDealerId)
         .eq('is_deleted', false)
         .eq('archived', false)
         .order('created_at', { ascending: false });
@@ -128,7 +128,7 @@ export const useBranches = (): UseBranchesResult => {
       });
 
       setBranches(mappedBranches);
-      logger.info('Branches loaded', { count: mappedBranches.length, companyId: currentCompany.id });
+      logger.info('Branches loaded', { count: mappedBranches.length, dealerId: activeDealerId });
     } catch (err: any) {
       // Only log unexpected errors
       const isExpectedError = 
@@ -152,7 +152,7 @@ export const useBranches = (): UseBranchesResult => {
 
   useEffect(() => {
     fetchBranches();
-  }, [currentCompany?.id]);
+  }, [activeDealerId]);
 
   return {
     branches,

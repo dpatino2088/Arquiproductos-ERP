@@ -1,0 +1,93 @@
+---
+description: Standard View B = vista de detalle (página de un ítem con header, tabs y contenido por pestaña). Si piden "crea un tab con Standard B", replicar esta estructura. Referencia: Order Detail.
+globs: "**/components/shared/DetailPageLayout.tsx,**/pages/sales/SalesOrderDetail.tsx,**/pages/sales/QuoteDetail.tsx,**/pages/sales/ProposalDetail.tsx"
+alwaysApply: false
+---
+
+# Standard View B
+
+**Standard View B = vista de detalle** (página de un solo ítem con header, tabs internos y contenido por pestaña). Si te piden *crea un tab con Standard B*, replicar esta estructura. Referencia: Order Detail ([SalesOrderDetail.tsx](src/pages/sales/SalesOrderDetail.tsx)) y [DetailPageLayout.tsx](src/components/shared/DetailPageLayout.tsx). QuoteDetail y ProposalDetail también usan DetailPageLayout (mismo estándar B). Design tokens: `.cursor/rules/design-system.mdc`.
+
+---
+
+## 1. Glosario de nombres (IDs estables)
+
+Cada elemento tiene un **ID estable** para instrucciones como "cambia el Detail_subtitle" o "agrega una card en Overview".
+
+### Estructura (orden top-down)
+
+| ID | Qué es | Dónde está |
+|----|--------|------------|
+| **Detail_layout_root** | Contenedor raíz. | `DetailPageLayout`: `flex flex-col h-full min-h-0` |
+| **Detail_header** | Fila con back + título + subtítulo + status + actions. Sin borde inferior. | `header` con `py-4 shrink-0`; interior `max-w-6xl mx-auto px-4 md:px-6`, `gap-4` |
+| **Detail_back_button** | Botón atrás. | `p-1 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded`, icono ArrowLeft |
+| **Detail_title** | Título principal (ej. número de orden, quote_no). | `h1` con `text-xl font-bold text-gray-900 truncate` |
+| **Detail_subtitle** | Texto bajo el título (ej. "Order Detail"). | `p` con `text-sm text-gray-500 truncate` |
+| **Detail_status** | Badge de estado (ej. Confirmed). | Zona derecha del header; usar StatusBadge según tipo |
+| **Detail_payment_status** | Badge de estado de pago (opcional). | Idem |
+| **Detail_actions** | Dropdown o botones de acción (ej. "Actions"). | `inline-flex gap-1.5 px-3 py-1.5 text-sm font-medium ... rounded-lg` |
+| **Detail_summary_bar** | Barra opcional con ítems label: value. | `py-3 bg-gray-50 border-b border-gray-200`, `max-w-6xl mx-auto px-4 md:px-6`, `flex flex-wrap gap-x-6 gap-y-1` |
+| **Detail_tab_bar** | Tabs (Overview, Lines, …). Mismo estilo que StatusTabs. | Contenedor `border border-gray-200 rounded-lg mb-4 bg-white`; tabs 40px, padding 0 16px, fontSize 12px |
+| **Detail_content** | Área scrolleable con el contenido por tab. | `flex-1 min-w-0 overflow-auto py-6`; interior `max-w-6xl mx-auto px-4 md:px-6` |
+| **Detail_overview_cards** | En tab Overview: cards con info (Order Details, Financial Summary, Key Dates, etc.). | `space-y-6`; cada card `rounded-lg border border-gray-200 bg-white p-6 shadow-sm` |
+| **Detail_card_title** | Título de una card (ej. "Order Details"). | `h3` con `text-sm font-semibold text-gray-900 mb-3` |
+| **Detail_table_tabs** | Tabs que muestran tabla (Lines, Manufacturing, Payments). | Tabla: `thead bg-gray-50 border-b`, `th px-4 py-3`, `td px-4 py-4` |
+
+---
+
+## 2. Orden de bloques y espaciado
+
+1. **Detail_layout_root**: `DetailPageLayout` con hijos en este orden.
+2. **Detail_header**: sin `border-b`; `py-4`; contenido en `max-w-6xl mx-auto px-4 md:px-6`.
+3. **Detail_summary_bar** (opcional): solo si se pasan `summaryItems`; `py-3 bg-gray-50 border-b border-gray-200`.
+4. **Detail_tab_bar**: wrapper `max-w-6xl mx-auto px-4 md:px-6`; contenedor de tabs `border border-gray-200 rounded-lg mb-4 bg-white`.
+5. **Detail_content**: `py-6` en el wrapper scrolleable; contenido interno `max-w-6xl mx-auto px-4 md:px-6`.
+
+---
+
+## 3. Especificaciones por elemento
+
+### Detail_header
+- Sin borde inferior. Contenedor: `flex justify-center py-4 shrink-0`.
+- Interior: `flex items-center gap-4 w-full max-w-6xl mx-auto px-4 md:px-6`.
+- **Detail_back_button**: `p-1 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors`; icono ArrowLeft `w-5 h-5`.
+- **Detail_title**: `text-xl font-bold text-gray-900 truncate`.
+- **Detail_subtitle**: `text-sm text-gray-500 truncate` (ej. "Order Detail").
+- **Detail_status / Detail_payment_status / Detail_actions**: en contenedor `flex items-center gap-2 shrink-0` a la derecha.
+
+### Detail_summary_bar (opcional)
+- `py-3 bg-gray-50 border-b border-gray-200 shrink-0`.
+- Interior: `w-full max-w-6xl mx-auto px-4 md:px-6`; items en `flex flex-wrap gap-x-6 gap-y-1`; cada ítem `flex items-center gap-2 text-sm` (label `text-gray-500`, value `font-medium text-gray-900`).
+
+### Detail_tab_bar
+- Mismo estilo que [StatusTabs](src/components/shared/StatusTabs.tsx) (Standard View A): contenedor `overflow-x-auto border border-gray-200 rounded-lg mb-4 bg-white`.
+- Cada tab: `height: 40px`, `padding: 0 16px`, `fontSize: 12px`, `color: #1c1f26`, `borderColor: var(--gray-250)` (`border-r` entre tabs).
+- Activo: `bg-white font-semibold`, `borderBottom: 2px solid var(--sidebar-base)`.
+- Inactivo: `borderBottom: 2px solid transparent`, `hover:bg-white/50`.
+- Opcional: `count` en el label (ej. "Lines (0)").
+
+### Detail_content
+- Wrapper: `flex-1 min-w-0 overflow-auto py-6`.
+- Interior: `w-full max-w-6xl mx-auto px-4 md:px-6 min-w-0 overflow-x-auto`; aquí van los paneles por tab (Overview, Lines, etc.).
+
+### Detail_overview_cards
+- Contenedor del tab Overview: `space-y-6`.
+- Fila de 2 cards: `grid grid-cols-1 md:grid-cols-2 gap-6`.
+- Cada card: `rounded-lg border border-gray-200 bg-white p-6 shadow-sm`.
+- **Detail_card_title**: `h3` con `text-sm font-semibold text-gray-900 mb-3`.
+- Contenido: `dl`/`dt`/`dd` con `space-y-2 text-sm`; `dt` con `text-gray-500`, `dd` con `font-medium text-gray-900` o enlaces/badges según campo.
+
+### Detail_table_tabs
+- Tablas en tabs (Lines, Manufacturing, Payments): contenedor `rounded-lg border border-gray-200 overflow-hidden`.
+- Tabla: `w-full text-sm`; `thead bg-gray-50 border-b`; `th px-4 py-3 text-left/right font-medium text-gray-700`; `td px-4 py-4`; filas `border-t hover:bg-gray-50`.
+- Estado vacío: `td colSpan={N} className="px-4 py-8 text-center text-gray-500"` (ej. "No lines").
+
+---
+
+## 4. Referencias de código
+
+- Vista de referencia: `src/pages/sales/SalesOrderDetail.tsx`
+- Layout: `src/components/shared/DetailPageLayout.tsx`
+- Otras vistas que usan este estándar: QuoteDetail, ProposalDetail
+- Design system: `.cursor/rules/design-system.mdc`
+- Este estándar se llama **Standard View B** (vista de detalle; referencia Order Detail).

@@ -73,6 +73,11 @@ const Manufacturing = lazy(() => import('./pages/manufacturing/Manufacturing'));
 const BillOfMaterials = lazy(() => import('./pages/manufacturing/BillOfMaterials'));
 const ApprovedBOMList = lazy(() => import('./pages/catalog/ApprovedBOMList'));
 const Financials = lazy(() => import('./pages/financials/Financials'));
+const Invoices = lazy(() => import('./pages/financials/Invoices'));
+const InvoiceNew = lazy(() => import('./pages/financials/InvoiceNew'));
+const InvoiceDetail = lazy(() => import('./pages/financials/InvoiceDetail'));
+const FinancialPayments = lazy(() => import('./pages/financials/FinancialPayments'));
+const PaymentDetail = lazy(() => import('./pages/financials/PaymentDetail'));
 
 const CompanySettings = lazy(() => import('./pages/settings/CompanySettings'));
 
@@ -666,11 +671,22 @@ function App() {
     
     // Financials routes
     router.addRoute('/financials', () => {
-      if (isAuthenticated) {
-        setCurrentPage('financials');
-      } else {
-        setCurrentPage('login');
-      }
+      if (isAuthenticated) { setCurrentPage('financials'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/invoices', () => {
+      if (isAuthenticated) { setCurrentPage('financials-invoices'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/invoices/new', () => {
+      if (isAuthenticated) { setCurrentPage('financials-invoice-new'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/invoices/:id', () => {
+      if (isAuthenticated) { setCurrentPage('financials-invoice-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/payments', () => {
+      if (isAuthenticated) { setCurrentPage('financials-payments'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/payments/:id', () => {
+      if (isAuthenticated) { setCurrentPage('financials-payment-detail'); } else { setCurrentPage('login'); }
     });
     
     // Reports routes
@@ -1010,6 +1026,16 @@ function App() {
         return <RequireModule module="manufacturing"><ApprovedBOMList /></RequireModule>; // Legacy support - redirect to ApprovedBOMList
       case 'financials':
         return <RequireModule module="financials"><Financials /></RequireModule>;
+      case 'financials-invoices':
+        return <RequireModule module="financials"><Invoices /></RequireModule>;
+      case 'financials-invoice-new':
+        return <RequireModule module="financials"><InvoiceNew /></RequireModule>;
+      case 'financials-invoice-detail':
+        return <RequireModule module="financials"><InvoiceDetail /></RequireModule>;
+      case 'financials-payments':
+        return <RequireModule module="financials"><FinancialPayments /></RequireModule>;
+      case 'financials-payment-detail':
+        return <RequireModule module="financials"><PaymentDetail /></RequireModule>;
 
       case 'reports':
         return <CompanyReports />;

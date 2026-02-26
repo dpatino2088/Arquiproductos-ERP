@@ -1,0 +1,135 @@
+---
+description: Standard View A = vista de lista (tab con tabla, filtros, paginación). Si piden "crea un tab con Standard A", replicar esta estructura. Referencia: Proposals, Quotes, Orders list.
+globs: "**/pages/sales/*.tsx,**/components/Layout.tsx,**/components/shared/StatusTabs.tsx,**/components/shared/StatusBadge.tsx"
+alwaysApply: false
+---
+
+# Standard View A
+
+**Standard View A = vista de lista.** Si te piden *crea un tab con Standard A*, replicar esta estructura. Referencia de implementación: Proposals (y Quotes, Sales Orders list). Cuando construyas o modifiques vistas de lista de Sales (Quotes, Proposals, Orders) o los Layout module tabs, sigue este estándar. Design tokens: `.cursor/rules/design-system.mdc`.
+
+---
+
+## 1. Glosario de nombres (IDs estables)
+
+Cada elemento tiene un **ID estable** para que instrucciones como "cambia el nombre del Sub_module" o "agrega un tab en Layout" sean inequívocas.
+
+### Layout (sidebar)
+
+| ID | Qué es | Dónde está |
+|----|--------|------------|
+| **Layout_module_tabs** | Barra de tabs del módulo (Quotes, Proposals, Orders) en el popover del sidebar al hacer hover en "Sales". | `src/components/Layout.tsx` → constante **`MODULE_TABS`** (Record por path; cada valor es array de `{ label, href }`). |
+| **Layout_module_tab_item** | Cada tab visible: tiene `label` (texto) y `href` (ruta). | Mismo archivo: cada entrada de `MODULE_TABS` es un array de `{ label, href }`. |
+
+**Reglas de uso:**
+- **Cambiar el nombre del Sub_module** (ej. "Proposals" → "Proposal"): editar el **`label`** del `Layout_module_tab_item` correspondiente en `MODULE_TABS` para los paths `/sales/quotes`, `/sales/proposals`, `/sales/orders`.
+- **Agregar un tab en Layout**: agregar un nuevo objeto al array de `MODULE_TABS` para cada path del módulo (ej. `{ label: 'Nuevo', href: '/sales/nuevo' }` en las tres entradas de Sales).
+
+### Página de lista (orden top-down)
+
+| ID | Qué es | Uso en Proposals.tsx |
+|----|--------|----------------------|
+| **Page_wrapper** | Contenedor raíz de la página. Solo este nivel: **no** agregar un contenedor interno con ancho máximo (`max-w-*`, `mx-auto`). El contenido (header, Status_tab_bar, Search_filters_card, Table_container, Pagination_card) va directo dentro para ancho completo, igual que Proposals. | `<div className="py-6 px-6">` |
+| **Page_header** | Fila título izquierda + acciones derecha. | `flex items-center justify-between mb-6` |
+| **Page_title** | Título principal (ej. "Proposals"). | `<h1 className="text-xl font-semibold text-foreground">Proposals</h1>` |
+| **Page_header_actions** | Contenedor de botones a la derecha. | `flex items-center gap-3 ml-auto` |
+| **Bulk_delete_button** | "Eliminar seleccionados (N)". | `px-2 py-1`, icon 14px, solo si hay selección |
+| **Status_tab_bar** | Tabs por estado (All, Draft, Sent, …). | Componente `<StatusTabs />` |
+| **Search_filters_card** | Card que contiene búsqueda + panel filtros. | Card con `py-6 px-6`, `rounded-lg` o `rounded-t-lg` si filtros abiertos |
+| **Search_input_wrapper** | Contenedor del input (con icono). | `flex-1 relative` |
+| **Search_input** | Input de búsqueda. | Placeholder, `pl-9 pr-3 py-1`, `text-sm` |
+| **Filters_button** | Botón "Filters" (badge opcional). | `px-2 py-1`, icon 14px |
+| **Search_card_refresh_button** | Botón Refresh dentro de la card. | `p-2`, icon 14px, `title="Actualizar"`, mismo estilo secundario |
+| **Filters_panel** | Panel desplegable: label "Status", "Limpiar", chips. | `mt-4 pt-4 border-t border-gray-200` |
+| **Table_container** | Card que envuelve la tabla + overlay. | `relative ... rounded-lg overflow-hidden mb-4 min-h-[300px]` |
+| **Table_loading_overlay** | Overlay de carga sobre la tabla. | Spinner + texto "Loading..." |
+| **Table** | `<table className="table-fit">` + `<colgroup>`. | thead + tbody |
+| **Table_header_row** | Encabezados de columna. | `py-3 px-4`, `text-xs font-medium text-gray-700` |
+| **Table_body** | Filas de datos. | Celdas `py-4 px-4`, `text-sm` |
+| **Table_empty_state** | Mensaje cuando no hay filas. | Icono + texto principal + subtítulo |
+| **Pagination_card** | Card bajo la tabla. | `mt-4 ... rounded-lg py-4 px-6` |
+| **Pagination_show_label** | Texto "Show:". | `text-sm text-gray-700` |
+| **Pagination_show_select** | Select (10, 25, 50, 100). | `px-3 py-1 border border-gray-200 rounded-lg text-sm` |
+| **Pagination_showing_text** | "Showing X–Y of Z". | `text-sm text-gray-700` |
+| **Pagination_previous_button** | Botón "Previous". | `px-3 py-1`, disabled en página 1 |
+| **Pagination_page_text** | "Page N of M". | `text-sm text-gray-700` |
+| **Pagination_next_button** | Botón "Next". | `px-3 py-1`, disabled en última página |
+
+---
+
+## 2. Orden de bloques y espaciado
+
+- **Ancho:** El contenido de la lista usa **ancho completo**. No envolver el contenido en `max-w-6xl mx-auto` ni ningún contenedor que limite el ancho; solo el **Page_wrapper** con `py-6 px-6`. Referencia: Proposals y Quotes (tras corrección) no tienen wrapper interno.
+
+1. **Page_wrapper**: `py-6 px-6` — hijos directos: header, StatusTabs, search card, table, pagination (sin contenedor intermedio).
+2. **Page_header**: `mb-6`
+3. **Status_tab_bar**: `mb-4` (definido en StatusTabs)
+4. **Search_filters_card**: `mb-4 mt-4`
+5. **Table_container**: `mb-4 min-h-[300px]`
+6. **Pagination_card**: `mt-4`
+
+---
+
+## 3. Especificaciones por elemento
+
+### Page_wrapper
+- Único contenedor raíz: `py-6 px-6`. **No** usar contenedor interno con `max-w-6xl`, `max-w-*` o `mx-auto`; el contenido debe ir directo como hijos para ancho completo (Quotes, Proposals, Orders).
+
+### Page_header
+- Contenedor: `flex items-center justify-between mb-6`
+- **Page_title**: `text-xl font-semibold text-foreground` — texto según módulo (Quotes, Proposals, Orders).
+- **Page_header_actions**: `flex items-center gap-3 ml-auto`
+- Botones secundarios (Bulk_delete): `px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors`, iconos 14px.
+
+### Status_tab_bar (StatusTabs)
+- Componente: `src/components/shared/StatusTabs.tsx`
+- Contenedor: `overflow-x-auto border border-gray-200 rounded-lg mb-4 bg-white` (borde en los 4 lados; fondo blanco).
+- Cada tab: `height: 40px`, `padding: 0 16px`, `fontSize: 12px`, `color: #1c1f26`, `borderColor: var(--gray-250)` entre tabs (`border-r`).
+- Activo: `bg-white font-semibold`, `borderBottom: 2px solid var(--sidebar-base)`
+- Inactivo: `borderBottom: 2px solid transparent`, `hover:bg-white/50`
+
+### Search_filters_card
+- Wrapper exterior: `mb-4 mt-4`
+- Card: `bg-white border border-gray-200 py-6 px-6`; `rounded-lg` o `rounded-t-lg` si filtros visibles
+- Barra: `flex items-center gap-3`
+- **Search_input**: `w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50`
+- Placeholder ejemplo: "Buscar por número, cliente o quote..." (adaptar por módulo)
+- Icono Search: `absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400`
+- **Filters_button**: `px-2 py-1 text-sm font-medium rounded border`; activo `bg-blue-600 text-white border-blue-600`; inactivo `bg-white text-gray-700 border-gray-200 hover:bg-gray-50`; icon 14px; texto "Filters"; badge opcional con número
+- **Filters_panel**: `mt-4 pt-4 border-t border-gray-200`; label "Status" `text-sm font-medium text-gray-700`; botón "Limpiar" `text-xs text-gray-500 hover:text-gray-700`; chips `px-3 py-1.5 rounded-lg text-xs font-medium`
+
+### Table_container
+- Contenedor: `relative bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-h-[300px]`
+- **Table_loading_overlay**: `absolute inset-0 bg-white/90 z-10 flex items-center justify-center rounded-lg`; spinner `h-8 w-8 border-b-2 border-primary`; texto "Loading..." `text-sm text-gray-600 font-medium`
+- **Table**: clase `table-fit`; wrapper `table-fit-wrapper`
+- **Table_header_row**: `thead bg-gray-50 border-b border-gray-200`; th `py-3 px-4 font-medium text-gray-700 text-xs`; primera columna (nombre/ID) `text-left`; columnas centro `text-center`; **Actions** `text-right`
+- **Table_body**: celdas `py-4 px-4 text-sm`; primera columna `text-left`; centro `text-center`; Actions `text-right` con `flex justify-end`; filas `hover:bg-gray-50`
+- Badges en celdas: usar `StatusBadge` con `size="sm"`; para centrar en columna usar `flex justify-center` en la celda
+- Botones de acción en fila: `p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors`, icon 14px (no rojo para delete; mismo gris)
+- **Table_empty_state**: `py-12 px-4 text-center`; icono 12x12 `text-gray-300`; título `text-gray-600 mb-2`; subtítulo `text-sm text-gray-400` (ej. "No se encontraron propuestas" / "Intenta con otros términos de búsqueda o filtros")
+
+### Pagination_card
+- Card: `mt-4 bg-white border border-gray-200 rounded-lg py-4 px-6`
+- Fila: `flex items-center justify-between`
+- Izquierda: "Show:" `text-sm text-gray-700`; select `px-3 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500`; opciones 10, 25, 50, 100; "Showing X–Y of Z" `text-sm text-gray-700`
+- Derecha: botón "Previous" y "Next" `px-3 py-1 border border-gray-200 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50`; texto "Page N of M" `text-sm text-gray-700`
+
+---
+
+## 4. Textos estándar (copy)
+
+- Search placeholder (Proposals): "Buscar por número, cliente o quote..."
+- Filters: "Filters"; panel: "Status", "Limpiar"
+- Loading: "Loading..."
+- Empty: título "No se encontraron propuestas" (o equivalente); subtítulo según contexto (lista vacía vs filtros)
+- Pagination: "Show:", "Showing X–Y of Z", "Previous", "Next", "Page N of M"
+
+---
+
+## 5. Referencias de código
+
+- Lista de referencia: `src/pages/sales/Proposals.tsx`
+- Status tabs: `src/components/shared/StatusTabs.tsx`
+- Layout tabs: `src/components/Layout.tsx` (constante `MODULE_TABS`)
+- Design system: `.cursor/rules/design-system.mdc`
+- Este estándar se llama **Standard View A** (vista de lista; antes Standard View Sales).

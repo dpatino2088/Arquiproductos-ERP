@@ -76,7 +76,12 @@ export function useRecordPayment() {
         addNotification({ type: 'success', title: 'Payment Recorded', message: 'Payment recorded successfully.' });
         return data;
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to record payment';
+        const msg =
+          (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string')
+            ? (err as { message: string }).message
+            : err instanceof Error
+              ? err.message
+              : 'Failed to record payment';
         addNotification({ type: 'error', title: 'Error', message: msg });
         throw err;
       } finally {

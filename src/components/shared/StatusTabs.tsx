@@ -12,7 +12,7 @@ export interface StatusTabsProps {
 
 export default function StatusTabs({ tabs, activeTab, onChange }: StatusTabsProps) {
   return (
-    <div className="overflow-x-auto border-b border-gray-200 mb-4 bg-gray-100">
+    <div className="overflow-x-auto border border-gray-200 rounded-lg mb-4 bg-white">
       <nav className="flex min-w-0" role="tablist">
         {tabs.map((tab) => {
           const isActive = tab.value === activeTab;
@@ -23,7 +23,7 @@ export default function StatusTabs({ tabs, activeTab, onChange }: StatusTabsProp
               role="tab"
               aria-selected={isActive}
               onClick={() => onChange(tab.value)}
-              className={`flex shrink-0 items-center gap-1.5 px-4 transition-colors whitespace-nowrap ${
+              className={`flex shrink-0 items-center gap-1.5 px-4 transition-colors whitespace-nowrap border-r ${
                 isActive ? 'bg-white font-semibold' : 'font-normal hover:bg-white/50'
               }`}
               style={{
@@ -31,6 +31,7 @@ export default function StatusTabs({ tabs, activeTab, onChange }: StatusTabsProp
                 padding: '0 16px',
                 height: '40px',
                 color: '#1c1f26',
+                borderColor: 'var(--gray-250)',
                 borderBottom: isActive ? '2px solid var(--sidebar-base)' : '2px solid transparent',
               }}
             >

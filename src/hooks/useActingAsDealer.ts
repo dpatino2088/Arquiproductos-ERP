@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, initSessionContext } from '../lib/supabase/client';
+import { useOrganizationContext } from '../context/OrganizationContext';
 
 const ACTING_DEALER_KEY = ['actingAsDealer'] as const;
 
@@ -43,14 +44,18 @@ async function callSetActingDealer(dealerId: string | null): Promise<string | nu
  * `setActingDealer(id)` persists the choice to DB via RPC and invalidates
  * all React Query caches so every dealer-scoped query refetches.
  */
+const LAST_ACTIVE_ORG_KEY = 'last_active_org_id';
+const LAST_ACTIVE_DEALER_KEY = 'last_active_dealer_id';
+
 export function useActingAsDealer() {
   const queryClient = useQueryClient();
+  const { activeOrganizationId } = useOrganizationContext();
 
   const query = useQuery({
     queryKey: ACTING_DEALER_KEY,
     queryFn: fetchCurrentDealerId,
-    staleTime: 60_000,
-    gcTime: 10 * 60_000,
+    staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     retry: 1,
   });
@@ -68,6 +73,14 @@ export function useActingAsDealer() {
     },
     onSuccess: (activeDealerId) => {
       queryClient.setQueryData(ACTING_DEALER_KEY, activeDealerId);
+      if (typeof window !== 'undefined' && activeOrganizationId) {
+        try {
+          window.localStorage.setItem(LAST_ACTIVE_ORG_KEY, activeOrganizationId);
+          window.localStorage.setItem(LAST_ACTIVE_DEALER_KEY, activeDealerId ?? '');
+        } catch {
+          // ignore storage errors
+        }
+      }
       void initSessionContext();
       queryClient.invalidateQueries({ queryKey: ['directory'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });

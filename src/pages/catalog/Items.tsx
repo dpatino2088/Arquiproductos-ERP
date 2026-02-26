@@ -1,6 +1,8 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
+import type { ManufacturersRef } from './Manufacturers';
+import type { CategoriesRef } from './Categories';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useCatalogItems, useDeleteCatalogItem, useCatalogCategories } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -145,6 +147,8 @@ export default function Items() {
   const [selectedActive, setSelectedActive] = useState<string[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const manufacturerRef = useRef<ManufacturersRef>(null);
+  const categoriesRef = useRef<CategoriesRef>(null);
 
   // Format date to DD/MM/YY format
   const formatDate = (dateString?: string | null): string => {
@@ -580,11 +584,10 @@ export default function Items() {
 
   if (error) {
     return (
-      <div className="py-6">
+      <div className="py-6 px-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-title font-semibold text-foreground mb-1">Items</h1>
-            <p className="text-small text-muted-foreground">Manage your product catalog, items, and collections</p>
+            <h1 className="text-title font-semibold text-foreground">Catalog Items</h1>
           </div>
         </div>
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -601,14 +604,13 @@ export default function Items() {
   }
 
   return (
-    <div className="py-6">
-      {/* Header */}
+    <div className="py-6 px-6">
+      {/* Header — title + contextual actions per tab (same as Quotes/Sales) */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-title font-semibold text-foreground mb-1">Items</h1>
-          <p className="text-small text-muted-foreground">Manage your product catalog, items, and collections</p>
+          <h1 className="text-title font-semibold text-foreground">Catalog Items</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto">
           {activeTab === 'items' && (
             <>
               <button
@@ -623,65 +625,130 @@ export default function Items() {
                 onClick={() => router.navigate('/catalog/items/new')}
               >
                 <Plus className="w-4 h-4" />
-                Add New Items
+                Add New
               </button>
             </>
+          )}
+          {activeTab === 'manufacturer' && (
+            <button
+              onClick={() => manufacturerRef.current?.openNewModal()}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+              title="Add new manufacturer"
+            >
+              <Plus className="w-4 h-4" />
+              Add New
+            </button>
+          )}
+          {activeTab === 'categories' && (
+            <>
+              <button
+                onClick={() => categoriesRef.current?.openNewParent()}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                title="Add parent group"
+              >
+                <Plus className="w-4 h-4" />
+                Add New
+              </button>
+              <button
+                onClick={() => categoriesRef.current?.openNew()}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                title="Add category"
+              >
+                <Plus className="w-4 h-4" />
+                Add New
+              </button>
+            </>
+          )}
+          {activeTab === 'collection' && (
+            <button
+              onClick={() => router.navigate('/catalog/items/new?is_fabric=true')}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              title="Add new collection"
+            >
+              <Plus className="w-4 h-4" />
+              Add New
+            </button>
           )}
         </div>
       </div>
 
-      {/* Internal Tabs - Items | Manufacturer | Categories | Collection */}
-      <div className="mb-6 border-b border-gray-200">
-        <div className="flex gap-6">
+      {/* Internal Tabs - same style as StatusTabs (Sales): white card, border-r dividers */}
+      <div className="overflow-x-auto border border-gray-200 rounded-lg mb-4 bg-white">
+        <nav className="flex min-w-0" role="tablist">
           <button
             onClick={() => setActiveTab('items')}
-            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-              activeTab === 'items'
-                ? 'border-[var(--tab-active-underline)] text-[var(--tab-active-underline)]'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`flex shrink-0 items-center gap-1.5 px-4 transition-colors whitespace-nowrap border-r ${
+              activeTab === 'items' ? 'bg-white font-semibold' : 'font-normal hover:bg-white/50'
             }`}
+            style={{
+              fontSize: '12px',
+              padding: '0 16px',
+              height: '40px',
+              color: '#1c1f26',
+              borderColor: 'var(--gray-250)',
+              borderBottom: activeTab === 'items' ? '2px solid var(--sidebar-base)' : '2px solid transparent',
+            }}
           >
-            Items
+            Products
           </button>
           <button
             onClick={() => setActiveTab('manufacturer')}
-            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-              activeTab === 'manufacturer'
-                ? 'border-[var(--tab-active-underline)] text-[var(--tab-active-underline)]'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`flex shrink-0 items-center gap-1.5 px-4 transition-colors whitespace-nowrap border-r ${
+              activeTab === 'manufacturer' ? 'bg-white font-semibold' : 'font-normal hover:bg-white/50'
             }`}
+            style={{
+              fontSize: '12px',
+              padding: '0 16px',
+              height: '40px',
+              color: '#1c1f26',
+              borderColor: 'var(--gray-250)',
+              borderBottom: activeTab === 'manufacturer' ? '2px solid var(--sidebar-base)' : '2px solid transparent',
+            }}
           >
-            Manufacturer
+            Manufacturers
           </button>
           <button
             onClick={() => setActiveTab('categories')}
-            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-              activeTab === 'categories'
-                ? 'border-[var(--tab-active-underline)] text-[var(--tab-active-underline)]'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`flex shrink-0 items-center gap-1.5 px-4 transition-colors whitespace-nowrap border-r ${
+              activeTab === 'categories' ? 'bg-white font-semibold' : 'font-normal hover:bg-white/50'
             }`}
+            style={{
+              fontSize: '12px',
+              padding: '0 16px',
+              height: '40px',
+              color: '#1c1f26',
+              borderColor: 'var(--gray-250)',
+              borderBottom: activeTab === 'categories' ? '2px solid var(--sidebar-base)' : '2px solid transparent',
+            }}
           >
             Categories
           </button>
           <button
             onClick={() => setActiveTab('collection')}
-            className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
-              activeTab === 'collection'
-                ? 'border-[var(--tab-active-underline)] text-[var(--tab-active-underline)]'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`flex shrink-0 items-center gap-1.5 px-4 transition-colors whitespace-nowrap border-r ${
+              activeTab === 'collection' ? 'bg-white font-semibold' : 'font-normal hover:bg-white/50'
             }`}
+            style={{
+              fontSize: '12px',
+              padding: '0 16px',
+              height: '40px',
+              color: '#1c1f26',
+              borderColor: 'var(--gray-250)',
+              borderBottom: activeTab === 'collection' ? '2px solid var(--sidebar-base)' : '2px solid transparent',
+            }}
           >
             Collection
           </button>
-        </div>
+        </nav>
       </div>
 
-      {/* Tab Content */}
+      {/* Tab Content — mt-4 below Status bar (same as Quotes/Sales) */}
       {activeTab === 'items' && (
         <>
       {/* Search Bar */}
-      <div className="mb-4">
-        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+      <div className="mb-2 mt-4">
+        <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg">
           <div className="flex items-center gap-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1182,9 +1249,21 @@ export default function Items() {
         </>
       )}
 
-      {activeTab === 'manufacturer' && <Manufacturers />}
-      {activeTab === 'categories' && <Categories />}
-      {activeTab === 'collection' && <Collections />}
+      {activeTab === 'manufacturer' && (
+        <div className="mt-4">
+          <Manufacturers ref={manufacturerRef} />
+        </div>
+      )}
+      {activeTab === 'categories' && (
+        <div className="mt-4">
+          <Categories ref={categoriesRef} />
+        </div>
+      )}
+      {activeTab === 'collection' && (
+        <div className="mt-4">
+          <Collections />
+        </div>
+      )}
 
       {/* Confirm Dialog */}
       <ConfirmDialog

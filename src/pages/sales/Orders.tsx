@@ -232,8 +232,7 @@ export default function Orders() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-title font-semibold text-foreground mb-1">Orders</h1>
-          <p className="text-small text-muted-foreground">Manage quotes and orders for your customers</p>
+          <h1 className="text-title font-semibold text-foreground">Orders</h1>
         </div>
         <div className="flex items-center gap-3">
           <button

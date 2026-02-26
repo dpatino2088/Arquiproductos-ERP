@@ -230,9 +230,7 @@ export default function CompanySettings() {
       <div className="flex h-[calc(100vh-48px)]">
         {/* Settings Sidebar */}
         <div className="bg-white border-r border-gray-200 flex-shrink-0" style={{ width: '240px' }}>
-          <div className="px-6 border-b border-gray-200 flex items-center" style={{ height: '48px' }}>
-            <p className="text-xs text-gray-500">Manage your system settings and content</p>
-          </div>
+          <div className="px-6 border-b border-gray-200 flex items-center" style={{ height: '48px' }} />
 
           <nav className="px-4 pt-6 pb-4">
             <ul className="space-y-1">

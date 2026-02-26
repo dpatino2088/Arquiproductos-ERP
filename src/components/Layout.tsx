@@ -1,8 +1,6 @@
 import React, { ReactNode, useState, useCallback, useMemo, useEffect, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../hooks/useAuth';
-import { useCompany } from '../hooks/useCompany';
-import { useCompanyStore } from '../stores/company-store';
 import { router } from '../lib/router';
 import { supabase } from '../lib/supabase/client';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
@@ -11,6 +9,7 @@ import { usePreviousPage } from '../hooks/usePreviousPage';
 import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
 import { usePermissions, MODULE_PERMS } from '../hooks/usePermissions';
 import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
+import { useActiveDealer } from '../hooks/useActiveDealer';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { ActingAsSwitcher } from './layout/ActingAsSwitcher';
@@ -49,8 +48,10 @@ import {
   Package,
   Wrench,
   DollarSign,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
+import { useDirectoryLoadStore } from '../stores/directory-load-store';
 
 interface LayoutProps {
   children: ReactNode;
@@ -94,7 +95,16 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Material', href: '/manufacturing/material' },
   ],
   '/financials': [
-    { label: 'Financials', href: '/financials' },
+    { label: 'Invoices', href: '/financials/invoices' },
+    { label: 'Payments', href: '/financials/payments' },
+  ],
+  '/financials/invoices': [
+    { label: 'Invoices', href: '/financials/invoices' },
+    { label: 'Payments', href: '/financials/payments' },
+  ],
+  '/financials/payments': [
+    { label: 'Invoices', href: '/financials/invoices' },
+    { label: 'Payments', href: '/financials/payments' },
   ],
 };
 
@@ -213,8 +223,6 @@ const baseNavigation = [
 function Layout({ children }: LayoutProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const { logout, user } = useAuth();
-  const { currentCompany, availableCompanies, canSwitchCompany, switchCompany, isLoading } = useCompany();
-  const { clearCompanies } = useCompanyStore();
   const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
   const [currentRoute, setCurrentRoute] = useState(() => router.getCurrentRoute() || '/');
   const { tabs: submoduleTabs, breadcrumbs, clearSubmoduleNav } = useSubmoduleNav();
@@ -228,8 +236,53 @@ function Layout({ children }: LayoutProps) {
   const isSuperAdminUser = isSuperAdmin || orgContextRole === 'superadmin' || currentRole === 'superadmin';
 
   // ActingAs dealer display: show switcher for internal users
-  const showDealerSwitcher = userType === 'internal';
-  
+  const showDealerSwitcher = userType === 'internal' && (isSuperAdminUser || currentRole === 'admin');
+  const { activeDealerId, activeDealer } = useActiveDealer();
+  const currentScopeKey = `${activeOrganization?.id ?? 'none'}:${activeDealerId ?? 'none'}`;
+  const {
+    loadContacts: directoryLoadContacts,
+    loadCustomers: directoryLoadCustomers,
+    loadQuotes: directoryLoadQuotes,
+    loadProposals: directoryLoadProposals,
+    loadOrders: directoryLoadOrders,
+    contactsScopeKey: storeContactsScopeKey,
+    customersScopeKey: storeCustomersScopeKey,
+    quotesScopeKey: storeQuotesScopeKey,
+    proposalsScopeKey: storeProposalsScopeKey,
+    ordersScopeKey: storeOrdersScopeKey,
+  } = useDirectoryLoadStore();
+  const isOnDirectory =
+    currentRoute.includes('/directory/contacts') || currentRoute.includes('/directory/customers');
+  const isOnSalesQuotes = currentRoute.includes('/sales/quotes');
+  const isOnSalesProposals = currentRoute.includes('/sales/proposals');
+  const isOnSalesOrders = currentRoute.includes('/sales/orders');
+  const isOnSales = isOnSalesQuotes || isOnSalesProposals || isOnSalesOrders;
+
+  // Directory: show Apply only when we have an applied scope (non-empty) and it differs from selected dealer
+  const hasContactsScope = storeContactsScopeKey != null && storeContactsScopeKey !== '';
+  const hasCustomersScope = storeCustomersScopeKey != null && storeCustomersScopeKey !== '';
+  const needsApplyDirectory =
+    (hasContactsScope && currentScopeKey !== storeContactsScopeKey) ||
+    (hasCustomersScope && currentScopeKey !== storeCustomersScopeKey);
+
+  // Sales: show Apply only when the current tab has an applied scope (non-empty) and it differs from selected dealer
+  const hasQuotesScope = storeQuotesScopeKey != null && storeQuotesScopeKey !== '';
+  const hasProposalsScope = storeProposalsScopeKey != null && storeProposalsScopeKey !== '';
+  const hasOrdersScope = storeOrdersScopeKey != null && storeOrdersScopeKey !== '';
+  const needsApplySalesCurrentTab =
+    (isOnSalesQuotes && hasQuotesScope && currentScopeKey !== storeQuotesScopeKey) ||
+    (isOnSalesProposals && hasProposalsScope && currentScopeKey !== storeProposalsScopeKey) ||
+    (isOnSalesOrders && hasOrdersScope && currentScopeKey !== storeOrdersScopeKey);
+  const hasCurrentSalesLoader =
+    (isOnSalesQuotes && directoryLoadQuotes) ||
+    (isOnSalesProposals && directoryLoadProposals) ||
+    (isOnSalesOrders && directoryLoadOrders);
+
+  const showApplyButton =
+    showDealerSwitcher &&
+    ((isOnDirectory && needsApplyDirectory && directoryLoadContacts && directoryLoadCustomers) ||
+      (isOnSales && needsApplySalesCurrentTab && hasCurrentSalesLoader));
+
   // Debug log for SuperAdmin detection
   if (import.meta.env.DEV) {
     console.log("[Layout] Role check:", {
@@ -633,12 +686,17 @@ function Layout({ children }: LayoutProps) {
       const actualPath = (isListPage ? lastRoute : null) || '/directory/customers';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
-    } else if (path.startsWith('/sales')) {
-      // Single Sales module: redirect to last visited tab or quotes
-      const lastRoute = getLastRouteForModule('/sales');
-      const validTabs = ['/sales/quotes', '/sales/proposals', '/sales/orders'];
-      const isListOrDetail = lastRoute && (validTabs.includes(lastRoute) || lastRoute.startsWith('/sales/quotes/') || lastRoute.startsWith('/sales/proposals/') || lastRoute.startsWith('/sales/orders/'));
-      const actualPath = (isListOrDetail ? lastRoute : null) || '/sales/quotes';
+    } else if (path === '/sales' || path === '/sales/quotes' || path === '/sales/proposals' || path === '/sales/orders') {
+      // Tab click or Sales menu: go to the list for that tab; only use lastRoute when opening Sales from sidebar (path === '/sales')
+      const listTabs = ['/sales/quotes', '/sales/proposals', '/sales/orders'];
+      const isListPath = listTabs.includes(path);
+      const actualPath = isListPath
+        ? path
+        : (() => {
+            const lastRoute = getLastRouteForModule('/sales');
+            const valid = lastRoute && (listTabs.includes(lastRoute) || /^\/sales\/(quotes|proposals|orders)\//.test(lastRoute));
+            return (valid ? lastRoute : null) || '/sales/quotes';
+          })();
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/catalog') {
@@ -947,7 +1005,40 @@ function Layout({ children }: LayoutProps) {
             {/* Left side - Organization Switcher + Acting As Dealer filter */}
             <div className="flex items-center gap-4 flex-shrink-0" style={{ marginLeft: '-4px', minWidth: '280px' }}>
               <OrganizationSwitcher />
-              {showDealerSwitcher && <ActingAsSwitcher />}
+              {showDealerSwitcher && (
+                <>
+                  <ActingAsSwitcher />
+                  {showApplyButton && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isOnSales) {
+                          directoryLoadQuotes?.();
+                          directoryLoadProposals?.();
+                          directoryLoadOrders?.();
+                        } else {
+                          directoryLoadContacts?.();
+                          directoryLoadCustomers?.();
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-sm font-medium text-gray-700"
+                      aria-label={
+                        isOnSales
+                          ? 'Apply dealer filter to quotes, proposals and orders'
+                          : 'Apply dealer filter to directory'
+                      }
+                      title={
+                        isOnSales
+                          ? 'Apply dealer filter to load quotes, proposals and orders'
+                          : 'Apply dealer filter to load contacts or customers'
+                      }
+                    >
+                      <RefreshCw style={{ width: '14px', height: '14px' }} />
+                      Apply
+                    </button>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Center - Empty space for future use */}
@@ -1021,10 +1112,10 @@ function Layout({ children }: LayoutProps) {
                     <div className="px-4 py-3 border-b border-gray-100">
                       <div className="text-sm text-gray-500 mb-1">Logged in as</div>
                       <div className="font-medium text-gray-900">{user?.name || user?.email || 'Demo User'}</div>
-                      {currentCompany && (
+                      {(activeOrganization?.name || activeDealer?.dealer_name) && (
                         <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                           <Building2 style={{ width: '12px', height: '12px' }} />
-                          {currentCompany.name}
+                          {activeDealer?.dealer_name ? `${activeOrganization?.name} · ${activeDealer.dealer_name}` : activeOrganization?.name}
                         </div>
                       )}
                     </div>
@@ -1081,7 +1172,6 @@ function Layout({ children }: LayoutProps) {
                         onClick={async () => {
                           setIsUserMenuOpen(false);
                           try {
-                            clearCompanies();
                             await logout();
                           } finally {
                             router.navigate('/login', true);
@@ -1103,13 +1193,12 @@ function Layout({ children }: LayoutProps) {
         {/* Secondary Navigation Bar for Submodules */}
         {!isSettingsRoute && (submoduleTabs.length > 0 || breadcrumbs.length > 0) && (
           <div 
-            className="border-b fixed right-0 z-30 transition-[left] duration-300 ease-in-out"
+            className="fixed right-0 z-30 transition-[left] duration-300 ease-in-out"
             style={{
               top: '3.5rem',
               height: '2.625rem',
               left: mainMarginLeft,
-              backgroundColor: 'var(--gray-100)',
-              borderColor: 'var(--gray-250)'
+              backgroundColor: 'var(--gray-100)'
             }}
             role="navigation"
             aria-label="Secondary navigation"

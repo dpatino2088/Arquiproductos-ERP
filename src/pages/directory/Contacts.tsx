@@ -124,17 +124,13 @@ export default function Contacts() {
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   
-  // ✅ Hook con nuevos campos: scopeState, canShowContacts, hasData, isFirstLoad, isRefreshing, isSwitchingDealer
   const {
     contacts,
     isPending: contactsPending,
     isInitialLoading: contactsInitialLoading,
     isScopeReady: contactsScopeReady,
     error: contactsError,
-    // ✅ Nuevos campos del hook mejorado
     scopeState,
-    contactsScopeKey,
-    canShowContacts,
     hasData,
     isFirstLoad,
     isRefreshing,
@@ -144,20 +140,16 @@ export default function Contacts() {
     organizationId: activeOrganizationId ?? null,
     enabled: !!activeOrganizationId,
   });
-  
+
   const { deleteContact, isDeleting } = useDeleteContact();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
-  // ✅ Estándar #4: Diferenciar estados correctamente
   const initialLoading = isFirstLoad || orgLoading || !contactsScopeReady;
-  
-  // ✅ Estándar #8: Instrumentación - log de estados
+
   useEffect(() => {
     if (import.meta.env.DEV) {
       console.log('[Contacts] State:', {
         scopeState,
-        contactsScopeKey,
-        canShowContacts,
         hasData,
         isFirstLoad,
         isRefreshing,
@@ -165,7 +157,7 @@ export default function Contacts() {
         contactsCount: contacts.length,
       });
     }
-  }, [scopeState, contactsScopeKey, canShowContacts, hasData, isFirstLoad, isRefreshing, isSwitchingDealer, contacts.length]);
+  }, [scopeState, hasData, isFirstLoad, isRefreshing, isSwitchingDealer, contacts.length]);
 
   useEffect(() => {
     setGlobalLoading(initialLoading);
@@ -395,15 +387,6 @@ export default function Contacts() {
   // isSearchSettling ya está definido arriba
   const showOverlay = isRefreshing || isSearchSettling || isSwitchingDealer;
   const showEmptyState = !isFirstLoad && !isSearchSettling && !isSwitchingDealer && filteredContacts.length === 0;
-
-  // Carga progresiva: 1) Header + Table container, 2) Search+Filters, 3) contenido tabla
-  const [showSearchAndFilters, setShowSearchAndFilters] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => setShowSearchAndFilters(true));
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
 
   // Handle sorting
   const handleSort = (field: typeof sortBy) => {
@@ -648,8 +631,7 @@ export default function Contacts() {
         </div>
       </div>
 
-      {/* 2) Search and Filters — se muestran después del primer paint (Header + Table container) */}
-      {showSearchAndFilters && (
+      {/* 2) Search and Filters — visible from first render; disabled until scope ready */}
       <div className="mb-4">
         <div className={`bg-white border border-gray-200 py-6 px-6 ${
           showFilters ? 'rounded-t-lg' : 'rounded-lg'
@@ -663,7 +645,8 @@ export default function Contacts() {
                 placeholder="Search contacts by name, email, company, or category..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                disabled={!contactsScopeReady}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
                 aria-label="Search contacts"
                 id="contact-search"
               />
@@ -672,8 +655,10 @@ export default function Contacts() {
             <div className="flex items-center gap-2">
               {/* Filters Button */}
               <button
+                type="button"
                 onClick={() => setShowFilters(!showFilters)}
-                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                disabled={!contactsScopeReady}
+                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm disabled:opacity-60 disabled:cursor-not-allowed ${
                   showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
               >
@@ -974,9 +959,8 @@ export default function Contacts() {
           </div>
         )}
       </div>
-      )}
 
-      {/* 3) Table container — visible desde el primer paint */}
+        {/* 3) Table container — visible desde el primer paint */}
       <div className="relative min-h-[420px]">
         {/* ✅ Estándar #7: Overlays para estados sin desmontar layout */}
         {isSwitchingDealer && (

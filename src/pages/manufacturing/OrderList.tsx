@@ -146,7 +146,7 @@ export default function OrderList() {
       const { data: allSaleOrders, error: soError } = await supabase
         .from('SalesOrders')
         .select(`
-          id, sales_order_no, status, payment_status, created_at, quote_id, customer_id,
+          id, sales_order_no, status, created_at, quote_id, customer_id,
           DirectoryCustomers:customer_id (id, customer_name)
         `)
         .eq('organization_id', activeOrganizationId)

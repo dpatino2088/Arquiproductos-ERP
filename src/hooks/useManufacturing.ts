@@ -8,47 +8,40 @@ import { normalizeUUID } from '../utils/uuid';
 // TYPES
 // ============================================================================
 
-export type ManufacturingOrderStatus = 'draft' | 'planned' | 'in_production' | 'completed' | 'cancelled';
+export type ManufacturingOrderStatus = 'draft' | 'planned' | 'in_production' | 'quality_check' | 'ready_for_pickup' | 'delivered' | 'completed' | 'cancelled';
 export type ManufacturingOrderPriority = 'low' | 'normal' | 'high' | 'urgent';
-
-/** Production status from factory flow (production_status_mo enum). */
-export type ProductionStatusMO =
-  | 'Pending Review'
-  | 'Planned'
-  | 'In Production'
-  | 'Completed'
-  | 'Ready for Pickup'
-  | 'Delivered';
 
 export interface ManufacturingOrder {
   id: string;
   organization_id: string;
   sales_order_id: string;
+  sales_order_line_id?: string | null;
   manufacturing_order_no: string;
   status: ManufacturingOrderStatus;
   priority: ManufacturingOrderPriority;
-  /** New factory flow column (production_status_mo). */
-  production_status?: ProductionStatusMO | null;
-  /** New factory flow column (priority_code_enum: Low, Normal, High, Rush). */
-  priority_code?: string | null;
-  scheduled_start_date?: string | null;
-  scheduled_end_date?: string | null;
-  actual_start_date?: string | null;
-  actual_end_date?: string | null;
+  mo_type?: string | null;
+  product_id?: string | null;
+  product_name?: string | null;
+  configuration?: Record<string, any> | null;
+  quantity?: number | null;
+  dealer_id?: string | null;
+  parent_mo_id?: string | null;
   notes?: string | null;
-  metadata?: Record<string, any> | null;
+  internal_notes?: string | null;
+  released_at?: string | null;
+  production_started_at?: string | null;
+  completed_at?: string | null;
+  delivered_at?: string | null;
   created_at: string;
   updated_at: string;
   deleted: boolean;
-  archived: boolean;
   created_by?: string | null;
-  updated_by?: string | null;
-  SaleOrders?: {
+  SalesOrders?: {
     id: string;
-    sale_order_no: string;
+    sales_order_no: string;
     customer_id: string;
-    total?: number;
-    currency?: string;
+    total_amount?: number;
+    dealer_id?: string;
     DirectoryCustomers?: {
       id: string;
       customer_name: string;
@@ -394,33 +387,10 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           console.log('🔍 useManufacturingMaterials: Fetching BOM for manufacturingOrderId:', safeManufacturingOrderId, 'organization:', activeOrganizationId);
         }
 
-        // Get BOMInstances for this manufacturing_order_id
-        // BOMInstances se relaciona con ManufacturingOrders a través de SaleOrderLines -> QuoteLines
-        // Primero obtener SaleOrderLines del MO, luego QuoteLines, luego BOMInstances
-        const { data: saleOrderLines, error: solError } = await supabase
-          .from('SaleOrderLines')
-          .select('quote_line_id')
-          .eq('manufacturing_order_id', safeManufacturingOrderId)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (solError) throw solError;
-
-        const quoteLineIds = saleOrderLines?.map((sol: { quote_line_id: string }) => sol.quote_line_id).filter(Boolean) || [];
-
-        if (quoteLineIds.length === 0) {
-          setMaterials([]);
-          setBomLinesCount(0);
-          setBomInstancesCount(0);
-          setLoading(false);
-          return;
-        }
-
         const { data: bomInstances, error: bomError } = await supabase
           .from('BOMInstances')
           .select('id, organization_id, quote_line_id')
-          .in('quote_line_id', quoteLineIds)
-          .eq('organization_id', activeOrganizationId)
+          .eq('manufacturing_order_id', safeManufacturingOrderId)
           .eq('deleted', false);
 
         if (bomError) throw bomError;
@@ -490,10 +460,9 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
         if (catalogItemIds.length > 0) {
           const { data: catalogItems } = await supabase
             .from('CatalogItems')
-            .select('id, sku, item_name, item_category_id')
+            .select('id, sku, name')
             .in('id', catalogItemIds)
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false);
+            .eq('organization_id', activeOrganizationId);
 
           if (catalogItems) {
             catalogItemsMap = new Map(catalogItems.map((item: any) => [item.id, item]));
@@ -506,10 +475,10 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           return {
             bom_instance_line_id: line.id,
             bom_instance_id: line.bom_instance_id,
-            category_code: 'accessory', // Default, se puede mejorar obteniendo de CatalogItems
+            category_code: line.part_role || 'accessory',
             catalog_item_id: line.resolved_part_id || '',
             sku: catalogItem?.sku || 'N/A',
-            item_name: catalogItem?.item_name || 'N/A',
+            item_name: catalogItem?.name || 'N/A',
             part_role: line.part_role || 'accessory',
             uom: line.uom || 'ea',
             qty: Number(line.qty) || 0,
@@ -646,11 +615,8 @@ export function useUpdateManufacturingOrder() {
     updates: {
       status?: ManufacturingOrderStatus;
       priority?: ManufacturingOrderPriority;
-      scheduled_start_date?: string | null;
-      scheduled_end_date?: string | null;
-      actual_start_date?: string | null;
-      actual_end_date?: string | null;
       notes?: string | null;
+      internal_notes?: string | null;
     }
   ) => {
     if (!activeOrganizationId) {
@@ -678,6 +644,35 @@ export function useUpdateManufacturingOrder() {
   };
 
   return { updateManufacturingOrder, isUpdating };
+}
+
+// ============================================================================
+// HOOK: useTransitionMOStatus
+// ============================================================================
+
+export function useTransitionMOStatus() {
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  const transitionStatus = useCallback(
+    async (moId: string, newStatus: string, userId: string, userName?: string) => {
+      setIsTransitioning(true);
+      try {
+        const { data, error } = await supabase.rpc('transition_mo_status', {
+          p_mo_id: moId,
+          p_new_status: newStatus,
+          p_user_id: userId,
+          p_user_name: userName ?? null,
+        });
+        if (error) throw error;
+        return data as { ok: boolean; from: string; to: string };
+      } finally {
+        setIsTransitioning(false);
+      }
+    },
+    []
+  );
+
+  return { transitionStatus, isTransitioning };
 }
 
 // ============================================================================

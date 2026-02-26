@@ -162,27 +162,10 @@ export default function Collections() {
   if (loading && collections.length === 0) return <div className="py-6 px-6" />;
 
   return (
-    <div className="py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-xl font-semibold text-foreground mb-1">Collections</h2>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage product collections ({filteredCollections.length} total)
-          </p>
-        </div>
-        <button
-          onClick={() => router.navigate('/catalog/items/new?is_fabric=true')}
-          className="px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-1.5"
-          style={{ backgroundColor: 'var(--primary-brand-hex)', color: 'white' }}
-        >
-          <Plus className="w-4 h-4" />
-          Add New Collection
-        </button>
-      </div>
-
-      {/* Filters: Search Bar + Manufacturer */}
-      <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg mb-4">
+    <div>
+      {/* Filters — spacing from status bar: mt-4 from parent */}
+      {/* Search Bar + Manufacturer */}
+      <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg mb-2">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
           {/* Search bar — tal cual, primero */}
           <div className="flex-1 relative min-w-0">

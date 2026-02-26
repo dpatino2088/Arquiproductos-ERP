@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils';
 
 export interface StatusBadgeProps {
   status: string;
-  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'manufacturing' | 'moType' | 'priority';
+  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority';
   size?: 'sm' | 'md';
 }
 
@@ -66,14 +66,36 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     paid: 'green',
     refunded: 'purple',
     overdue: 'red',
+    unassigned: 'orange',
+    unapplied: 'blue',
+    applied: 'green',
+  },
+  invoice: {
+    draft: 'gray',
+    issued: 'blue',
+    partial: 'amber',
+    paid: 'green',
+    void: 'red',
+    overdue: 'orange',
   },
   manufacturing: {
     draft: 'gray',
+    'pending review': 'gray',
+    pending_review: 'gray',
     planned: 'blue',
+    'in production': 'indigo',
     in_production: 'indigo',
+    'quality check': 'amber',
     quality_check: 'amber',
+    completed: 'green',
+    'ready for pickup': 'emerald',
     ready_for_pickup: 'emerald',
     delivered: 'slate',
+    cancelled: 'red',
+  },
+  moLineStatus: {
+    planned: 'gray',
+    in_production: 'indigo',
     completed: 'green',
     cancelled: 'red',
   },

@@ -113,14 +113,13 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
     );
     
     const processedTabs = tabs.map(tab => {
-      const isSales = tabsModule === 'sales';
-      const targetPath = isSales ? (getSalesLastPaths()[tab.id] || tab.href) : tab.href;
+      // Tab click always goes to the list (tab.href), not the last visited detail
       return {
         ...tab,
         // Only mark as active if it's the most specific match
         isActive: tab.id === mostSpecificTab.id && (currentPath === tab.href || currentPath.startsWith(tab.href + '/')),
         onClick: () => {
-          router.navigate(targetPath);
+          router.navigate(tab.href);
         }
       };
     });

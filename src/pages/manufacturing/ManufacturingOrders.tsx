@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useManufacturingOrders, ManufacturingOrderStatus, ProductionStatusMO } from '../../hooks/useManufacturing';
+import { useManufacturingOrders, ManufacturingOrderStatus } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
@@ -20,7 +20,7 @@ import StatusTabs from '../../components/shared/StatusTabs';
 interface ManufacturingOrderItem {
   id: string;
   manufacturingOrderNo: string;
-  status: ManufacturingOrderStatus | ProductionStatusMO | undefined;
+  status: ManufacturingOrderStatus | string | undefined;
   saleOrderNo: string;
   customerName: string;
   scheduledStartDate?: string | null;
@@ -33,7 +33,7 @@ interface ManufacturingOrderItem {
 // UTILITIES
 // ============================================================================
 
-const getStatusBadgeColor = (status: ManufacturingOrderStatus | ProductionStatusMO | undefined) => {
+const getStatusBadgeColor = (status: ManufacturingOrderStatus | string | undefined) => {
   if (!status) return 'bg-gray-50 text-gray-700';
   switch (status) {
     case 'draft': case 'Pending Review':
@@ -74,7 +74,7 @@ export default function ManufacturingOrders() {
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'scheduled_start_date' | 'priority'>('manufacturing_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedStatus, setSelectedStatus] = useState<(ManufacturingOrderStatus | ProductionStatusMO)[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [statusTab, setStatusTab] = useState('all');
 
   const moStatusCounts = useMemo(() => {
@@ -123,19 +123,19 @@ export default function ManufacturingOrders() {
   const displayOrders: ManufacturingOrderItem[] = useMemo(() => {
     if (import.meta.env.DEV) {
       console.log('🔍 ManufacturingOrders: Total MOs fetched:', manufacturingOrders.length);
-      console.log('   Statuses:', manufacturingOrders.map(mo => mo.production_status ?? mo.status));
+      console.log('   Statuses:', manufacturingOrders.map(mo => mo.status));
     }
 
     return manufacturingOrders
       .map(mo => ({
         id: mo.id,
         manufacturingOrderNo: mo.manufacturing_order_no,
-        status: mo.production_status ?? mo.status,
-        saleOrderNo: (mo as any).SalesOrders?.sales_order_no ?? mo.SaleOrders?.sale_order_no ?? 'N/A',
-        customerName: (mo as any)._resolvedCustomer?.customer_name ?? (mo as any).SalesOrders?.Quotes?.DirectoryCustomers?.customer_name ?? mo.SaleOrders?.DirectoryCustomers?.customer_name ?? 'N/A',
-        scheduledStartDate: mo.scheduled_start_date,
-        scheduledEndDate: mo.scheduled_end_date,
-        priority: mo.priority_code ?? mo.priority ?? 'Normal',
+        status: mo.status,
+        saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
+        customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? 'N/A',
+        scheduledStartDate: null as string | null,
+        scheduledEndDate: null as string | null,
+        priority: mo.priority ?? 'normal',
         createdAt: mo.created_at,
       }));
   }, [manufacturingOrders]);
@@ -317,7 +317,7 @@ export default function ManufacturingOrders() {
       {/* Status Filters */}
       <div className="mb-4 flex items-center gap-2 flex-wrap">
         <span className="text-sm text-gray-700">Filter by status:</span>
-        {(['Pending Review', 'Planned', 'In Production', 'Completed', 'Ready for Pickup', 'Delivered'] as ProductionStatusMO[]).map(status => (
+        {(['draft', 'planned', 'in_production', 'quality_check', 'ready_for_pickup', 'delivered', 'cancelled'] as ManufacturingOrderStatus[]).map(status => (
           <button
             key={status}
             onClick={() => {

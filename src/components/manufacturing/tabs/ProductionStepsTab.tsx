@@ -1,252 +1,60 @@
 import { useState } from 'react';
-import { useManufacturingOrder, useUpdateManufacturingOrder, useManufacturingMaterials, ProductionStatusMO } from '../../../hooks/useManufacturing';
+import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
+import { useAuth } from '../../../hooks/useAuth';
 import { useUIStore } from '../../../stores/ui-store';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../ui/ConfirmDialog';
-import { CheckCircle, Circle, Clock } from 'lucide-react';
-import { supabase } from '../../../lib/supabase/client';
-import { useOrganizationContext } from '../../../context/OrganizationContext';
-import { normalizeUUID } from '../../../utils/uuid';
+import { CheckCircle, Circle, Clock, XCircle } from 'lucide-react';
 
 interface ProductionStepsTabProps {
   moId: string;
 }
 
-const STATUS_STEPS: ProductionStatusMO[] = ['Pending Review', 'Planned', 'In Production', 'Completed', 'Ready for Pickup', 'Delivered'];
+const STATUS_STEPS: ManufacturingOrderStatus[] = ['draft', 'planned', 'in_production', 'quality_check', 'ready_for_pickup', 'delivered'];
 
-const STATUS_LABELS: Record<ProductionStatusMO, string> = {
-  'Pending Review': 'Pending Review',
-  'Planned': 'Planned',
-  'In Production': 'In Production',
-  'Completed': 'Completed',
-  'Ready for Pickup': 'Ready for Pickup',
-  'Delivered': 'Delivered',
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Pending Review',
+  planned: 'Planned',
+  in_production: 'In Production',
+  quality_check: 'Quality Check',
+  ready_for_pickup: 'Ready for Pickup',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
 };
 
 export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
-  const { manufacturingOrder, loading, refetch } = useManufacturingOrder(moId);
+  const { manufacturingOrder: mo, loading, refetch } = useManufacturingOrder(moId);
   const { materials } = useManufacturingMaterials(moId);
-  const { updateManufacturingOrder, isUpdating } = useUpdateManufacturingOrder();
+  const { transitionStatus, isTransitioning } = useTransitionMOStatus();
+  const { user } = useAuth();
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
-  const [updatingStatus, setUpdatingStatus] = useState<ProductionStatusMO | null>(null);
-  const { activeOrganizationId } = useOrganizationContext();
-  
-  // Calculate BOM totals for validation
-  const bomTotals = {
-    totalLines: materials.length,
-  };
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  const addNotification = useUIStore((s) => s.addNotification);
 
-  const handleStatusChange = async (newStatus: ProductionStatusMO) => {
-    if (!manufacturingOrder) return;
+  const handleStatusChange = async (newStatus: ManufacturingOrderStatus) => {
+    if (!mo || !user?.id) return;
 
-    // 🛡️ Guard Rail: Validate status transitions according to business rules
-    // Pending Review → Planned: Requires valid BOM (BOMInstanceLines > 0)
-    if (newStatus === 'Planned') {
-      try {
-        // Normalize UUID before query
-        const safeMoId = normalizeUUID(moId);
-        if (!safeMoId) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Error',
-            message: 'Invalid manufacturing order ID',
-          });
-          return;
-        }
-
-        // Get BOMInstances for this ManufacturingOrder
-        // BOMInstances se relaciona con ManufacturingOrders a través de SaleOrderLines -> QuoteLines
-        const { data: saleOrderLines, error: solError } = await supabase
-          .from('SaleOrderLines')
-          .select('quote_line_id')
-          .eq('manufacturing_order_id', safeMoId)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (solError) throw solError;
-
-        const quoteLineIds = saleOrderLines?.map((sol: { quote_line_id: string }) => sol.quote_line_id).filter(Boolean) || [];
-
-        if (quoteLineIds.length === 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Cannot Advance to Planned',
-            message: 'No quote lines found for this manufacturing order. Please generate BOM first.',
-          });
-          return;
-        }
-
-        const { data: bomInstances, error: biError } = await supabase
-          .from('BOMInstances')
-          .select('id')
-          .in('quote_line_id', quoteLineIds)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (biError) throw biError;
-
-        if (!bomInstances || bomInstances.length === 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Cannot Advance to Planned',
-            message: 'No BOM instances found. Please generate BOM first.',
-          });
-          return;
-        }
-
-        const bomInstanceIds = bomInstances.map((bi: { id: string }) => bi.id);
-
-        // Check if BOMInstanceLines exist
-        const { data: bomLines, error: bilError } = await supabase
-          .from('BOMInstanceLines')
-          .select('id')
-          .in('bom_instance_id', bomInstanceIds)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .limit(1);
-
-        if (bilError) throw bilError;
-
-        if (!bomLines || bomLines.length === 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Cannot Advance to Planned',
-            message: 'BOM has no lines. Cannot advance to Planned without valid BOM. Please generate BOM first.',
-          });
-          return;
-        }
-      } catch (err: any) {
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error',
-          message: err.message || 'Failed to verify BOM before advancing to Planned',
-        });
-        return;
-      }
-    }
-
-    // 🛡️ Guard Rail: Check if BOM has lines before starting production
-    if (newStatus === 'In Production') {
-      try {
-        // Normalize UUID before query
-        const safeMoId = normalizeUUID(moId);
-        if (!safeMoId) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Error',
-            message: 'Invalid manufacturing order ID',
-          });
-          return;
-        }
-
-        // Get BOMInstances for this ManufacturingOrder
-        // BOMInstances se relaciona con ManufacturingOrders a través de SaleOrderLines -> QuoteLines
-        const { data: saleOrderLines, error: solError } = await supabase
-          .from('SaleOrderLines')
-          .select('quote_line_id')
-          .eq('manufacturing_order_id', safeMoId)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (solError) throw solError;
-
-        const quoteLineIds = saleOrderLines?.map((sol: { quote_line_id: string }) => sol.quote_line_id).filter(Boolean) || [];
-
-        if (quoteLineIds.length === 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Cannot Start Production',
-            message: 'No quote lines found for this manufacturing order. Please generate BOM first.',
-          });
-          return;
-        }
-
-        const { data: bomInstances, error: biError } = await supabase
-          .from('BOMInstances')
-          .select('id')
-          .in('quote_line_id', quoteLineIds)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        if (biError) throw biError;
-
-        if (!bomInstances || bomInstances.length === 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Cannot Start Production',
-            message: 'No BOM instances found. Please generate BOM first.',
-          });
-          return;
-        }
-
-        const bomInstanceIds = bomInstances.map((bi: { id: string }) => bi.id);
-
-        // Check if BOMInstanceLines exist
-        const { data: bomLines, error: bilError } = await supabase
-          .from('BOMInstanceLines')
-          .select('id')
-          .in('bom_instance_id', bomInstanceIds)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .limit(1);
-
-        if (bilError) throw bilError;
-
-        if (!bomLines || bomLines.length === 0) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Cannot Start Production',
-            message: 'BOM has no lines. Cannot start production without materials list. Please generate BOM components first.',
-          });
-          return;
-        }
-      } catch (err: any) {
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error',
-          message: err.message || 'Failed to verify BOM before starting production',
-        });
-        return;
-      }
+    if ((newStatus === 'planned' || newStatus === 'in_production') && materials.length === 0) {
+      addNotification({ type: 'error', title: 'Cannot Advance', message: 'Generate BOM first before advancing.' });
+      return;
     }
 
     const confirmed = await showConfirm({
-      title: 'Change Manufacturing Order Status',
-      message: `Are you sure you want to change the status to "${STATUS_LABELS[newStatus]}"?`,
+      title: 'Change Status',
+      message: `Move this MO to "${STATUS_LABELS[newStatus]}"?`,
       variant: 'info',
       confirmText: 'Change Status',
       cancelText: 'Cancel',
     });
-
     if (!confirmed) return;
 
     try {
       setUpdatingStatus(newStatus);
-      const updateData: any = { production_status: newStatus };
-
-      // Set actual dates when status changes
-      if (newStatus === 'In Production' && !manufacturingOrder.actual_start_date) {
-        updateData.actual_start_date = new Date().toISOString().split('T')[0];
-      }
-      if ((newStatus === 'Completed' || newStatus === 'Ready for Pickup' || newStatus === 'Delivered') && !manufacturingOrder.actual_end_date) {
-        updateData.actual_end_date = new Date().toISOString().split('T')[0];
-      }
-
-      await updateManufacturingOrder(moId, updateData);
-
-      useUIStore.getState().addNotification({
-        type: 'success',
-        title: 'Success',
-        message: `Status changed to ${STATUS_LABELS[newStatus]}`,
-      });
-
+      await transitionStatus(moId, newStatus, user.id, user.name);
+      addNotification({ type: 'success', title: 'Status Updated', message: `Moved to ${STATUS_LABELS[newStatus]}` });
       refetch();
-    } catch (err: any) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err.message || 'Failed to update status',
-      });
+    } catch (err: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: err instanceof Error ? err.message : 'Failed to update status' });
     } finally {
       setUpdatingStatus(null);
     }
@@ -256,117 +64,81 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
     return (
       <div className="p-6">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded"></div>
-          <div className="h-32 bg-gray-200 rounded"></div>
+          <div className="h-8 bg-gray-200 rounded" />
+          <div className="h-32 bg-gray-200 rounded" />
         </div>
       </div>
     );
   }
 
-  if (!manufacturingOrder) {
-    return (
-      <div className="p-6">
-        <div className="text-center text-gray-500">Manufacturing order not found</div>
-      </div>
-    );
+  if (!mo) {
+    return <div className="p-6 text-center text-gray-500">Manufacturing order not found</div>;
   }
 
-  const legacyToProduction: Record<string, ProductionStatusMO> = {
-    draft: 'Pending Review', planned: 'Planned', in_production: 'In Production', completed: 'Completed', cancelled: 'Completed',
-  };
-  const currentProdStatus = (manufacturingOrder.production_status ?? (manufacturingOrder.status && legacyToProduction[manufacturingOrder.status])) as ProductionStatusMO | undefined;
-  const rawIndex = currentProdStatus ? STATUS_STEPS.indexOf(currentProdStatus) : 0;
-  const currentStatusIndex = rawIndex >= 0 ? rawIndex : 0;
-  const isCancelled = (manufacturingOrder as { status?: string }).status === 'cancelled';
-
-  const getAdvanceDisabled = (status: ProductionStatusMO, current: ProductionStatusMO | undefined) => {
-    if (!current) return false;
-    if (status === 'Planned' && current === 'Pending Review') return bomTotals.totalLines === 0;
-    if (status === 'In Production' && current === 'Planned') return bomTotals.totalLines === 0;
-    return false;
-  };
-
-  const getDisableReason = (status: ProductionStatusMO, current: ProductionStatusMO | undefined) => {
-    if (status === 'Planned' && current === 'Pending Review' && bomTotals.totalLines === 0) return 'Generate BOM first';
-    if (status === 'In Production' && current === 'Planned' && bomTotals.totalLines === 0) return 'BOM must have materials';
-    return '';
-  };
+  const currentStatus = mo.status;
+  const currentIdx = STATUS_STEPS.indexOf(currentStatus);
+  const isCancelled = currentStatus === 'cancelled';
+  const hasBom = materials.length > 0;
 
   return (
     <div className="p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-6">Production Workflow</h3>
 
       {isCancelled ? (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+          <XCircle className="w-6 h-6 text-red-600 shrink-0" />
           <p className="text-sm text-red-800 font-medium">This manufacturing order has been cancelled.</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {STATUS_STEPS.map((status, index) => {
-            const isCompleted = index < currentStatusIndex;
-            const isCurrent = index === currentStatusIndex;
-            const isPending = index > currentStatusIndex;
-            const canAdvance = index === currentStatusIndex + 1;
-            
-            // Business rule validation: disable advance if rules not met
-            const isAdvanceDisabled = canAdvance ? getAdvanceDisabled(status, currentProdStatus) : false;
-            const disableReason = canAdvance ? getDisableReason(status, currentProdStatus) : '';
+        <div className="space-y-3">
+          {STATUS_STEPS.map((step, idx) => {
+            const isCompleted = idx < currentIdx;
+            const isCurrent = idx === currentIdx;
+            const canAdvance = idx === currentIdx + 1;
+            const needsBom = (step === 'planned' || step === 'in_production') && !hasBom;
+            const isDisabled = canAdvance && needsBom;
 
             return (
               <div
-                key={status}
+                key={step}
                 className={`flex items-center gap-4 p-4 rounded-lg border ${
-                  isCurrent
-                    ? 'bg-blue-50 border-blue-200'
-                    : isCompleted
-                    ? 'bg-green-50 border-green-200'
-                    : 'bg-gray-50 border-gray-200'
+                  isCurrent ? 'bg-blue-50 border-blue-200' :
+                  isCompleted ? 'bg-green-50 border-green-200' :
+                  'bg-gray-50 border-gray-200'
                 }`}
               >
-                <div className="flex-shrink-0">
-                  {isCompleted ? (
-                    <CheckCircle className="w-6 h-6 text-green-600" />
-                  ) : isCurrent ? (
-                    <Clock className="w-6 h-6 text-blue-600" />
-                  ) : (
-                    <Circle className="w-6 h-6 text-gray-400" />
-                  )}
+                <div className="shrink-0">
+                  {isCompleted ? <CheckCircle className="w-6 h-6 text-green-600" /> :
+                   isCurrent ? <Clock className="w-6 h-6 text-blue-600" /> :
+                   <Circle className="w-6 h-6 text-gray-400" />}
                 </div>
                 <div className="flex-1">
-                  <div className="font-medium text-gray-900">{STATUS_LABELS[status]}</div>
-                  {isCurrent && manufacturingOrder.metadata?.status_history && (
-                    <div className="text-xs text-gray-500 mt-1">
-                      Started: {new Date(manufacturingOrder.created_at).toLocaleString()}
-                    </div>
+                  <div className="font-medium text-gray-900">{STATUS_LABELS[step]}</div>
+                  {isCurrent && step === 'draft' && (
+                    <div className="text-xs text-gray-500 mt-0.5">Review materials and generate BOM before planning.</div>
                   )}
                 </div>
                 {canAdvance && (
                   <div className="flex flex-col items-end gap-1">
                     <button
-                      onClick={() => handleStatusChange(status)}
-                      disabled={isUpdating || updatingStatus === status || isAdvanceDisabled}
-                      className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-                      title={isAdvanceDisabled ? disableReason : ''}
+                      type="button"
+                      onClick={() => handleStatusChange(step)}
+                      disabled={isTransitioning || isDisabled}
+                      className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
-                      {isUpdating && updatingStatus === status ? 'Updating...' : 'Advance to this step'}
+                      {isTransitioning && updatingStatus === step ? 'Updating...' : `Advance`}
                     </button>
-                    {isAdvanceDisabled && disableReason && (
-                      <span className="text-xs text-red-600">{disableReason}</span>
-                    )}
+                    {isDisabled && <span className="text-xs text-red-600">Generate BOM first</span>}
                   </div>
                 )}
                 {isCurrent && (
-                  <span className="px-3 py-1 text-xs font-medium text-blue-800 bg-blue-100 rounded-full">
-                    Current
-                  </span>
+                  <span className="px-3 py-1 text-xs font-medium text-blue-800 bg-blue-100 rounded-full">Current</span>
                 )}
               </div>
             );
           })}
         </div>
       )}
-
 
       <ConfirmDialog
         isOpen={dialogState.isOpen}

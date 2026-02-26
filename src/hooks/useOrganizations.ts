@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
-import { useCompanyStore } from '../stores/company-store';
 
 export interface Organization {
   id: string;
@@ -34,7 +33,6 @@ interface UseOrganizationsResult {
 }
 
 export const useOrganizations = (): UseOrganizationsResult => {
-  const { currentCompany } = useCompanyStore();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

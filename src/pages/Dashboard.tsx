@@ -78,8 +78,7 @@ export default function ManagementDashboard() {
     <div className="p-6">
       {/* Management Header */}
       <div className="mb-8">
-        <h1 className="text-title font-semibold text-foreground mb-1">Management Dashboard</h1>
-        <p className="text-small text-muted-foreground">Overview of team performance, approvals, and key metrics</p>
+        <h1 className="text-title font-semibold text-foreground">Management Dashboard</h1>
       </div>
 
       {/* Management Stats */}

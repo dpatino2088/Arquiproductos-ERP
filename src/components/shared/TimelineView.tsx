@@ -26,6 +26,9 @@ const ACTION_DOT_COLORS: Record<string, string> = {
   status_changed: 'bg-blue-500',
   payment_recorded: 'bg-emerald-500',
   converted: 'bg-purple-500',
+  approved: 'bg-amber-500',
+  updated: 'bg-gray-400',
+  mo_created: 'bg-indigo-500',
 };
 
 function formatRelativeTime(createdAt: string): string {

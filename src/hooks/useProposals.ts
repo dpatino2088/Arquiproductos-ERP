@@ -3,12 +3,13 @@
  * RLS is enforced by Supabase; list filters by org + dealer (misma regla que Quotes/Directory).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { getAppUsersDisplayNames } from '../lib/appUsersDisplayNames';
 import { fetchAuthContext } from '../auth/authContext';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useDealerScope } from './useDealerScope';
 import { useActiveDealer } from './useActiveDealer';
 import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
@@ -43,18 +44,19 @@ export function useProposalsList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeDealerId, hasHydrated } = useActiveDealer();
+  const { scopeKey, activeDealerId, effectiveDealerId: scopeEffectiveDealerId, hasHydrated } = useDealerScope();
   const { userType } = useAccessContext();
+  const fetchListRef = useRef<(signal?: AbortSignal) => Promise<void>>(null!);
 
-  const fetchList = useCallback(async () => {
+  const fetchList = useCallback(async (signal?: AbortSignal) => {
     if (!activeOrganizationId) {
       setList([]);
       setLoading(false);
       setError(null);
       return;
     }
+    if (signal?.aborted) return;
 
-    // ✅ NO vaciar list — mantener datos previos mientras carga (evita flash)
     setLoading(true);
     setError(null);
 
@@ -66,6 +68,7 @@ export function useProposalsList() {
           userType,
           activeDealerId: null,
         });
+        if (signal?.aborted) return;
         effectiveDealerId = effective.dealerId;
         if (effectiveDealerId == null) {
           setList([]);
@@ -73,7 +76,7 @@ export function useProposalsList() {
           return;
         }
       } else {
-        effectiveDealerId = activeDealerId ?? null;
+        effectiveDealerId = scopeEffectiveDealerId ?? activeDealerId ?? null;
       }
 
       let query = supabase
@@ -88,12 +91,12 @@ export function useProposalsList() {
       }
 
       const { data, error: e } = await query;
-
       if (e) {
         setError(e.message);
         setList([]);
         return;
       }
+      if (signal?.aborted) return;
 
       const rows = (data || []) as ProposalListItem[];
       const quoteIds = [...new Set(rows.map((r) => r.quote_id))];
@@ -101,6 +104,7 @@ export function useProposalsList() {
       const quotesRes = quoteIds.length
         ? await supabase.from('Quotes').select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
         : { data: [] };
+      if (signal?.aborted) return;
 
       const quoteMap = new Map<string, { quote_no?: string; status?: string; created_at?: string; created_by_user_id?: string | null; customer_id?: string; contact_id?: string }>();
       (quotesRes.data || []).forEach((q: any) => {
@@ -125,6 +129,7 @@ export function useProposalsList() {
         customerIds.size > 0
           ? await supabase.from('DirectoryCustomers').select('id, customer_name').in('id', [...customerIds])
           : { data: [] };
+      if (signal?.aborted) return;
 
       const customerMap = new Map<string, string>();
       (customersRes.data || []).forEach((c: { id: string; customer_name?: string }) => {
@@ -138,6 +143,7 @@ export function useProposalsList() {
         if (q?.created_by_user_id) appUserIds.push(q.created_by_user_id);
       });
       const appUsersMap = await getAppUsersDisplayNames(appUserIds);
+      if (signal?.aborted) return;
 
       rows.forEach((r) => {
         const q = quoteMap.get(r.quote_id);
@@ -155,26 +161,37 @@ export function useProposalsList() {
       });
       setList(rows);
     } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       setError(err?.message || 'Error loading proposals');
       setList([]);
     } finally {
       setLoading(false);
     }
-  }, [activeOrganizationId, activeDealerId, userType]);
+  }, [activeOrganizationId, userType, activeDealerId, scopeEffectiveDealerId]);
+
+  fetchListRef.current = fetchList;
+
+  const refetch = useCallback(() => {
+    fetchListRef.current();
+  }, []);
 
   useEffect(() => {
-    if (userType === 'internal' && !hasHydrated) return;
-    fetchList();
-  }, [fetchList, userType, hasHydrated]);
+    const ctrl = new AbortController();
+    fetchListRef.current(ctrl.signal);
+
+    return () => {
+      ctrl.abort();
+    };
+  }, [scopeKey, userType]);
 
   const deleteProposal = useCallback(
     async (id: string) => {
       const { data, error: e } = await supabase.rpc('soft_delete_proposals', { p_proposal_ids: [id] });
       if (e) throw e;
       if (data !== 1 && data != null) throw new Error('Proposal not found or no permission');
-      await fetchList();
+      refetch();
     },
-    [fetchList]
+    [refetch]
   );
 
   const deleteProposals = useCallback(
@@ -183,12 +200,12 @@ export function useProposalsList() {
       const { data, error: e } = await supabase.rpc('soft_delete_proposals', { p_proposal_ids: ids });
       if (e) throw e;
       if (data != null && Number(data) < ids.length) throw new Error('Some proposals could not be deleted (no permission)');
-      await fetchList();
+      refetch();
     },
-    [fetchList]
+    [refetch]
   );
 
-  return { list, loading, error, refetch: fetchList, deleteProposal, deleteProposals };
+  return { list, loading, error, refetch, deleteProposal, deleteProposals };
 }
 
 export interface QuoteLineInfoForPDF {
@@ -543,7 +560,7 @@ export function useProposalDetail(proposalId: string | null) {
 
   const refetch = useCallback(() => {
     query.refetch();
-  }, [query]);
+  }, [query.refetch]);
 
   const setCanWrite = useCallback((value: boolean) => {
     setCanWriteState(value);

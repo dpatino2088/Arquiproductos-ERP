@@ -52,3 +52,21 @@ export async function warmDetailIfNeeded(
     // Don't break UI; warm is best-effort.
   }
 }
+
+const LIST_COOLDOWN_MS = 15_000;
+
+/**
+ * Optional list prewarm: run load functions (e.g. from directory-load-store) once per scopeKey per cooldown.
+ * Use when user is on Directory or Sales and you want to warm lists without spamming on rapid dealer changes.
+ * List hooks already use cacheRef; this only throttles explicit prefetch triggers.
+ */
+export function warmListScope(
+  scopeKey: string,
+  loadFns: Array<(() => void) | undefined>,
+  cooldownMs: number = LIST_COOLDOWN_MS
+): void {
+  if (!scopeKey || scopeKey.startsWith('none:')) return;
+  if (!shouldWarm(`list:${scopeKey}`, cooldownMs)) return;
+  lastWarmAt.set(`list:${scopeKey}`, Date.now());
+  loadFns.forEach((fn) => { if (typeof fn === 'function') fn(); });
+}

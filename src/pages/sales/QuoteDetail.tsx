@@ -79,9 +79,7 @@ interface SalesOrder {
   id: string;
   sales_order_no: string;
   status: string | null;
-  payment_status: string | null;
   total_amount: number | null;
-  amount_paid: number | null;
   expected_delivery_date: string | null;
   completed_at: string | null;
   created_at: string | null;
@@ -167,7 +165,7 @@ export default function QuoteDetail() {
           .order('version_no', { ascending: false }),
         supabase
           .from('SalesOrders')
-          .select('id, sales_order_no, status, payment_status, total_amount, amount_paid, expected_delivery_date, completed_at, created_at')
+          .select('id, sales_order_no, status, total_amount, expected_delivery_date, completed_at, created_at')
           .eq('quote_id', quoteId)
           .eq('deleted', false)
           .maybeSingle(),
@@ -308,6 +306,35 @@ export default function QuoteDetail() {
   const canCreateProposal = status === 'draft' && !hasActiveProposal;
   const canCreateSO = status === 'approved' && !salesOrder;
 
+  const currentLifecycleStage: 'quote' | 'proposal' | 'sales_order' | 'manufacturing' = salesOrder ? 'sales_order' : proposals.length > 0 ? 'proposal' : 'quote';
+
+  const lifecycleSteps: LifecycleStep[] = useMemo(() => {
+    if (!quote) {
+      return [
+        { id: 'quote', label: 'Quote', sublabel: '—', status: 'pending', href: undefined },
+        { id: 'proposal', label: 'Proposal', sublabel: '—', status: 'pending', href: undefined },
+        { id: 'sales_order', label: 'Sales Order', sublabel: '—', status: 'pending', href: undefined },
+        { id: 'manufacturing', label: 'Manufacturing', sublabel: '—', status: 'pending', href: undefined },
+      ];
+    }
+    const ids: ('quote' | 'proposal' | 'sales_order' | 'manufacturing')[] = ['quote', 'proposal', 'sales_order', 'manufacturing'];
+    const currentIndex = ids.indexOf(currentLifecycleStage);
+    const latestProposal = proposals.length > 0 ? proposals[0] : null;
+    const stages = [
+      { label: 'Quote', ref: quote.quote_no },
+      { label: 'Proposal', ref: proposals.length > 0 ? (proposals.length === 1 ? latestProposal?.proposal_no : `${proposals.length} proposal(s)`) : undefined, href: latestProposal ? `/sales/proposals/${latestProposal.id}` : undefined },
+      { label: 'Sales Order', ref: salesOrder?.sales_order_no, href: salesOrder ? `/sales/orders/${salesOrder.id}` : undefined },
+      { label: 'Manufacturing', ref: undefined },
+    ];
+    return stages.map((s, i) => ({
+      id: ids[i],
+      label: s.label,
+      sublabel: s.ref ?? '—',
+      status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
+      href: s.href,
+    }));
+  }, [quote, currentLifecycleStage, proposals.length, proposals[0]?.id, proposals[0]?.proposal_no, salesOrder?.sales_order_no, salesOrder?.id]);
+
   const actionButtons = useMemo(() => {
     if (isPortal) return null;
     const btns: React.ReactNode[] = [];
@@ -423,72 +450,21 @@ export default function QuoteDetail() {
     ? lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
     : (quote.total_amount ?? 0);
 
-  const summaryItems = isPortal
-    ? [
-        { label: 'Customer', value: customerName ?? '—' },
-        { label: 'Contact', value: contactName ?? '—' },
-        { label: 'Date', value: new Date(quote.created_at).toLocaleDateString() },
-        { label: 'Total', value: formatCurrencyDisplay(displayTotal) },
-        ...(salesOrder
-          ? [
-              {
-                label: 'SO #',
-                value: (
-                  <button
-                    type="button"
-                    onClick={() => router.navigate(`/sales/orders/${salesOrder.id}`)}
-                    className="text-primary hover:underline font-medium"
-                  >
-                    {salesOrder.sales_order_no}
-                  </button>
-                ),
-              },
-            ]
-          : []),
-      ]
-    : [
-        { label: 'Customer', value: customerName ?? '—' },
-        { label: 'Contact', value: contactName ?? '—' },
-        { label: 'Created By', value: createdByName ?? '—' },
-        { label: 'Date', value: new Date(quote.created_at).toLocaleDateString() },
-        { label: 'Total', value: formatCurrencyDisplay(displayTotal) },
-        { label: 'Priority', value: quote.priority ? <StatusBadge status={quote.priority} type="priority" size="sm" /> : '—' },
-      ];
-
-  const currentLifecycleStage: 'quote' | 'proposal' | 'sales_order' | 'manufacturing' = salesOrder ? 'sales_order' : proposals.length > 0 ? 'proposal' : 'quote';
-
-  const lifecycleSteps: LifecycleStep[] = useMemo(() => {
-    const ids: ('quote' | 'proposal' | 'sales_order' | 'manufacturing')[] = ['quote', 'proposal', 'sales_order', 'manufacturing'];
-    const currentIndex = ids.indexOf(currentLifecycleStage);
-    const stages = [
-      { label: 'Quote', ref: quote.quote_no },
-      { label: 'Proposal', ref: proposals.length > 0 ? `${proposals.length} proposal(s)` : undefined },
-      { label: 'Sales Order', ref: salesOrder?.sales_order_no, href: salesOrder ? `/sales/orders/${salesOrder.id}` : undefined },
-      { label: 'Manufacturing', ref: undefined },
-    ];
-    return stages.map((s, i) => ({
-      id: ids[i],
-      label: s.label,
-      sublabel: s.ref ?? '—',
-      status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
-      href: s.href,
-    }));
-  }, [currentLifecycleStage, quote.quote_no, proposals.length, salesOrder?.sales_order_no, salesOrder?.id]);
-
   const headerStatus = <StatusBadge status={quote.status} type="quote" />;
+  const latestProposal = proposals.length > 0 ? proposals[0] : null;
 
   return (
     <DetailPageLayout
       title={quote.quote_no}
       subtitle="Quote"
       status={headerStatus}
-      {...(!isPortal && salesOrder?.payment_status ? { paymentStatus: <StatusBadge status={salesOrder.payment_status} type="payment" /> } : {})}
-      summaryItems={summaryItems}
+      {...({})}
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
       onBack={onBack}
       actions={actionButtons}
+      contentClassName="pt-2 pb-6"
     >
       {refreshError && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center justify-between gap-3">
@@ -504,39 +480,77 @@ export default function QuoteDetail() {
       )}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {isPortal && (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Sales Order</h3>
-              {salesOrder ? (
-                <p className="text-sm text-gray-700">
-                  This quote has a sales order.{' '}
-                  <button
-                    type="button"
-                    onClick={() => router.navigate(`/sales/orders/${salesOrder.id}`)}
-                    className="text-primary hover:underline font-medium"
-                  >
-                    View order {salesOrder.sales_order_no}
-                  </button>
-                </p>
-              ) : (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <div className="h-2 w-2 rounded-full bg-amber-400" />
-                  <span>Your order is being processed. A sales order will be created soon.</span>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Row 1: Quote Details + Financial Summary — same layout as Sales Order Order Details */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Description & Notes</h3>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{quote.description || '—'}</p>
-              {quote.notes && (
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Quote Details</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Customer</dt>
+                  <dd className="font-medium text-gray-900">{customerName ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Contact</dt>
+                  <dd className="text-gray-900">{contactName ?? '—'}</dd>
+                </div>
+                {!isPortal && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Created By</dt>
+                    <dd className="text-gray-900">{createdByName ?? '—'}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-500">Priority</dt>
+                  <dd>
+                    {quote.priority ? (
+                      <div className="flex justify-end">
+                        <StatusBadge status={quote.priority} type="priority" size="sm" />
+                      </div>
+                    ) : '—'}
+                  </dd>
+                </div>
+                {latestProposal && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Proposal</dt>
+                    <dd>
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(`/sales/proposals/${latestProposal.id}`)}
+                        className="text-primary hover:underline font-medium"
+                      >
+                        {latestProposal.proposal_no}
+                      </button>
+                    </dd>
+                  </div>
+                )}
+                {salesOrder && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Sales Order</dt>
+                    <dd>
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(`/sales/orders/${salesOrder.id}`)}
+                        className="text-primary hover:underline font-medium"
+                      >
+                        {salesOrder.sales_order_no}
+                      </button>
+                    </dd>
+                  </div>
+                )}
+              </dl>
+              {(quote.description || quote.notes) && (
                 <div className="mt-3 pt-3 border-t border-gray-100">
-                  <p className="text-xs text-gray-500 font-medium">Notes</p>
-                  <p className="text-sm text-gray-600 whitespace-pre-wrap">{quote.notes}</p>
+                  {quote.description && <p className="text-sm text-gray-700 whitespace-pre-wrap">{quote.description}</p>}
+                  {quote.notes && (
+                    <>
+                      <p className="text-xs text-gray-500 font-medium mt-2">Notes</p>
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap">{quote.notes}</p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
+
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Financial Summary</h3>
               <dl className="space-y-2 text-sm">
@@ -552,47 +566,61 @@ export default function QuoteDetail() {
                   <dt className="text-gray-500">Total</dt>
                   <dd className="font-semibold">{formatCurrencyDisplay(displayTotal)}</dd>
                 </div>
+                {salesOrder && (
+                  <>
+                    <div className="flex justify-between border-t pt-2">
+                      <dt className="text-gray-500">SO Total</dt>
+                      <dd className="font-mono font-semibold">
+                        {formatCurrencyDisplay(salesOrder.total_amount)}
+                      </dd>
+                    </div>
+                  </>
+                )}
               </dl>
             </div>
           </div>
-          {!isPortal && (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Lifecycle</h3>
-              <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
-            </div>
-          )}
+
+          {/* Row 2: Key Dates — same grid style as Sales Order */}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Key Dates</h3>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
                 <dt className="text-gray-500">Created</dt>
-                <dd>{new Date(quote.created_at).toLocaleDateString()}</dd>
+                <dd className="font-medium text-gray-900 mt-0.5">{new Date(quote.created_at).toLocaleDateString()}</dd>
               </div>
-              {quote.expires_at && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Expires</dt>
-                  <dd>{new Date(quote.expires_at).toLocaleDateString()}</dd>
-                </div>
-              )}
-              {!isPortal && quote.approved_at && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Approved</dt>
-                  <dd>{new Date(quote.approved_at).toLocaleDateString()}</dd>
-                </div>
-              )}
-              {!isPortal && quote.converted_at && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Converted</dt>
-                  <dd>{new Date(quote.converted_at).toLocaleDateString()}</dd>
-                </div>
-              )}
-            </dl>
+              <div>
+                <dt className="text-gray-500">Expires</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{quote.expires_at ? new Date(quote.expires_at).toLocaleDateString() : '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Approved</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{!isPortal && quote.approved_at ? new Date(quote.approved_at).toLocaleDateString() : '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Converted</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{!isPortal && quote.converted_at ? new Date(quote.converted_at).toLocaleDateString() : '—'}</dd>
+              </div>
+            </div>
           </div>
+
+          {/* Row 3: Origin & Progress — same as Sales Order */}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
+          </div>
+
+          {isPortal && !salesOrder && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <div className="h-2 w-2 rounded-full bg-amber-400" />
+                <span>Your order is being processed. A sales order will be created soon.</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === 'lines' && (
-        <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
@@ -620,28 +648,28 @@ export default function QuoteDetail() {
                   const dims = [line.width_m, line.height_m].filter((v) => v != null);
                   return (
                     <tr key={line.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-3">{idx + 1}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-4">{idx + 1}</td>
+                      <td className="px-4 py-4">
                         <div>{line.name ?? '—'}</div>
                         {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
                       </td>
-                      <td className="px-4 py-3">{line.product_type ?? '—'}</td>
-                      <td className="px-4 py-3">{dims.length ? `${line.width_m} x ${line.height_m}` : '—'}</td>
-                      <td className="px-4 py-3 text-right">{qty}</td>
-                      <td className="px-4 py-3 text-right font-mono">{formatCurrencyDisplay(unitPrice)}</td>
-                      <td className="px-4 py-3 text-right font-mono">{formatCurrencyDisplay(lineTotal)}</td>
+                      <td className="px-4 py-4">{line.product_type ?? '—'}</td>
+                      <td className="px-4 py-4">{dims.length ? `${line.width_m} x ${line.height_m}` : '—'}</td>
+                      <td className="px-4 py-4 text-right">{qty}</td>
+                      <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(unitPrice)}</td>
+                      <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(lineTotal)}</td>
                     </tr>
                   );
                 })
               )}
             </tbody>
             {lines.length > 0 && (
-              <tfoot className="bg-gray-50 border-t-2">
+              <tfoot className="bg-gray-50 border-t">
                 <tr>
-                  <td colSpan={6} className="px-4 py-3 text-right font-medium text-gray-700">
+                  <td colSpan={6} className="px-4 py-4 text-right font-medium text-gray-700">
                     Total
                   </td>
-                  <td className="px-4 py-3 text-right font-mono font-semibold">
+                  <td className="px-4 py-4 text-right font-mono font-semibold">
                     {formatCurrencyDisplay(
                       lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
                     )}
@@ -654,9 +682,9 @@ export default function QuoteDetail() {
       )}
 
       {activeTab === 'proposals' && (
-        <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
           {proposals.length === 0 ? (
-            <div className="px-4 py-12 text-center text-gray-500">No proposals yet</div>
+            <div className="px-4 py-8 text-center text-gray-500">No proposals yet</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
@@ -676,14 +704,14 @@ export default function QuoteDetail() {
                     className="border-t hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.navigate(`/sales/proposals/${p.id}`)}
                   >
-                    <td className="px-4 py-3 font-medium text-primary">{p.proposal_no}</td>
-                    <td className="px-4 py-3">{p.version_no}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-4 font-medium text-primary">{p.proposal_no}</td>
+                    <td className="px-4 py-4">{p.version_no}</td>
+                    <td className="px-4 py-4">
                       <StatusBadge status={p.status} type="proposal" size="sm" />
                     </td>
-                    <td className="px-4 py-3">{p.sent_at ? new Date(p.sent_at).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-3">{p.valid_until ? new Date(p.valid_until).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-3 text-right font-mono">{formatCurrencyDisplay(p.total_amount)}</td>
+                    <td className="px-4 py-4">{p.sent_at ? new Date(p.sent_at).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-4">{p.valid_until ? new Date(p.valid_until).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(p.total_amount)}</td>
                   </tr>
                 ))}
               </tbody>

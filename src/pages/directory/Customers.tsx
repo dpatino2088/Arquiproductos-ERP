@@ -91,8 +91,6 @@ export default function Customers() {
     isScopeReady: customersScopeReady,
     error: customersError,
     scopeState,
-    customersScopeKey,
-    canShowCustomers,
     hasData,
     isFirstLoad,
     isRefreshing,
@@ -103,18 +101,16 @@ export default function Customers() {
     organizationId: activeOrganizationId ?? null,
     enabled: !!activeOrganizationId,
   });
-  
+
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
-  // Permisos — llamados siempre pero NO afectan layout/loading
   const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
   const { canEditCustomers, canViewQuotes, loading: roleLoading, isSuperAdmin, isAdmin, isOwner } = useCurrentOrgRole();
-  const canEditCustomersFinal = userType === "portal" 
-    ? canEditDirectory 
+  const canEditCustomersFinal = userType === "portal"
+    ? canEditDirectory
     : (isSuperAdmin || isOwner || isAdmin || canEditCustomers);
 
-  // ✅ IDÉNTICO A CONTACTS — solo isFirstLoad para loading global
   const initialLoading = isFirstLoad || orgLoading || !customersScopeReady;
 
   useEffect(() => {
@@ -512,16 +508,7 @@ export default function Customers() {
   const showOverlay = isRefreshing || isSearchSettling || isSwitchingDealer;
   const showEmptyState = !isFirstLoad && !isSearchSettling && !isSwitchingDealer && filteredCustomers.length === 0;
 
-  // Carga progresiva: 1) Header + Table container, 2) Search+Filters, 3) contenido tabla
-  const [showSearchAndFilters, setShowSearchAndFilters] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => setShowSearchAndFilters(true));
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
-
-  // Main render — 1) Header, 2) Search+Filters (tras primer paint), 3) Table container
+  // Main render — 1) Header, 2) Search+Filters (visible from first render; disabled until scope ready), 3) Table container
   return (
     <div className="py-6">
       {/* 1) Header */}
@@ -547,8 +534,7 @@ export default function Customers() {
         </div>
       </div>
 
-      {/* 2) Search and Filters — se muestran después del primer paint (Header + Table container) */}
-      {showSearchAndFilters && (
+      {/* 2) Search and Filters — visible from first render; disabled until scope ready */}
       <div className="mb-4">
         <div className={`bg-white border border-gray-200 py-6 px-6 ${
           showFilters ? 'rounded-t-lg' : 'rounded-lg'
@@ -561,15 +547,18 @@ export default function Customers() {
                 placeholder="Search customers by company name, email, or phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                disabled={!customersScopeReady}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:opacity-60 disabled:cursor-not-allowed"
                 aria-label="Search customers"
               />
             </div>
             
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => setShowFilters(!showFilters)}
-                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm ${
+                disabled={!customersScopeReady}
+                className={`flex items-center gap-2 px-2 py-1 border border-gray-300 rounded transition-colors text-sm disabled:opacity-60 disabled:cursor-not-allowed ${
                   showFilters ? 'bg-gray-300 text-black' : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
               >
@@ -798,7 +787,6 @@ export default function Customers() {
           </div>
         )}
       </div>
-      )}
 
       {/* 3) Table container — visible desde el primer paint */}
       <div className="relative min-h-[420px]">

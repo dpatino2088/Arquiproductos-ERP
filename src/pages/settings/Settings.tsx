@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { router } from '../../lib/router';
 import { usePreviousPage } from '../../hooks/usePreviousPage';
-import { useCompanyStore } from '../../stores/company-store';
+import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import {
   Building,
   Users,
@@ -15,11 +17,13 @@ import OrganizationUser from './OrganizationUser';
 
 export default function Settings() {
   const { getPreviousPage } = usePreviousPage();
-  const { currentCompany, currentCompanyUser } = useCompanyStore();
+  const { role, isSuperAdmin, isAdmin } = useCurrentOrgRole();
+  const { activeOrganization } = useOrganizationContext();
+  const { activeDealer } = useActiveDealer();
   const [activeTab, setActiveTab] = useState<string>('organization-user');
 
-  // Check if user is Owner/Admin
-  const isOwnerOrAdmin = currentCompanyUser?.role === 'super_admin' || currentCompanyUser?.role === 'admin';
+  // Owner/Admin: org superadmin or admin; portal: dealer_manager can see Members
+  const isOwnerOrAdmin = isSuperAdmin || isAdmin || role === 'superadmin' || role === 'admin';
 
   // Handle ESC key to close settings and return to previous page
   useEffect(() => {
@@ -102,7 +106,9 @@ export default function Settings() {
 
           <div className="flex items-center gap-2">
             <Building className="text-gray-900" style={{ width: '18px', height: '18px' }} />
-            <span className="text-sm font-medium text-gray-900">{currentCompany?.name || 'No Company'}</span>
+            <span className="text-sm font-medium text-gray-900">
+            {activeDealer?.dealer_name ? `${activeOrganization?.name ?? ''} · ${activeDealer.dealer_name}` : activeOrganization?.name ?? 'Settings'}
+          </span>
           </div>
 
           <div className="ml-auto">

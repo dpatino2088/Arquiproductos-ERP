@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { useSalesOrders, type SalesOrder } from '../../hooks/useSalesOrders';
 import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
@@ -10,25 +11,10 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { Search, ShoppingBag, Eye, Trash2, RefreshCw, Filter, Archive, RotateCcw } from 'lucide-react';
 import { router } from '../../lib/router';
 
-interface SalesOrderRow {
-  id: string;
-  sales_order_no: string;
-  status: string;
-  tracking_status?: string;
-  payment_status: string;
-  priority: string;
-  dealer_id?: string;
-  customer_id?: string;
-  quote_id?: string | null;
-  total_amount?: number;
-  amount_paid?: number;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-  archived?: boolean;
+type SalesOrderRow = SalesOrder & {
   DirectoryCustomers?: { customer_name: string } | null;
   Dealers?: { dealer_name: string; dealer_no?: string | null } | null;
-}
+};
 
 const STATUS_VALUES = ['all', 'draft', 'confirmed', 'on_hold', 'delivered', 'closed', 'cancelled'] as const;
 const STATUS_LABELS: Record<string, string> = {
@@ -41,15 +27,18 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
+// Homogeneous center alignment and spacing for table columns (header and body match)
+const TH_CENTER = 'text-center py-3 px-4 font-medium text-gray-700 text-xs';
+const TD_CENTER = 'text-center py-4 px-4';
+
 export default function SalesOrdersPage() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isPortal, isInternal } = useAccessContext();
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
   const addNotification = useUIStore((s) => s.addNotification);
-  const [orders, setOrders] = useState<SalesOrderRow[]>([]);
+  const { salesOrders, loading, error, refetch } = useSalesOrders();
+  const orders: SalesOrderRow[] = (salesOrders ?? []) as SalesOrderRow[];
   const [moCountBySoId, setMoCountBySoId] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -57,57 +46,26 @@ export default function SalesOrdersPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
 
-  const load = useCallback(async () => {
-    if (!activeOrganizationId) return;
-      try {
-        setLoading(true);
-        setError(null);
-        const { data, error: err } = await supabase
-          .from('SalesOrders')
-          .select(`
-            id, sales_order_no, dealer_id, status, payment_status, priority, quote_id, customer_id,
-            total_amount, amount_paid, notes, created_at, updated_at, archived,
-            DirectoryCustomers:customer_id (customer_name),
-            Dealers:dealer_id (dealer_name, dealer_no)
-          `)
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('created_at', { ascending: false });
-        if (err) throw err;
-        const orderList = data || [];
-        setOrders(orderList);
-
-        if (orderList.length === 0) {
-          setMoCountBySoId({});
-          return;
-        }
-        const soIds = orderList.map((o: SalesOrderRow) => o.id);
-        const { data: moData } = await supabase
-          .from('ManufacturingOrders')
-          .select('sales_order_id')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .in('sales_order_id', soIds);
+  useEffect(() => {
+    if (!activeOrganizationId || !orders.length) {
+      if (!orders.length) setMoCountBySoId({});
+      return;
+    }
+    const soIds = orders.map((o) => o.id);
+    supabase
+      .from('ManufacturingOrders')
+      .select('sales_order_id')
+      .eq('organization_id', activeOrganizationId)
+      .eq('deleted', false)
+      .in('sales_order_id', soIds)
+      .then(({ data }: { data: { sales_order_id: string }[] | null }) => {
         const countBySo: Record<string, number> = {};
-        (moData || []).forEach((row: { sales_order_id: string }) => {
+        (data || []).forEach((row) => {
           countBySo[row.sales_order_id] = (countBySo[row.sales_order_id] || 0) + 1;
         });
         setMoCountBySoId(countBySo);
-      } catch (e: any) {
-        setError(e?.message || 'Error loading sales orders');
-      } finally {
-        setLoading(false);
-      }
-  }, [activeOrganizationId]);
-
-  useEffect(() => {
-    if (!activeOrganizationId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    load();
-  }, [activeOrganizationId, load]);
+      });
+  }, [activeOrganizationId, orders]);
 
   const handleDelete = useCallback(
     async (order: SalesOrderRow, e: React.MouseEvent) => {
@@ -127,16 +85,15 @@ export default function SalesOrdersPage() {
           .update({ deleted: true })
           .eq('id', order.id);
         if (err) throw err;
-        setOrders((prev) => prev.filter((o) => o.id !== order.id));
         addNotification({ type: 'success', title: 'Deleted', message: 'Order deleted successfully' });
-        await load();
+        await refetch();
       } catch (e: any) {
         addNotification({ type: 'error', title: 'Error', message: e?.message || 'Could not delete order' });
       } finally {
         setDialogLoading(false);
       }
     },
-    [showConfirm, setDialogLoading, addNotification, load]
+    [showConfirm, setDialogLoading, addNotification, refetch]
   );
 
   const handleArchive = useCallback(
@@ -157,16 +114,15 @@ export default function SalesOrdersPage() {
           .update({ archived: true })
           .eq('id', order.id);
         if (err) throw err;
-        setOrders((prev) => prev.filter((o) => o.id !== order.id));
         addNotification({ type: 'success', title: 'Archived', message: 'Order archived successfully' });
-        await load();
+        await refetch();
       } catch (e: any) {
         addNotification({ type: 'error', title: 'Error', message: e?.message || 'Could not archive order' });
       } finally {
         setDialogLoading(false);
       }
     },
-    [showConfirm, setDialogLoading, addNotification, load]
+    [showConfirm, setDialogLoading, addNotification, refetch]
   );
 
   const handleRestore = useCallback(
@@ -187,16 +143,15 @@ export default function SalesOrdersPage() {
           .update({ archived: false })
           .eq('id', order.id);
         if (err) throw err;
-        setOrders((prev) => prev.filter((o) => o.id !== order.id));
         addNotification({ type: 'success', title: 'Restored', message: 'Order restored successfully' });
-        await load();
+        await refetch();
       } catch (e: any) {
         addNotification({ type: 'error', title: 'Error', message: e?.message || 'Could not restore order' });
       } finally {
         setDialogLoading(false);
       }
     },
-    [showConfirm, setDialogLoading, addNotification, load]
+    [showConfirm, setDialogLoading, addNotification, refetch]
   );
 
   const nonArchivedOrders = useMemo(() => orders.filter((o) => !o.archived), [orders]);
@@ -311,7 +266,7 @@ export default function SalesOrdersPage() {
               )}
             </button>
             <button
-              onClick={() => load()}
+              onClick={() => refetch()}
               className="flex items-center justify-center p-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors"
               title="Refresh"
             >
@@ -366,23 +321,20 @@ export default function SalesOrdersPage() {
           <div className="table-fit-wrapper">
             <table className="table-fit w-full text-sm">
               <colgroup>
-                <col style={{ width: '15%' }} />
+                <col style={{ width: '11%' }} />
                 {isInternal ? (
                   <>
-                    <col style={{ width: '11%' }} />
+                    <col style={{ width: '10%' }} />
                     <col style={{ width: '7%' }} />
                   </>
                 ) : (
-                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '11%' }} />
                 )}
                 <col style={{ width: '8%' }} />
+                {!isPortal && <col style={{ width: '6%' }} />}
+                {!isPortal && <col style={{ width: '6%' }} />}
                 <col style={{ width: '8%' }} />
-                {!isPortal && <col style={{ width: '6%' }} />}
-                {!isPortal && <col style={{ width: '6%' }} />}
-                {!isPortal && <col style={{ width: '6%' }} />}
-                {!isPortal && <col style={{ width: '4%' }} />}
-                <col style={{ width: '9%' }} />
-                <col style={{ width: '9%' }} />
+                <col style={{ width: '8%' }} />
                 <col style={{ width: '9%' }} />
               </colgroup>
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -390,20 +342,17 @@ export default function SalesOrdersPage() {
                   <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">SO #</th>
                   {isInternal ? (
                     <>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Dealer</th>
-                      <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Dealer No</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Dealer</th>
+                      <th className={TH_CENTER}>Dealer No</th>
                     </>
                   ) : (
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Customer</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Customer</th>
                   )}
-                  <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Status</th>
-                  <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Payment</th>
-                  {!isPortal && <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Priority</th>}
-                  {!isPortal && <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Paid</th>}
-                  {!isPortal && <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Balance</th>}
-                  {!isPortal && <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">MOs</th>}
-                  <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Date</th>
-                  <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Total</th>
+                  <th className={TH_CENTER}>Status</th>
+                  {!isPortal && <th className={TH_CENTER}>Priority</th>}
+                  {!isPortal && <th className={TH_CENTER}>MOs</th>}
+                  <th className={TH_CENTER}>Date</th>
+                  <th className={TH_CENTER}>Total</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
                 </tr>
               </thead>
@@ -411,7 +360,7 @@ export default function SalesOrdersPage() {
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={7 + (isInternal ? 2 : 1) + (!isPortal ? 4 : 0)}
+                      colSpan={5 + (isInternal ? 2 : 1) + (!isPortal ? 2 : 0)}
                       className="py-12 px-4 text-center"
                     >
                       <ShoppingBag className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -421,69 +370,61 @@ export default function SalesOrdersPage() {
                   </tr>
                 ) : (
                   paginatedOrders.map((order) => {
-                  const balance = (order.total_amount || 0) - (order.amount_paid || 0);
                   return (
                     <tr
                       key={order.id}
                       className="hover:bg-gray-50"
                     >
-                      <td className="py-4 px-4 text-gray-900 text-sm font-medium text-left">
+                      <td className="py-4 px-4 text-gray-900 text-sm font-normal text-left">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             router.navigate(`/sales/orders/${order.id}`);
                           }}
-                          className="text-primary hover:underline"
+                          className="grid text-left text-primary hover:underline"
                         >
                           {order.sales_order_no}
                         </button>
                       </td>
                       {isInternal ? (
                         <>
-                          <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                          <td className="py-4 px-4 text-gray-700 text-sm text-left">
                             <span className="block truncate">{order.Dealers?.dealer_name ?? '—'}</span>
                           </td>
-                          <td className="py-4 px-4 text-gray-600 text-sm text-center font-mono">
+                          <td className={`${TD_CENTER} text-gray-600 text-sm font-mono`}>
                             {order.Dealers?.dealer_no ?? '—'}
                           </td>
                         </>
                       ) : (
-                        <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                        <td className="py-4 px-4 text-gray-700 text-sm text-left">
                           <span className="block truncate">{order.DirectoryCustomers?.customer_name ?? '—'}</span>
                         </td>
                       )}
-                      <td className="py-4 px-4 text-center">
-                        <StatusBadge status={order.status} type="salesOrder" size="sm" />
-                      </td>
-                      <td className="py-4 px-4 text-center">
-                        <StatusBadge status={order.payment_status || 'pending'} type="payment" size="sm" />
+                      <td className={TD_CENTER}>
+                        <div className="flex justify-center">
+                          <StatusBadge status={order.status ?? 'draft'} type="salesOrder" size="sm" />
+                        </div>
                       </td>
                       {!isPortal && (
-                        <td className="py-4 px-4 text-center">
-                          {order.priority && order.priority !== 'normal' ? (
-                            <StatusBadge status={order.priority} type="priority" size="sm" />
-                          ) : (
-                            '—'
-                          )}
+                        <td className={TD_CENTER}>
+                          <div className="flex justify-center">
+                            {order.priority && order.priority !== 'normal' ? (
+                              <StatusBadge status={order.priority} type="priority" size="sm" />
+                            ) : (
+                              '—'
+                            )}
+                          </div>
                         </td>
                       )}
                       {!isPortal && (
-                        <td className="py-4 px-4 text-gray-600 text-sm text-center font-mono">
-                          {formatCurrency(order.amount_paid)}
-                        </td>
-                      )}
-                      {!isPortal && (
-                        <td className="py-4 px-4 text-gray-600 text-sm text-center font-mono">{formatCurrency(balance)}</td>
-                      )}
-                      {!isPortal && (
-                        <td className="py-4 px-4 text-gray-700 text-sm text-center">
+                        <td className={`${TD_CENTER} text-gray-700 text-sm whitespace-nowrap`}>
                           {(moCountBySoId[order.id] ?? 0) === 0 ? '—' : moCountBySoId[order.id] === 1 ? '1 MO' : `${moCountBySoId[order.id]} MOs`}
                         </td>
                       )}
-                      <td className="py-4 px-4 text-gray-600 text-sm text-center">
+                      <td className={`${TD_CENTER} text-gray-600 text-sm`}>
                         {new Date(order.created_at).toLocaleDateString()}
                       </td>
-                      <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
+                      <td className={`${TD_CENTER} text-gray-900 text-sm font-medium`}>
                         {formatCurrency(order.total_amount)}
                       </td>
                       <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -551,7 +492,7 @@ export default function SalesOrdersPage() {
                   setItemsPerPage(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="px-3 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                className="px-3 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               >
                 <option value={10}>10</option>
                 <option value={25}>25</option>
@@ -567,7 +508,7 @@ export default function SalesOrdersPage() {
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 border border-gray-200 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                className="px-3 py-1 border border-gray-200 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
               >
                 Previous
               </button>
@@ -577,7 +518,7 @@ export default function SalesOrdersPage() {
               <button
                 onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
                 disabled={currentPage >= totalPages}
-                className="px-3 py-1 border border-gray-200 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                className="px-3 py-1 border border-gray-200 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
               >
                 Next
               </button>

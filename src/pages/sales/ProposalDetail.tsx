@@ -45,6 +45,8 @@ import { resolveDefaultTermsTemplateId, fetchTermsTemplateById } from '../../lib
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useProductTypes } from '../../hooks/useProductTypes';
+import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 
 const PROPOSAL_STATUS_OPTIONS: { value: Proposal['status']; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -86,6 +88,14 @@ function SortableRow({
 
 function formatCurrency(amount: number, currency = 'USD') {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(amount || 0);
+}
+
+/** Default "Valid until" = created_at + 30 days (YYYY-MM-DD). Used when proposal.valid_until is null. */
+function defaultValidUntilFromCreatedAt(createdAt: string): string {
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + 30);
+  return d.toISOString().slice(0, 10);
 }
 
 /** Compute base amount (line total) for a quote line: unit_msrp * quantity when both exist, else msrp as line total */
@@ -187,6 +197,16 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const { activeOrganizationId } = useOrganizationContext();
   const { user: authUser } = useAuth();
   const { userType, portalRole, loading: accessLoading } = useAccessContext();
+  const { productTypes } = useProductTypes();
+  const productTypeNameByCodeOrId = useMemo(() => {
+    const byId = new Map<string, string>();
+    const byCode = new Map<string, string>();
+    productTypes.forEach((pt) => {
+      if (pt.name) byId.set(pt.id, pt.name);
+      if (pt.code) byCode.set(pt.code.trim().toLowerCase(), pt.name || pt.code);
+    });
+    return { byId, byCode };
+  }, [productTypes]);
   const stateResolved = !loading && !!proposal && !accessLoading;
 
   const refetchTimeline = useCallback(() => {
@@ -251,7 +271,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       notes: proposal.notes ?? '',
       terms_title: proposal.terms_title ?? '',
       terms_content: proposal.terms_content ?? '',
-      valid_until: proposal.valid_until ? proposal.valid_until.slice(0, 10) : '',
+      valid_until: proposal.valid_until ? proposal.valid_until.slice(0, 10) : defaultValidUntilFromCreatedAt(proposal.created_at),
       global_discount_pct: proposal.global_discount_pct != null ? String(proposal.global_discount_pct) : '0',
       global_fee_amount: proposal.global_fee_amount != null ? String(proposal.global_fee_amount) : '0',
       global_installation_discount_pct: proposal.global_installation_discount_pct != null ? String(proposal.global_installation_discount_pct) : '0',
@@ -895,18 +915,30 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             ? formatDimensionsDisplayCompact(dimensionsSource as Parameters<typeof formatDimensionsDisplayCompact>[0]).replace(/\s*mm\s*$/i, '').trim()
             : null;
         const dimensions = dimensionsSimple ?? (dimensionsFormatted && dimensionsFormatted !== '—' ? dimensionsFormatted : null);
+        const meas = (snapFrozen as { measurements?: { panel_count?: number; panels?: unknown[] } } | null)?.measurements ?? (snap as { measurements?: { panel_count?: number; panels?: unknown[] }; panels?: unknown[] } | undefined)?.measurements;
+        const panelsArray = (snap as { panels?: unknown[] } | undefined)?.panels ?? meas?.panels;
+        const panel_count =
+          (typeof meas?.panel_count === 'number' && meas.panel_count >= 1 ? meas.panel_count : null) ??
+          (Array.isArray(panelsArray) && panelsArray.length >= 1 ? panelsArray.length : null) ??
+          1;
         const qty = snapFrozen?.qty ?? qlInfo?.quantity ?? 1;
         const unitPrice = qty > 0 ? lineTotal / qty : 0;
+        const productTypeRaw = snapFrozen?.product_type ?? qlInfo?.product_type ?? null;
+        const productTypeName =
+          (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ??
+          (productTypeRaw && productTypeNameByCodeOrId.byCode.get(productTypeRaw.trim().toLowerCase())) ??
+          productTypeRaw;
         return {
           area: snapFrozen?.area ?? qlInfo?.area ?? null,
           position: snapFrozen?.position ?? qlInfo?.position ?? null,
-          product_type: snapFrozen?.product_type ?? qlInfo?.product_type ?? null,
+          product_type: productTypeName ?? null,
           collection_name: snapFrozen?.collection_name ?? qlInfo?.collection_name ?? null,
           variant_name: snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null,
           drive_type: snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null,
           description: snapFrozen?.name || snapFrozen?.sku || qlInfo?.name || qlInfo?.sku || null,
           sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
           dimensions: dimensions ?? null,
+          panel_count,
           install_included: !!(installationAddon && (Number(installationAddon.sale_amount) || 0) > 1),
           accessories: formatAccessoriesForPDF(
             (snapFrozen as { accessories?: unknown } | null)?.accessories ??
@@ -917,6 +949,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           line_total: lineTotal,
         };
       });
+
+      const creatorId = proposal.created_by_user_id ?? null;
+      const sellerName =
+        creatorId
+          ? (await getAppUsersDisplayNames([creatorId])).get(creatorId) ?? 'System'
+          : 'System';
 
       const doc = generateProposalPDF(
         {
@@ -951,8 +989,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           logoPngBase64,
           logoWidthPx,
           logoHeightPx,
+          sellerName,
           customerAddress: customer?.address ?? undefined,
-          customerEmail: customer?.customer_email ?? undefined,
+          customerEmail: contact?.contact_email ?? customer?.customer_email ?? undefined,
           customerPhone: customer?.customer_phone ?? undefined,
           overrideTotals: {
             totalProduct: totals.totalProduct ?? 0,
@@ -968,8 +1007,14 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         }
       );
 
-      const suffix = variant === 'internal' ? 'Internal' : 'Customer';
-      const fileName = `Proposal_${proposal.proposal_no || proposal.id.slice(0, 8)}_${suffix}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const proposalNoRaw = proposal.proposal_no || proposal.id.slice(0, 8);
+      const proposalNo = String(proposalNoRaw).replace(/[.\-]/g, '_');
+      const dateYmd = proposal.created_at ? new Date(proposal.created_at).toISOString().slice(0, 10).replace(/-/g, '') : new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const customerPart = (customer?.customer_name ?? 'Customer')
+        .replace(/\s+/g, '_')
+        .replace(/[\\/:*?"<>|]/g, '')
+        .slice(0, 80) || 'Customer';
+      const fileName = `${proposalNo}_${dateYmd}_${customerPart}.PDF`;
       return { doc, fileName };
     },
     [proposal, proposalId, displayLines, quoteLinesMap, configuredProductsMap, customer, contact, totals, formatAccessoriesForPDF, dealerLogoUrl, headerForm]
@@ -987,7 +1032,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           useUIStore.getState().addNotification({
             type: 'success',
             title: 'Preview',
-            message: 'PDF opened in new tab. You can download from the browser if needed.',
+            message: `PDF abierto en nueva pestaña (${result.fileName}). Descárgalo desde el botón de descarga del navegador cuando quieras.`,
           });
         }
       } catch (err: any) {
@@ -1119,7 +1164,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    { id: 'lines', label: 'Lines', count: displayLines.length },
     { id: 'timeline', label: 'Timeline' },
   ];
 
@@ -1138,7 +1182,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     { label: 'Contact', value: contactDisplay || '—' },
     { label: 'Valid Until', value: proposal.valid_until ? new Date(proposal.valid_until).toLocaleDateString() : '—' },
     { label: 'Version', value: proposal.version_no ?? '—' },
-    { label: 'Total', value: formatCurrency(proposal.total_amount ?? totals.total ?? 0, currency) },
   ];
 
   return (
@@ -1275,112 +1318,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         </div>
       </div>
 
-          {/* Notes (left) + Summary (right) - in Overview */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-            <div className="lg:col-span-2 min-w-0 bg-white border border-gray-200 rounded-lg p-6">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Notes</h3>
-              <textarea
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm min-h-[120px]"
-                rows={4}
-                value={headerForm.notes}
-                onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
-                disabled={contentReadOnly}
-                placeholder="Additional notes or comments..."
-              />
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg p-6 w-full lg:col-span-1 shrink-0 self-start">
-              <div className="flex items-center gap-2 pb-3 mb-3 border-b border-gray-100">
-                <input
-                  type="checkbox"
-                  checked={headerForm.exempt_tax}
-                  onChange={(e) => { setHeaderForm((f) => ({ ...f, exempt_tax: e.target.checked })); setHeaderDirty(true); }}
-                  disabled={contentReadOnly}
-                />
-                <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
-              </div>
-              <div className="flex justify-between py-1 text-sm">
-                <span className="text-gray-600">Total Product</span>
-                <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
-              </div>
-              {(totals.discountAmount ?? 0) > 0 && (
-                <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
-                  <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
-                </div>
-              )}
-              {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
-                <>
-                  {((totals.laborDiscountAmount ?? 0) > 0 || (totals.laborFeeAmount ?? 0) > 0) ? (
-                    <>
-                      <div className="flex justify-between py-1 text-sm">
-                        <span className="text-gray-600">Installation</span>
-                        <span>{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
-                      </div>
-                      {(totals.laborDiscountAmount ?? 0) > 0 && (
-                        <div className="flex justify-between py-1 text-sm">
-                          <span className="text-gray-600">Labor discount {totals.instDiscountPct != null ? `(${totals.instDiscountPct}%)` : ''}</span>
-                          <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
-                        </div>
-                      )}
-                      {(totals.laborFeeAmount ?? 0) > 0 && (
-                        <div className="flex justify-between py-1 text-sm">
-                          <span className="text-gray-600">Labor fee {totals.instFeePct != null ? `(${totals.instFeePct}%)` : ''}</span>
-                          <span>{formatCurrency(totals.laborFeeAmount ?? 0, currency)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between py-1 text-sm font-medium">
-                        <span className="text-gray-700">Installation (net)</span>
-                        <span>{formatCurrency(totals.installationNet ?? 0, currency)}</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex justify-between py-1 text-sm">
-                      <span className="text-gray-600">Installation</span>
-                      <span>{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
-                    </div>
-                  )}
-                </>
-              )}
-              <div className="flex justify-between py-1 text-sm">
-                <span className="text-gray-600">Subtotal</span>
-                <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
-              </div>
-              {!headerForm.exempt_tax && (
-                <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Tax</span>
-                  <span>{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
-                </div>
-              )}
-              <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
-                <span>Total {currency ? `(${currency})` : ''}</span>
-                <span>{formatCurrency(totals.total, currency)}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Terms & Conditions - in Overview */}
-          <div>
-            <DocumentTermsSection
-              docType="proposal"
-              orgId={activeOrganizationId}
-              dealerId={proposal?.dealer_id ?? null}
-              termsTitle={headerForm.terms_title}
-              termsContent={headerForm.terms_content}
-              onTermsChange={(title, content) => {
-                setHeaderForm((f) => ({ ...f, terms_title: title, terms_content: content }));
-                setHeaderDirty(true);
-              }}
-              readOnly={contentReadOnly}
-              hideSaveAsTemplate
-              hideTitleInput
-            />
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'lines' && (
-        <div className="space-y-6 w-full max-w-full">
-      {/* Lines: misma tabla y bordes que listas */}
+          {/* Lines - above Notes */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
           <h2 className="text-xl font-semibold text-gray-900">Lines</h2>
@@ -1428,9 +1366,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10" title="Drag to reorder"></th>
                 <th className="text-center py-3 px-1 font-medium text-gray-700 text-xs w-11 min-w-[44px]" aria-label="Expand row"></th>
                 <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs w-12">#</th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs w-24 [word-break:keep-all]">Area</th>
-                <th className="text-center py-3 pl-[21px] pr-4 font-medium text-gray-700 text-xs w-24 min-w-[6rem]">Position</th>
-                <th className="text-left py-3 pl-[29px] pr-3 font-medium text-gray-700 text-xs min-w-[447px]">Description</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs min-w-[8rem]">Area</th>
+                <th className="text-center py-3 pl-0.5 pr-4 font-medium text-gray-700 text-xs w-24 min-w-[6rem] -ml-5">Position</th>
+                <th className="text-left py-3 pl-[29px] pr-3 font-medium text-gray-700 text-xs min-w-[320px]">Description</th>
                 <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs min-w-[120px]">Product type</th>
                 <th className="text-center py-3 px-1.5 font-medium text-gray-700 text-xs min-w-[64px] w-[64px]">Qty</th>
                 <th className="w-[16px] min-w-[16px] py-3" aria-hidden></th>
@@ -1450,9 +1388,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     : (qlInfo ? getQuoteLineBase(qlInfo) : 0)
                   : 0;
                 const hasBasePrice = line.line_type === 'from_quote' && qlInfo && baseAmount > 0;
-                const dims =
-                  qlInfo && (qlInfo.width_m != null || qlInfo.height_m != null)
-                    ? `${qlInfo.width_m ?? '—'} × ${qlInfo.height_m ?? '—'} m`
+                const snap = line.quote_line_snapshot as { width_m?: number | null; height_m?: number | null; name?: string | null; sku?: string | null } | null;
+                const wM = snap?.width_m ?? qlInfo?.width_m ?? null;
+                const hM = snap?.height_m ?? qlInfo?.height_m ?? null;
+                const dimsMm =
+                  wM != null && hM != null
+                    ? `${Math.round(Number(wM) * 1000)} x ${Math.round(Number(hM) * 1000)}`
                     : null;
                 const isCustomInvalid =
                   line.line_type === 'custom' &&
@@ -1498,31 +1439,35 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       </button>
                     </td>
                     <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12 align-middle">{index + 1}</td>
-                    <td className="py-4 px-4 text-gray-700 text-sm w-24 align-middle [word-break:keep-all]">
+                    <td className="py-4 px-4 text-gray-700 text-sm min-w-[8rem] align-middle whitespace-nowrap">
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { area?: string } | null)?.area ?? qlInfo?.area ?? '—'
                         : (line.area ?? '—')}
                     </td>
-                    <td className="py-4 pl-[21px] pr-4 text-center text-gray-700 text-sm w-24 min-w-[6rem] align-middle">
+                    <td className="py-4 pl-0.5 pr-4 text-center text-gray-700 text-sm w-24 min-w-[6rem] align-middle -ml-5">
                       {line.line_type === 'from_quote'
                         ? (line.quote_line_snapshot as { position?: string } | null)?.position ?? qlInfo?.position ?? '—'
                         : (line.position ?? '—')}
                     </td>
-                    <td className="py-4 pl-[30px] pr-5 align-middle min-w-[447px] max-w-[447px]">
+                    <td className="py-4 pl-[30px] pr-5 align-middle min-w-[320px] max-w-[520px]">
                       {line.line_type === 'from_quote' && qlInfo ? (
                           <div className="min-h-[3.5rem] flex flex-col justify-center gap-0.5 flex-1 min-w-0">
-                            <div className="line-clamp-3 break-words flex flex-col gap-0.5">
-                              <span className="font-medium text-gray-900">{qlInfo.name || qlInfo.sku || '—'}</span>
-                              {qlInfo.sku && <span className="text-gray-500 text-xs">({qlInfo.sku})</span>}
-                              {dims && <span className="text-xs text-gray-500">{dims}</span>}
-                            </div>
-                            {installationAddon && (Number(installationAddon.sale_amount) || 0) > 1 ? (
-                              <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green w-fit">
-                                Install Included
+                            <div className="break-words">
+                              <span className="font-medium text-gray-900">
+                                {snap?.name ?? qlInfo.name ?? qlInfo.sku ?? '—'}
                               </span>
-                            ) : (
-                              <span className="h-5 mt-1 w-fit" aria-hidden />
-                            )}
+                              {(snap?.sku ?? qlInfo.sku) && (snap?.sku ?? qlInfo.sku) !== (snap?.name ?? qlInfo.name ?? qlInfo.sku) && (
+                                <span className="text-gray-500 text-xs ml-0.5">({snap?.sku ?? qlInfo.sku})</span>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-0.5 mt-0.5">
+                              {dimsMm && <span className="text-xs text-gray-500">{dimsMm}</span>}
+                              {installationAddon && (Number(installationAddon.sale_amount) || 0) > 1 ? (
+                                <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
+                                  Install Included
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         ) : (
                           <div className="flex flex-col gap-0.5 flex-1 min-w-0">
@@ -1535,7 +1480,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     </td>
                     <td className="py-4 px-2 text-gray-700 text-sm align-middle min-w-[120px]">
                       {line.line_type === 'from_quote'
-                        ? (line.quote_line_snapshot as { product_type?: string } | null)?.product_type ?? qlInfo?.product_type ?? '—'
+                        ? (() => {
+                            const ptRaw = (line.quote_line_snapshot as { product_type?: string } | null)?.product_type ?? qlInfo?.product_type ?? null;
+                            const ptName = (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ?? (ptRaw && productTypeNameByCodeOrId.byCode.get(ptRaw.trim().toLowerCase())) ?? ptRaw;
+                            return ptName ?? '—';
+                          })()
                         : (
                           <span className="text-gray-700">
                             {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
@@ -1690,7 +1639,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     <tr key={`${line.id}-addons`} className="bg-gray-50/80">
                       <td colSpan={11} className="py-4 px-6">
                         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-                          {/* Installation add-on */}
                           <div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-2">Installation</h4>
                             <div className="flex flex-wrap items-center gap-4">
@@ -1818,6 +1766,107 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           <span>Some lines have no base price. Check QuoteLine MSRP / unit MSRP on the Quote.</span>
         </div>
       )}
+
+          {/* Notes (left) + Summary (right) - in Overview */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+            <div className="lg:col-span-2 min-w-0 bg-white border border-gray-200 rounded-lg p-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Notes</h3>
+              <textarea
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm min-h-[120px]"
+                rows={4}
+                value={headerForm.notes}
+                onChange={(e) => { setHeaderForm((f) => ({ ...f, notes: e.target.value })); setHeaderDirty(true); }}
+                disabled={contentReadOnly}
+                placeholder="Additional notes or comments..."
+              />
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-6 w-full lg:col-span-1 shrink-0 self-start">
+              <div className="flex items-center gap-2 pb-3 mb-3 border-b border-gray-100">
+                <input
+                  type="checkbox"
+                  checked={headerForm.exempt_tax}
+                  onChange={(e) => { setHeaderForm((f) => ({ ...f, exempt_tax: e.target.checked })); setHeaderDirty(true); }}
+                  disabled={contentReadOnly}
+                />
+                <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
+              </div>
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-600">Total Product</span>
+                <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
+              </div>
+              {(totals.discountAmount ?? 0) > 0 && (
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
+                  <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+                </div>
+              )}
+              {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
+                <>
+                  {((totals.laborDiscountAmount ?? 0) > 0 || (totals.laborFeeAmount ?? 0) > 0) ? (
+                    <>
+                      <div className="flex justify-between py-1 text-sm">
+                        <span className="text-gray-600">Installation</span>
+                        <span>{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
+                      </div>
+                      {(totals.laborDiscountAmount ?? 0) > 0 && (
+                        <div className="flex justify-between py-1 text-sm">
+                          <span className="text-gray-600">Labor discount {totals.instDiscountPct != null ? `(${totals.instDiscountPct}%)` : ''}</span>
+                          <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
+                        </div>
+                      )}
+                      {(totals.laborFeeAmount ?? 0) > 0 && (
+                        <div className="flex justify-between py-1 text-sm">
+                          <span className="text-gray-600">Labor fee {totals.instFeePct != null ? `(${totals.instFeePct}%)` : ''}</span>
+                          <span>{formatCurrency(totals.laborFeeAmount ?? 0, currency)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between py-1 text-sm font-medium">
+                        <span className="text-gray-700">Installation (net)</span>
+                        <span>{formatCurrency(totals.installationNet ?? 0, currency)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex justify-between py-1 text-sm">
+                      <span className="text-gray-600">Installation</span>
+                      <span>{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-600">Subtotal</span>
+                <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
+              </div>
+              {!headerForm.exempt_tax && (
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Tax</span>
+                  <span>{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
+                <span>Total {currency ? `(${currency})` : ''}</span>
+                <span>{formatCurrency(totals.total, currency)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Terms & Conditions - in Overview */}
+          <div>
+            <DocumentTermsSection
+              docType="proposal"
+              orgId={activeOrganizationId}
+              dealerId={proposal?.dealer_id ?? null}
+              termsTitle={headerForm.terms_title}
+              termsContent={headerForm.terms_content}
+              onTermsChange={(title, content) => {
+                setHeaderForm((f) => ({ ...f, terms_title: title, terms_content: content }));
+                setHeaderDirty(true);
+              }}
+              readOnly={contentReadOnly}
+              hideSaveAsTemplate
+              hideTitleInput
+            />
+          </div>
         </div>
       )}
 

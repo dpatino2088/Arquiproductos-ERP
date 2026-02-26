@@ -51,10 +51,10 @@ All border-radius is `0` (square corners) via Tailwind config. Use `rounded-lg` 
 
 ## Spacing
 
-- **Page padding**: `py-6 px-6` (content area)
+- **Page padding**: `py-6 px-6` (content area). Wrap list content in `max-w-6xl mx-auto` so container width matches detail pages (DetailPageLayout uses `max-w-6xl` for header, tabs, and content).
 - **Card padding**: `p-6` (standard), `p-4` (compact), `p-3` (tight)
-- **Table header cells**: `py-3 px-6`
-- **Table body cells**: `py-4 px-6`
+- **Table header cells**: `py-3 px-4`
+- **Table body cells**: `py-4 px-4`
 - **Gap between items**: `gap-3` (buttons), `gap-2` (icons), `gap-1` (tight actions)
 - **Margin below header**: `mb-6`
 - **Margin below search/filter bar**: `mb-4`
@@ -106,6 +106,7 @@ All border-radius is `0` (square corners) via Tailwind config. Use `rounded-lg` 
 
 - **First column**: The content of the **first column** (entity name / primary identifier: e.g. Contact Name, Customer Name, Proposal / Quote) must be **pegado al margen izquierdo** — use `text-left` for both `<th>` and `<td>`. Do not center the first column.
 - **Other columns**: Use `text-center` for headers and cells so content is centered in the column. Use `<colgroup>` with explicit widths for homogeneous spacing (e.g. Directory, Proposals).
+- **Labels/badges in center columns**: When a center-aligned cell contains a **label or badge** (e.g. `StatusBadge`, pill badges, or any `inline-flex` component), wrap the content in `<div className="flex justify-center">`. `text-center` alone does not reliably center inline-flex content; the wrapper ensures the label is visually centered in the cell and aligned with the column header. Apply this to all center columns that show status, payment, priority, or similar badges.
 - **Actions column**: The **Actions** header and the action icons (View, Edit, Delete, etc.) must be **pegados al padding derecho** — use `text-right` for the Actions `<th>`, and `text-right` on the `<td>` with `justify-end` on the flex container so the last icon (e.g. Delete) sits against the right padding. This keeps the column visually consistent.
 - **Padding**: Prefer `py-3 px-4` (headers) and `py-4 px-4` (cells); use `px-4` for consistent spacing.
 
@@ -126,7 +127,12 @@ All border-radius is `0` (square corners) via Tailwind config. Use `rounded-lg` 
     <tbody>
       <tr className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
         <td className="py-4 px-4 text-gray-900 text-sm text-left">Primary text</td>
-        <td className="py-4 px-4 text-gray-700 text-sm text-center">…</td>
+        <td className="py-4 px-4 text-center">
+          <div className="flex justify-center">
+            <StatusBadge status={order.status} type="salesOrder" size="sm" />
+          </div>
+        </td>
+        <td className="py-4 px-4 text-gray-700 text-sm text-center">Plain text</td>
         <td className="py-4 px-4 text-right">…</td>
       </tr>
     </tbody>
@@ -287,21 +293,40 @@ Used on list pages (Quotes, Proposals, Sales Orders, Manufacturing Orders). Same
 
 Place StatusTabs between the page header and the search bar.
 
+### Status Bar Pattern (Catalog, Sales list pages)
+
+When a list page uses a **Status bar** (horizontal tabs below the page title, e.g. Items | Manufacturer | Categories | Collection, or All | Draft | …):
+
+1. **Page structure (top to bottom)**
+   - **Header row**: Page title (h1) + **contextual actions** aligned right (`flex items-center justify-between mb-6`, actions in `ml-auto`). Contextual actions change per tab (e.g. “Add New Items” for Items tab, “Add New Collection” for Collection tab).
+   - **Status bar**: Tabs in a white card (`border border-gray-200 rounded-lg mb-4 bg-white`), tab buttons with `border-r` dividers, active tab `borderBottom: 2px solid var(--sidebar-base)`.
+   - **Content**: First block below the status bar has **`mt-4`** (same spacing as Quotes list / Sales Orders). Then search/filters and table.
+
+2. **Contextual actions**
+   - All primary actions for the current tab (Add, Import, etc.) live in the **header row**, above the status bar — never duplicate a tab name as a heading between the status bar and the content.
+   - Use refs + `useImperativeHandle` when the action opens a modal in a child (e.g. Catalog: “Add New Manufacturer” in header calls `manufacturerRef.current?.openNewModal()`).
+
+3. **Spacing**
+   - Below header: `mb-6`.
+   - Status bar container: `mb-4`.
+   - Between status bar and content: **only** `mt-4` on the first content block (16px gap, matching Quotes/Sales). Tab content components (e.g. Manufacturers, Categories, Collections when used as tabs) must **not** add top padding (`pt-*` or `py-*`) on their root so that the gap is consistent with the Items tab; use `pb-6` only if bottom padding is needed.
+
+4. **Reference**
+   - Sales: `Quotes.tsx`, `SalesOrdersPage.tsx` (header → StatusTabs → `mt-4` → search card).
+   - Catalog: `Items.tsx` (header with per-tab actions → internal tabs → `mt-4` → tab content).
+
 ### Detail Page Tabs (internal tabs within a detail page)
 
-Used on detail pages (QuoteDetail, ProposalDetail, SalesOrderDetail) to switch between content sections. Same underline style.
+Used on detail pages **Quote** (QuoteDetail), **Proposals** (ProposalDetail), and **Orders** (SalesOrderDetail) to switch between content sections. **Same visual pattern as StatusTabs**: gray bar, white active tab, underline.
+
+**Implementation:** `src/components/shared/DetailPageLayout.tsx`
+- Container: `overflow-x-auto border-b border-gray-200 bg-gray-100`, same horizontal padding as content (`px-4 md:px-6` inside max-w-6xl).
+- Tab: `height: 40px`, `padding: 0 16px`, `fontSize: 12px`, `color: #1c1f26`, `border-r` with `var(--gray-250)` between tabs.
+- Active: `bg-white font-semibold`, `borderBottom: 2px solid var(--sidebar-base)`.
+- Inactive: `hover:bg-white/50`, `borderBottom: 2px solid transparent`.
+- Optional count: show `(n)` next to label in gray for tabs that have a count (e.g. Lines (3)).
 
 ```tsx
-{/* Tab bar */}
-<div className="flex items-center gap-1 border-b border-gray-200 mb-6">
-  <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-[var(--sidebar-base)] text-[var(--primary-brand-hex)]">
-    Overview
-  </button>
-  <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
-    Lines
-  </button>
-</div>
-
 {/* Tab content — keep all panels mounted, toggle with display */}
 <div style={{ display: activeTab === 'overview' ? undefined : 'none' }}>
   {/* Overview content */}

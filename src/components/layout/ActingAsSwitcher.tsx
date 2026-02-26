@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useActingAsDealer } from '../../hooks/useActingAsDealer';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useDealers } from '../../hooks/useDealers';
+import { router } from '../../lib/router';
 import { ChevronDown, Check, Store, LayoutGrid, Loader2 } from 'lucide-react';
 
 /**
@@ -46,6 +47,13 @@ export function ActingAsSwitcher({ onAfterSelect, labelAbove }: { onAfterSelect?
       return;
     }
     setIsOpen(false);
+
+    const path = window.location.pathname;
+    const salesDetailMatch = path.match(/^\/sales\/(quotes|proposals|orders)\/[^/]+/);
+    if (salesDetailMatch) {
+      router.navigate(`/sales/${salesDetailMatch[1]}`);
+    }
+
     onAfterSelect?.();
   };
 

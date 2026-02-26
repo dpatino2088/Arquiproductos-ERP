@@ -13,7 +13,7 @@ import { formatCurrency } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
 import { usePayments, useRecordPayment } from '../../hooks/usePayments';
 import Input from '../../components/ui/Input';
-import { ChevronDown, Plus, FileText, ShoppingBag } from 'lucide-react';
+import { ChevronDown, Plus, FileText, ShoppingBag, CreditCard, Factory } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 
 const SALES_SUBMODULES = [
@@ -30,11 +30,9 @@ interface SalesOrder {
   status: string;
   /** Set when cancelled; used to restore on reactivate (org user). */
   status_before_cancel?: string | null;
-  payment_status: string;
   customer_id: string;
   dealer_id: string;
   total_amount: number;
-  amount_paid: number;
   subtotal: number;
   tax_amount: number;
   discount_amount: number;
@@ -47,6 +45,16 @@ interface SalesOrder {
   Dealers?: { dealer_name: string; dealer_no?: string | null } | null;
 }
 
+interface FinancialSummary {
+  invoice_count: number;
+  total_invoiced: number;
+  total_paid: number;
+  balance_due: number;
+  invoice_status: string;
+  latest_invoice_id: string | null;
+  latest_invoice_number: string | null;
+}
+
 interface SalesOrderLine {
   id: string;
   sales_order_id: string;
@@ -54,10 +62,13 @@ interface SalesOrderLine {
   description: string | null;
   collection_name: string | null;
   variant_name: string | null;
+  product_type?: string | null;
+  width_m?: number | null;
+  height_m?: number | null;
   quantity: number;
   unit_price: number | null;
   line_total: number | null;
-  CatalogItems?: { item_name: string; sku: string } | null;
+  CatalogItems?: { name: string; sku: string } | null;
 }
 
 interface ManufacturingOrder {
@@ -106,6 +117,7 @@ export default function SalesOrderDetail() {
   const [lines, setLines] = useState<SalesOrderLine[]>([]);
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -131,12 +143,12 @@ export default function SalesOrderDetail() {
     setLoading(true);
     setError(null);
     try {
-      const [soRes, linesRes, mosRes, timelineRes] = await Promise.all([
+      const [soRes, linesRes, mosRes, timelineRes, financialRes] = await Promise.all([
         supabase
           .from('SalesOrders')
           .select(`
-            id, sales_order_no, quote_id, status, status_before_cancel, payment_status, customer_id, dealer_id,
-            total_amount, amount_paid, subtotal, tax_amount, discount_amount,
+            id, sales_order_no, quote_id, status, status_before_cancel, customer_id, dealer_id,
+            total_amount, subtotal, tax_amount, discount_amount,
             priority, created_at, expected_delivery_date, completed_at, closed_at,
             DirectoryCustomers:customer_id (customer_name),
             Dealers:dealer_id (dealer_name, dealer_no),
@@ -150,8 +162,9 @@ export default function SalesOrderDetail() {
           .from('SaleOrderLines')
           .select(`
             id, sales_order_id, line_number, description, collection_name, variant_name,
+            product_type, width_m, height_m,
             quantity, unit_price, line_total,
-            CatalogItems:catalog_item_id (item_name, sku)
+            CatalogItems:catalog_item_id (name, sku)
           `)
           .eq('sales_order_id', salesOrderId)
           .eq('organization_id', activeOrganizationId)
@@ -169,6 +182,11 @@ export default function SalesOrderDetail() {
           .eq('entity_type', 'sales_order')
           .eq('entity_id', salesOrderId)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('sales_order_financial_summary')
+          .select('invoice_count, total_invoiced, total_paid, balance_due, invoice_status, latest_invoice_id, latest_invoice_number')
+          .eq('sales_order_id', salesOrderId)
+          .maybeSingle(),
       ]);
 
       if (soRes.error) throw soRes.error;
@@ -190,6 +208,7 @@ export default function SalesOrderDetail() {
       } else {
         setTimeline((timelineRes.data ?? []) as TimelineEvent[]);
       }
+      setFinancialSummary((financialRes.data as FinancialSummary | null) ?? null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load sales order';
       setError(msg);
@@ -248,6 +267,10 @@ export default function SalesOrderDetail() {
 
   const handleRecordPayment = useCallback(async () => {
     if (!salesOrderId || !user?.id) return;
+    if ((so?.total_amount ?? 0) <= 0) {
+      addNotification({ type: 'error', title: 'Cannot record payment', message: 'Sales order has no total amount. Add lines and save first.' });
+      return;
+    }
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) {
       addNotification({ type: 'error', title: 'Invalid amount', message: 'Enter a valid amount.' });
@@ -266,7 +289,7 @@ export default function SalesOrderDetail() {
     } finally {
       setSubmittingPayment(false);
     }
-  }, [salesOrderId, user, paymentAmount, paymentMethod, paymentReference, recordPayment, refetch, refetchPayments, addNotification]);
+  }, [salesOrderId, so, user, paymentAmount, paymentMethod, paymentReference, recordPayment, refetch, refetchPayments, addNotification]);
 
   const actionButtons = useMemo(() => {
     if (!so) return [];
@@ -332,8 +355,8 @@ export default function SalesOrderDetail() {
   }, [so, mos.length, moAllDelivered]);
 
   const currency = 'USD';
-  const balance = (so?.total_amount ?? 0) - (so?.amount_paid ?? 0);
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const totalPaid = financialSummary?.total_paid ?? payments.reduce((sum, p) => sum + Number(p.amount), 0);
+  const balance = financialSummary?.balance_due ?? (so?.total_amount ?? 0) - totalPaid;
 
   const onBack = () => router.navigate('/sales/orders');
 
@@ -382,43 +405,27 @@ export default function SalesOrderDetail() {
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    { id: 'lines', label: 'Lines', count: lines.length },
-    { id: 'manufacturing', label: 'Manufacturing', count: mos.length },
-    { id: 'payments', label: 'Payments', count: payments.length },
+    { id: 'lines', label: 'Lines' },
+    { id: 'manufacturing', label: 'Manufacturing' },
+    { id: 'payments', label: 'Payments' },
     { id: 'timeline', label: 'Timeline' },
   ];
 
-  const summaryItems = [
-    {
-      label: 'Quote',
-      value: so.Quotes?.id && so.Quotes?.quote_no ? (
-        <button onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)} className="text-primary hover:underline">
-          {so.Quotes.quote_no}
-        </button>
-      ) : (
-        '—'
-      ),
-    },
-    { label: 'Dealer', value: so.Dealers?.dealer_name ?? '—' },
-    { label: 'Dealer #', value: so.Dealers?.dealer_no ?? '—' },
-    { label: 'Total', value: formatCurrency(so.total_amount ?? 0, currency) },
-    { label: 'Paid', value: formatCurrency(so.amount_paid ?? 0, currency) },
-    { label: 'Balance', value: formatCurrency(balance, currency) },
-    { label: 'Priority', value: so.priority ? <StatusBadge status={so.priority} type="priority" size="sm" /> : '—' },
-    { label: 'Order Date', value: new Date(so.created_at).toLocaleDateString() },
-  ];
+  const soStatus = (so.status || 'draft').toLowerCase();
+  const hasPaidAmount = totalPaid > 0;
+  const invoiceStatus = financialSummary?.invoice_status ?? 'none';
 
   return (
     <DetailPageLayout
       title={so.sales_order_no}
-      subtitle="Sales Order"
+      subtitle="Order Detail"
       status={<StatusBadge status={so.status} type="salesOrder" />}
-      paymentStatus={<StatusBadge status={so.payment_status || 'pending'} type="payment" />}
-      summaryItems={summaryItems}
+      paymentStatus={invoiceStatus !== 'none' ? <StatusBadge status={invoiceStatus} type="payment" /> : undefined}
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
       onBack={onBack}
+      contentClassName="pt-2 pb-6"
       actions={
         actionButtons.length > 0 ? (
           <div className="relative" ref={actionsRef}>
@@ -449,10 +456,117 @@ export default function SalesOrderDetail() {
         ) : undefined
       }
     >
+      {/* Payment form — global, shown above any tab when open */}
+      {paymentFormOpen && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-gray-900">Record Payment</h4>
+            <button
+              type="button"
+              onClick={() => { setPaymentFormOpen(false); setPaymentAmount(''); setPaymentReference(''); }}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Close
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
+              <select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+              >
+                <option value="check">Check</option>
+                <option value="wire">Wire</option>
+                <option value="card">Card</option>
+                <option value="cash">Cash</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Reference</label>
+              <Input
+                value={paymentReference}
+                onChange={(e) => setPaymentReference(e.target.value)}
+                placeholder="Check #, transaction ID..."
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleRecordPayment}
+              disabled={submittingPayment || isRecording}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+            >
+              {submittingPayment || isRecording ? 'Recording...' : 'Submit'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPaymentFormOpen(false); setPaymentAmount(''); setPaymentReference(''); }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Row 1: Order Details + Financial Summary */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Details</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Quote</dt>
+                  <dd>
+                    {so.Quotes?.id && so.Quotes?.quote_no ? (
+                      <button onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)} className="text-primary hover:underline font-medium">
+                        {so.Quotes.quote_no}
+                      </button>
+                    ) : '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Customer</dt>
+                  <dd className="font-medium text-gray-900">{so.DirectoryCustomers?.customer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Dealer</dt>
+                  <dd className="text-gray-900">{so.Dealers?.dealer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Dealer #</dt>
+                  <dd className="font-mono text-gray-900">{so.Dealers?.dealer_no ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-500">Priority</dt>
+                  <dd>
+                    {so.priority ? (
+                      <div className="flex justify-end">
+                        <StatusBadge status={so.priority} type="priority" size="sm" />
+                      </div>
+                    ) : '—'}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Financial Summary</h3>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
@@ -468,8 +582,12 @@ export default function SalesOrderDetail() {
                   <dd className="font-semibold">{formatCurrency(so.total_amount ?? 0, currency)}</dd>
                 </div>
                 <div className="flex justify-between border-t pt-2">
+                  <dt className="text-gray-500">Invoiced</dt>
+                  <dd className="font-mono">{formatCurrency(financialSummary?.total_invoiced ?? 0, currency)}</dd>
+                </div>
+                <div className="flex justify-between">
                   <dt className="text-gray-500">Paid</dt>
-                  <dd className="font-mono text-green-600">{formatCurrency(so.amount_paid ?? 0, currency)}</dd>
+                  <dd className="font-mono text-green-600">{formatCurrency(totalPaid, currency)}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Balance Due</dt>
@@ -477,48 +595,47 @@ export default function SalesOrderDetail() {
                 </div>
               </dl>
             </div>
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Key Dates</h3>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Order Date</dt>
-                  <dd>{new Date(so.created_at).toLocaleDateString()}</dd>
-                </div>
-                {so.expected_delivery_date && (
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Expected Delivery</dt>
-                    <dd>{new Date(so.expected_delivery_date).toLocaleDateString()}</dd>
-                  </div>
-                )}
-                {so.completed_at && (
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Completed</dt>
-                    <dd>{new Date(so.completed_at).toLocaleDateString()}</dd>
-                  </div>
-                )}
-                {so.closed_at && (
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Closed</dt>
-                    <dd>{new Date(so.closed_at).toLocaleDateString()}</dd>
-                  </div>
-                )}
-              </dl>
+          </div>
+
+          {/* Row 2: Key Dates */}
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Key Dates</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <dt className="text-gray-500">Order Date</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{new Date(so.created_at).toLocaleDateString()}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Expected Delivery</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{so.expected_delivery_date ? new Date(so.expected_delivery_date).toLocaleDateString() : '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Completed</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{so.completed_at ? new Date(so.completed_at).toLocaleDateString() : '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Closed</dt>
+                <dd className="font-medium text-gray-900 mt-0.5">{so.closed_at ? new Date(so.closed_at).toLocaleDateString() : '—'}</dd>
+              </div>
             </div>
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+
+          {/* Row 3: Origin & Progress */}
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
             <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
           </div>
         </div>
       )}
 
       {activeTab === 'lines' && (
-        <div className="rounded-lg border border-gray-200 overflow-hidden">
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Line #</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Description</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">SKU</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
@@ -527,21 +644,36 @@ export default function SalesOrderDetail() {
             <tbody>
               {lines.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                     No lines
                   </td>
                 </tr>
               ) : (
-                lines.map((line, idx) => (
-                  <tr key={line.id} className="border-t hover:bg-gray-50">
-                    <td className="px-4 py-3">{line.line_number ?? idx + 1}</td>
-                    <td className="px-4 py-3">{line.description ?? line.CatalogItems?.item_name ?? '—'}</td>
-                    <td className="px-4 py-3">{line.CatalogItems?.sku ?? '—'}</td>
-                    <td className="px-4 py-3 text-right">{line.quantity}</td>
-                    <td className="px-4 py-3 text-right font-mono">{formatCurrency(line.unit_price ?? 0, currency)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{formatCurrency(line.line_total ?? 0, currency)}</td>
-                  </tr>
-                ))
+                lines.map((line, idx) => {
+                  const name =
+                    line.description ??
+                    (line.collection_name && line.variant_name
+                      ? `${line.collection_name} - ${line.variant_name}`
+                      : line.collection_name || line.variant_name || line.CatalogItems?.name) ??
+                    '—';
+                  const dims = [line.width_m, line.height_m].filter((v) => v != null);
+                  return (
+                    <tr key={line.id} className="border-t hover:bg-gray-50">
+                      <td className="px-4 py-4 text-gray-500 tabular-nums">{line.line_number ?? idx + 1}</td>
+                      <td className="px-4 py-4">
+                        <div className="text-gray-900">{name}</div>
+                        {line.CatalogItems?.sku && (
+                          <div className="text-xs text-gray-500">{line.CatalogItems.sku}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-gray-700">{line.product_type ?? '—'}</td>
+                      <td className="px-4 py-4 text-gray-700">{dims.length === 2 ? `${line.width_m} x ${line.height_m}` : '—'}</td>
+                      <td className="px-4 py-4 text-right text-gray-900 tabular-nums">{line.quantity}</td>
+                      <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(line.unit_price ?? 0, currency)}</td>
+                      <td className="px-4 py-4 text-right font-mono font-medium text-gray-900">{formatCurrency(line.line_total ?? 0, currency)}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -549,145 +681,259 @@ export default function SalesOrderDetail() {
       )}
 
       {activeTab === 'manufacturing' && (
-        <div className="space-y-4">
-          {(so.status === 'confirmed' || so.status === 'draft') && isInternal && (
-            <button
-              type="button"
-              onClick={handleCreateMO}
-              disabled={isActing}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
-            >
-              <Plus className="w-4 h-4" />
-              Create Manufacturing Order
-            </button>
-          )}
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">MO #</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Type</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Status</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Product</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Priority</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mos.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No manufacturing orders
-                    </td>
-                  </tr>
-                ) : (
-                  mos.map((mo) => (
-                    <tr
-                      key={mo.id}
-                      className="border-t hover:bg-gray-50 cursor-pointer"
-                      onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
-                    >
-                      <td className="px-4 py-3 font-medium text-primary">{mo.manufacturing_order_no}</td>
-                      <td className="px-4 py-3">
-                        {mo.mo_type && <StatusBadge status={mo.mo_type} type="moType" size="sm" />}
-                      </td>
-                      <td className="px-4 py-3"><StatusBadge status={mo.status} type="manufacturing" size="sm" /></td>
-                      <td className="px-4 py-3">{mo.product_name ?? '—'}</td>
-                      <td className="px-4 py-3 text-right">{mo.quantity}</td>
-                      <td className="px-4 py-3">
-                        {mo.priority && mo.priority !== 'normal' && (
-                          <StatusBadge status={mo.priority} type="priority" size="sm" />
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500">{new Date(mo.created_at).toLocaleDateString()}</td>
-                    </tr>
-                  ))
+        <div className="space-y-6">
+          {/* Row 1: two cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Order Info card — same as Overview and Payments */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Info</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Quote</dt>
+                  <dd>
+                    {so.Quotes?.id && so.Quotes?.quote_no ? (
+                      <button type="button" onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)}
+                        className="text-primary hover:underline font-medium">{so.Quotes.quote_no}</button>
+                    ) : '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Customer</dt>
+                  <dd className="font-medium text-gray-900">{so.DirectoryCustomers?.customer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Dealer</dt>
+                  <dd className="text-gray-900">{so.Dealers?.dealer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Dealer #</dt>
+                  <dd className="font-mono text-gray-900">{so.Dealers?.dealer_no ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Order Date</dt>
+                  <dd className="font-medium text-gray-900">{new Date(so.created_at).toLocaleDateString()}</dd>
+                </div>
+                <div className="flex justify-between items-center border-t pt-2">
+                  <dt className="text-gray-500">Priority</dt>
+                  <dd>{so.priority ? <StatusBadge status={so.priority} type="priority" size="sm" /> : '—'}</dd>
+                </div>
+              </dl>
+            </div>
+
+            {/* Production Summary card */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Production Summary</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Total MOs</dt>
+                  <dd className="font-medium text-gray-900">{mos.length}</dd>
+                </div>
+                {(['draft','confirmed','in_progress','delivered','cancelled'] as const).map((s) => {
+                  const count = mos.filter((m) => m.status === s).length;
+                  if (count === 0) return null;
+                  return (
+                    <div key={s} className="flex justify-between">
+                      <dt className="text-gray-500 capitalize">{s.replace('_', ' ')}</dt>
+                      <dd><StatusBadge status={s} type="manufacturing" size="sm" /></dd>
+                    </div>
+                  );
+                })}
+                {mos.length === 0 && (
+                  <div className="py-2 text-gray-400 text-xs">No manufacturing orders yet</div>
                 )}
-              </tbody>
-            </table>
+              </dl>
+              {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  {!hasPaidAmount && (
+                    <p className="text-xs text-amber-600 mb-2">A payment must be recorded in Financials before creating a Manufacturing Order.</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCreateMO}
+                    disabled={isActing || !hasPaidAmount}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Factory className="w-4 h-4" />
+                    Create Manufacturing Order
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* MO Table */}
+          <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">MO #</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Type</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Status</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Product</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Priority</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mos.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    No manufacturing orders
+                  </td>
+                </tr>
+              ) : (
+                mos.map((mo) => (
+                  <tr
+                    key={mo.id}
+                    className="border-t hover:bg-gray-50 cursor-pointer"
+                    onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
+                  >
+                    <td className="px-4 py-4 font-medium text-primary">{mo.manufacturing_order_no}</td>
+                    <td className="px-4 py-4">
+                      {mo.mo_type && <StatusBadge status={mo.mo_type} type="moType" size="sm" />}
+                    </td>
+                    <td className="px-4 py-4"><StatusBadge status={mo.status} type="manufacturing" size="sm" /></td>
+                    <td className="px-4 py-4">{mo.product_name ?? '—'}</td>
+                    <td className="px-4 py-4 text-right">{mo.quantity}</td>
+                    <td className="px-4 py-4">
+                      {mo.priority && mo.priority !== 'normal' && (
+                        <StatusBadge status={mo.priority} type="priority" size="sm" />
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-gray-500 text-right">{new Date(mo.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
           </div>
         </div>
       )}
 
       {activeTab === 'payments' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm">
-              <span className="text-gray-500">Total Paid: </span>
-              <span className="font-semibold">{formatCurrency(totalPaid, currency)}</span>
-              <span className="text-gray-500 ml-4">Balance: </span>
-              <span className="font-semibold">{formatCurrency(balance, currency)}</span>
-            </div>
-            {!['closed', 'cancelled'].includes((so.status || '').toLowerCase()) && (
-              <button
-                type="button"
-                onClick={() => setPaymentFormOpen(!paymentFormOpen)}
-                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90"
-              >
-                <Plus className="w-4 h-4" />
-                Record Payment
-              </button>
-            )}
-          </div>
-          {paymentFormOpen && (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
-              <h4 className="text-sm font-medium text-gray-900">Record Payment</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(e.target.value)}
-                    placeholder="0.00"
-                  />
+        <div className="space-y-6">
+          {/* Row 1: two cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Order Info card */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Info</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Quote</dt>
+                  <dd>
+                    {so.Quotes?.id && so.Quotes?.quote_no ? (
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)}
+                        className="text-primary hover:underline font-medium"
+                      >
+                        {so.Quotes.quote_no}
+                      </button>
+                    ) : '—'}
+                  </dd>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Customer</dt>
+                  <dd className="font-medium text-gray-900">{so.DirectoryCustomers?.customer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Dealer</dt>
+                  <dd className="text-gray-900">{so.Dealers?.dealer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Dealer #</dt>
+                  <dd className="font-mono text-gray-900">{so.Dealers?.dealer_no ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Order Date</dt>
+                  <dd className="font-medium text-gray-900">{new Date(so.created_at).toLocaleDateString()}</dd>
+                </div>
+                <div className="flex justify-between items-center border-t pt-2">
+                  <dt className="text-gray-500">Invoice Status</dt>
+                  <dd>
+                    {invoiceStatus !== 'none'
+                      ? <StatusBadge status={invoiceStatus} type="payment" />
+                      : <span className="text-gray-400 text-xs">No invoice</span>}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            {/* Financial Summary card */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Financial Summary</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Subtotal</dt>
+                  <dd className="font-mono text-gray-900">{formatCurrency(so.subtotal ?? 0, currency)}</dd>
+                </div>
+                {(so.discount_amount ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Discount</dt>
+                    <dd className="font-mono text-gray-900">−{formatCurrency(so.discount_amount ?? 0, currency)}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Tax</dt>
+                  <dd className="font-mono text-gray-900">{formatCurrency(so.tax_amount ?? 0, currency)}</dd>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="font-medium text-gray-700">Order Total</dt>
+                  <dd className="font-semibold font-mono text-gray-900">{formatCurrency(so.total_amount ?? 0, currency)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Total Invoiced</dt>
+                  <dd className="font-mono text-gray-900">{formatCurrency(financialSummary?.total_invoiced ?? 0, currency)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Total Paid</dt>
+                  <dd className={`font-mono font-medium ${totalPaid > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                    {formatCurrency(totalPaid, currency)}
+                  </dd>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="font-medium text-gray-700">Balance Due</dt>
+                  <dd className={`font-semibold font-mono ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {formatCurrency(balance, currency)}
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
+                {financialSummary?.latest_invoice_id ? (
+                  <button
+                    type="button"
+                    onClick={() => router.navigate(`/financials/invoices/${financialSummary.latest_invoice_id}`)}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
-                    <option value="check">Check</option>
-                    <option value="wire">Wire</option>
-                    <option value="card">Card</option>
-                    <option value="cash">Cash</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Reference</label>
-                  <Input
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="Check #, transaction ID..."
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleRecordPayment}
-                  disabled={submittingPayment || isRecording}
-                  className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {submittingPayment || isRecording ? 'Recording...' : 'Submit'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setPaymentFormOpen(false); setPaymentAmount(''); setPaymentReference(''); }}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
+                    View Invoice {financialSummary.latest_invoice_number}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => router.navigate(`/financials/invoices/new?sales_order_id=${so.id}`)}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Create Invoice
+                  </button>
+                )}
+                {financialSummary?.latest_invoice_id && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentFormOpen(!paymentFormOpen)}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Record Payment
+                  </button>
+                )}
               </div>
             </div>
-          )}
-          <div className="rounded-lg border border-gray-200 overflow-hidden">
+          </div>
+
+          {/* Payments table */}
+          <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
@@ -701,24 +947,20 @@ export default function SalesOrderDetail() {
               <tbody>
                 {paymentsLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                      Loading...
-                    </td>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">Loading...</td>
                   </tr>
                 ) : payments.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                      No payments recorded
-                    </td>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">No payments recorded</td>
                   </tr>
                 ) : (
                   payments.map((p) => (
                     <tr key={p.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-3">{new Date(p.payment_date || p.created_at).toLocaleDateString()}</td>
-                      <td className="px-4 py-3 text-right font-mono">{formatCurrency(p.amount, currency)}</td>
-                      <td className="px-4 py-3">{p.payment_method ?? '—'}</td>
-                      <td className="px-4 py-3">{p.reference_number ?? '—'}</td>
-                      <td className="px-4 py-3">—</td>
+                      <td className="px-4 py-4">{new Date(p.payment_date || p.created_at).toLocaleDateString()}</td>
+                      <td className="px-4 py-4 text-right font-mono">{formatCurrency(p.amount, currency)}</td>
+                      <td className="px-4 py-4">{p.payment_method ?? '—'}</td>
+                      <td className="px-4 py-4">{p.reference_number ?? '—'}</td>
+                      <td className="px-4 py-4">—</td>
                     </tr>
                   ))
                 )}

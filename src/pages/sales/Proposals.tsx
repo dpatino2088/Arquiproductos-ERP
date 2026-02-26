@@ -399,13 +399,6 @@ export default function Proposals() {
               Eliminar seleccionados ({selectedIds.size})
             </button>
           )}
-          <button
-            onClick={() => refetch()}
-            className="flex items-center justify-center p-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors"
-            title="Actualizar"
-          >
-            <RefreshCw style={{ width: 14, height: 14 }} />
-          </button>
         </div>
       </div>
 
