@@ -29,12 +29,17 @@ export interface ManufacturingOrder {
   notes?: string | null;
   internal_notes?: string | null;
   released_at?: string | null;
+  planned_start_at?: string | null;
+  planned_end_at?: string | null;
+  scheduled_start_date?: string | null;
+  scheduled_end_date?: string | null;
   production_started_at?: string | null;
   completed_at?: string | null;
   delivered_at?: string | null;
   created_at: string;
   updated_at: string;
   deleted: boolean;
+  archived?: boolean;
   created_by?: string | null;
   SalesOrders?: {
     id: string;
@@ -543,8 +548,26 @@ export function useCreateManufacturingOrder() {
   const [isCreating, setIsCreating] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
 
+  const ensureBOMGenerated = async (manufacturingOrderId: string, manufacturingOrderNo?: string | null) => {
+    const { data: bomResult, error: bomError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
+      p_manufacturing_order_id: manufacturingOrderId,
+    });
+    if (bomError) {
+      throw new Error(`MO created, but BOM generation failed for ${manufacturingOrderNo ?? manufacturingOrderId}: ${bomError.message}`);
+    }
+    const bomOk = Boolean((bomResult as { ok?: boolean } | null)?.ok);
+    if (!bomOk) {
+      const errors = (bomResult as { errors?: string[] } | null)?.errors ?? [];
+      throw new Error(
+        `MO created, but BOM generation failed for ${manufacturingOrderNo ?? manufacturingOrderId}: ${errors.join('; ') || 'Unknown error'}`
+      );
+    }
+  };
+
   const createManufacturingOrder = async (moData: {
     sales_order_id: string;
+    planned_start_at?: string;
+    planned_end_at?: string;
     scheduled_start_date?: string;
     scheduled_end_date?: string;
     priority?: ManufacturingOrderPriority;
@@ -575,25 +598,58 @@ export function useCreateManufacturingOrder() {
         moNumber = `MO-TEMP-${timestamp}`;
       }
 
-      const { data, error } = await supabase
+      const plannedPayload = {
+        organization_id: activeOrganizationId,
+        sales_order_id: moData.sales_order_id,
+        manufacturing_order_no: moNumber,
+        status: 'draft',
+        priority: moData.priority || 'normal',
+        planned_start_at: moData.planned_start_at || null,
+        planned_end_at: moData.planned_end_at || null,
+        notes: moData.notes || null,
+        deleted: false,
+        archived: false,
+      };
+
+      const primary = await supabase
         .from('ManufacturingOrders')
-        .insert({
-          organization_id: activeOrganizationId,
-          sales_order_id: moData.sales_order_id,
-          manufacturing_order_no: moNumber,
-          status: 'draft',
-          priority: moData.priority || 'normal',
-          scheduled_start_date: moData.scheduled_start_date || null,
-          scheduled_end_date: moData.scheduled_end_date || null,
-          notes: moData.notes || null,
-          deleted: false,
-          archived: false,
-        })
+        .insert(plannedPayload)
         .select()
         .single();
 
-      if (error) throw error;
-      return data;
+      if (!primary.error) {
+        await ensureBOMGenerated(primary.data.id, primary.data.manufacturing_order_no);
+        return primary.data;
+      }
+
+      const primaryMessage = String((primary.error as { message?: string })?.message ?? '').toLowerCase();
+      const missingPlannedColumns = primaryMessage.includes('planned_start_at') || primaryMessage.includes('planned_end_at');
+      if (!missingPlannedColumns) {
+        throw primary.error;
+      }
+
+      const fallbackPayload = {
+        organization_id: activeOrganizationId,
+        sales_order_id: moData.sales_order_id,
+        manufacturing_order_no: moNumber,
+        status: 'draft',
+        priority: moData.priority || 'normal',
+        scheduled_start_date: moData.planned_start_at ?? moData.scheduled_start_date ?? null,
+        scheduled_end_date: moData.planned_end_at ?? moData.scheduled_end_date ?? null,
+        notes: moData.notes || null,
+        deleted: false,
+        archived: false,
+      };
+
+      const fallback = await supabase
+        .from('ManufacturingOrders')
+        .insert(fallbackPayload)
+        .select()
+        .single();
+
+      if (fallback.error) throw fallback.error;
+      await ensureBOMGenerated(fallback.data.id, fallback.data.manufacturing_order_no);
+      return fallback.data;
     } finally {
       setIsCreating(false);
     }
@@ -617,6 +673,10 @@ export function useUpdateManufacturingOrder() {
       priority?: ManufacturingOrderPriority;
       notes?: string | null;
       internal_notes?: string | null;
+      planned_start_at?: string | null;
+      planned_end_at?: string | null;
+      scheduled_start_date?: string | null;
+      scheduled_end_date?: string | null;
     }
   ) => {
     if (!activeOrganizationId) {
@@ -625,19 +685,57 @@ export function useUpdateManufacturingOrder() {
 
     setIsUpdating(true);
     try {
+      const basePayload = {
+        ...updates,
+        updated_at: new Date().toISOString(),
+      };
+
       const { data, error } = await supabase
         .from('ManufacturingOrders')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString(),
-        })
+        .update(basePayload)
         .eq('id', moId)
         .eq('organization_id', activeOrganizationId)
         .select()
         .single();
 
-      if (error) throw error;
-      return data;
+      if (!error) {
+        return data;
+      }
+
+      // Backward compatibility: some databases still use scheduled_* fields.
+      const message = String((error as { message?: string })?.message ?? '').toLowerCase();
+      const hasPlannedKeys = Object.prototype.hasOwnProperty.call(updates, 'planned_start_at')
+        || Object.prototype.hasOwnProperty.call(updates, 'planned_end_at');
+      const missingPlannedColumns = message.includes('planned_start_at') || message.includes('planned_end_at');
+      if (!hasPlannedKeys || !missingPlannedColumns) {
+        throw error;
+      }
+
+      const fallbackPayload = {
+        ...basePayload,
+        scheduled_start_date: updates.planned_start_at ?? null,
+        scheduled_end_date: updates.planned_end_at ?? null,
+      };
+      delete (fallbackPayload as Record<string, unknown>).planned_start_at;
+      delete (fallbackPayload as Record<string, unknown>).planned_end_at;
+
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('ManufacturingOrders')
+        .update(fallbackPayload)
+        .eq('id', moId)
+        .eq('organization_id', activeOrganizationId)
+        .select()
+        .single();
+
+      if (fallbackError) {
+        const fallbackMessage = String((fallbackError as { message?: string })?.message ?? '').toLowerCase();
+        const missingScheduledColumns = fallbackMessage.includes('scheduled_start_date') || fallbackMessage.includes('scheduled_end_date');
+        if (missingScheduledColumns) {
+          throw new Error('Could not save schedule. Missing schedule columns in ManufacturingOrders; run schedule migration.');
+        }
+        throw fallbackError;
+      }
+      return fallbackData;
     } finally {
       setIsUpdating(false);
     }

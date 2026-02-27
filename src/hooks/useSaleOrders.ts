@@ -217,7 +217,7 @@ export function useSaleOrderLines(saleOrderId: string | null) {
         setError(null);
 
         const { data, error: queryError } = await supabase
-          .from('SalesOrderLines')
+          .from('SaleOrderLines')
           .select(`
             *,
             CatalogItems:catalog_item_id (

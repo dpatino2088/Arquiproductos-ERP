@@ -86,7 +86,7 @@ export default function Quotes() {
 
   const quotes = hookQuotes;
 
-  const [proposalStatusMap, setProposalStatusMap] = useState<Record<string, string>>({});
+  const [proposalByQuoteMap, setProposalByQuoteMap] = useState<Record<string, { id: string; no: string }>>({});
   const [soNumberMap, setSONumberMap] = useState<Record<string, { id: string; no: string }>>({});
 
   useEffect(() => {
@@ -95,15 +95,19 @@ export default function Quotes() {
 
     supabase
       .from('Proposals')
-      .select('quote_id, status')
+      .select('id, quote_id, proposal_no')
       .in('quote_id', ids)
       .or('deleted.is.false,deleted.is.null')
       .order('updated_at', { ascending: false })
       .then(({ data }: { data: any }) => {
         if (!data) return;
-        const m: Record<string, string> = {};
-        data.forEach((p: any) => { if (!m[p.quote_id]) m[p.quote_id] = p.status; });
-        setProposalStatusMap(m);
+        const m: Record<string, { id: string; no: string }> = {};
+        data.forEach((p: any) => {
+          if (p.quote_id && !m[p.quote_id]) {
+            m[p.quote_id] = { id: p.id, no: p.proposal_no ?? p.id?.slice(0, 8) ?? '—' };
+          }
+        });
+        setProposalByQuoteMap(m);
       });
 
     supabase
@@ -774,8 +778,15 @@ export default function Quotes() {
                       <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
                     )}
                     <td className="py-4 px-4 text-center">
-                      {proposalStatusMap[quote.id]
-                        ? <StatusBadge status={proposalStatusMap[quote.id]} type="proposal" size="sm" />
+                      {proposalByQuoteMap[quote.id]
+                        ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/proposals/${proposalByQuoteMap[quote.id].id}`); }}
+                            className="text-primary hover:underline font-medium"
+                          >
+                            {proposalByQuoteMap[quote.id].no}
+                          </button>
+                        )
                         : <span className="text-gray-400 text-sm">—</span>}
                     </td>
                     <td className="py-4 px-4 text-sm text-center">

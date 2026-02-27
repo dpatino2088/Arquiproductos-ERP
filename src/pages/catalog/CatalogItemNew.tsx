@@ -196,6 +196,10 @@ export default function CatalogItemNew() {
     const match = currentPath.match(/\/catalog\/items\/edit\/([^/]+)/);
     return match && match[1] ? match[1] : null;
   }, [currentPath]);
+  const returnToFromStorage = useMemo(
+    () => (itemId ? window.sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null),
+    [itemId]
+  );
 
   const { activeDealerId, hasHydrated } = useActiveDealer();
   const { userType } = useAccessContext();
@@ -213,6 +217,10 @@ export default function CatalogItemNew() {
     () => ({ q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 500 }),
     []
   );
+  const returnTo = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('returnTo') || returnToFromStorage || '/catalog/items';
+  }, [currentPath, returnToFromStorage]);
   const listCache = queryClient.getQueryData(
     catalogItemsListKey(scopeKey, defaultListFilters)
   ) as CatalogItem[] | undefined;
@@ -590,7 +598,7 @@ export default function CatalogItemNew() {
             title: 'Item not found',
             message: 'The item you are trying to edit was not found.',
           });
-          router.navigate('/catalog/items');
+          router.navigate(returnTo);
           return;
         }
         
@@ -727,7 +735,7 @@ export default function CatalogItemNew() {
     }
     
     loadItem();
-  }, [itemId, activeOrganizationId, setValue, sessionKey, reset]);
+  }, [itemId, activeOrganizationId, setValue, sessionKey, reset, returnTo]);
 
   // Load Supply (Supply Type + Origin) when editing
   useEffect(() => {
@@ -1108,10 +1116,10 @@ export default function CatalogItemNew() {
       // Navigate based on user action (use intent captured at submit start)
       shouldCloseAfterSaveRef.current = false;
       if (closeAfterSave) {
-        router.navigate('/catalog/items');
+        router.navigate(returnTo);
       } else if (!itemId && finalItemId) {
         // For new items, navigate to edit mode preserving active tab
-        const newPath = `/catalog/items/edit/${finalItemId}`;
+        const newPath = `/catalog/items/edit/${finalItemId}?returnTo=${encodeURIComponent(returnTo)}`;
         window.history.pushState({ activeTab }, '', newPath);
         router.navigate(newPath);
       }
@@ -1168,7 +1176,7 @@ export default function CatalogItemNew() {
           {/* Close Button */}
           <button
             type="button"
-            onClick={() => router.navigate('/catalog/items')}
+            onClick={() => router.navigate(returnTo)}
             disabled={isSaving}
             className="px-4 py-1.5 rounded border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-50"
           >

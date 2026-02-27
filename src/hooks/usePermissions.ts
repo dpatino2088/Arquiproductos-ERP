@@ -86,6 +86,10 @@ export const MODULE_PERMS = {
     view: ['finance.read', 'financials.read'], // Support both for backward compatibility
     edit: ['finance.write', 'financials.write'],
   },
+  partners: {
+    view: ['settings.read', 'partners.read'],
+    edit: ['settings.write', 'partners.write'],
+  },
   settings: {
     view: ['settings.read'],
     edit: ['settings.write'],

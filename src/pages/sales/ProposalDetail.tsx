@@ -12,7 +12,7 @@ import { getSupabaseErrorMessage, isRLSError } from '../../lib/supabase-error-ut
 import { useProposalDetail } from '../../hooks/useProposals';
 import type { Proposal, ProposalLine, ProposalCustomCategory, ProposalLineAddOn, ProposalLineAddOnPricingMode } from '../../types/proposals';
 import { generateProposalPDF, type ProposalPDFLine } from '../../lib/pdf/generateProposalPDF';
-import { formatDimensionsDisplayCompact } from '../../lib/formatDimensions';
+import { formatDimensionsForProposalPDF } from '../../lib/formatDimensions';
 import { getLogoPathFromUrl } from '../../lib/dealerLogo';
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
@@ -352,7 +352,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const handleSave = useCallback(async () => {
     if (!proposal || !canWrite) return;
     if (!headerDirty && !linesDirty && !addonsDirty) {
-      useUIStore.getState().addNotification({ type: 'info', title: 'Guardar', message: 'No hay cambios que guardar.' });
       return;
     }
     setSaving(true);
@@ -871,6 +870,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       const pdfLines: ProposalPDFLine[] = displayLines.map((line, index) => {
         const lineTotal = totals.lineTotals[index] ?? 0;
         const installationAddon = (displayAddonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
+        const isInstallIncluded = Number(installationAddon?.cost_amount ?? 0) > 0;
         if (line.line_type === 'custom') {
           const qty = Number(line.qty) || 0;
           const up = Number(line.unit_price) || 0;
@@ -890,31 +890,31 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             ? { measurements: snapFrozen.measurements, accessories: snapFrozen.accessories }
             : qlInfo?.config_snapshot ??
               (qlInfo?.configured_product_id ? (configuredProductsMap ?? {})[qlInfo.configured_product_id]?.config_snapshot : undefined);
-        // Same source as UI Description column: prefer qlInfo.width_m × qlInfo.height_m ("1.2 × 2 m"), then snapshot, then formatDimensions for panels
-        const hasSimpleDims = qlInfo && (qlInfo.width_m != null || qlInfo.height_m != null);
-        const dimensionsSimple =
-          hasSimpleDims
-            ? `${qlInfo!.width_m ?? '—'} × ${qlInfo!.height_m ?? '—'} m`
-            : null;
         const dimensionsSource =
-          dimensionsSimple
-            ? null
-            : snapFrozen && (snapFrozen.width_m != null || snapFrozen.height_m != null)
+          snapFrozen && (snapFrozen.width_m != null || snapFrozen.height_m != null || (typeof snapFrozen.measurements === 'object' && snapFrozen.measurements))
+            ? {
+                measurements: (typeof snapFrozen.measurements === 'object' && snapFrozen.measurements) ? snapFrozen.measurements : undefined,
+                panels: Array.isArray((snapFrozen as { panels?: unknown[] }).panels) ? (snapFrozen as { panels?: unknown[] }).panels : undefined,
+                width_m: snapFrozen.width_m,
+                height_m: snapFrozen.height_m,
+              }
+            : snap
               ? {
-                  ...(typeof snapFrozen.measurements === 'object' && snapFrozen.measurements ? snapFrozen.measurements : {}),
-                  width_m: snapFrozen.width_m,
-                  height_m: snapFrozen.height_m,
+                  measurements: (typeof (snap as { measurements?: unknown }).measurements === 'object' && (snap as { measurements?: unknown }).measurements)
+                    ? (snap as { measurements?: { panels?: unknown[]; height_mm?: number } }).measurements
+                    : undefined,
+                  panels: Array.isArray((snap as { panels?: unknown[] }).panels) ? (snap as { panels?: unknown[] }).panels : undefined,
+                  width_m: qlInfo?.width_m ?? null,
+                  height_m: qlInfo?.height_m ?? null,
                 }
-              : snap?.measurements && typeof snap.measurements === 'object'
-                ? snap.measurements
-                : qlInfo
-                  ? { width_m: qlInfo.width_m, height_m: qlInfo.height_m }
-                  : null;
+              : qlInfo
+                ? { width_m: qlInfo.width_m, height_m: qlInfo.height_m }
+                : null;
         const dimensionsFormatted =
           dimensionsSource
-            ? formatDimensionsDisplayCompact(dimensionsSource as Parameters<typeof formatDimensionsDisplayCompact>[0]).replace(/\s*mm\s*$/i, '').trim()
+            ? formatDimensionsForProposalPDF(dimensionsSource as Parameters<typeof formatDimensionsForProposalPDF>[0]).trim()
             : null;
-        const dimensions = dimensionsSimple ?? (dimensionsFormatted && dimensionsFormatted !== '—' ? dimensionsFormatted : null);
+        const dimensions = dimensionsFormatted && dimensionsFormatted !== '—' ? dimensionsFormatted : null;
         const meas = (snapFrozen as { measurements?: { panel_count?: number; panels?: unknown[] } } | null)?.measurements ?? (snap as { measurements?: { panel_count?: number; panels?: unknown[] }; panels?: unknown[] } | undefined)?.measurements;
         const panelsArray = (snap as { panels?: unknown[] } | undefined)?.panels ?? meas?.panels;
         const panel_count =
@@ -939,7 +939,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
           dimensions: dimensions ?? null,
           panel_count,
-          install_included: !!(installationAddon && (Number(installationAddon.sale_amount) || 0) > 1),
+          install_included: isInstallIncluded,
           accessories: formatAccessoriesForPDF(
             (snapFrozen as { accessories?: unknown } | null)?.accessories ??
             (snap as { accessories?: unknown } | undefined)?.accessories
@@ -1167,29 +1167,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     { id: 'timeline', label: 'Timeline' },
   ];
 
-  const summaryItems = [
-    {
-      label: 'Quote',
-      value: quote ? (
-        <button onClick={() => router.navigate(`/sales/quotes/${quote.id}`)} className="text-blue-600 hover:underline">
-          {quote.quote_no}
-        </button>
-      ) : (
-        '—'
-      ),
-    },
-    { label: 'Customer', value: customer?.customer_name ?? '—' },
-    { label: 'Contact', value: contactDisplay || '—' },
-    { label: 'Valid Until', value: proposal.valid_until ? new Date(proposal.valid_until).toLocaleDateString() : '—' },
-    { label: 'Version', value: proposal.version_no ?? '—' },
-  ];
-
   return (
     <DetailPageLayout
       title={proposal.proposal_no || proposal.id.slice(0, 8)}
       subtitle="Proposal"
       status={<StatusBadge status={proposal.status} type="proposal" />}
-      summaryItems={summaryItems}
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
@@ -1198,125 +1180,156 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     >
       {activeTab === 'overview' && (
         <div className="space-y-6 w-full max-w-full">
-          {/* Header card: logo, Proposal No, Status, Valid until, Description, financial fields */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
-        <div className="flex items-start gap-4 mb-4 -ml-0">
-          <div className="logo-slot flex-shrink-0 self-start">
-            {showLogo ? (
-              <img
-                id="dealerLogoDetail"
-                src={resolvedLogoUrl ?? ''}
-                alt="Dealer logo"
-                crossOrigin="anonymous"
-                onError={handleLogoError}
-                className="max-w-full max-h-full object-contain"
-              />
-            ) : (
-              <div className="flex items-center justify-center w-full h-full text-gray-400 text-xs" aria-hidden>
-                Dealer logo
+          {/* Header cards (Invoice-style: customer left, settings right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Customer Info</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Quote</dt>
+                  <dd>
+                    {quote ? (
+                      <button onClick={() => router.navigate(`/sales/quotes/${quote.id}`)} className="text-primary hover:underline font-medium">
+                        {quote.quote_no}
+                      </button>
+                    ) : '—'}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Customer</dt>
+                  <dd className="text-gray-900 font-medium">{customer?.customer_name ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Contact</dt>
+                  <dd className="text-gray-900 text-right">{contactDisplay || '—'}</dd>
+                </div>
+                {customer?.address && (
+                  <div className="border-t pt-2">
+                    <dt className="text-gray-500 text-xs mb-0.5">Address</dt>
+                    <dd className="text-gray-700 text-xs whitespace-pre-line">{customer.address}</dd>
+                  </div>
+                )}
+                {(contact?.contact_email || customer?.customer_email) && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Email</dt>
+                    <dd className="text-gray-900">{contact?.contact_email ?? customer?.customer_email}</dd>
+                  </div>
+                )}
+                {customer?.customer_phone && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Phone</dt>
+                    <dd className="text-gray-900">{customer.customer_phone}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Details</h3>
+              <div className="space-y-3">
+                <div>
+                  <Label>Proposal No</Label>
+                  <Input
+                    value={headerForm.proposal_no}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, proposal_no: e.target.value })); setHeaderDirty(true); }}
+                    disabled={contentReadOnly}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <Label>Status</Label>
+                    <SelectShadcn
+                      value={headerForm.status}
+                      onValueChange={(v) => { setHeaderForm((f) => ({ ...f, status: v as Proposal['status'] })); setHeaderDirty(true); }}
+                      disabled={statusDropdownDisabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROPOSAL_STATUS_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </SelectShadcn>
+                  </div>
+                  <div>
+                    <Label>Valid until</Label>
+                    <Input
+                      type="date"
+                      value={headerForm.valid_until}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, valid_until: e.target.value })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label>Description</Label>
+                  <textarea
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    rows={2}
+                    value={headerForm.description}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
+                    disabled={contentReadOnly}
+                    placeholder="Short proposal description"
+                  />
+                </div>
+                <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div>
+                    <Label className="block min-h-[2.5rem] leading-5">Global Disc. %</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={headerForm.global_discount_pct}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_discount_pct: e.target.value })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                    />
+                  </div>
+                  <div>
+                    <Label className="block min-h-[2.5rem] leading-5">Global Fee %</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="e.g. 10"
+                      value={headerForm.global_fee_amount}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                    />
+                  </div>
+                  <div>
+                    <Label className="block min-h-[2.5rem] leading-5">Labor Disc. %</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="Installation discount"
+                      value={headerForm.global_installation_discount_pct}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_discount_pct: e.target.value })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                    />
+                  </div>
+                  <div>
+                    <Label className="block min-h-[2.5rem] leading-5">Labor Fee %</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="Installation fee"
+                      value={headerForm.global_installation_fee_pct}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_fee_pct: e.target.value })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                    />
+                  </div>
+                </div>
               </div>
-            )}
+            </div>
           </div>
-        </div>
-        <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-12 md:col-span-4">
-            <Label>Proposal No</Label>
-            <Input
-              value={headerForm.proposal_no}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, proposal_no: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-            />
-          </div>
-          <div className="col-span-12 md:col-span-2">
-            <Label>Status</Label>
-            <SelectShadcn
-              value={headerForm.status}
-              onValueChange={(v) => { setHeaderForm((f) => ({ ...f, status: v as Proposal['status'] })); setHeaderDirty(true); }}
-              disabled={statusDropdownDisabled}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROPOSAL_STATUS_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-          </div>
-          <div className="col-span-12 md:col-span-4">
-            <Label>Valid until</Label>
-            <Input
-              type="date"
-              value={headerForm.valid_until}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, valid_until: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-            />
-          </div>
-          <div className="col-span-12">
-            <Label>Description</Label>
-            <textarea
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-              rows={2}
-              value={headerForm.description}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-              placeholder="Short proposal description"
-            />
-          </div>
-          <div className="col-span-6 md:col-span-2">
-            <Label>Global discount %</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              value={headerForm.global_discount_pct}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, global_discount_pct: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-            />
-          </div>
-          <div className="col-span-6 md:col-span-2">
-            <Label>Global fee %</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              placeholder="e.g. 10"
-              value={headerForm.global_fee_amount}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-            />
-          </div>
-          <div className="col-span-6 md:col-span-2">
-            <Label>Labor discount %</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              placeholder="Installation discount"
-              value={headerForm.global_installation_discount_pct}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_discount_pct: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-            />
-          </div>
-          <div className="col-span-6 md:col-span-2">
-            <Label>Labor fee %</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              placeholder="Installation fee"
-              value={headerForm.global_installation_fee_pct}
-              onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_fee_pct: e.target.value })); setHeaderDirty(true); }}
-              disabled={contentReadOnly}
-            />
-          </div>
-        </div>
-      </div>
 
           {/* Lines - above Notes */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
@@ -1388,18 +1401,28 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     : (qlInfo ? getQuoteLineBase(qlInfo) : 0)
                   : 0;
                 const hasBasePrice = line.line_type === 'from_quote' && qlInfo && baseAmount > 0;
-                const snap = line.quote_line_snapshot as { width_m?: number | null; height_m?: number | null; name?: string | null; sku?: string | null } | null;
-                const wM = snap?.width_m ?? qlInfo?.width_m ?? null;
-                const hM = snap?.height_m ?? qlInfo?.height_m ?? null;
-                const dimsMm =
-                  wM != null && hM != null
-                    ? `${Math.round(Number(wM) * 1000)} x ${Math.round(Number(hM) * 1000)}`
-                    : null;
+                const snap = line.quote_line_snapshot as {
+                  width_m?: number | null;
+                  height_m?: number | null;
+                  measurements?: { panels?: unknown[]; height_mm?: number } | null;
+                  panels?: unknown[] | null;
+                  name?: string | null;
+                  sku?: string | null;
+                } | null;
+                const dimsSource = {
+                  measurements: snap?.measurements ?? (qlInfo?.config_snapshot as { measurements?: { panels?: unknown[]; height_mm?: number } } | undefined)?.measurements,
+                  panels: snap?.panels ?? (qlInfo?.config_snapshot as { panels?: unknown[] } | undefined)?.panels,
+                  width_m: snap?.width_m ?? qlInfo?.width_m ?? null,
+                  height_m: snap?.height_m ?? qlInfo?.height_m ?? null,
+                };
+                const dimsMm = formatDimensionsForProposalPDF(dimsSource as Parameters<typeof formatDimensionsForProposalPDF>[0]);
                 const isCustomInvalid =
                   line.line_type === 'custom' &&
                   (!(line.description?.trim()) || line.qty == null || line.unit_price == null || Number(line.qty) <= 0);
                 const isExpanded = expandedLineId === line.id;
                 const installationAddon = (displayAddonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
+                const hasInstallationAddon = !!installationAddon;
+                const isInstallIncluded = Number(installationAddon?.cost_amount ?? 0) > 0;
                 const addonsTotal = (displayAddonsMap?.get(line.id) || []).reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
                 const materialTotal = computeLineTotal(line, qlInfo, proposal?.status);
                 const qtyForLine = line.line_type === 'from_quote'
@@ -1461,8 +1484,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                               )}
                             </div>
                             <div className="flex flex-col gap-0.5 mt-0.5">
-                              {dimsMm && <span className="text-xs text-gray-500">{dimsMm}</span>}
-                              {installationAddon && (Number(installationAddon.sale_amount) || 0) > 1 ? (
+                              {dimsMm && dimsMm !== '—' && <span className="text-xs text-gray-500 whitespace-pre-line">{dimsMm}</span>}
+                              {isInstallIncluded ? (
                                 <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
                                   Install Included
                                 </span>
@@ -1645,11 +1668,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                               <label className="flex items-center gap-2 cursor-pointer">
                                 <input
                                   type="checkbox"
-                                  checked={!!(installationAddon && (Number(installationAddon.sale_amount) || 0) > 1)}
+                                  checked={hasInstallationAddon}
                                   onChange={(e) => {
                                     if (contentReadOnly) return;
                                     if (e.target.checked) {
-                                      upsertAddOn(line.id, { addon_type: 'installation', cost_amount: 0, markup_pct: 100, pricing_mode: 'markup_pct' });
+                                      upsertAddOn(line.id, { addon_type: 'installation', cost_amount: 0, markup_pct: installationAddon?.markup_pct ?? 100, pricing_mode: 'markup_pct' });
                                     } else {
                                       const inst = (displayAddonsMap?.get(line.id) || []).find((a) => a.addon_type === 'installation');
                                       if (inst) removeAddOn(inst.id);
@@ -1660,7 +1683,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                 />
                                 <span className="text-sm text-gray-700">Install Included</span>
                               </label>
-                              {installationAddon && (Number(installationAddon.sale_amount) || 0) > 1 && (
+                              {hasInstallationAddon && (
                                 <>
                                   <div>
                                     <Label className="text-xs">Cost</Label>

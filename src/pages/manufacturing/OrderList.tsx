@@ -303,11 +303,28 @@ export default function OrderList() {
       }
 
       const moNumber = rpcResult?.mo_number ?? 'MO';
+      const moId = rpcResult?.mo_id as string | undefined;
+
+      // Compatibility fallback: if backend RPC doesn't auto-generate BOM,
+      // generate it explicitly right after MO creation.
+      if (moId) {
+        const { data: bomData, error: bomError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
+          p_manufacturing_order_id: moId,
+        });
+        if (bomError) {
+          throw new Error(`MO created (${moNumber}) but BOM generation failed: ${bomError.message}`);
+        }
+        const bomOk = Boolean((bomData as { ok?: boolean } | null)?.ok);
+        if (!bomOk) {
+          const bomErrors = (bomData as { errors?: string[] } | null)?.errors ?? [];
+          throw new Error(`MO created (${moNumber}) but BOM generation failed: ${bomErrors.join('; ') || 'Unknown error'}`);
+        }
+      }
 
       useUIStore.getState().addNotification({
         type: 'success',
         title: 'Released to Manufacturing',
-        message: `Created ${moNumber}. You can generate BOM from the MO detail.`,
+        message: `Created ${moNumber} with materials ready.`,
       });
       refetch();
     } catch (err: any) {

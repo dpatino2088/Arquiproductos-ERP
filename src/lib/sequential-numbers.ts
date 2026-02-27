@@ -79,6 +79,45 @@ export async function generateNextInvoiceNumber(organizationId: string): Promise
   return generateNextSequentialNumber('INV', 'DealerInvoices', 'invoice_number', organizationId);
 }
 
+/**
+ * Generates the next Purchase Order number (org-wide). Format: PO-NNNNN.
+ * PurchaseOrders table has no deleted column; query all rows with po_number.
+ */
+export async function generateNextPurchaseOrderNumber(organizationId: string): Promise<string> {
+  try {
+    const { data, error } = await supabase
+      .from('PurchaseOrders')
+      .select('po_number')
+      .eq('organization_id', organizationId)
+      .not('po_number', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const minStart = 100;
+    const padLength = 5;
+    const pattern = /^PO-(\d+)$/;
+    let maxNumber = minStart - 1;
+
+    if (data && data.length > 0) {
+      for (const row of data) {
+        const no = (row as { po_number: string | null }).po_number;
+        if (!no) continue;
+        const match = String(no).match(pattern);
+        if (match && match[1] != null) {
+          const n = parseInt(match[1], 10);
+          if (n > maxNumber) maxNumber = n;
+        }
+      }
+    }
+
+    return `PO-${String(Math.max(minStart, maxNumber + 1)).padStart(padLength, '0')}`;
+  } catch (err) {
+    console.error('Error generating PO number:', err);
+    return `PO-${Date.now().toString().slice(-6)}`;
+  }
+}
+
 /** Minimum proposal number (PR-00100, PR-00101, ...) */
 const PROPOSAL_NUMBER_START = 100;
 const PROPOSAL_PREFIX = 'PR';

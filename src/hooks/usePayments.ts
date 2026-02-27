@@ -12,6 +12,8 @@ export interface Payment {
   notes: string | null;
   recorded_by: string | null;
   created_at: string;
+  bank_name?: string | null;
+  description?: string | null;
 }
 
 export function usePayments(salesOrderId: string | null) {
@@ -28,7 +30,7 @@ export function usePayments(salesOrderId: string | null) {
     try {
       const { data, error } = await supabase
         .from('Payments')
-        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, created_at')
+        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, created_at, bank_name, description')
         .eq('sales_order_id', salesOrderId)
         .eq('deleted', false)
         .order('payment_date', { ascending: false });
@@ -92,4 +94,76 @@ export function useRecordPayment() {
   );
 
   return { recordPayment, isRecording };
+}
+
+export interface RecordPaymentForSOParams {
+  salesOrderId: string;
+  dealerId: string | null;
+  organizationId: string;
+  amount: number;
+  method: string;
+  reference: string;
+  paymentDate: string;
+  bankName?: string | null;
+  description?: string | null;
+  userId: string | null;
+  userName?: string | null;
+}
+
+export function useRecordPaymentForSO() {
+  const { activeOrganizationId } = useOrganizationContext();
+  const [isRecording, setIsRecording] = useState(false);
+  const addNotification = useUIStore((s) => s.addNotification);
+
+  const recordPaymentForSO = useCallback(
+    async (
+      params: RecordPaymentForSOParams,
+      onSuccess?: () => void
+    ): Promise<{ id: string } | null> => {
+      const orgId = params.organizationId || activeOrganizationId;
+      if (!orgId) {
+        addNotification({ type: 'error', title: 'Error', message: 'Organization context required.' });
+        return null;
+      }
+      setIsRecording(true);
+      try {
+        const { data, error } = await supabase
+          .from('Payments')
+          .insert({
+            organization_id: orgId,
+            sales_order_id: params.salesOrderId,
+            dealer_id: params.dealerId || null,
+            amount: params.amount,
+            payment_method: params.method,
+            reference_number: params.reference.trim() || null,
+            payment_date: params.paymentDate,
+            bank_name: params.bankName?.trim() || null,
+            description: params.description?.trim() || null,
+            recorded_by: params.userId,
+            recorded_by_name: params.userName ?? null,
+            deleted: false,
+          })
+          .select('id')
+          .single();
+        if (error) throw error;
+        addNotification({ type: 'success', title: 'Payment Recorded', message: 'Payment recorded successfully.' });
+        onSuccess?.();
+        return data as { id: string };
+      } catch (err: unknown) {
+        const msg =
+          (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string')
+            ? (err as { message: string }).message
+            : err instanceof Error
+              ? err.message
+              : 'Failed to record payment';
+        addNotification({ type: 'error', title: 'Error', message: msg });
+        throw err;
+      } finally {
+        setIsRecording(false);
+      }
+    },
+    [activeOrganizationId, addNotification]
+  );
+
+  return { recordPaymentForSO, isRecording };
 }

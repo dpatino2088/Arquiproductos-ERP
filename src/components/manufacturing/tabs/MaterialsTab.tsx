@@ -1,13 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useManufacturingMaterials } from '../../../hooks/useManufacturing';
 import { formatCurrency } from '../../../lib/utils';
-import { supabase } from '../../../lib/supabase/client';
-import { useUIStore } from '../../../stores/ui-store';
-import { RefreshCw, ChevronDown, ChevronUp, BarChart3 } from 'lucide-react';
 import type { ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
-import BOMMonitoringDashboard from './BOMMonitoringDashboard';
-import { useBOMMonitoring } from '../../../hooks/useBOMMonitoring';
-import { normalizeUUID } from '../../../utils/uuid';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useWarehouses } from '../../../hooks/useWarehouses';
 import { useInventoryAvailability } from '../../../hooks/useInventoryAvailability';
@@ -18,6 +12,8 @@ interface MaterialsTabProps {
   saleOrderId: string | null;
   moStatus: ManufacturingOrderStatus;
   currency?: string;
+  /** Called after BOM is generated so parent can refresh MO lines / timeline */
+  onBOMGenerated?: () => void;
 }
 
 // Category order matches the new BOM structure
@@ -44,13 +40,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   accessory: 'Accessory',
 };
 
-export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = 'USD' }: MaterialsTabProps) {
-  const { materials, bomTotals, loading, error, refetch, hasBomInstances, hasBomLines, debugCounts } = useManufacturingMaterials(moId);
-  const { refetch: refetchMonitoring } = useBOMMonitoring(saleOrderId);
+export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus, currency = 'USD', onBOMGenerated: _onBOMGenerated }: MaterialsTabProps) {
+  const { materials, bomTotals, loading, error, hasBomInstances, hasBomLines, debugCounts } = useManufacturingMaterials(moId);
   const [showCosts, setShowCosts] = useState(false);
   const [shouldShowError, setShouldShowError] = useState(false);
-  const [generatingBOM, setGeneratingBOM] = useState(false);
-  const [showMonitoring, setShowMonitoring] = useState(false);
 
   const { activeOrganizationId } = useOrganizationContext();
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
@@ -77,163 +70,6 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
     }
   }, [error, loading]);
 
-  // Handle Generate BOM
-  const handleGenerateBOM = async () => {
-    if (!moId || generatingBOM) return;
-
-    // Normalize UUID before RPC calls
-    const safeMoId = normalizeUUID(moId);
-    if (!safeMoId) {
-      if (import.meta.env.DEV) {
-        console.warn('⚠️ RPC aborted: invalid UUID', moId);
-      }
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'Invalid manufacturing order ID',
-      });
-      return;
-    }
-
-    try {
-      setGeneratingBOM(true);
-      
-      // Step 1: Reset (soft-delete) existing BOMs
-      const { data: resetData, error: resetError } = await supabase.rpc('reset_bom_for_manufacturing_order', {
-        p_manufacturing_order_id: safeMoId
-      });
-      
-      if (resetError) {
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error',
-          message: resetError.message || 'Failed to reset BOM',
-        });
-        return;
-      }
-      
-      // Step 2: Generate new BOM
-      const { data, error: rpcError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
-        p_manufacturing_order_id: safeMoId
-      });
-
-      if (rpcError) {
-        // Only show error if RPC actually failed
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error',
-          message: rpcError.message || 'Failed to generate BOM',
-        });
-        return;
-      }
-
-      // Parse response (new format with counts and warnings)
-      const ok = data?.ok ?? false;
-      const errors = data?.errors ?? [];
-      const warnings = data?.warnings ?? [];
-      const results = data?.results ?? [];
-      
-      // Use new counts from response
-      const moLinesProcessed = data?.mo_lines_processed ?? 0;
-      const bomInstancesCreated = data?.bom_instances_created ?? results.length;
-      const bomLinesCreated = data?.bom_instance_lines_created ?? results.reduce((sum: number, r: any) => sum + (r.created_lines || 0), 0);
-      
-      // Log detailed response
-      if (import.meta.env.DEV) {
-        console.log('📊 BOM Generation Result:', {
-          ok,
-          moLinesProcessed,
-          bomInstancesCreated,
-          bomLinesCreated,
-          warnings: warnings.length,
-          errors: errors.length,
-        });
-      }
-      
-      if (!ok || errors.length > 0) {
-        const errorMsg = errors.length > 0 
-          ? `Errors: ${errors.slice(0, 3).join(', ')}`
-          : 'Unknown error occurred';
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'BOM Generation Failed',
-          message: `${errorMsg}. BOMInstances: ${bomInstancesCreated}, Lines: ${bomLinesCreated}`,
-        });
-      } else if (warnings.length > 0) {
-        useUIStore.getState().addNotification({
-          type: 'warning',
-          title: 'BOM Generated with Warnings',
-          message: `BOM generated: ${bomInstancesCreated} instance(s), ${bomLinesCreated} line(s). Warnings: ${warnings.slice(0, 2).join('; ')}`,
-        });
-      } else if (bomLinesCreated === 0) {
-        useUIStore.getState().addNotification({
-          type: 'warning',
-          title: 'BOM Generated',
-          message: `BOM generated but 0 lines created. BOMInstances: ${bomInstancesCreated}. Check component mappings and BOM template configuration.`,
-        });
-      } else {
-        useUIStore.getState().addNotification({
-          type: 'success',
-          title: 'Success',
-          message: `BOM generated successfully: ${bomInstancesCreated} instance(s), ${bomLinesCreated} line(s) created.`,
-        });
-      }
-      
-      // Show detailed warnings in console for debugging
-      if (warnings.length > 0 && import.meta.env.DEV) {
-        console.warn('⚠️ BOM Generation Warnings:', warnings);
-      }
-      
-      // Small delay to allow DB to commit
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Refetch materials to update the display (with retry)
-      let retries = 0;
-      const maxRetries = 3;
-      while (retries < maxRetries) {
-        await refetch();
-        
-        // Check if materials are now available
-        if (materials.length > 0) {
-          break;
-        }
-        
-        retries++;
-        if (retries < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 500 * retries));
-        }
-      }
-      
-      // ✅ FIX: Refetch monitoring dashboard to show new BOM instance
-      // Always refresh monitor after BOM generation (regardless of linesCreated)
-      // Small delay to ensure new BOM instance is committed
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await refetchMonitoring();
-      
-      if (materials.length === 0 && bomLinesCreated > 0 && !loading) {
-        useUIStore.getState().addNotification({
-          type: 'warning',
-          title: 'Materials Not Visible',
-          message: 'BOM lines were created but not visible. This may be a permissions issue. Please refresh the page.',
-        });
-      }
-      
-      // Note: MO status will be updated by backend to 'planned' if BOM lines > 0
-      // The parent component (ManufacturingOrderDetail) will automatically refetch
-      // the MO when the tab is re-rendered or when user navigates
-      
-    } catch (err) {
-      // Only show error if it's a real error
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err instanceof Error ? err.message : 'Failed to generate BOM',
-      });
-    } finally {
-      setGeneratingBOM(false);
-    }
-  };
-
   // ✅ FIX: Group materials by category_code first (fallback to part_role)
   // This ensures consistent grouping by category (hardware/tube/drive/bottom_bar/bracket/fabric/accessory)
   // instead of by role which can be inconsistent (e.g., operating_system_drive vs drive_manual)
@@ -254,7 +90,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
         acc[m.uom] = (acc[m.uom] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
-      console.log('[DEBUG] Materials displayed', {
+      console.warn('[DEBUG] Materials displayed', {
         materialsCount: materials.length,
         groupedCategories: Object.keys(groupedMaterials),
         uomDistribution: uomCounts
@@ -310,7 +146,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
                 No se crearon BOMInstances para este Manufacturing Order
               </h3>
               <p className="text-sm text-yellow-700 mb-3">
-                No hay BOMInstances asociados a este MO. Ejecuta "Generate BOM" o revisa que el MO tenga ManufacturingOrderLines y BOM Templates configurados.
+                No hay BOMInstances asociados a este MO. Revisa que el MO tenga ManufacturingOrderLines y BOM Templates configurados.
               </p>
               <div className="text-xs text-yellow-600 space-y-1">
                 <p>• Debug: BOMInstances = {debugCounts.bomInstances}, BOMInstanceLines = {debugCounts.bomLines}</p>
@@ -320,13 +156,6 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
             </div>
           </div>
         </div>
-        <button
-          onClick={handleGenerateBOM}
-          disabled={generatingBOM}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {generatingBOM ? 'Generating...' : 'Generate BOM'}
-        </button>
       </div>
     );
   }
@@ -357,13 +186,6 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
             </div>
           </div>
         </div>
-        <button
-          onClick={handleGenerateBOM}
-          disabled={generatingBOM}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {generatingBOM ? 'Regenerating...' : 'Regenerate BOM'}
-        </button>
       </div>
     );
   }
@@ -371,46 +193,10 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
   if (materials.length === 0) {
     return (
       <div className="p-6">
-        {/* Status Banner */}
-        {moStatus === 'draft' && (
-          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  Material Review
-                </span>
-                <p className="text-sm text-blue-800">
-                  BOM needs to be generated before production can begin.
-                </p>
-              </div>
-              <button
-                onClick={handleGenerateBOM}
-                disabled={generatingBOM}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw className={`w-4 h-4 ${generatingBOM ? 'animate-spin' : ''}`} />
-                {generatingBOM ? 'Generating...' : 'Generate BOM'}
-              </button>
-            </div>
-          </div>
-        )}
-        
         <div className="text-center text-gray-500 py-12">
           <p className="mb-2">No frozen BOM materials found for this Sale Order yet.</p>
-          {moStatus !== 'draft' && (
-            <p className="text-xs mt-2 text-gray-400">Click "Generate BOM" button above to create materials list.</p>
-          )}
+          <p className="text-xs mt-2 text-gray-400">Materials are generated automatically when creating the Manufacturing Order.</p>
         </div>
-        
-        {/* Loading state for BOM generation */}
-        {generatingBOM && (
-          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-              <p className="text-sm text-blue-800">Generating BOM... Please wait.</p>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -420,23 +206,13 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
       {/* Status Banner */}
       {moStatus === 'draft' && (
         <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                Material Review
-              </span>
-              <p className="text-sm text-blue-800">
-                BOM needs to be generated before production can begin.
-              </p>
-            </div>
-            <button
-              onClick={handleGenerateBOM}
-              disabled={generatingBOM}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={`w-4 h-4 ${generatingBOM ? 'animate-spin' : ''}`} />
-              {generatingBOM ? 'Generating...' : 'Generate BOM'}
-            </button>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              Material Review
+            </span>
+            <p className="text-sm text-blue-800">
+              Materials are auto-generated from the Sales Order during MO creation.
+            </p>
           </div>
         </div>
       )}
@@ -466,30 +242,7 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
             <span className="text-sm text-gray-700">Show costs</span>
           </label>
         </div>
-        
-        {/* Monitoring Dashboard Toggle */}
-        <button
-          onClick={() => setShowMonitoring(!showMonitoring)}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors w-full justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
-            <span>BOM Health Monitoring Dashboard</span>
-          </div>
-          {showMonitoring ? (
-            <ChevronUp className="w-4 h-4" />
-          ) : (
-            <ChevronDown className="w-4 h-4" />
-          )}
-        </button>
       </div>
-
-      {/* Monitoring Dashboard */}
-      {showMonitoring && (
-        <div className="mb-6 border border-gray-200 rounded-lg overflow-hidden">
-          <BOMMonitoringDashboard saleOrderId={saleOrderId} currency={currency} />
-        </div>
-      )}
 
       {/* Materials by Category */}
       <div className="space-y-6">
@@ -670,15 +423,6 @@ export default function MaterialsTab({ moId, saleOrderId, moStatus, currency = '
         </div>
       )}
 
-      {/* Loading state for BOM generation */}
-      {generatingBOM && (
-        <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center gap-2">
-            <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
-            <p className="text-sm text-blue-800">Generating BOM... Please wait.</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

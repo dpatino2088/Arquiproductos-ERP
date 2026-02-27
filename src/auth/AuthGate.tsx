@@ -29,20 +29,22 @@ type Props = {
  * If any check fails, redirects appropriately.
  */
 export default function AuthGate({ children }: Props) {
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [ctx, setCtx] = useState<AuthContextRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
+    let hasCompletedOnce = false;
 
-    async function run() {
+    async function run(isInitial: boolean) {
       try {
-        setLoading(true);
+        if (isInitial) {
+          setInitialLoading(true);
+        }
         setError(null);
 
-        // 1) Get session
         const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
         if (sessionErr) {
           console.error('[AuthGate] getSession error:', sessionErr);
@@ -55,31 +57,35 @@ export default function AuthGate({ children }: Props) {
         setSessionUserId(uid);
 
         if (!uid) {
-          // No session - will redirect to login
           setCtx(null);
-          setLoading(false);
+          setInitialLoading(false);
+          hasCompletedOnce = true;
           return;
         }
 
-        // 2) Get auth context to verify membership
         const row = await fetchAuthContext(supabase);
 
         if (!mounted) return;
         setCtx(row);
-        setLoading(false);
+        setInitialLoading(false);
+        hasCompletedOnce = true;
       } catch (e: any) {
         console.error('[AuthGate] Error:', e);
         if (!mounted) return;
         setError(e?.message ?? 'Unknown error');
-        setLoading(false);
+        setInitialLoading(false);
+        hasCompletedOnce = true;
       }
     }
 
-    run();
+    run(true);
 
-    // Listen for auth state changes (login/logout)
-    const { data: subscription } = supabase.auth.onAuthStateChange(() => {
-      run();
+    // Only re-run on actual sign-in / sign-out, not token refreshes.
+    // TOKEN_REFRESHED fires on every tab-focus and would unmount children.
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        run(!hasCompletedOnce);
+      }
     });
 
     return () => {
@@ -90,8 +96,8 @@ export default function AuthGate({ children }: Props) {
     };
   }, []);
 
-  // Loading state
-  if (loading) {
+  // Loading state (only on initial check, never on token refresh)
+  if (initialLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">

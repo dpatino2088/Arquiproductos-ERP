@@ -50,7 +50,17 @@ function StatusBadge({ status, deleted = false }: StatusBadgeProps) {
   );
 }
 
-export default function DealerList() {
+interface DealerListProps {
+  basePath?: string;
+  moduleLabel?: string;
+  skipSubmoduleRegistration?: boolean;
+  /** Section title (e.g. "Accounts"). Default "Dealer List". */
+  sectionTitle?: string;
+  /** When true, hide the top header bar (title + subtitle + Add Dealer). Content is search + table only. */
+  hideSectionHeader?: boolean;
+}
+
+export default function DealerList({ basePath = '/settings/dealer-profile', moduleLabel = 'Settings', skipSubmoduleRegistration = false, sectionTitle = 'Accounts', hideSectionHeader = false }: DealerListProps) {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { isSuperAdmin, isOwner, isAdmin, isMember, loading: roleLoading } = useCurrentOrgRole();
@@ -67,10 +77,11 @@ export default function DealerList() {
   const canManageDealers = isSuperAdmin || isOwner || isAdmin || isMember;
 
   useEffect(() => {
-    registerSubmodules('Settings', [
-      { id: 'dealer-list', label: 'Dealer List', href: '/settings/dealer-profile' },
+    if (skipSubmoduleRegistration) return;
+    registerSubmodules(moduleLabel, [
+      { id: 'dealer-list', label: sectionTitle, href: basePath },
     ]);
-  }, [registerSubmodules]);
+  }, [registerSubmodules, moduleLabel, basePath, skipSubmoduleRegistration, sectionTitle]);
 
   const filteredDealers = useMemo(() => {
     if (!searchTerm) return dealers;
@@ -83,7 +94,7 @@ export default function DealerList() {
   }, [dealers, searchTerm]);
 
   const handleEdit = (dealer: Dealer) => {
-    router.navigate(`/settings/dealer-profile/edit/${dealer.id}`);
+    router.navigate(`${basePath}/edit/${dealer.id}`);
   };
 
   const handleDelete = async (dealer: Dealer) => {
@@ -138,28 +149,29 @@ export default function DealerList() {
   }
 
   return (
-    <div className="py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Dealer List</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage dealers in your organization ({filteredDealers.length} total)
-          </p>
+    <div className={hideSectionHeader ? '' : 'py-6'}>
+      {!hideSectionHeader && (
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-xl font-semibold text-foreground mb-1">{sectionTitle}</h1>
+            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+              Manage dealers in your organization ({filteredDealers.length} total)
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {canManageDealers && !roleLoading && (
+              <button
+                onClick={() => router.navigate(`${basePath}/new`)}
+                className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                <Plus className="w-4 h-4 inline mr-1" />
+                Add Dealer
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {canManageDealers && !roleLoading && (
-            <button
-              onClick={() => router.navigate('/settings/dealer-profile/new')}
-              className="px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
-              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            >
-              <Plus className="w-4 h-4 inline mr-1" />
-              Add Dealer
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Search and Filters */}
       <div className="mb-4">
@@ -306,7 +318,7 @@ export default function DealerList() {
                                 handleDelete(dealer);
                               }}
                               disabled={archivingId === dealer.id}
-                              className="p-1.5 hover:bg-red-50 rounded transition-colors text-red-600 disabled:opacity-50"
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
                               title="Eliminar (archivar) dealer"
                             >
                               <Trash2 className="w-4 h-4" />

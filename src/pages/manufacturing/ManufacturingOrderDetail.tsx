@@ -1,18 +1,21 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useModuleAccess } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
+import { useIssueMaterials } from '../../hooks/useInventoryMovements';
+import { useWarehouses } from '../../hooks/useWarehouses';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
-import SummaryTab from '../../components/manufacturing/tabs/SummaryTab';
 import MaterialsTab from '../../components/manufacturing/tabs/MaterialsTab';
-import CutListTab from '../../components/manufacturing/tabs/CutListTab';
 import ProductionStepsTab from '../../components/manufacturing/tabs/ProductionStepsTab';
+import ScheduleTab from '../../components/manufacturing/tabs/ScheduleTab';
 import NotesTab from '../../components/manufacturing/tabs/NotesTab';
+import AttachmentsTab from '../../components/manufacturing/tabs/AttachmentsTab';
 import TimelineView from '../../components/shared/TimelineView';
 import { ChevronDown } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
@@ -57,9 +60,13 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { manufacturingOrder: mo, loading, error, refetch } = useManufacturingOrder(moId);
   const { materials } = useManufacturingMaterials(moId ?? '');
   const { transitionStatus, isTransitioning } = useTransitionMOStatus();
+  const { issueMaterials } = useIssueMaterials();
+  const { defaultWarehouse } = useWarehouses(mo?.organization_id ?? null);
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
   const { isInternal } = useAccessContext();
+  const { canEdit: canEditInventory } = useModuleAccess('inventory');
+  const { canEdit: canEditManufacturing } = useModuleAccess('manufacturing');
   const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -138,12 +145,26 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     try {
       await transitionStatus(moId, newStatus, user.id, user.name);
       addNotification({ type: 'success', title: 'Status Updated', message: `MO moved to ${newStatus.replace(/_/g, ' ')}.` });
+
+      if (newStatus === 'in_production' && defaultWarehouse) {
+        try {
+          const result = await issueMaterials(moId, defaultWarehouse.id);
+          if (result?.skipped) {
+            addNotification({ type: 'info', title: 'Materials', message: 'Materials were already issued for this MO.' });
+          } else if (result?.lines_count > 0) {
+            addNotification({ type: 'success', title: 'Materials Issued', message: `${result.lines_count} material(s) issued to production (${result.movement_no}).` });
+          }
+        } catch (issueErr: unknown) {
+          addNotification({ type: 'warning', title: 'Materials Issue Warning', message: issueErr instanceof Error ? issueErr.message : 'Could not auto-issue materials.' });
+        }
+      }
+
       refetch();
       fetchTimeline();
     } catch (e: unknown) {
       addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to update status' });
     }
-  }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification]);
+  }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification, issueMaterials, defaultWarehouse]);
 
   const handleCancel = useCallback(async () => {
     if (!moId || !user?.id) return;
@@ -198,9 +219,11 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     { id: 'overview', label: 'Overview' },
     { id: 'lines', label: 'Lines', count: moLines.length },
     { id: 'materials', label: 'Materials', count: materials.length },
+    { id: 'schedule', label: 'Schedule' },
     { id: 'steps', label: 'Production Steps' },
     { id: 'notes', label: 'Notes' },
     { id: 'timeline', label: 'Timeline', count: timeline.length },
+    { id: 'attachments', label: 'Attachments' },
   ];
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean }[] = [];
@@ -210,6 +233,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     if (status === 'quality_check') actionItems.push({ label: 'Ready for Pickup', onClick: () => handleTransition('ready_for_pickup') });
     if (status === 'ready_for_pickup') actionItems.push({ label: 'Mark Delivered', onClick: () => handleTransition('delivered') });
+    if (['draft', 'planned', 'in_production'].includes(status) && materials.length > 0 && canEditInventory) {
+      actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
+    }
     if (['draft', 'planned', 'in_production'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
     }
@@ -344,6 +370,18 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                   <dd className="text-gray-900">{new Date(mo.released_at).toLocaleDateString()}</dd>
                 </div>
               )}
+              {(mo.planned_start_at || mo.scheduled_start_date) && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Planned Start</dt>
+                  <dd className="text-gray-900">{new Date(mo.planned_start_at ?? mo.scheduled_start_date ?? '').toLocaleDateString()}</dd>
+                </div>
+              )}
+              {(mo.planned_end_at || mo.scheduled_end_date) && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Planned End</dt>
+                  <dd className="text-gray-900">{new Date(mo.planned_end_at ?? mo.scheduled_end_date ?? '').toLocaleDateString()}</dd>
+                </div>
+              )}
               {mo.production_started_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Production Started</dt>
@@ -425,6 +463,10 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         />
       )}
 
+      {activeTab === 'schedule' && (
+        <ScheduleTab moId={moId} canEdit={canEditManufacturing} />
+      )}
+
       {/* Production Steps tab */}
       {activeTab === 'steps' && (
         <ProductionStepsTab moId={moId} />
@@ -444,6 +486,11 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
             <TimelineView events={timeline} />
           )}
         </div>
+      )}
+
+      {/* Attachments tab */}
+      {activeTab === 'attachments' && moId && (
+        <AttachmentsTab moId={moId} organizationId={mo.organization_id} />
       )}
     </DetailPageLayout>
   );

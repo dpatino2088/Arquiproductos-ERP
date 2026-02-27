@@ -63,6 +63,7 @@ DECLARE
     v_bom_instances_after integer := 0;
     v_bom_lines_before integer := 0;
     v_bom_lines_after integer := 0;
+    v_cost_from_msrp boolean := false;
 BEGIN
     -- ====================================================
     -- STEP 1: Load ManufacturingOrder
@@ -496,8 +497,17 @@ BEGIN
                 ELSE 'accessory'
             END;
             
-            -- Calculate costs
-            v_unit_cost_exw := COALESCE(CAST(v_catalog_item.cost_exw AS numeric(12,4)), 0);
+            -- Calculate costs: prefer CatalogItemsMSRP.total_cost (cost_exw + shipping + import_tax), else CatalogItems.cost_exw
+            v_cost_from_msrp := false;
+            SELECT cim.total_cost INTO v_unit_cost_exw
+            FROM "CatalogItemsMSRP" cim
+            WHERE cim.catalog_item_id = v_catalog_item.id AND cim.organization_id = v_mo.organization_id AND cim.total_cost IS NOT NULL
+            LIMIT 1;
+            IF FOUND AND v_unit_cost_exw IS NOT NULL THEN
+                v_cost_from_msrp := true;
+            ELSE
+                v_unit_cost_exw := COALESCE(CAST(v_catalog_item.cost_exw AS numeric(12,4)), 0);
+            END IF;
             v_total_cost_exw := v_unit_cost_exw * v_calculated_qty;
             
             IF v_unit_cost_exw > 0 THEN
@@ -505,7 +515,11 @@ BEGIN
                     v_unit_cost_with_taxes numeric(12,4);
                     v_msrp_sale_in numeric(12,4);
                 BEGIN
-                    v_unit_cost_with_taxes := v_unit_cost_exw * (1 + (v_shipping_percentage / 100.0) + (v_import_tax_percentage / 100.0));
+                    IF v_cost_from_msrp THEN
+                        v_unit_cost_with_taxes := v_unit_cost_exw;
+                    ELSE
+                        v_unit_cost_with_taxes := v_unit_cost_exw * (1 + (v_shipping_percentage / 100.0) + (v_import_tax_percentage / 100.0));
+                    END IF;
                     v_msrp_sale_in := v_unit_cost_with_taxes / (1 - (v_min_margin_pct / 100.0));
                     v_unit_msrp_sale_out := v_msrp_sale_in / (1 - (v_max_discount_pct / 100.0));
                     v_total_msrp_sale_out := v_unit_msrp_sale_out * v_calculated_qty;

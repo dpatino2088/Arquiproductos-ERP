@@ -1,567 +1,339 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { 
-  Search, 
-  Filter,
-  Plus,
-  Upload,
-  List,
-  Grid3X3,
+import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useWarehouses } from '../../hooks/useWarehouses';
+import { supabase } from '../../lib/supabase/client';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { buildDirectoryScopeKey } from '../../lib/directoryScopeKey';
+import { warehouseStockListKey } from '../../lib/queryKeys';
+import {
+  Search,
   SortAsc,
   SortDesc,
-  Edit,
-  Copy,
-  Trash2,
-  Warehouse as WarehouseIcon
+  Eye,
 } from 'lucide-react';
+import Input from '../../components/ui/Input';
 
-interface WarehouseItem {
+const INVENTORY_SUBMODULES = [
+  { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
+  { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
+  { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
+  { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
+  { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
+  { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand' },
+];
+
+interface StockRow {
   id: string;
-  manufacturer: string;
+  catalogItemId: string;
   sku: string;
   itemName: string;
-  quantity: number;
+  uom: string;
+  category: string | null;
+  onHand: number;
+  warehouseName: string;
+  onOrder: number;
+  assigned: number;
+  required: number;
+  available: number;
+  balance: number;
 }
 
-// Function to get quantity badge color
-const getQuantityBadgeColor = (quantity: number) => {
-  if (quantity === 0) {
-    return 'bg-red-50 text-red-700';
-  } else if (quantity < 10) {
-    return 'bg-yellow-50 text-yellow-700';
-  } else {
-    return 'bg-green-50 text-green-700';
-  }
+const getBalanceBadgeColor = (balance: number, required: number) => {
+  if (balance >= 0) return 'bg-green-50 text-green-700';
+  const threshold = Math.abs(Number(required) || 0) * 0.1;
+  if (Math.abs(balance) <= threshold) return 'bg-orange-50 text-orange-700';
+  return 'bg-red-50 text-red-700';
 };
 
 export default function Warehouse() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
+  const { activeOrganizationId } = useOrganizationContext();
+  const { activeDealerId } = useActiveDealer();
+  const { userType } = useAccessContext();
+  const { warehouses, defaultWarehouse } = useWarehouses(activeOrganizationId);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-  const [sortBy, setSortBy] = useState<'manufacturer' | 'sku' | 'itemName' | 'quantity'>('manufacturer');
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('');
+  const [sortBy, setSortBy] = useState<'sku' | 'itemName' | 'onHand' | 'available' | 'balance'>('sku');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedManufacturer, setSelectedManufacturer] = useState<string[]>([]);
-  const [selectedStockLevel, setSelectedStockLevel] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
 
   useEffect(() => {
-    // Only register Inventory submodules if we're actually in the Inventory module
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/inventory')) {
-      registerSubmodules('Inventory', [
-        { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
-        { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
-        { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
-        { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
-        { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
-      ]);
+      registerSubmodules('Inventory', INVENTORY_SUBMODULES);
     }
-    
-    // Cleanup: clear submodules when component unmounts or path changes
     return () => {
       const path = window.location.pathname;
-      if (!path.startsWith('/inventory')) {
-        // Only clear if we're leaving the Inventory module
-        clearSubmoduleNav();
-      }
+      if (!path.startsWith('/inventory')) clearSubmoduleNav();
     };
   }, [registerSubmodules, clearSubmoduleNav]);
 
-  // Mock data - Replace with actual data fetching
-  const warehouseData: WarehouseItem[] = useMemo(() => [
-    {
-      id: '1',
-      manufacturer: 'Coulisse',
-      sku: 'COU-BLD-001',
-      itemName: 'Premium Roller Blinds - White',
-      quantity: 45,
-    },
-    {
-      id: '2',
-      manufacturer: 'Coulisse',
-      sku: 'COU-VEN-123',
-      itemName: 'Venetian Blind Slats - Silver',
-      quantity: 156,
-    },
-    {
-      id: '3',
-      manufacturer: 'Coulisse',
-      sku: 'COU-ZIP-445',
-      itemName: 'Zip Screen System - Charcoal',
-      quantity: 3,
-    },
-    {
-      id: '4',
-      manufacturer: 'Coulisse',
-      sku: 'COU-CAS-890',
-      itemName: 'Cassette Roller Blind - Black',
-      quantity: 0,
-    },
-    {
-      id: '5',
-      manufacturer: 'Coulisse',
-      sku: 'COU-DAY-345',
-      itemName: 'Day & Night Roller Blind',
-      quantity: 10,
-    },
-    {
-      id: '6',
-      manufacturer: 'Coulisse',
-      sku: 'COU-PLI-678',
-      itemName: 'Pleated Blind System - Ivory',
-      quantity: 36,
-    },
-    {
-      id: '7',
-      manufacturer: 'Coulisse',
-      sku: 'COU-TRA-789',
-      itemName: 'Traverse Rod System - Bronze',
-      quantity: 2,
-    },
-    {
-      id: '8',
-      manufacturer: 'Hunter Douglas',
-      sku: 'HD-SIL-456',
-      itemName: 'Silhouette Window Shadings',
-      quantity: 23,
-    },
-    {
-      id: '9',
-      manufacturer: 'Hunter Douglas',
-      sku: 'HD-DUE-234',
-      itemName: 'Duette Honeycomb Shades - Cream',
-      quantity: 67,
-    },
-    {
-      id: '10',
-      manufacturer: 'Hunter Douglas',
-      sku: 'HD-LUM-678',
-      itemName: 'Luminette Privacy Sheers',
-      quantity: 41,
-    },
-  ], []);
+  const effectiveWarehouseId = selectedWarehouseId || defaultWarehouse?.id || '';
+  const scopeKey = useMemo(
+    () =>
+      buildDirectoryScopeKey({
+        orgId: activeOrganizationId ?? null,
+        activeDealerId: activeDealerId ?? null,
+        userRole: userType,
+      }),
+    [activeOrganizationId, activeDealerId, userType]
+  );
 
-  // Filter and sort warehouse items
-  const filteredItems = useMemo(() => {
-    const filtered = warehouseData.filter(item => {
-      // Search filter
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || (
-        item.manufacturer.toLowerCase().includes(searchLower) ||
-        item.sku.toLowerCase().includes(searchLower) ||
-        item.itemName.toLowerCase().includes(searchLower)
+  const { data: stockRows, isLoading, isFetching } = useQuery({
+    queryKey: warehouseStockListKey(scopeKey, effectiveWarehouseId || 'all'),
+    queryFn: async (): Promise<StockRow[]> => {
+      if (!activeOrganizationId) return [];
+
+      let balanceQuery = supabase
+        .from('InventoryBalances')
+        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, is_roll, CatalogCategories(name))')
+        .eq('organization_id', activeOrganizationId);
+
+      if (effectiveWarehouseId) {
+        balanceQuery = balanceQuery.eq('warehouse_id', effectiveWarehouseId);
+      }
+
+      const { data: balances, error } = await balanceQuery;
+      if (error) throw error;
+      if (!balances?.length) return [];
+
+      const catalogIds = [...new Set((balances as any[]).map(b => b.catalog_item_id))];
+
+      const onOrderMap = new Map<string, number>();
+      const requiredMap = new Map<string, number>();
+      const assignedMap = new Map<string, number>();
+      if (catalogIds.length > 0) {
+        const { data: onOrderRows, error: onOrderError } = await supabase
+          .from('inventory_on_order')
+          .select('catalog_item_id, on_order_qty')
+          .eq('organization_id', activeOrganizationId)
+          .in('catalog_item_id', catalogIds);
+        if (onOrderError) throw onOrderError;
+        (onOrderRows ?? []).forEach((r: any) => {
+          onOrderMap.set(r.catalog_item_id, (onOrderMap.get(r.catalog_item_id) || 0) + Number(r.on_order_qty || 0));
+        });
+
+        const { data: demandRows, error: demandError } = await supabase
+          .from('manufacturing_order_material_demand')
+          .select('catalog_item_id, required_qty')
+          .eq('organization_id', activeOrganizationId)
+          .in('catalog_item_id', catalogIds)
+          .in('mo_status', ['draft', 'planned', 'quality_check']);
+        if (demandError) throw demandError;
+
+        (demandRows ?? []).forEach((r: any) => {
+          const qty = Number(r.required_qty ?? 0);
+          requiredMap.set(r.catalog_item_id, (requiredMap.get(r.catalog_item_id) || 0) + qty);
+          // Soft reservation model: assigned is planning allocation and can be reassigned.
+          assignedMap.set(r.catalog_item_id, (assignedMap.get(r.catalog_item_id) || 0) + qty);
+        });
+      }
+
+      return (balances as any[]).map(b => ({
+        id: b.catalog_item_id + ':' + b.warehouse_id,
+        catalogItemId: b.catalog_item_id,
+        sku: b.CatalogItems?.sku ?? '—',
+        itemName: b.CatalogItems?.name ?? '—',
+        uom: b.CatalogItems?.is_roll ? 'm' : (b.CatalogItems?.unit_of_measure ?? 'ea'),
+        category: b.CatalogItems?.CatalogCategories?.name ?? null,
+        onHand: Number(b.quantity ?? 0),
+        warehouseName: b.Warehouses?.name ?? '—',
+        onOrder: onOrderMap.get(b.catalog_item_id) ?? 0,
+        assigned: assignedMap.get(b.catalog_item_id) ?? 0,
+        required: requiredMap.get(b.catalog_item_id) ?? 0,
+        available: Number(b.quantity ?? 0) - (assignedMap.get(b.catalog_item_id) ?? 0),
+        balance: Number(b.quantity ?? 0) + (onOrderMap.get(b.catalog_item_id) ?? 0) - (requiredMap.get(b.catalog_item_id) ?? 0),
+      }));
+    },
+    enabled: !!activeOrganizationId,
+    placeholderData: keepPreviousData,
+    refetchOnMount: false,
+  });
+
+  const hasData = (stockRows?.length ?? 0) > 0;
+
+  const filtered = useMemo(() => {
+    let rows = stockRows ?? [];
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      rows = rows.filter(r =>
+        r.sku.toLowerCase().includes(q) ||
+        r.itemName.toLowerCase().includes(q) ||
+        (r.category ?? '').toLowerCase().includes(q)
       );
-
-      // Manufacturer filter
-      const matchesManufacturer = selectedManufacturer.length === 0 || selectedManufacturer.includes(item.manufacturer);
-
-      // Stock level filter
-      const stockLevel = item.quantity === 0 ? 'Out of Stock' : item.quantity < 10 ? 'Low Stock' : 'In Stock';
-      const matchesStockLevel = selectedStockLevel.length === 0 || selectedStockLevel.includes(stockLevel);
-
-      return matchesSearch && matchesManufacturer && matchesStockLevel;
-    });
-
-    // Apply sorting
-    return filtered.sort((a, b) => {
-      let aValue: string | number;
-      let bValue: string | number;
-
-      switch (sortBy) {
-        case 'manufacturer':
-          aValue = a.manufacturer.toLowerCase();
-          bValue = b.manufacturer.toLowerCase();
-          break;
-        case 'sku':
-          aValue = a.sku.toLowerCase();
-          bValue = b.sku.toLowerCase();
-          break;
-        case 'itemName':
-          aValue = a.itemName.toLowerCase();
-          bValue = b.itemName.toLowerCase();
-          break;
-        case 'quantity':
-          aValue = a.quantity;
-          bValue = b.quantity;
-          break;
-        default:
-          aValue = a.manufacturer.toLowerCase();
-          bValue = b.manufacturer.toLowerCase();
-      }
-
-      if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
-      } else {
-        const strA = String(aValue);
-        const strB = String(bValue);
-        if (strA < strB) return sortOrder === 'asc' ? -1 : 1;
-        if (strA > strB) return sortOrder === 'asc' ? 1 : -1;
-        return 0;
-      }
-    });
-  }, [searchTerm, warehouseData, sortBy, sortOrder, selectedManufacturer, selectedStockLevel]);
-
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
-
-  // Reset to first page when search changes
-  useMemo(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  // Handle sorting
-  const handleSort = (field: typeof sortBy) => {
-    if (sortBy === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(field);
-      setSortOrder('asc');
     }
+    rows.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'sku') cmp = a.sku.localeCompare(b.sku);
+      else if (sortBy === 'itemName') cmp = a.itemName.localeCompare(b.itemName);
+      else if (sortBy === 'onHand') cmp = a.onHand - b.onHand;
+      else if (sortBy === 'available') cmp = a.available - b.available;
+      else if (sortBy === 'balance') cmp = a.balance - b.balance;
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+    return rows;
+  }, [stockRows, searchTerm, sortBy, sortOrder]);
+
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginated = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  const handleSort = (col: typeof sortBy) => {
+    if (sortBy === col) setSortOrder(o => o === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortOrder('asc'); }
   };
 
-  // Handle filter toggles
-  const handleManufacturerToggle = (manufacturer: string) => {
-    setSelectedManufacturer(prev => 
-      prev.includes(manufacturer) 
-        ? prev.filter(m => m !== manufacturer)
-        : [...prev, manufacturer]
-    );
+  const SortIcon = ({ col }: { col: typeof sortBy }) => {
+    if (sortBy !== col) return null;
+    return sortOrder === 'asc' ? <SortAsc className="w-3.5 h-3.5 inline ml-1" /> : <SortDesc className="w-3.5 h-3.5 inline ml-1" />;
   };
-
-  const handleStockLevelToggle = (stockLevel: string) => {
-    setSelectedStockLevel(prev => 
-      prev.includes(stockLevel) 
-        ? prev.filter(s => s !== stockLevel)
-        : [...prev, stockLevel]
-    );
-  };
-
-  // Clear all filters
-  const clearAllFilters = () => {
-    setSelectedManufacturer([]);
-    setSelectedStockLevel([]);
-    setSearchTerm('');
-  };
-
-  // Get unique filter options
-  const manufacturerOptions = Array.from(new Set(warehouseData.map(item => item.manufacturer).filter(Boolean)));
-  const stockLevelOptions = ['In Stock', 'Low Stock', 'Out of Stock'];
-
-  const totalActiveFilters = selectedManufacturer.length + selectedStockLevel.length;
 
   return (
-    <div className="py-6">
-      {/* Header */}
+    <div className="py-6 px-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-title font-semibold text-foreground">Warehouse</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            Import
-          </button>
-          <button
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-            onClick={() => router.navigate('/inventory/warehouse/new')}
-          >
-            <Plus className="w-4 h-4" />
-            Add New Warehouse
-          </button>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Warehouse Stock</h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+            {filtered.length} item{filtered.length === 1 ? '' : 's'} in stock
+          </p>
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="mb-4">
-        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
-          <div className="flex items-center gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search warehouse items by manufacturer, SKU, or item name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              />
-            </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
-                showFilters || totalActiveFilters > 0
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <Filter className="w-4 h-4" />
-              Filters
-              {totalActiveFilters > 0 && (
-                <span className="bg-white text-primary rounded-full px-2 py-0.5 text-xs font-semibold">
-                  {totalActiveFilters}
-                </span>
-              )}
-            </button>
-            <div className="flex items-center gap-1 border border-gray-200 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode('table')}
-                className={`p-2 transition-colors ${
-                  viewMode === 'table'
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+      {/* Filters */}
+      <div className="mb-4 flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Input
+            type="text"
+            placeholder="Search by SKU, item name, or category..."
+            value={searchTerm}
+            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+            className="pl-10"
+          />
+        </div>
+        {warehouses.length > 1 && (
+          <select
+            value={selectedWarehouseId}
+            onChange={e => { setSelectedWarehouseId(e.target.value); setCurrentPage(1); }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+          >
+            <option value="">All Warehouses</option>
+            {warehouses.map(w => (
+              <option key={w.id} value={w.id}>{w.name}</option>
+            ))}
+          </select>
+        )}
+      </div>
 
-          {/* Filters Dropdown */}
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                {/* Manufacturer Filter */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-700">Manufacturer</span>
-                    {selectedManufacturer.length > 0 && (
-                      <button
-                        onClick={() => setSelectedManufacturer([])}
-                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
-                      >
-                        Clear ({selectedManufacturer.length})
-                      </button>
-                    )}
-                  </div>
-                  <div className="max-h-40 overflow-y-auto">
-                    {manufacturerOptions.map((manufacturer) => (
-                      <div
-                        key={manufacturer}
-                        onClick={() => handleManufacturerToggle(manufacturer)}
-                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedManufacturer.includes(manufacturer)}
-                          readOnly
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm text-gray-700">{manufacturer}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Stock Level Filter */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-700">Stock Level</span>
-                    {selectedStockLevel.length > 0 && (
-                      <button
-                        onClick={() => setSelectedStockLevel([])}
-                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
-                      >
-                        Clear ({selectedStockLevel.length})
-                      </button>
-                    )}
-                  </div>
-                  <div className="max-h-40 overflow-y-auto">
-                    {stockLevelOptions.map((stockLevel) => (
-                      <div
-                        key={stockLevel}
-                        onClick={() => handleStockLevelToggle(stockLevel)}
-                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedStockLevel.includes(stockLevel)}
-                          readOnly
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm text-gray-700">{stockLevel}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-between items-center">
-                <button 
-                  onClick={clearAllFilters}
-                  className="text-xs text-gray-500 hover:text-gray-700"
+      {isLoading ? (
+        <div className="animate-pulse space-y-3">
+          <div className="h-10 bg-gray-100 rounded" />
+          <div className="h-10 bg-gray-100 rounded" />
+          <div className="h-10 bg-gray-100 rounded" />
+        </div>
+      ) : (
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('sku')}>
+                  SKU <SortIcon col="sku" />
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('itemName')}>
+                  Item Name <SortIcon col="itemName" />
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Category</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Warehouse</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('onHand')}>
+                  On Hand <SortIcon col="onHand" />
+                </th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">On Order</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Assigned</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Required</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('available')}>
+                  Available <SortIcon col="available" />
+                </th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('balance')}>
+                  Balance <SortIcon col="balance" />
+                </th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginated.length === 0 ? (
+                <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-500">No stock data found</td></tr>
+              ) : paginated.map(row => (
+                <tr
+                  key={row.id}
+                  className={`border-t hover:bg-gray-50 ${row.catalogItemId ? 'cursor-pointer' : ''}`}
+                  tabIndex={row.catalogItemId ? 0 : -1}
+                  onClick={() => {
+                    if (!row.catalogItemId) return;
+                    sessionStorage.setItem('currentInventoryItemId', row.catalogItemId);
+                    router.navigate(`/inventory/items/${row.catalogItemId}`);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!row.catalogItemId) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      sessionStorage.setItem('currentInventoryItemId', row.catalogItemId);
+                      router.navigate(`/inventory/items/${row.catalogItemId}`);
+                    }
+                  }}
                 >
-                  Clear all filters
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Table View */}
-      {viewMode === 'table' && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
-          <div className="table-fit-wrapper">
-            <table className="table-fit">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
+                  <td className="px-4 py-3 font-medium text-gray-900">{row.sku}</td>
+                  <td className="px-4 py-3 text-gray-700">{row.itemName}</td>
+                  <td className="px-4 py-3 text-gray-600">{row.category ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">{row.warehouseName}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{Number(row.onHand).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onOrder > 0 ? Number(row.onOrder).toFixed(2) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.assigned > 0 ? Number(row.assigned).toFixed(2) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.required > 0 ? Number(row.required).toFixed(2) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{Number(row.available).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getBalanceBadgeColor(row.balance, row.required)}`}>
+                      {Number(row.balance).toFixed(2)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => handleSort('manufacturer')}
-                      className="flex items-center gap-1 hover:text-gray-700"
+                      type="button"
+                      onClick={() => {
+                        sessionStorage.setItem('currentInventoryItemId', row.catalogItemId);
+                        router.navigate(`/inventory/items/${row.catalogItemId}`);
+                      }}
+                      className="inline-flex items-center justify-center p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded"
+                      aria-label={`Open ${row.sku}`}
+                      title={`Open ${row.sku}`}
                     >
-                      Manufacturer
-                      {sortBy === 'manufacturer' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                      <Eye className="w-4 h-4" />
                     </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('sku')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      SKU
-                      {sortBy === 'sku' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('itemName')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Item Name
-                      {sortBy === 'itemName' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">
-                    <button
-                      onClick={() => handleSort('quantity')}
-                      className="flex items-center gap-1 hover:text-gray-700"
-                    >
-                      Quantity
-                      {sortBy === 'quantity' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
-                    </button>
-                  </th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-12 px-6 text-center">
-                      <div className="flex flex-col items-center">
-                        <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                          <Search className="w-6 h-6 text-gray-400" />
-                        </div>
-                        <p className="text-gray-600 mb-2">No warehouse items found</p>
-                        <p className="text-sm text-gray-500">
-                          {warehouseData.length === 0 
-                            ? 'Start by adding warehouse items'
-                            : 'Try adjusting your search criteria'}
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedItems.map((item) => (
-                    <tr 
-                      key={item.id} 
-                      className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {item.manufacturer}
-                      </td>
-                      <td className="py-4 px-6 text-gray-900 text-sm font-medium">
-                        {item.sku}
-                      </td>
-                      <td className="py-4 px-6 text-gray-700 text-sm">
-                        {item.itemName}
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getQuantityBadgeColor(item.quantity)}`}>
-                          {item.quantity} units
-                        </span>
-                      </td>
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1 justify-end">
-                          <button className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600">
-                            <Copy className="w-4 h-4" />
-                          </button>
-                          <button className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
+          {hasData && isFetching ? (
+            <div className="border-t bg-gray-50/80 px-4 py-2 text-xs text-gray-600">
+              Updating...
+            </div>
+          ) : null}
         </div>
       )}
 
-      {/* Pagination */}
-      <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-700">Show:</span>
-            <select
-              value={itemsPerPage}
-              onChange={(e) => {
-                setItemsPerPage(Number(e.target.value));
-                setCurrentPage(1);
-              }}
-              className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            <span className="text-sm text-gray-700">
-              Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredItems.length)} of {filteredItems.length}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-gray-700">
-              Page {currentPage} of {totalPages || 1}
-            </span>
-            <button
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              disabled={currentPage >= totalPages}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+          <span>Page {currentPage} of {totalPages} ({filtered.length} results)</span>
+          <div className="flex gap-2">
+            <button disabled={currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1 border rounded disabled:opacity-50">Prev</button>
+            <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1 border rounded disabled:opacity-50">Next</button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
-

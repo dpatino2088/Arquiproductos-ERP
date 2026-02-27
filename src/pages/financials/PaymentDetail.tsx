@@ -46,6 +46,8 @@ interface PaymentHeader {
   dealer_id: string | null;
   sales_order_id: string | null;
   created_at: string;
+  bank_name?: string | null;
+  description?: string | null;
   Dealer?: DealerInfo | null;
   SalesOrder?: { id: string; sales_order_no: string } | null;
 }
@@ -56,6 +58,14 @@ interface InvoiceApplication {
   invoice_id: string;
   created_at: string;
   Invoice?: { invoice_number: string; total: number; status: string } | null;
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  if (err instanceof Error) return err.message;
+  return 'Failed to load payment';
 }
 
 function getPaymentId(): string | null {
@@ -106,15 +116,36 @@ export default function PaymentDetail() {
     setLoading(true);
     setError(null);
     try {
-      const { data: payData, error: payErr } = await supabase
+      const baseSelect = 'id, amount, payment_method, reference_number, payment_date, notes, recorded_by_name, dealer_id, sales_order_id, created_at';
+      const extendedSelect = `${baseSelect}, bank_name, description`;
+
+      let pay: PaymentHeader;
+      const primary = await supabase
         .from('Payments')
-        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by_name, dealer_id, sales_order_id, created_at')
+        .select(extendedSelect)
         .eq('id', paymentId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .single();
-      if (payErr) throw payErr;
-      const pay = payData as PaymentHeader;
+
+      if (!primary.error) {
+        pay = primary.data as PaymentHeader;
+      } else {
+        const msg = getErrorMessage(primary.error).toLowerCase();
+        const isMissingOptionalColumn =
+          msg.includes('column') && (msg.includes('bank_name') || msg.includes('description'));
+        if (!isMissingOptionalColumn) throw primary.error;
+
+        const fallback = await supabase
+          .from('Payments')
+          .select(baseSelect)
+          .eq('id', paymentId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .single();
+        if (fallback.error) throw fallback.error;
+        pay = { ...(fallback.data as PaymentHeader), bank_name: null, description: null };
+      }
 
       const [dealerRes, soRes, appsRes] = await Promise.all([
         pay.dealer_id
@@ -156,7 +187,7 @@ export default function PaymentDetail() {
         setApplications([]);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load payment');
+      setError(getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -257,6 +288,18 @@ export default function PaymentDetail() {
               <dt className="text-gray-500">Recorded By</dt>
               <dd className="text-gray-900">{payment.recorded_by_name ?? '—'}</dd>
             </div>
+            {payment.bank_name && (
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Bank Name</dt>
+                <dd className="text-gray-900">{payment.bank_name}</dd>
+              </div>
+            )}
+            {payment.description && (
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Description</dt>
+                <dd className="text-gray-900">{payment.description}</dd>
+              </div>
+            )}
             <div className="flex justify-between border-t pt-2">
               <dt className="text-gray-500">Applied</dt>
               <dd className={`font-mono font-medium ${totalApplied > 0 ? 'text-green-600' : 'text-gray-500'}`}>{fmt(totalApplied)}</dd>

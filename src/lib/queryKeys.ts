@@ -99,3 +99,33 @@ export function paymentsListKey(scopeKey: string, soId: string): unknown[] {
 export function timelineKey(entityType: string, entityId: string): unknown[] {
   return ['timeline', entityType, entityId, LIST_QUERY_VERSION];
 }
+
+/** Purchase Orders list */
+export function purchaseOrdersListKey(scopeKey: string): unknown[] {
+  return ['inventory', 'purchase-orders', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Purchase Order detail */
+export function purchaseOrderDetailKey(scopeKey: string, poId: string): unknown[] {
+  return ['inventory', 'purchase-orders', 'detail', DETAIL_QUERY_VERSION, scopeKey, poId ?? ''];
+}
+
+/** Vendors list */
+export function vendorsListKey(scopeKey: string): unknown[] {
+  return ['partners', 'vendors', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Vendor detail */
+export function vendorDetailKey(scopeKey: string, vendorId: string): unknown[] {
+  return ['partners', 'vendors', 'detail', DETAIL_QUERY_VERSION, scopeKey, vendorId];
+}
+
+/** Warehouse stock list (MRP availability columns) */
+export function warehouseStockListKey(scopeKey: string, warehouseId: string): unknown[] {
+  return ['inventory', 'warehouse', 'stock', 'list', LIST_QUERY_VERSION, scopeKey, warehouseId ?? 'all'];
+}
+
+/** Inventory item operational detail */
+export function inventoryItemDetailKey(scopeKey: string, itemId: string): unknown[] {
+  return ['inventory', 'items', 'detail', DETAIL_QUERY_VERSION, scopeKey, itemId ?? ''];
+}

@@ -69,6 +69,13 @@ const ManufacturingOrderDetail = lazy(() => import('./pages/manufacturing/Manufa
 const CatalogItemNew = lazy(() => import('./pages/catalog/CatalogItemNew'));
 const Inventory = lazy(() => import('./pages/inventory/Inventory'));
 const Warehouse = lazy(() => import('./pages/inventory/Warehouse'));
+const InventoryItemDetail = lazy(() => import('./pages/inventory/InventoryItemDetail'));
+const PurchaseOrders = lazy(() => import('./pages/inventory/PurchaseOrders'));
+const PurchaseOrderDetail = lazy(() => import('./pages/inventory/PurchaseOrderDetail'));
+const Receipts = lazy(() => import('./pages/inventory/Receipts'));
+const Transactions = lazy(() => import('./pages/inventory/Transactions'));
+const TransactionDetail = lazy(() => import('./pages/inventory/TransactionDetail'));
+const MaterialDemand = lazy(() => import('./pages/inventory/MaterialDemand'));
 const Manufacturing = lazy(() => import('./pages/manufacturing/Manufacturing'));
 const BillOfMaterials = lazy(() => import('./pages/manufacturing/BillOfMaterials'));
 const ApprovedBOMList = lazy(() => import('./pages/catalog/ApprovedBOMList'));
@@ -78,6 +85,11 @@ const InvoiceNew = lazy(() => import('./pages/financials/InvoiceNew'));
 const InvoiceDetail = lazy(() => import('./pages/financials/InvoiceDetail'));
 const FinancialPayments = lazy(() => import('./pages/financials/FinancialPayments'));
 const PaymentDetail = lazy(() => import('./pages/financials/PaymentDetail'));
+const Partners = lazy(() => import('./pages/partners/Partners'));
+const PartnerDealers = lazy(() => import('./pages/partners/PartnerDealers'));
+const PartnerVendors = lazy(() => import('./pages/partners/PartnerVendors'));
+const PartnerVendorForm = lazy(() => import('./pages/partners/PartnerVendorForm'));
+const PartnerManufacturers = lazy(() => import('./pages/partners/PartnerManufacturers'));
 
 const CompanySettings = lazy(() => import('./pages/settings/CompanySettings'));
 
@@ -558,30 +570,84 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/inventory/items/:catalog_item_id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/inventory\/items\/([^/]+)/);
+        if (match?.[1]) sessionStorage.setItem('currentInventoryItemId', match[1]);
+        setCurrentPage('inventory-item-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/inventory/purchase-orders', () => {
       if (isAuthenticated) {
-        setCurrentPage('inventory');
+        setCurrentPage('inventory-purchase-orders');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/purchase-orders/new', () => {
+      if (isAuthenticated) {
+        sessionStorage.removeItem('currentPurchaseOrderId');
+        setCurrentPage('inventory-purchase-order-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/purchase-orders/:id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/inventory\/purchase-orders\/([^/]+)/);
+        if (match?.[1] && match[1] !== 'new') {
+          sessionStorage.setItem('currentPurchaseOrderId', match[1]);
+        }
+        setCurrentPage('inventory-purchase-order-detail');
       } else {
         setCurrentPage('login');
       }
     });
     router.addRoute('/inventory/receipts', () => {
       if (isAuthenticated) {
-        setCurrentPage('inventory');
+        setCurrentPage('inventory-receipts');
       } else {
         setCurrentPage('login');
       }
     });
     router.addRoute('/inventory/transactions', () => {
       if (isAuthenticated) {
-        setCurrentPage('inventory');
+        setCurrentPage('transactions');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/transactions/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('transaction-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/transactions/:id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/inventory\/transactions\/([^/]+)/);
+        if (match?.[1]) sessionStorage.setItem('currentTransactionId', match[1]);
+        setCurrentPage('transaction-detail');
       } else {
         setCurrentPage('login');
       }
     });
     router.addRoute('/inventory/adjustments', () => {
       if (isAuthenticated) {
-        setCurrentPage('inventory');
+        setCurrentPage('inventory-adjustments');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/material-demand', () => {
+      if (isAuthenticated) {
+        setCurrentPage('material-demand');
       } else {
         setCurrentPage('login');
       }
@@ -687,6 +753,38 @@ function App() {
     });
     router.addRoute('/financials/payments/:id', () => {
       if (isAuthenticated) { setCurrentPage('financials-payment-detail'); } else { setCurrentPage('login'); }
+    });
+
+    // Partners routes
+    router.addRoute('/partners', () => {
+      if (isAuthenticated) { setCurrentPage('partners'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealers', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealers/new', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealers/edit/:id', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealer-users/new', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealer-users/edit/:id', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/vendors', () => {
+      if (isAuthenticated) { setCurrentPage('partners-vendors'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/vendors/new', () => {
+      if (isAuthenticated) { setCurrentPage('partners-vendor-form'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/vendors/edit/:id', () => {
+      if (isAuthenticated) { setCurrentPage('partners-vendor-form'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/manufacturers', () => {
+      if (isAuthenticated) { setCurrentPage('partners-manufacturers'); } else { setCurrentPage('login'); }
     });
     
     // Reports routes
@@ -1012,6 +1110,30 @@ function App() {
         return <Inventory />;
       case 'warehouse':
         return <Warehouse />;
+      case 'inventory-item-detail': {
+        const itemId = sessionStorage.getItem('currentInventoryItemId');
+        return itemId ? <InventoryItemDetail itemId={itemId} /> : <Warehouse />;
+      }
+      case 'inventory-purchase-orders':
+        return <PurchaseOrders />;
+      case 'inventory-purchase-order-detail': {
+        const poId = sessionStorage.getItem('currentPurchaseOrderId');
+        return poId ? <PurchaseOrderDetail poId={poId} /> : <PurchaseOrderDetail />;
+      }
+      case 'inventory-receipts':
+        return <Receipts />;
+      case 'transactions':
+        return <Transactions />;
+      case 'inventory-adjustments':
+        return <Transactions defaultTypeFilter="adjustment" title="Adjustments" />;
+      case 'transaction-new':
+        return <TransactionDetail />;
+      case 'transaction-detail': {
+        const txId = sessionStorage.getItem('currentTransactionId');
+        return txId ? <TransactionDetail transactionId={txId} /> : <Transactions />;
+      }
+      case 'material-demand':
+        return <MaterialDemand />;
       case 'manufacturing':
         return <RequireModule module="manufacturing"><Manufacturing /></RequireModule>;
       case 'manufacturing-orders':
@@ -1036,6 +1158,20 @@ function App() {
         return <RequireModule module="financials"><FinancialPayments /></RequireModule>;
       case 'financials-payment-detail':
         return <RequireModule module="financials"><PaymentDetail /></RequireModule>;
+      case 'partners':
+        return <RequireModule module="settings"><Partners /></RequireModule>;
+      case 'partners-dealers':
+        return <RequireModule module="settings"><PartnerDealers /></RequireModule>;
+      case 'partners-vendors':
+        return <RequireModule module="settings"><PartnerVendors /></RequireModule>;
+      case 'partners-vendor-form': {
+        const path = window.location.pathname;
+        const match = path.match(/\/partners\/vendors\/edit\/([^/]+)/);
+        const vendorId = match?.[1] ?? null;
+        return <RequireModule module="settings"><PartnerVendorForm vendorId={vendorId} /></RequireModule>;
+      }
+      case 'partners-manufacturers':
+        return <RequireModule module="settings"><PartnerManufacturers /></RequireModule>;
 
       case 'reports':
         return <CompanyReports />;

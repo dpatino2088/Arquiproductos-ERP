@@ -121,6 +121,20 @@ export function useSOActions() {
           p_user_name: userName ?? null,
         });
         if (error) throw error;
+        const mo = data as { mo_id?: string; mo_number?: string } | null;
+        if (mo?.mo_id) {
+          // Compatibility fallback: if backend RPC does not auto-generate BOM yet,
+          // generate it explicitly after MO creation.
+          const { data: bomData, error: bomError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
+            p_manufacturing_order_id: mo.mo_id,
+          });
+          if (bomError) throw new Error(`MO created but BOM generation failed: ${bomError.message}`);
+          const bomOk = Boolean((bomData as { ok?: boolean } | null)?.ok);
+          if (!bomOk) {
+            const bomErrors = (bomData as { errors?: string[] } | null)?.errors ?? [];
+            throw new Error(`MO created but BOM generation failed: ${bomErrors.join('; ') || 'Unknown error'}`);
+          }
+        }
         addNotification({ type: 'success', title: 'MO Created', message: 'Manufacturing order created.' });
         return data as { mo_id: string; mo_number: string };
       } catch (err: unknown) {

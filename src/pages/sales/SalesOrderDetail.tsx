@@ -7,14 +7,13 @@ import { useAuth } from '../../hooks/useAuth';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
-import LifecycleIndicator from '../../components/shared/LifecycleIndicator';
 import { router } from '../../lib/router';
 import { formatCurrency } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { usePayments, useRecordPayment } from '../../hooks/usePayments';
-import Input from '../../components/ui/Input';
-import { ChevronDown, Plus, FileText, ShoppingBag, CreditCard, Factory } from 'lucide-react';
+import { usePayments } from '../../hooks/usePayments';
+import { ChevronDown, Plus, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -82,6 +81,26 @@ interface ManufacturingOrder {
   created_at: string;
 }
 
+const MFG_STATUS_STEPS = [
+  { id: 'draft', label: 'Pending Review' },
+  { id: 'planned', label: 'Planned' },
+  { id: 'in_production', label: 'In Production' },
+  { id: 'quality_check', label: 'Quality Check' },
+  { id: 'ready_for_pickup', label: 'Ready for Pickup' },
+  { id: 'delivered', label: 'Delivered' },
+] as const;
+
+function normalizeMfgStatus(status: string | null | undefined): string {
+  const normalized = (status ?? '').trim().toLowerCase();
+  if (normalized === 'in_progress') {
+    return 'in_production';
+  }
+  if (normalized === 'completed') {
+    return 'delivered';
+  }
+  return normalized;
+}
+
 interface Payment {
   id: string;
   amount: number;
@@ -113,6 +132,8 @@ export default function SalesOrderDetail() {
   const { isInternal, isPortal } = useAccessContext();
   const addNotification = useUIStore((s) => s.addNotification);
 
+  const { summary: materialSummary, overallStatus: materialStatus, loading: materialSummaryLoading } = useSOFulfillmentSummary(salesOrderId);
+
   const [so, setSo] = useState<SalesOrder | null>(null);
   const [lines, setLines] = useState<SalesOrderLine[]>([]);
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
@@ -122,16 +143,10 @@ export default function SalesOrderDetail() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [paymentFormOpen, setPaymentFormOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('check');
-  const [paymentReference, setPaymentReference] = useState('');
-  const [submittingPayment, setSubmittingPayment] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
 
   const { payments, loading: paymentsLoading, refetch: refetchPayments } = usePayments(salesOrderId);
   const { transitionSOStatus, createMO, isActing } = useSOActions();
-  const { recordPayment, isRecording } = useRecordPayment();
   const { registerSubmodules } = useSubmoduleNav();
 
   useEffect(() => {
@@ -289,31 +304,6 @@ export default function SalesOrderDetail() {
     }
   }, [salesOrderId, user, createMO, refetch]);
 
-  const handleRecordPayment = useCallback(async () => {
-    if (!salesOrderId || !user?.id) return;
-    if ((so?.total_amount ?? 0) <= 0) {
-      addNotification({ type: 'error', title: 'Cannot record payment', message: 'Sales order has no total amount. Add lines and save first.' });
-      return;
-    }
-    const amount = parseFloat(paymentAmount);
-    if (isNaN(amount) || amount <= 0) {
-      addNotification({ type: 'error', title: 'Invalid amount', message: 'Enter a valid amount.' });
-      return;
-    }
-    setSubmittingPayment(true);
-    try {
-      await recordPayment(salesOrderId, amount, paymentMethod, paymentReference, user.id, user.name);
-      setPaymentAmount('');
-      setPaymentReference('');
-      setPaymentFormOpen(false);
-      refetch();
-      refetchPayments();
-    } catch {
-      // useRecordPayment shows notification
-    } finally {
-      setSubmittingPayment(false);
-    }
-  }, [salesOrderId, so, user, paymentAmount, paymentMethod, paymentReference, recordPayment, refetch, refetchPayments, addNotification]);
 
   const actionButtons = useMemo(() => {
     if (!so) return [];
@@ -343,40 +333,15 @@ export default function SalesOrderDetail() {
     return btns;
   }, [so, isInternal, handleTransition, handleCreateMO]);
 
-  const moAllDelivered = so != null && mos.length > 0 && mos.every((m) => (m.status || '').toLowerCase() === 'delivered');
-  const lifecycleSteps = useMemo((): import('../../components/shared/LifecycleIndicator').LifecycleStep[] => {
-    if (!so) {
-      return [
-        { id: 'quote', label: 'Quote', sublabel: '—', status: 'pending' },
-        { id: 'proposal', label: 'Proposal', sublabel: '—', status: 'pending' },
-        { id: 'sales_order', label: 'Sales Order', sublabel: '—', status: 'pending' },
-        { id: 'manufacturing', label: 'Manufacturing', sublabel: '—', status: 'pending' },
-      ];
-    }
-    const quoteNoShort = so.Quotes?.quote_no ?? '—';
-    return [
-      {
-        id: 'quote',
-        label: 'Quote',
-        sublabel: quoteNoShort,
-        status: 'completed',
-        href: so.Quotes?.id ? `/sales/quotes/${so.Quotes.id}` : undefined,
-      },
-      { id: 'proposal', label: 'Proposal', sublabel: 'Accepted', status: 'completed' },
-      { id: 'sales_order', label: 'Sales Order', sublabel: 'Current', status: 'active' },
-      {
-        id: 'manufacturing',
-        label: 'Manufacturing',
-        sublabel:
-          mos.length === 0
-            ? 'No MOs'
-            : moAllDelivered
-              ? 'All Delivered'
-              : `${mos.length} MO${mos.length > 1 ? 's' : ''}`,
-        status: mos.length === 0 ? 'pending' : moAllDelivered ? 'completed' : 'active',
-      },
-    ];
-  }, [so, mos.length, moAllDelivered]);
+  const currentMfgStepIndex = useMemo(() => {
+    if (mos.length === 0) return -1;
+    const ranked = mos
+      .map((m) => MFG_STATUS_STEPS.findIndex((s) => s.id === normalizeMfgStatus(m.status)))
+      .filter((idx) => idx >= 0);
+    if (ranked.length === 0) return -1;
+    // Show the most delayed MO status to avoid hiding bottlenecks.
+    return Math.min(...ranked);
+  }, [mos]);
 
   const currency = 'USD';
   const totalPaid = financialSummary?.total_paid ?? payments.reduce((sum, p) => sum + Number(p.amount), 0);
@@ -438,6 +403,43 @@ export default function SalesOrderDetail() {
   const soStatus = (so.status || 'draft').toLowerCase();
   const hasPaidAmount = totalPaid > 0;
   const invoiceStatus = financialSummary?.invoice_status ?? 'none';
+  const manufacturingProgressCard = (
+    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>
+      {mos.length === 0 ? (
+        <p className="text-sm text-gray-500">No manufacturing orders yet.</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="relative px-3">
+            <div className="absolute left-3 right-3 top-2 border-t border-dashed border-gray-300" />
+            <div className="relative flex items-center justify-between">
+              {MFG_STATUS_STEPS.map((step, idx) => {
+                const isReached = currentMfgStepIndex >= 0 && idx <= currentMfgStepIndex;
+                const isCurrent = currentMfgStepIndex === idx;
+                return (
+                  <div key={step.id} className="flex flex-col items-center gap-2 w-24">
+                    <span
+                      className={[
+                        'w-4 h-4 rounded-full border-2 bg-white',
+                        isReached ? 'border-primary' : 'border-gray-300',
+                        isCurrent ? 'ring-2 ring-primary/20' : '',
+                      ].join(' ')}
+                    />
+                    <span className={`text-[11px] text-center ${isCurrent ? 'text-primary font-semibold' : 'text-gray-600'}`}>
+                      {step.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">
+            Current: {currentMfgStepIndex >= 0 ? MFG_STATUS_STEPS[currentMfgStepIndex].label : 'Unknown'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <DetailPageLayout
@@ -480,74 +482,6 @@ export default function SalesOrderDetail() {
         ) : undefined
       }
     >
-      {/* Payment form — global, shown above any tab when open */}
-      {paymentFormOpen && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-gray-900">Record Payment</h4>
-            <button
-              type="button"
-              onClick={() => { setPaymentFormOpen(false); setPaymentAmount(''); setPaymentReference(''); }}
-              className="text-xs text-gray-500 hover:text-gray-700"
-            >
-              Close
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
-              >
-                <option value="check">Check</option>
-                <option value="wire">Wire</option>
-                <option value="card">Card</option>
-                <option value="cash">Cash</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Reference</label>
-              <Input
-                value={paymentReference}
-                onChange={(e) => setPaymentReference(e.target.value)}
-                placeholder="Check #, transaction ID..."
-              />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleRecordPayment}
-              disabled={submittingPayment || isRecording}
-              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
-            >
-              {submittingPayment || isRecording ? 'Recording...' : 'Submit'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setPaymentFormOpen(false); setPaymentAmount(''); setPaymentReference(''); }}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {/* Row 1: Order Details + Financial Summary */}
@@ -644,10 +578,65 @@ export default function SalesOrderDetail() {
             </div>
           </div>
 
-          {/* Row 3: Origin & Progress */}
-          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
-          </div>
+          {/* Row 3: Materials Status */}
+          {isInternal && materialSummary.total > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-gray-500" />
+                  Materials
+                </h3>
+              </div>
+              {materialSummaryLoading ? (
+                <div className="animate-pulse h-8 bg-gray-100 rounded" />
+              ) : (
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1.5">
+                    {materialStatus === 'fulfilled' ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    ) : materialStatus === 'partial' ? (
+                      <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-red-500" />
+                    )}
+                    <span className={`text-sm font-medium ${
+                      materialStatus === 'fulfilled' ? 'text-green-700' :
+                      materialStatus === 'partial' ? 'text-yellow-700' : 'text-red-700'
+                    }`}>
+                      {materialStatus === 'fulfilled' ? 'All materials covered' :
+                       materialStatus === 'partial' ? 'Partially covered' : 'Materials needed'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
+                      {materialSummary.fulfilled} fulfilled
+                    </span>
+                    {materialSummary.partial > 0 && (
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-yellow-400" />
+                        {materialSummary.partial} partial
+                      </span>
+                    )}
+                    {materialSummary.shortage > 0 && (
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-2 h-2 rounded-full bg-red-400" />
+                        {materialSummary.shortage} shortage
+                      </span>
+                    )}
+                    <span className="text-gray-400">|</span>
+                    <span>{materialSummary.totalAllocated}/{materialSummary.totalRequired} allocated</span>
+                    {materialSummary.totalOnOrder > 0 && (
+                      <span>{materialSummary.totalOnOrder} on order</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Row 4: Manufacturing Status Timeline */}
+          {manufacturingProgressCard}
         </div>
       )}
 
@@ -784,6 +773,8 @@ export default function SalesOrderDetail() {
               )}
             </div>
           </div>
+
+          {manufacturingProgressCard}
 
           {/* MO Table */}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
@@ -924,7 +915,7 @@ export default function SalesOrderDetail() {
                 </div>
               </dl>
               <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
-                {financialSummary?.latest_invoice_id ? (
+                {financialSummary?.latest_invoice_id && (
                   <button
                     type="button"
                     onClick={() => router.navigate(`/financials/invoices/${financialSummary.latest_invoice_id}`)}
@@ -932,26 +923,27 @@ export default function SalesOrderDetail() {
                   >
                     View Invoice {financialSummary.latest_invoice_number}
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => router.navigate(`/financials/invoices/new?sales_order_id=${so.id}`)}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Create Invoice
-                  </button>
                 )}
-                {financialSummary?.latest_invoice_id && (
-                  <button
-                    type="button"
-                    onClick={() => setPaymentFormOpen(!paymentFormOpen)}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Record Payment
-                  </button>
-                )}
+                <a
+                  href="/financials/payments?new=1"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    sessionStorage.setItem(
+                      'financials_payment_prefill',
+                      JSON.stringify({
+                        source: 'sales_order',
+                        sales_order_id: so.id,
+                        sales_order_no: so.sales_order_no,
+                        dealer_id: so.dealer_id ?? null,
+                      })
+                    );
+                    router.navigate('/financials/payments?new=1');
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-primary border border-primary rounded-lg hover:bg-primary/5 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Payment
+                </a>
               </div>
             </div>
           </div>
@@ -965,17 +957,19 @@ export default function SalesOrderDetail() {
                   <th className="px-4 py-3 text-right font-medium text-gray-700">Amount</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Method</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Reference</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Bank</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Description</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Recorded By</th>
                 </tr>
               </thead>
               <tbody>
                 {paymentsLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">Loading...</td>
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">Loading...</td>
                   </tr>
                 ) : payments.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">No payments recorded</td>
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">No payments recorded</td>
                   </tr>
                 ) : (
                   payments.map((p) => (
@@ -984,6 +978,8 @@ export default function SalesOrderDetail() {
                       <td className="px-4 py-4 text-right font-mono">{formatCurrency(p.amount, currency)}</td>
                       <td className="px-4 py-4">{p.payment_method ?? '—'}</td>
                       <td className="px-4 py-4">{p.reference_number ?? '—'}</td>
+                      <td className="px-4 py-4">{p.bank_name ?? '—'}</td>
+                      <td className="px-4 py-4 max-w-[12rem] truncate" title={p.description ?? undefined}>{p.description ?? '—'}</td>
                       <td className="px-4 py-4">—</td>
                     </tr>
                   ))

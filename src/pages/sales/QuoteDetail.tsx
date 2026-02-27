@@ -85,6 +85,12 @@ interface SalesOrder {
   created_at: string | null;
 }
 
+interface ManufacturingOrder {
+  id: string;
+  manufacturing_order_no: string;
+  status: string;
+}
+
 interface TimelineEvent {
   id: string;
   action: string;
@@ -92,6 +98,26 @@ interface TimelineEvent {
   user_name?: string | null;
   created_at: string;
   metadata?: Record<string, unknown> | null;
+}
+
+const MFG_STATUS_STEPS = [
+  { id: 'draft', label: 'Pending Review' },
+  { id: 'planned', label: 'Planned' },
+  { id: 'in_production', label: 'In Production' },
+  { id: 'quality_check', label: 'Quality Check' },
+  { id: 'ready_for_pickup', label: 'Ready for Pickup' },
+  { id: 'delivered', label: 'Delivered' },
+] as const;
+
+function normalizeMfgStatus(status: string | null | undefined): string {
+  const normalized = (status ?? '').trim().toLowerCase();
+  if (normalized === 'in_progress') {
+    return 'in_production';
+  }
+  if (normalized === 'completed') {
+    return 'delivered';
+  }
+  return normalized;
 }
 
 export default function QuoteDetail() {
@@ -110,6 +136,7 @@ export default function QuoteDetail() {
   const [lines, setLines] = useState<QuoteLine[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [salesOrder, setSalesOrder] = useState<SalesOrder | null>(null);
+  const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [contactName, setContactName] = useState<string | null>(null);
@@ -192,8 +219,26 @@ export default function QuoteDetail() {
       }
       if (soRes.error) {
         if (import.meta.env.DEV) console.warn('[QuoteDetail] SalesOrders error:', soRes.error);
+        setMos([]);
       } else {
-        setSalesOrder(soRes.data as SalesOrder | null);
+        const soData = soRes.data as SalesOrder | null;
+        setSalesOrder(soData);
+        if (soData?.id) {
+          const mosRes = await supabase
+            .from('ManufacturingOrders')
+            .select('id, manufacturing_order_no, status')
+            .eq('sales_order_id', soData.id)
+            .eq('deleted', false)
+            .order('created_at', { ascending: false });
+          if (mosRes.error) {
+            if (import.meta.env.DEV) console.warn('[QuoteDetail] ManufacturingOrders error:', mosRes.error);
+            setMos([]);
+          } else {
+            setMos((mosRes.data ?? []) as ManufacturingOrder[]);
+          }
+        } else {
+          setMos([]);
+        }
       }
       setTimeline((timelineRes.error ? [] : (timelineRes.data ?? [])) as TimelineEvent[]);
 
@@ -307,6 +352,18 @@ export default function QuoteDetail() {
   const canCreateSO = status === 'approved' && !salesOrder;
 
   const currentLifecycleStage: 'quote' | 'proposal' | 'sales_order' | 'manufacturing' = salesOrder ? 'sales_order' : proposals.length > 0 ? 'proposal' : 'quote';
+  const currentMfgStepIndex = useMemo(() => {
+    if (mos.length === 0) {
+      return -1;
+    }
+    const ranked = mos
+      .map((m) => MFG_STATUS_STEPS.findIndex((s) => s.id === normalizeMfgStatus(m.status)))
+      .filter((idx) => idx >= 0);
+    if (ranked.length === 0) {
+      return -1;
+    }
+    return Math.min(...ranked);
+  }, [mos]);
 
   const lifecycleSteps: LifecycleStep[] = useMemo(() => {
     if (!quote) {
@@ -606,6 +663,43 @@ export default function QuoteDetail() {
           {/* Row 3: Origin & Progress — same as Sales Order */}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
+          </div>
+
+          {/* Row 4: Manufacturing Status */}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>
+            {mos.length === 0 ? (
+              <p className="text-sm text-gray-500">No manufacturing orders yet.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="relative px-3">
+                  <div className="absolute left-3 right-3 top-2 border-t border-dashed border-gray-300" />
+                  <div className="relative flex items-center justify-between">
+                    {MFG_STATUS_STEPS.map((step, idx) => {
+                      const isReached = currentMfgStepIndex >= 0 && idx <= currentMfgStepIndex;
+                      const isCurrent = currentMfgStepIndex === idx;
+                      return (
+                        <div key={step.id} className="flex flex-col items-center gap-2 w-24">
+                          <span
+                            className={[
+                              'w-4 h-4 rounded-full border-2 bg-white',
+                              isReached ? 'border-primary' : 'border-gray-300',
+                              isCurrent ? 'ring-2 ring-primary/20' : '',
+                            ].join(' ')}
+                          />
+                          <span className={`text-[11px] text-center ${isCurrent ? 'text-primary font-semibold' : 'text-gray-600'}`}>
+                            {step.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Current: {currentMfgStepIndex >= 0 ? MFG_STATUS_STEPS[currentMfgStepIndex].label : 'Unknown'}
+                </p>
+              </div>
+            )}
           </div>
 
           {isPortal && !salesOrder && (

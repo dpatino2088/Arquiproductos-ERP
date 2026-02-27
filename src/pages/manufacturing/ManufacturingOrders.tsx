@@ -8,7 +8,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { usePermissions } from '../../hooks/usePermissions';
-import { Search, Eye, Trash2, SortAsc, SortDesc } from 'lucide-react';
+import { Search, Eye, Archive, RotateCcw, SortAsc, SortDesc } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
@@ -23,6 +23,7 @@ interface ManufacturingOrderItem {
   status: ManufacturingOrderStatus | string | undefined;
   saleOrderNo: string;
   customerName: string;
+  archived?: boolean;
   scheduledStartDate?: string | null;
   scheduledEndDate?: string | null;
   priority: string;
@@ -77,14 +78,26 @@ export default function ManufacturingOrders() {
   const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [statusTab, setStatusTab] = useState('all');
 
+  const nonArchivedOrders = useMemo(
+    () => manufacturingOrders.filter((mo) => !mo.archived),
+    [manufacturingOrders]
+  );
+  const archivedOrders = useMemo(
+    () => manufacturingOrders.filter((mo) => !!mo.archived),
+    [manufacturingOrders]
+  );
+
   const moStatusCounts = useMemo(() => {
-    const c: Record<string, number> = { all: manufacturingOrders.length };
-    manufacturingOrders.forEach(mo => {
+    const c: Record<string, number> = {
+      all: nonArchivedOrders.length,
+      archived: archivedOrders.length,
+    };
+    nonArchivedOrders.forEach(mo => {
       const s = mo.status || 'draft';
       c[s] = (c[s] || 0) + 1;
     });
     return c;
-  }, [manufacturingOrders]);
+  }, [nonArchivedOrders, archivedOrders]);
 
   const moStatusTabs = useMemo(() => [
     { label: 'All', value: 'all', count: moStatusCounts.all || 0 },
@@ -94,6 +107,7 @@ export default function ManufacturingOrders() {
     { label: 'Ready', value: 'ready_for_pickup', count: moStatusCounts.ready_for_pickup || 0 },
     { label: 'Delivered', value: 'delivered', count: (moStatusCounts.delivered || 0) + (moStatusCounts.completed || 0) },
     { label: 'Cancelled', value: 'cancelled', count: moStatusCounts.cancelled || 0 },
+    { label: 'Archived', value: 'archived', count: moStatusCounts.archived || 0 },
   ], [moStatusCounts]);
 
   // Permission checks
@@ -133,6 +147,7 @@ export default function ManufacturingOrders() {
         status: mo.status,
         saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
         customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? 'N/A',
+        archived: !!mo.archived,
         scheduledStartDate: null as string | null,
         scheduledEndDate: null as string | null,
         priority: mo.priority ?? 'normal',
@@ -144,8 +159,14 @@ export default function ManufacturingOrders() {
   const filteredAndSorted = useMemo(() => {
     let filtered = displayOrders;
 
-    // StatusTabs filter
-    if (statusTab !== 'all') {
+    if (statusTab === 'archived') {
+      filtered = filtered.filter((mo) => !!mo.archived);
+    } else {
+      filtered = filtered.filter((mo) => !mo.archived);
+    }
+
+    // StatusTabs filter (non-archived tabs only)
+    if (statusTab !== 'all' && statusTab !== 'archived') {
       if (statusTab === 'delivered') {
         filtered = filtered.filter(mo => {
           const s = String(mo.status || '').toLowerCase();
@@ -170,7 +191,7 @@ export default function ManufacturingOrders() {
     }
 
     // Status filter
-    if (selectedStatus.length > 0) {
+    if (selectedStatus.length > 0 && statusTab !== 'archived') {
       filtered = filtered.filter(mo => mo.status != null && selectedStatus.includes(mo.status));
     }
 
@@ -212,22 +233,22 @@ export default function ManufacturingOrders() {
     router.navigate(`/manufacturing/manufacturing-orders/${id}`);
   };
 
-  const handleDelete = async (id: string, orderNo: string) => {
+  const handleArchive = async (id: string, orderNo: string) => {
     // Check write permission
     if (!canWrite) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Sin permisos',
-        message: 'No tienes permisos para eliminar Manufacturing Orders. Se requiere el permiso "manufacturing.write".',
+        title: 'No permission',
+        message: 'You do not have permission to archive Manufacturing Orders. The "manufacturing.write" permission is required.',
       });
       return;
     }
 
     const confirmed = await showConfirm({
-      title: 'Delete Manufacturing Order',
-      message: `Are you sure you want to delete Manufacturing Order "${orderNo}"? This action cannot be undone.`,
-      variant: 'danger',
-      confirmText: 'Delete',
+      title: 'Archive Manufacturing Order',
+      message: `Archive Manufacturing Order "${orderNo}"? It will be hidden from active tabs.`,
+      variant: 'info',
+      confirmText: 'Archive',
       cancelText: 'Cancel',
     });
 
@@ -235,18 +256,18 @@ export default function ManufacturingOrders() {
 
     try {
       setDialogLoading(true);
-      const { error: deleteError } = await supabase
+      const { error: archiveError } = await supabase
         .from('ManufacturingOrders')
-        .update({ deleted: true })
+        .update({ archived: true })
         .eq('id', id)
         .eq('organization_id', activeOrganizationId);
 
-      if (deleteError) throw deleteError;
+      if (archiveError) throw archiveError;
 
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Success',
-        message: `Manufacturing Order "${orderNo}" deleted successfully`,
+        title: 'Archived',
+        message: `Manufacturing Order "${orderNo}" archived successfully.`,
       });
 
       refetch();
@@ -254,7 +275,56 @@ export default function ManufacturingOrders() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: err.message || 'Failed to delete manufacturing order',
+        message: err.message || 'Failed to archive manufacturing order',
+      });
+    } finally {
+      setDialogLoading(false);
+      closeDialog();
+    }
+  };
+
+  const handleRestore = async (id: string, orderNo: string) => {
+    if (!canWrite) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'No permission',
+        message: 'You do not have permission to restore Manufacturing Orders. The "manufacturing.write" permission is required.',
+      });
+      return;
+    }
+
+    const confirmed = await showConfirm({
+      title: 'Restore Manufacturing Order',
+      message: `Restore Manufacturing Order "${orderNo}"? It will return to active tabs.`,
+      variant: 'info',
+      confirmText: 'Restore',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      setDialogLoading(true);
+      const { error: restoreError } = await supabase
+        .from('ManufacturingOrders')
+        .update({ archived: false })
+        .eq('id', id)
+        .eq('organization_id', activeOrganizationId);
+
+      if (restoreError) throw restoreError;
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Restored',
+        message: `Manufacturing Order "${orderNo}" restored successfully.`,
+      });
+
+      refetch();
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: err.message || 'Failed to restore manufacturing order',
       });
     } finally {
       setDialogLoading(false);
@@ -276,10 +346,10 @@ export default function ManufacturingOrders() {
     return (
       <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-sm text-yellow-800 font-medium">Sin permisos</p>
+          <p className="text-sm text-yellow-800 font-medium">No permission</p>
           <p className="text-sm text-yellow-700 mt-1">
-            No tienes permisos para ver Manufacturing Orders. 
-            Contacta a un administrador para solicitar el permiso 'manufacturing.read'.
+            You do not have permission to view Manufacturing Orders.
+            Contact an administrator to request the 'manufacturing.read' permission.
           </p>
         </div>
       </div>
@@ -461,11 +531,15 @@ export default function ManufacturingOrders() {
                         </button>
                         {canWrite && (
                           <button
-                            onClick={() => handleDelete(mo.id, mo.manufacturingOrderNo)}
-                            className="p-1.5 hover:bg-red-50 rounded transition-colors"
-                            title="Delete"
+                            onClick={() => mo.archived
+                              ? handleRestore(mo.id, mo.manufacturingOrderNo)
+                              : handleArchive(mo.id, mo.manufacturingOrderNo)}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                            title={mo.archived ? 'Restore' : 'Archive'}
                           >
-                            <Trash2 className="w-4 h-4 text-red-600" />
+                            {mo.archived
+                              ? <RotateCcw className="w-4 h-4 text-gray-600" />
+                              : <Archive className="w-4 h-4 text-gray-600" />}
                           </button>
                         )}
                       </div>

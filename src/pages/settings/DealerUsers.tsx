@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useImperativeHandle, forwardRef } from 'react';
 import {
   useDealerAppUsersForOrg,
   useAppUsersByDealer,
@@ -14,6 +14,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
+import { router } from '../../lib/router';
 import { fetchRolesByType, useRolesForUserType, type AppUserRole } from '../../lib/roles';
 import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check, Search, Filter, List, Grid3X3 } from 'lucide-react';
 import Input from '../../components/ui/Input';
@@ -727,7 +728,16 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
   );
 }
 
-export default function DealerUsers() {
+export interface DealerUsersRef {
+  openCreateModal: () => void;
+}
+
+interface DealerUsersProps {
+  hideSectionHeader?: boolean;
+  useInlineEdit?: boolean;
+}
+
+const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function DealerUsers({ hideSectionHeader = false, useInlineEdit = false }, ref) {
   const { activeOrganizationId, activeOrganization } = useOrganizationContext();
   const { userType, portalDealerId, portalRole } = useAccessContext();
   const isPortalManager = userType === 'portal' && portalRole === 'dealer_manager';
@@ -768,6 +778,8 @@ export default function DealerUsers() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
 
+  useImperativeHandle(ref, () => ({ openCreateModal: () => setIsCreateOpen(true) }), []);
+
   const filteredUsers = useMemo(() => {
     if (!searchTerm) return users;
     const search = searchTerm.toLowerCase();
@@ -799,6 +811,10 @@ export default function DealerUsers() {
   };
 
   const handleEdit = (user: DealerAppUserWithDealer) => {
+    if (useInlineEdit) {
+      router.navigate(`/partners/dealer-users/edit/${user.id}`);
+      return;
+    }
     setEditingUser(user);
     setIsEditOpen(true);
   };
@@ -994,28 +1010,29 @@ export default function DealerUsers() {
   }
 
   return (
-    <div className="py-6 px-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Dealer Users</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Manage dealer user access and permissions ({filteredUsers.length} total)
-          </p>
+    <div className={hideSectionHeader ? '' : 'py-6 px-6'}>
+      {!hideSectionHeader && (
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-xl font-semibold text-foreground mb-1">Dealer Users</h1>
+            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+              Manage dealer user access and permissions ({filteredUsers.length} total)
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {(activeOrganizationId || (isPortal && portalDealerId)) && (isPortalManager || !isPortal) && (
+              <button
+                onClick={() => setIsCreateOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
+                style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              >
+                <Plus className="w-4 h-4" />
+                Add Dealer User
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {(activeOrganizationId || (isPortal && portalDealerId)) && (isPortalManager || !isPortal) && (
-            <button
-              onClick={() => setIsCreateOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
-              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            >
-              <Plus className="w-4 h-4" />
-              Add Dealer User
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Search and Filters */}
       <div className="mb-4">
@@ -1261,8 +1278,8 @@ export default function DealerUsers() {
         </div>
       </div>
 
-      {/* Summary */}
-      {users.length > 0 && (
+      {/* Summary - hide when section header is hidden to match Dealers format */}
+      {!hideSectionHeader && users.length > 0 && (
         <div className="mt-4 text-sm text-gray-600">
           Showing {users.length} dealer user{users.length !== 1 ? 's' : ''}
         </div>
@@ -1312,4 +1329,7 @@ export default function DealerUsers() {
       />
     </div>
   );
-}
+});
+
+DealerUsers.displayName = 'DealerUsers';
+export default DealerUsers;

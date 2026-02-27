@@ -16,6 +16,7 @@ export default function Inventory() {
         { id: 'receipts', label: 'Receipts', href: '/inventory/receipts', icon: Receipt },
         { id: 'transactions', label: 'Transactions', href: '/inventory/transactions', icon: ArrowLeftRight },
         { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments', icon: Settings },
+        { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand', icon: Package },
       ]);
       
       // Redirect to warehouse by default

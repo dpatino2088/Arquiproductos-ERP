@@ -49,7 +49,8 @@ import {
   Wrench,
   DollarSign,
   FileText,
-  RefreshCw
+  RefreshCw,
+  Handshake
 } from 'lucide-react';
 import { useDirectoryLoadStore } from '../stores/directory-load-store';
 
@@ -105,6 +106,11 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
   '/financials/payments': [
     { label: 'Invoices', href: '/financials/invoices' },
     { label: 'Payments', href: '/financials/payments' },
+  ],
+  '/partners': [
+    { label: 'Dealers', href: '/partners/dealers' },
+    { label: 'Vendors', href: '/partners/vendors' },
+    { label: 'Manufacturers', href: '/partners/manufacturers' },
   ],
 };
 
@@ -351,6 +357,8 @@ function Layout({ children }: LayoutProps) {
       setLastRouteForModule('/manufacturing', route);
     } else if (route.startsWith('/financials')) {
       setLastRouteForModule('/financials', route);
+    } else if (route.startsWith('/partners')) {
+      setLastRouteForModule('/partners', route);
     }
   }, [setLastRouteForModule]);
 
@@ -383,22 +391,21 @@ function Layout({ children }: LayoutProps) {
     }
   }, [currentRoute, saveCurrentRouteForModule, clearSubmoduleNav]);
 
-  // Update current route when router changes
+  // Update current route when router changes and persist for module restoration
   useEffect(() => {
     const updateRoute = () => {
-      setCurrentRoute(router.getCurrentRoute());
+      const route = router.getCurrentRoute();
+      setCurrentRoute(route);
+      saveCurrentRouteForModule(route);
     };
-    
-    // Listen for route changes
+
     const removeListener = router.addListener(updateRoute);
-    
-    // Set initial route
     updateRoute();
-    
+
     return () => {
       removeListener();
     };
-  }, []);
+  }, [saveCurrentRouteForModule]);
 
   // OBSOLETO: Este código está duplicado y usa el schema antiguo.
   // OrganizationContext ya maneja esto correctamente.
@@ -449,6 +456,8 @@ function Layout({ children }: LayoutProps) {
       case 'Financials':
         // Financials is active if we're on any financials route
         return currentRoute.includes('/financials');
+      case 'Partners':
+        return currentRoute.includes('/partners');
       case 'Branches':
         // Branches is active if we're on any branches route
         return currentRoute.includes('/branches');
@@ -483,6 +492,7 @@ function Layout({ children }: LayoutProps) {
       { name: 'Inventory', href: '/inventory', icon: Package, module: 'inventory' },
       { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, module: 'manufacturing' },
       { name: 'Financials', href: '/financials', icon: DollarSign, module: 'financials' },
+      { name: 'Partners', href: '/partners', icon: Handshake, module: 'partners' },
     ];
     
     // ✅ CORRECCIÓN: Lógica separada para portal vs internal
@@ -650,6 +660,7 @@ function Layout({ children }: LayoutProps) {
         inventory: "inventory",
         manufacturing: "manufacturing",
         financials: "financials",
+        partners: "partners",
         settings: "settings",
       };
       const moduleKey = map[first];
@@ -717,6 +728,11 @@ function Layout({ children }: LayoutProps) {
     } else if (path === '/financials') {
       const lastRoute = getLastRouteForModule('/financials');
       const actualPath = lastRoute || '/financials';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/partners') {
+      const lastRoute = getLastRouteForModule('/partners');
+      const actualPath = lastRoute || '/partners/dealers';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else {
@@ -864,7 +880,7 @@ function Layout({ children }: LayoutProps) {
                 <button
                     {...getDashboardButtonProps(
                       viewMode,
-                      hoveredNavHref === dashboardItem.href,
+                      isNavItemActive(dashboardItem.name, dashboardItem.href) || hoveredNavHref === dashboardItem.href,
                       () => handleNavigation(dashboardItem.href)
                     )}
                     aria-label={`${dashboardItem.name}${isNavItemActive(dashboardItem.name, dashboardItem.href) ? ' (current page)' : ''}`}
@@ -888,7 +904,7 @@ function Layout({ children }: LayoutProps) {
               {otherNavItems.map((item) => {
                 if (!item) return null;
                 const isHovered = hoveredNavHref === item.href;
-                const isActive = isHovered;
+                const isActive = isNavItemActive(item.name, item.href) || isHovered;
                 const Icon = item.icon;
                 const tabs = MODULE_TABS[item.href] ?? [];
 

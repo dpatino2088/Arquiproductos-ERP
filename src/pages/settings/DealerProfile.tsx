@@ -4,21 +4,38 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import DealerList from './DealerList';
 import DealerProfileForm from './DealerProfileForm';
 
-export default function DealerProfile() {
+interface DealerProfileProps {
+  basePath?: string;
+  moduleLabel?: string;
+  skipSubmoduleRegistration?: boolean;
+  /** List section title (e.g. "Accounts"). Default "Dealer List". */
+  listSectionTitle?: string;
+  /** Hide the dealer list top header bar (title + subtitle + Add Dealer). */
+  listHideSectionHeader?: boolean;
+}
+
+export default function DealerProfile({ basePath = '/settings/dealer-profile', moduleLabel = 'Settings', skipSubmoduleRegistration = false, listSectionTitle = 'Accounts', listHideSectionHeader = false }: DealerProfileProps) {
   const { registerSubmodules } = useSubmoduleNav();
   const currentRoute = router.getCurrentRoute() || window.location.pathname;
 
-  // Single submodule: Dealer List (user management is inside Dealer Detail)
   useEffect(() => {
-    registerSubmodules('Settings', [
-      { id: 'dealer-list', label: 'Dealer List', href: '/settings/dealer-profile' },
+    if (skipSubmoduleRegistration) return;
+    registerSubmodules(moduleLabel, [
+      { id: 'dealer-list', label: 'Dealer List', href: basePath },
     ]);
-  }, [registerSubmodules]);
+  }, [registerSubmodules, moduleLabel, basePath, skipSubmoduleRegistration]);
 
-  // New or edit dealer: show form. Otherwise show list (no tabs).
-  if (currentRoute.includes('/settings/dealer-profile/new') || currentRoute.match(/\/settings\/dealer-profile\/edit\//)) {
-    return <DealerProfileForm />;
+  if (currentRoute.includes(`${basePath}/new`) || currentRoute.match(new RegExp(`${basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/edit/`))) {
+    return <DealerProfileForm basePath={basePath} />;
   }
 
-  return <DealerList />;
+  return (
+    <DealerList
+      basePath={basePath}
+      moduleLabel={moduleLabel}
+      skipSubmoduleRegistration={skipSubmoduleRegistration}
+      sectionTitle={listSectionTitle}
+      hideSectionHeader={listHideSectionHeader}
+    />
+  );
 }

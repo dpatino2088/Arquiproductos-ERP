@@ -12,8 +12,8 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 
 const createMOSchema = z.object({
   sales_order_id: z.string().uuid('Sale Order is required'),
-  scheduled_start_date: z.string().optional(),
-  scheduled_end_date: z.string().optional(),
+  planned_start_at: z.string().optional(),
+  planned_end_at: z.string().optional(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   notes: z.string().optional(),
 });
@@ -80,8 +80,8 @@ export default function CreateManufacturingOrderModal({
     try {
       const mo = await createManufacturingOrder({
         sales_order_id: data.sales_order_id,
-        scheduled_start_date: data.scheduled_start_date || undefined,
-        scheduled_end_date: data.scheduled_end_date || undefined,
+        planned_start_at: data.planned_start_at || undefined,
+        planned_end_at: data.planned_end_at || undefined,
         priority: priorityMap[data.priority || 'normal'] ?? 'normal',
         notes: data.notes || undefined,
       });
@@ -185,21 +185,21 @@ export default function CreateManufacturingOrderModal({
             {/* Scheduled Dates */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="scheduled_start_date">Scheduled Start Date</Label>
+                <Label htmlFor="planned_start_at">Scheduled Start Date</Label>
                 <Input
-                  id="scheduled_start_date"
+                  id="planned_start_at"
                   type="date"
-                  {...register('scheduled_start_date')}
-                  error={errors.scheduled_start_date?.message}
+                  {...register('planned_start_at')}
+                  error={errors.planned_start_at?.message}
                 />
               </div>
               <div>
-                <Label htmlFor="scheduled_end_date">Scheduled End Date</Label>
+                <Label htmlFor="planned_end_at">Scheduled End Date</Label>
                 <Input
-                  id="scheduled_end_date"
+                  id="planned_end_at"
                   type="date"
-                  {...register('scheduled_end_date')}
-                  error={errors.scheduled_end_date?.message}
+                  {...register('planned_end_at')}
+                  error={errors.planned_end_at?.message}
                 />
               </div>
             </div>

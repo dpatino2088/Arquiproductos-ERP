@@ -3,7 +3,7 @@
  * Header: dealer logo (top-left), "INVOICE" + number (top-right).
  * Bill To: dealer name, Tax ID, billing address.
  * Invoice Details: issue date, due date, SO reference.
- * Table: lines (description, qty, unit price, tax %, tax, total).
+ * Table: lines (description, qty, unit price, total).
  * Summary: subtotal, tax, total, paid, balance due.
  * Footer: page numbers.
  */
@@ -15,9 +15,7 @@ export interface InvoicePDFLine {
   description: string;
   qty: number;
   unit_price: number;
-  tax_pct: number;
-  line_tax: number;
-  line_total: number;
+  line_subtotal: number;
 }
 
 export interface InvoicePDFData {
@@ -69,7 +67,7 @@ export function generateInvoicePDF(
   const cur = invoice.currency_code || 'USD';
   let yPos = marginTop;
 
-  // Logo slot: 80mm x 20mm
+  // Top-left brand slot: logo (preferred) or org name fallback.
   const logoSlotW = 80;
   const logoSlotH = 20;
   let logoDrawn = false;
@@ -89,6 +87,11 @@ export function generateInvoicePDF(
       logoDrawn = true;
     } catch { /* ignore */ }
   }
+  if (!logoDrawn) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text(opts.organizationName ?? 'Arquiproductos', marginX, marginTop + 6);
+  }
 
   // Header right: "INVOICE" + number
   const headerRightX = pageWidth - marginX;
@@ -98,7 +101,7 @@ export function generateInvoicePDF(
   doc.setFontSize(14);
   doc.text(invoice.invoice_number, headerRightX, yPos + 6, { align: 'right' });
 
-  yPos += logoDrawn ? logoSlotH : 14;
+  yPos += logoSlotH;
 
   // Details section: Bill To (left) | Invoice Info (right)
   doc.setFontSize(9);
@@ -148,12 +151,13 @@ export function generateInvoicePDF(
     leftY += lineH + gap;
   }
 
-  // Right: Invoice details
-  const rightX = pageWidth / 2 + 10;
+  // Right: Invoice details (anchored to right margin under invoice number)
+  const rightLabelX = pageWidth - marginX - 58;
+  const rightValueX = pageWidth - marginX;
   let rightY = yPos;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text('Invoice Details', rightX, rightY);
+  doc.text('Invoice Details', rightLabelX, rightY);
   rightY += lineH + gap;
   doc.setFontSize(9);
 
@@ -166,9 +170,9 @@ export function generateInvoicePDF(
 
   for (const item of detailItems) {
     doc.setFont('helvetica', 'bold');
-    doc.text(`${item.label}:`, rightX, rightY);
+    doc.text(`${item.label}:`, rightLabelX, rightY);
     doc.setFont('helvetica', 'normal');
-    doc.text(item.value, rightX + doc.getTextWidth(`${item.label}: `) + 2, rightY);
+    doc.text(item.value, rightValueX, rightY, { align: 'right' });
     rightY += lineH + gap;
   }
 
@@ -186,9 +190,7 @@ export function generateInvoicePDF(
     { header: 'Description', dataKey: 'description' },
     { header: 'Qty', dataKey: 'qty' },
     { header: 'Unit Price', dataKey: 'unit_price' },
-    { header: 'Tax %', dataKey: 'tax_pct' },
-    { header: 'Tax', dataKey: 'tax' },
-    { header: 'Total', dataKey: 'total' },
+    { header: 'Total', dataKey: 'line_subtotal' },
   ];
 
   const tableRows = lines.map((l, i) => ({
@@ -196,9 +198,7 @@ export function generateInvoicePDF(
     description: l.description,
     qty: String(l.qty),
     unit_price: fmtCurrency(l.unit_price, cur),
-    tax_pct: `${(l.tax_pct * 100).toFixed(1)}%`,
-    tax: fmtCurrency(l.line_tax, cur),
-    total: fmtCurrency(l.line_total, cur),
+    line_subtotal: fmtCurrency(l.line_subtotal, cur),
   }));
 
   autoTable(doc, {
@@ -206,16 +206,44 @@ export function generateInvoicePDF(
     head: [tableColumns.map((c) => c.header)],
     body: tableRows.map((r) => tableColumns.map((c) => (r as any)[c.dataKey])),
     margin: { left: marginX, right: marginX },
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [245, 245, 245], textColor: [60, 60, 60], fontStyle: 'bold' },
+    theme: 'plain',
+    styles: {
+      fontSize: 8,
+      cellPadding: 2,
+      fillColor: [255, 255, 255],
+      lineColor: [220, 220, 220],
+      lineWidth: { bottom: 0.2 },
+    },
+    headStyles: {
+      fillColor: [245, 245, 245],
+      textColor: [60, 60, 60],
+      fontStyle: 'bold',
+      lineColor: [220, 220, 220],
+      lineWidth: { bottom: 0.2 },
+    },
+    alternateRowStyles: {
+      fillColor: [255, 255, 255],
+    },
+    didParseCell: (hookData) => {
+      if (hookData.section === 'head' && [0, 2, 3, 4].includes(hookData.column.index)) {
+        hookData.cell.styles.halign = 'left';
+        const left =
+          hookData.column.index === 0 ? 4 :
+          hookData.column.index === 2 ? 5 :
+          hookData.column.index === 4 ? 14.5 : 7;
+        hookData.cell.styles.cellPadding = { top: 2, right: 2, bottom: 2, left };
+      }
+      if (hookData.section === 'body' && hookData.column.index === 4) {
+        hookData.cell.styles.halign = 'left';
+        hookData.cell.styles.cellPadding = { top: 2, right: 2, bottom: 2, left: 11.5 };
+      }
+    },
     columnStyles: {
       0: { cellWidth: 10, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 15, halign: 'right' },
-      3: { cellWidth: 25, halign: 'right' },
-      4: { cellWidth: 18, halign: 'right' },
-      5: { cellWidth: 22, halign: 'right' },
-      6: { cellWidth: 25, halign: 'right' },
+      2: { cellWidth: 15, halign: 'center' },
+      3: { cellWidth: 25, halign: 'center' },
+      4: { cellWidth: 25, halign: 'center' },
     },
     didDrawPage: () => {
       const pageCount = (doc as any).internal.getNumberOfPages();
@@ -227,10 +255,11 @@ export function generateInvoicePDF(
   });
 
   yPos = (doc as any).lastAutoTable?.finalY ?? yPos + 40;
-  yPos += 6;
+  yPos += 16;
 
   // Summary table (right-aligned)
-  const summaryX = pageWidth - marginX - 80;
+  const summaryX = pageWidth - marginX - 56;
+  const summaryValueX = pageWidth - marginX - 3;
   const summaryItems = [
     { label: 'Subtotal', value: fmtCurrency(invoice.subtotal, cur), bold: false },
     { label: 'Tax', value: fmtCurrency(invoice.tax_total, cur), bold: false },
@@ -238,18 +267,21 @@ export function generateInvoicePDF(
     { label: 'Paid', value: fmtCurrency(invoice.total_paid, cur), bold: false },
     { label: 'Balance Due', value: fmtCurrency(invoice.balance_due, cur), bold: true },
   ];
+  const summaryLineH = 3.2;
+  const summaryGap = 1.8;
+  const summaryBoldTopGap = 2.6;
 
   for (const item of summaryItems) {
     if (item.bold) {
       doc.setDrawColor(200, 200, 200);
-      doc.line(summaryX, yPos - 1, pageWidth - marginX, yPos - 1);
-      yPos += 1;
+      doc.line(summaryX - 2.5, yPos - 1.4, summaryValueX + 2.5, yPos - 1.4);
+      yPos += summaryBoldTopGap;
     }
     doc.setFont('helvetica', item.bold ? 'bold' : 'normal');
     doc.setFontSize(9);
     doc.text(item.label, summaryX, yPos);
-    doc.text(item.value, pageWidth - marginX, yPos, { align: 'right' });
-    yPos += lineH + gap;
+    doc.text(item.value, summaryValueX, yPos, { align: 'right' });
+    yPos += summaryLineH + summaryGap;
   }
 
   // Notes

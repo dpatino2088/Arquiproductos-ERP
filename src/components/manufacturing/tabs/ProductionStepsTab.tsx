@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
+import { useManufacturingOrder, useTransitionMOStatus, ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
 import { useAuth } from '../../../hooks/useAuth';
 import { useUIStore } from '../../../stores/ui-store';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
@@ -24,7 +24,6 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
   const { manufacturingOrder: mo, loading, refetch } = useManufacturingOrder(moId);
-  const { materials } = useManufacturingMaterials(moId);
   const { transitionStatus, isTransitioning } = useTransitionMOStatus();
   const { user } = useAuth();
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
@@ -33,11 +32,6 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
   const handleStatusChange = async (newStatus: ManufacturingOrderStatus) => {
     if (!mo || !user?.id) return;
-
-    if ((newStatus === 'planned' || newStatus === 'in_production') && materials.length === 0) {
-      addNotification({ type: 'error', title: 'Cannot Advance', message: 'Generate BOM first before advancing.' });
-      return;
-    }
 
     const confirmed = await showConfirm({
       title: 'Change Status',
@@ -78,8 +72,6 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
   const currentStatus = mo.status;
   const currentIdx = STATUS_STEPS.indexOf(currentStatus);
   const isCancelled = currentStatus === 'cancelled';
-  const hasBom = materials.length > 0;
-
   return (
     <div className="p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-6">Production Workflow</h3>
@@ -95,8 +87,6 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
             const isCompleted = idx < currentIdx;
             const isCurrent = idx === currentIdx;
             const canAdvance = idx === currentIdx + 1;
-            const needsBom = (step === 'planned' || step === 'in_production') && !hasBom;
-            const isDisabled = canAdvance && needsBom;
 
             return (
               <div
@@ -115,7 +105,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
                 <div className="flex-1">
                   <div className="font-medium text-gray-900">{STATUS_LABELS[step]}</div>
                   {isCurrent && step === 'draft' && (
-                    <div className="text-xs text-gray-500 mt-0.5">Review materials and generate BOM before planning.</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Review materials before planning.</div>
                   )}
                 </div>
                 {canAdvance && (
@@ -123,12 +113,11 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
                     <button
                       type="button"
                       onClick={() => handleStatusChange(step)}
-                      disabled={isTransitioning || isDisabled}
+                      disabled={isTransitioning}
                       className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       {isTransitioning && updatingStatus === step ? 'Updating...' : `Advance`}
                     </button>
-                    {isDisabled && <span className="text-xs text-red-600">Generate BOM first</span>}
                   </div>
                 )}
                 {isCurrent && (

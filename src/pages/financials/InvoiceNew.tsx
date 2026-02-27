@@ -41,7 +41,18 @@ interface InvoiceLine {
   description: string;
   qty: number;
   unit_price: number;
-  tax_pct: number;
+  base_subtotal: number;
+  billing_percent: number;
+  billing_amount: number;
+}
+
+interface SalesOrderOption {
+  id: string;
+  sales_order_no: string;
+  subtotal: number | null;
+  total_amount: number | null;
+  tax_amount: number | null;
+  status: string | null;
 }
 
 function getQueryParam(name: string): string | null {
@@ -71,6 +82,12 @@ function newLineKey(): string {
   return `line-${++lineKeyCounter}-${Date.now()}`;
 }
 
+function safeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export default function InvoiceNew() {
   const { activeOrganizationId } = useOrganizationContext();
   const { user } = useAuth();
@@ -78,6 +95,8 @@ export default function InvoiceNew() {
   const addNotification = useUIStore((s) => s.addNotification);
   const { settings: costSettings } = useCostSettings();
   const defaultTaxPct = costSettings?.tax_pct ?? 0.07;
+  const [taxExempt, setTaxExempt] = useState(false);
+  const appliedTaxPct = taxExempt ? 0 : defaultTaxPct;
 
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [dealers, setDealers] = useState<DealerOption[]>([]);
@@ -92,9 +111,19 @@ export default function InvoiceNew() {
   });
   const [currency, setCurrency] = useState('USD');
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<InvoiceLine[]>([{ key: newLineKey(), description: '', qty: 1, unit_price: 0, tax_pct: defaultTaxPct }]);
+  const [lines, setLines] = useState<InvoiceLine[]>([{
+    key: newLineKey(),
+    description: '',
+    qty: 1,
+    unit_price: 0,
+    base_subtotal: 0,
+    billing_percent: 100,
+    billing_amount: 0,
+  }]);
   const [salesOrderId, setSalesOrderId] = useState<string | null>(null);
   const [salesOrderNo, setSalesOrderNo] = useState<string | null>(null);
+  const [salesOrders, setSalesOrders] = useState<SalesOrderOption[]>([]);
+  const [loadingSalesOrders, setLoadingSalesOrders] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingSO, setLoadingSO] = useState(false);
 
@@ -117,6 +146,16 @@ export default function InvoiceNew() {
       .then(({ data }: { data: DealerOption[] | null }) => { if (data) setDealers(data); });
   }, [activeOrganizationId]);
 
+  const createCustomLine = useCallback((): InvoiceLine => ({
+    key: newLineKey(),
+    description: '',
+    qty: 1,
+    unit_price: 0,
+    base_subtotal: 0,
+    billing_percent: 100,
+    billing_amount: 0,
+  }), []);
+
   const loadFromSalesOrder = useCallback(async (soId: string) => {
     if (!activeOrganizationId) return;
     setLoadingSO(true);
@@ -131,7 +170,7 @@ export default function InvoiceNew() {
           .single(),
         supabase
           .from('SaleOrderLines')
-          .select('description, collection_name, variant_name, quantity, unit_price, line_total, CatalogItems:catalog_item_id (item_name, sku)')
+          .select('description, collection_name, variant_name, quantity, unit_price, line_total, CatalogItems:catalog_item_id (name, sku)')
           .eq('sales_order_id', soId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
@@ -143,31 +182,36 @@ export default function InvoiceNew() {
       setSalesOrderNo(so.sales_order_no);
       setSelectedDealerId(so.dealer_id);
 
+      const mappedLines: InvoiceLine[] = [];
       if (!linesRes.error && linesRes.data && linesRes.data.length > 0) {
-        const soLines = linesRes.data as any[];
-        const soTotal = so.subtotal ?? so.total_amount ?? 0;
-        const soTax = so.tax_amount ?? 0;
-        const effectiveTaxPct = soTotal > 0 ? soTax / soTotal : defaultTaxPct;
-
-        setLines(soLines.map((l) => {
-          const name = l.CatalogItems?.item_name || l.description || l.collection_name || l.variant_name || 'Item';
-          const sku = l.CatalogItems?.sku ? ` (${l.CatalogItems.sku})` : '';
-          return {
+        const soLines = linesRes.data as Array<Record<string, unknown>>;
+        for (const l of soLines) {
+          const item = l.CatalogItems as { name?: string; sku?: string } | null | undefined;
+          const name = item?.name || String(l.description || l.collection_name || l.variant_name || 'Item');
+          const sku = item?.sku ? ` (${item.sku})` : '';
+          const qty = Math.max(1, safeNumber(l.quantity, 1));
+          const unit = Math.max(0, safeNumber(l.unit_price, 0));
+          const lineSubtotal = Math.max(0, safeNumber(l.line_total, qty * unit));
+          mappedLines.push({
             key: newLineKey(),
-            description: `${name}${sku}`,
-            qty: l.quantity ?? 1,
-            unit_price: l.unit_price ?? 0,
-            tax_pct: effectiveTaxPct,
-          };
-        }));
+            description: `${String(name)}${sku}`,
+            qty,
+            unit_price: unit,
+            base_subtotal: lineSubtotal,
+            billing_percent: 100,
+            billing_amount: lineSubtotal,
+          });
+        }
       }
+
+      setLines(mappedLines.length > 0 ? mappedLines : [createCustomLine()]);
     } catch (e) {
       console.error('Failed to load SO:', e);
       addNotification({ type: 'error', title: 'Error', message: 'Failed to load sales order data' });
     } finally {
       setLoadingSO(false);
     }
-  }, [activeOrganizationId, defaultTaxPct, addNotification]);
+  }, [activeOrganizationId, addNotification, createCustomLine]);
 
   useEffect(() => {
     const soId = getQueryParam('sales_order_id');
@@ -187,22 +231,71 @@ export default function InvoiceNew() {
     );
   }, [dealers, dealerSearch]);
 
+  useEffect(() => {
+    if (!activeOrganizationId || !selectedDealerId) {
+      setSalesOrders([]);
+      return;
+    }
+    setLoadingSalesOrders(true);
+    supabase
+      .from('SalesOrders')
+      .select('id, sales_order_no, subtotal, total_amount, tax_amount, status')
+      .eq('organization_id', activeOrganizationId)
+      .eq('dealer_id', selectedDealerId)
+      .eq('deleted', false)
+      .in('status', ['draft', 'confirmed', 'in_production', 'on_hold', 'delivered'])
+      .order('created_at', { ascending: false })
+      .then(({ data, error }: { data: SalesOrderOption[] | null; error: unknown }) => {
+        if (error) {
+          if (import.meta.env.DEV) console.warn('[InvoiceNew] sales orders fetch error:', error);
+          setSalesOrders([]);
+        } else {
+          setSalesOrders(data ?? []);
+        }
+      })
+      .finally(() => setLoadingSalesOrders(false));
+  }, [activeOrganizationId, selectedDealerId]);
+
+  useEffect(() => {
+    if (!salesOrderId) return;
+    const exists = salesOrders.some((so) => so.id === salesOrderId);
+    if (!exists && !loadingSalesOrders) {
+      setSalesOrderId(null);
+      setSalesOrderNo(null);
+      setLines([createCustomLine()]);
+    }
+  }, [salesOrderId, salesOrders, loadingSalesOrders, createCustomLine]);
+
   const { subtotal, taxTotal, total } = useMemo(() => {
     let sub = 0;
     let tax = 0;
     for (const l of lines) {
       const lineSub = l.qty * l.unit_price;
       sub += lineSub;
-      tax += lineSub * l.tax_pct;
+      tax += lineSub * appliedTaxPct;
     }
     return { subtotal: sub, taxTotal: tax, total: sub + tax };
-  }, [lines]);
+  }, [lines, appliedTaxPct]);
 
   const fmt = (v: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
 
   const updateLine = (key: string, field: keyof InvoiceLine, value: string | number) => {
-    setLines((prev) => prev.map((l) => l.key === key ? { ...l, [field]: value } : l));
+    setLines((prev) => prev.map((l) => {
+      if (l.key !== key) return l;
+      const next = { ...l, [field]: value } as InvoiceLine;
+      if (field === 'qty' || field === 'unit_price') {
+        const subtotalValue = Math.max(0, Number(next.qty) * Number(next.unit_price));
+        next.billing_amount = subtotalValue;
+        if (next.base_subtotal > 0) {
+          const pct = (subtotalValue / next.base_subtotal) * 100;
+          next.billing_percent = Math.max(1, Math.min(100, Number(pct.toFixed(2))));
+        } else {
+          next.billing_percent = 100;
+        }
+      }
+      return next;
+    }));
   };
 
   const removeLine = (key: string) => {
@@ -210,7 +303,62 @@ export default function InvoiceNew() {
   };
 
   const addLine = () => {
-    setLines((prev) => [...prev, { key: newLineKey(), description: '', qty: 1, unit_price: 0, tax_pct: defaultTaxPct }]);
+    setLines((prev) => [...prev, createCustomLine()]);
+  };
+
+  const handleSalesOrderSelect = async (soId: string) => {
+    if (!soId) {
+      setSalesOrderId(null);
+      setSalesOrderNo(null);
+      setLines([createCustomLine()]);
+      return;
+    }
+    await loadFromSalesOrder(soId);
+  };
+
+  const handleLinePercentChange = (key: string, value: string) => {
+    const parsed = Number(value);
+    setLines((prev) => prev.map((line) => {
+      if (line.key !== key) return line;
+      if (!Number.isFinite(parsed)) {
+        return line;
+      }
+      const boundedPercent = Math.max(1, Math.min(100, parsed));
+      if (line.base_subtotal <= 0) {
+        return { ...line, billing_percent: boundedPercent, billing_amount: 0 };
+      }
+      const billedAmount = Number(((line.base_subtotal * boundedPercent) / 100).toFixed(2));
+      const nextQty = Math.max(1, line.qty);
+      return {
+        ...line,
+        billing_percent: boundedPercent,
+        billing_amount: billedAmount,
+        unit_price: Number((billedAmount / nextQty).toFixed(6)),
+      };
+    }));
+  };
+
+  const handleLineAmountChange = (key: string, value: string) => {
+    const parsed = Number(value);
+    setLines((prev) => prev.map((line) => {
+      if (line.key !== key) return line;
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return line;
+      }
+      const boundedAmount = Math.max(0, parsed);
+      const nextQty = Math.max(1, line.qty);
+      const percent = line.base_subtotal > 0 ? (boundedAmount / line.base_subtotal) * 100 : 100;
+      const boundedPercent = Math.max(1, Math.min(100, percent));
+      const normalizedAmount = line.base_subtotal > 0
+        ? Number(((line.base_subtotal * boundedPercent) / 100).toFixed(2))
+        : boundedAmount;
+      return {
+        ...line,
+        billing_amount: normalizedAmount,
+        billing_percent: Number(boundedPercent.toFixed(2)),
+        unit_price: Number((normalizedAmount / nextQty).toFixed(6)),
+      };
+    }));
   };
 
   const handleSave = async () => {
@@ -253,10 +401,10 @@ export default function InvoiceNew() {
           description: l.description.trim(),
           qty: l.qty,
           unit_price: l.unit_price,
-          tax_pct: l.tax_pct,
+          tax_pct: 0,
           line_subtotal: l.qty * l.unit_price,
-          line_tax: l.qty * l.unit_price * l.tax_pct,
-          line_total: l.qty * l.unit_price * (1 + l.tax_pct),
+          line_tax: 0,
+          line_total: l.qty * l.unit_price,
         }));
         const { error: linesErr } = await supabase.from('DealerInvoiceLines').insert(lineRows);
         if (linesErr) throw linesErr;
@@ -333,15 +481,19 @@ export default function InvoiceNew() {
                 {selectedDealer ? (
                   <div className="flex items-center justify-between px-3 py-2 border border-gray-200 rounded-lg bg-gray-50">
                     <span className="text-sm font-medium text-gray-900">{selectedDealer.dealer_name}</span>
-                    {!salesOrderId && (
-                      <button
-                        type="button"
-                        onClick={() => { setSelectedDealerId(''); setDealerSearch(''); }}
-                        className="text-xs text-gray-500 hover:text-gray-700"
-                      >
-                        Change
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDealerId('');
+                        setDealerSearch('');
+                        setSalesOrderId(null);
+                        setSalesOrderNo(null);
+                        setLines([createCustomLine()]);
+                      }}
+                      className="text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Change
+                    </button>
                   </div>
                 ) : (
                   <>
@@ -359,7 +511,14 @@ export default function InvoiceNew() {
                           <button
                             key={d.id}
                             type="button"
-                            onClick={() => { setSelectedDealerId(d.id); setShowDealerDropdown(false); setDealerSearch(''); }}
+                            onClick={() => {
+                              setSelectedDealerId(d.id);
+                              setShowDealerDropdown(false);
+                              setDealerSearch('');
+                              setSalesOrderId(null);
+                              setSalesOrderNo(null);
+                              setLines([createCustomLine()]);
+                            }}
                             className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0"
                           >
                             <span className="font-medium">{d.dealer_name}</span>
@@ -369,6 +528,33 @@ export default function InvoiceNew() {
                       </div>
                     )}
                   </>
+                )}
+              </div>
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-500 mb-1">SO #</label>
+                <select
+                  value={salesOrderId ?? ''}
+                  onChange={(e) => void handleSalesOrderSelect(e.target.value)}
+                  disabled={!selectedDealerId || loadingSalesOrders}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-gray-50 disabled:text-gray-500"
+                >
+                  <option value="">
+                    {!selectedDealerId
+                      ? 'Select dealer first'
+                      : loadingSalesOrders
+                        ? 'Loading SO list...'
+                        : salesOrders.length === 0
+                          ? 'No SO available'
+                          : 'Select SO #'}
+                  </option>
+                  {salesOrders.map((so) => (
+                    <option key={so.id} value={so.id}>
+                      {so.sales_order_no}
+                    </option>
+                  ))}
+                </select>
+                {salesOrderNo && (
+                  <p className="mt-2 text-xs text-gray-500">Reference: {salesOrderNo}</p>
                 )}
               </div>
 
@@ -414,17 +600,6 @@ export default function InvoiceNew() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600"
                   />
                 </div>
-                {salesOrderNo && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Sales Order</label>
-                    <input
-                      type="text"
-                      value={salesOrderNo}
-                      readOnly
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600"
-                    />
-                  </div>
-                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Issue Date</label>
@@ -467,21 +642,34 @@ export default function InvoiceNew() {
                     placeholder="Internal notes..."
                   />
                 </div>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={taxExempt}
+                    onChange={(e) => setTaxExempt(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/20"
+                  />
+                  Tax Exempt (0%)
+                </label>
               </div>
             </div>
           </div>
 
-          {/* Lines table */}
+          {/* Lines table + Summary below (after table) */}
+          <div className="space-y-4">
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <div className="px-4 py-2 border-b border-gray-200 bg-gray-50 text-xs text-gray-600">
+              Tax global: {taxExempt ? 'Exempt (0.00%)' : `Fixed from Cost Settings (${(defaultTaxPct * 100).toFixed(2)}%)`}
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs w-8">#</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs">Description</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-24">%</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">Amount</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-20">Qty</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">Unit Price</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-20">Tax %</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-24">Tax</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">Total</th>
                   <th className="px-4 py-3 text-center font-medium text-gray-700 text-xs w-10">
                     <button
@@ -498,8 +686,6 @@ export default function InvoiceNew() {
               <tbody>
                 {lines.map((line, idx) => {
                   const lineSub = line.qty * line.unit_price;
-                  const lineTax = lineSub * line.tax_pct;
-                  const lineTotal = lineSub + lineTax;
                   return (
                     <tr key={line.key} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-3 text-center text-gray-400 tabular-nums">{idx + 1}</td>
@@ -510,6 +696,27 @@ export default function InvoiceNew() {
                           onChange={(e) => updateLine(line.key, 'description', e.target.value)}
                           placeholder="Item description..."
                           className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={0.01}
+                          value={line.billing_percent}
+                          onChange={(e) => handleLinePercentChange(line.key, e.target.value)}
+                          className="w-full px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={line.billing_amount}
+                          onChange={(e) => handleLineAmountChange(line.key, e.target.value)}
+                          className="w-full px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/20"
                         />
                       </td>
                       <td className="px-4 py-3">
@@ -531,19 +738,7 @@ export default function InvoiceNew() {
                           className="w-full px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/20"
                         />
                       </td>
-                      <td className="px-4 py-3">
-                        <input
-                          type="number"
-                          min={0}
-                          max={1}
-                          step={0.01}
-                          value={line.tax_pct}
-                          onChange={(e) => updateLine(line.key, 'tax_pct', Math.max(0, Math.min(1, Number(e.target.value))))}
-                          className="w-full px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/20"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-600">{fmt(lineTax)}</td>
-                      <td className="px-4 py-3 text-right font-mono font-medium">{fmt(lineTotal)}</td>
+                      <td className="px-4 py-3 text-right font-mono font-medium">{fmt(lineSub)}</td>
                       <td className="px-4 py-3 text-center">
                         <button
                           type="button"
@@ -558,27 +753,27 @@ export default function InvoiceNew() {
                   );
                 })}
               </tbody>
-              <tfoot className="bg-gray-50 border-t">
-                <tr>
-                  <td colSpan={5} />
-                  <td className="px-4 py-3 text-right text-xs font-medium text-gray-500">Subtotal</td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(subtotal)}</td>
-                  <td />
-                </tr>
-                <tr>
-                  <td colSpan={5} />
-                  <td className="px-4 py-3 text-right text-xs font-medium text-gray-500">Tax</td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(taxTotal)}</td>
-                  <td />
-                </tr>
-                <tr className="border-t">
-                  <td colSpan={5} />
-                  <td className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Total</td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-gray-900">{fmt(total)}</td>
-                  <td />
-                </tr>
-              </tfoot>
             </table>
+          </div>
+            <div className="flex justify-end">
+            <div className="w-full lg:w-[22rem] rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Summary Total</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Subtotal</dt>
+                  <dd className="font-mono text-gray-900">{fmt(subtotal)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Tax</dt>
+                  <dd className="font-mono text-gray-900">{fmt(taxTotal)}</dd>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="text-sm font-semibold text-gray-700">Total</dt>
+                  <dd className="font-mono font-bold text-gray-900">{fmt(total)}</dd>
+                </div>
+              </dl>
+            </div>
+            </div>
           </div>
 
         </div>

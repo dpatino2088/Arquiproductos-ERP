@@ -8,7 +8,7 @@ import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText, DollarSign, ChevronDown } from 'lucide-react';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
-import type { InvoicePDFLine, InvoicePDFData, InvoicePDFDealer } from '../../lib/pdf/generateInvoicePDF';
+import type { InvoicePDFLine, InvoicePDFData, InvoicePDFDealer, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 
 const FINANCIAL_SUBMODULES = [
   { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
@@ -59,10 +59,7 @@ interface InvoiceLine {
   description: string;
   qty: number;
   unit_price: number;
-  tax_pct: number;
   line_subtotal: number;
-  line_tax: number;
-  line_total: number;
 }
 
 interface PaymentApplication {
@@ -291,8 +288,68 @@ export default function InvoiceDetail() {
     }
   };
 
-  const handlePreviewPDF = () => {
-    if (!invoice) return;
+  const loadOrganizationLogoOptions = useCallback(async (): Promise<GenerateInvoicePDFOptions> => {
+    const tryLogo = async (path: string): Promise<string | undefined> => {
+      try {
+        const res = await fetch(path, { cache: 'no-store' });
+        if (!res.ok) return undefined;
+        const blob = await res.blob();
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return undefined;
+      }
+    };
+
+    let organizationName = 'Arquiproductos';
+    if (activeOrganizationId) {
+      const { data: orgData } = await supabase
+        .from('Organizations')
+        .select('name')
+        .eq('id', activeOrganizationId)
+        .maybeSingle();
+      organizationName = (orgData as { name?: string } | null)?.name ?? 'Arquiproductos';
+    }
+
+    const logoPaths = [
+      '/images/Arquiproductos.png',
+      '/images/arquiproductos.png',
+      '/images/Arquiproductos.jpg',
+      '/images/arquiproductos.jpg',
+    ];
+    let logoPngBase64: string | undefined;
+    for (const path of logoPaths) {
+      logoPngBase64 = await tryLogo(path);
+      if (logoPngBase64) break;
+    }
+
+    let logoWidthPx = 100;
+    let logoHeightPx = 100;
+    if (logoPngBase64) {
+      const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => resolve({ w: 100, h: 100 });
+        img.src = logoPngBase64!;
+      });
+      logoWidthPx = dims.w;
+      logoHeightPx = dims.h;
+    }
+
+    return {
+      organizationName,
+      logoPngBase64,
+      logoWidthPx,
+      logoHeightPx,
+    };
+  }, [activeOrganizationId]);
+
+  const buildInvoicePDFDoc = useCallback(async () => {
+    if (!invoice) return null;
     const pdfData: InvoicePDFData = {
       invoice_number: invoice.invoice_number,
       status: invoice.status,
@@ -319,49 +376,24 @@ export default function InvoiceDetail() {
       description: l.description,
       qty: l.qty,
       unit_price: l.unit_price,
-      tax_pct: l.tax_pct,
-      line_tax: l.line_tax,
-      line_total: l.line_total,
+      line_subtotal: l.line_subtotal,
     }));
-    const doc = generateInvoicePDF(pdfData, pdfDealer, pdfLines);
+
+    const logoOptions = await loadOrganizationLogoOptions();
+    return generateInvoicePDF(pdfData, pdfDealer, pdfLines, logoOptions);
+  }, [invoice, applications, lines, loadOrganizationLogoOptions]);
+
+  const handlePreviewPDF = async () => {
+    const doc = await buildInvoicePDFDoc();
+    if (!doc) return;
     const blob = doc.output('blob');
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
   };
 
-  const handleDownloadPDF = () => {
-    if (!invoice) return;
-    const pdfData: InvoicePDFData = {
-      invoice_number: invoice.invoice_number,
-      status: invoice.status,
-      issue_date: invoice.issue_date,
-      due_date: invoice.due_date,
-      currency_code: invoice.currency_code || 'USD',
-      subtotal: invoice.subtotal,
-      tax_total: invoice.tax_total,
-      total: invoice.total,
-      total_paid: applications.reduce((s, a) => s + Number(a.applied_amount), 0),
-      balance_due: Math.max(invoice.total - applications.reduce((s, a) => s + Number(a.applied_amount), 0), 0),
-      notes: invoice.notes,
-      sales_order_no: invoice.SalesOrders?.sales_order_no ?? null,
-    };
-    const pdfDealer: InvoicePDFDealer | null = invoice.Dealers ? {
-      dealer_name: invoice.Dealers.dealer_name,
-      dealer_no: invoice.Dealers.dealer_no ?? null,
-      identification_number: invoice.Dealers.identification_number ?? null,
-      billing_address: formatBillingAddress(invoice.Dealers),
-      email: invoice.Dealers.dealer_email ?? null,
-      phone: invoice.Dealers.dealer_phone ?? null,
-    } : null;
-    const pdfLines: InvoicePDFLine[] = lines.map((l) => ({
-      description: l.description,
-      qty: l.qty,
-      unit_price: l.unit_price,
-      tax_pct: l.tax_pct,
-      line_tax: l.line_tax,
-      line_total: l.line_total,
-    }));
-    const doc = generateInvoicePDF(pdfData, pdfDealer, pdfLines);
+  const handleDownloadPDF = async () => {
+    const doc = await buildInvoicePDFDoc();
+    if (!doc || !invoice) return;
     doc.save(`${invoice.invoice_number}.pdf`);
   };
 
@@ -536,153 +568,72 @@ export default function InvoiceDetail() {
         </div>
       </div>
 
-      {/* Row 2: Financial Summary (full width) */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-900">Financial Summary</h3>
-          {balanceDue > 0 && (status === 'issued' || status === 'partial') && !applyFormOpen && (
-            <button
-              type="button"
-              onClick={handleOpenApplyForm}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-            >
-              <DollarSign className="w-4 h-4" />
-              Apply Payment
-            </button>
-          )}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="text-center">
-            <dt className="text-xs text-gray-500 mb-1">Subtotal</dt>
-            <dd className="font-mono text-sm text-gray-900">{fmt(invoice.subtotal, currency)}</dd>
-          </div>
-          <div className="text-center">
-            <dt className="text-xs text-gray-500 mb-1">Tax</dt>
-            <dd className="font-mono text-sm text-gray-900">{fmt(invoice.tax_total, currency)}</dd>
-          </div>
-          <div className="text-center">
-            <dt className="text-xs text-gray-500 mb-1">Total</dt>
-            <dd className="font-mono text-sm font-semibold text-gray-900">{fmt(invoice.total, currency)}</dd>
-          </div>
-          <div className="text-center">
-            <dt className="text-xs text-gray-500 mb-1">Paid</dt>
-            <dd className={`font-mono text-sm font-medium ${totalApplied > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-              {fmt(totalApplied, currency)}
-            </dd>
-          </div>
-          <div className="text-center">
-            <dt className="text-xs text-gray-500 mb-1">Balance Due</dt>
-            <dd className={`font-mono text-sm font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {fmt(balanceDue, currency)}
-            </dd>
-          </div>
-        </div>
-        {status === 'draft' && balanceDue > 0 && (
-          <p className="text-xs text-amber-600 mt-3 text-center">Issue this invoice first to apply payments.</p>
-        )}
-        {applyFormOpen && (
-          <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
-            <h4 className="text-xs font-semibold text-gray-700">Apply Payment to Invoice</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Select Payment</label>
-                <select
-                  value={selectedPaymentId}
-                  onChange={(e) => {
-                    setSelectedPaymentId(e.target.value);
-                    const pay = availablePayments.find((p) => p.id === e.target.value);
-                    if (pay) setApplyAmount(String(Math.min(pay.unapplied, balanceDue).toFixed(2)));
-                  }}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="">-- Select --</option>
-                  {availablePayments.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {new Date(p.payment_date).toLocaleDateString()} - {p.payment_method} - {fmt(p.unapplied, currency)} available
-                      {p.reference_number ? ` (${p.reference_number})` : ''}
-                    </option>
-                  ))}
-                </select>
-                {availablePayments.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1">No payments with available balance for this dealer.</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Amount</label>
-                <input
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={applyAmount}
-                  onChange={(e) => setApplyAmount(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-              <div className="flex items-end gap-2">
-                <button
-                  type="button"
-                  onClick={handleApplyPayment}
-                  disabled={applying || !selectedPaymentId || !applyAmount}
-                  className="flex-1 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >
-                  {applying ? 'Applying...' : 'Apply'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setApplyFormOpen(false); setSelectedPaymentId(''); setApplyAmount(''); }}
-                  className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
       {activeTab === 'lines' && (
+        <div className="space-y-4">
         <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Description</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Tax %</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Tax</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
               </tr>
             </thead>
             <tbody>
               {lines.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No lines</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No lines</td></tr>
               ) : (
-                lines.map((l) => (
+                lines.map((l, idx) => (
                   <tr key={l.id} className="border-t hover:bg-gray-50">
+                    <td className="px-4 py-4 text-gray-500 tabular-nums">{idx + 1}</td>
                     <td className="px-4 py-4 text-gray-900">{l.description}</td>
                     <td className="px-4 py-4 text-right tabular-nums">{l.qty}</td>
                     <td className="px-4 py-4 text-right font-mono">{fmt(l.unit_price, currency)}</td>
-                    <td className="px-4 py-4 text-right text-gray-500">{(l.tax_pct * 100).toFixed(1)}%</td>
-                    <td className="px-4 py-4 text-right font-mono text-gray-600">{fmt(l.line_tax, currency)}</td>
-                    <td className="px-4 py-4 text-right font-mono font-medium">{fmt(l.line_total, currency)}</td>
+                    <td className="px-4 py-4 text-right font-mono font-medium">{fmt(l.line_subtotal, currency)}</td>
                   </tr>
                 ))
               )}
             </tbody>
-            {lines.length > 0 && (
-              <tfoot className="bg-gray-50 border-t">
-                <tr>
-                  <td colSpan={5} className="px-4 py-3 text-right font-medium text-gray-700">Total</td>
-                  <td className="px-4 py-3 text-right font-semibold font-mono">{fmt(invoice.total, currency)}</td>
-                </tr>
-              </tfoot>
-            )}
           </table>
+        </div>
+        <div className="flex justify-end">
+          <div className="w-full lg:w-[22rem] rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Summary</h3>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Subtotal</dt>
+                <dd className="font-mono text-gray-900">{fmt(invoice.subtotal, currency)}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Tax</dt>
+                <dd className="font-mono text-gray-900">{fmt(invoice.tax_total, currency)}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Paid</dt>
+                <dd className={`font-mono ${totalApplied > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                  {fmt(totalApplied, currency)}
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Balance Due</dt>
+                <dd className={`font-mono font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  {fmt(balanceDue, currency)}
+                </dd>
+              </div>
+              <div className="flex justify-between border-t pt-2">
+                <dt className="text-sm font-semibold text-gray-700">Total</dt>
+                <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
         </div>
       )}
 
       {activeTab === 'payments' && (
-        <>
+        <div className="space-y-4">
           {balanceDue > 0 && (status === 'issued' || status === 'partial') && !applyFormOpen && (
             <div className="mb-4 flex justify-end">
               <button
@@ -698,6 +649,64 @@ export default function InvoiceDetail() {
           {status === 'draft' && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
               <p className="text-xs text-amber-700">Issue this invoice first to apply payments.</p>
+            </div>
+          )}
+          {applyFormOpen && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-800">Apply Payment to Invoice</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Select Payment</label>
+                  <select
+                    value={selectedPaymentId}
+                    onChange={(e) => {
+                      setSelectedPaymentId(e.target.value);
+                      const pay = availablePayments.find((p) => p.id === e.target.value);
+                      if (pay) setApplyAmount(String(Math.min(pay.unapplied, balanceDue).toFixed(2)));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">-- Select --</option>
+                    {availablePayments.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {new Date(p.payment_date).toLocaleDateString()} - {p.payment_method} - {fmt(p.unapplied, currency)} available
+                        {p.reference_number ? ` (${p.reference_number})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {availablePayments.length === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">No payments with available balance for this dealer.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Amount</label>
+                  <input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={applyAmount}
+                    onChange={(e) => setApplyAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleApplyPayment}
+                    disabled={applying || !selectedPaymentId || !applyAmount}
+                    className="flex-1 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {applying ? 'Applying...' : 'Apply'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setApplyFormOpen(false); setSelectedPaymentId(''); setApplyAmount(''); }}
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             </div>
           )}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
@@ -730,17 +739,40 @@ export default function InvoiceDetail() {
                   ))
                 )}
               </tbody>
-              {applications.length > 0 && (
-                <tfoot className="bg-gray-50 border-t">
-                  <tr>
-                    <td colSpan={4} className="px-4 py-4 text-right font-medium text-gray-700">Total Applied</td>
-                    <td className="px-4 py-4 text-right font-semibold font-mono text-green-700">{fmt(totalApplied, currency)}</td>
-                  </tr>
-                </tfoot>
-              )}
             </table>
           </div>
-        </>
+          <div className="flex justify-end">
+            <div className="w-full lg:w-[22rem] rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Summary</h3>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Subtotal</dt>
+                  <dd className="font-mono text-gray-900">{fmt(invoice.subtotal, currency)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Tax</dt>
+                  <dd className="font-mono text-gray-900">{fmt(invoice.tax_total, currency)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Paid</dt>
+                  <dd className={`font-mono ${totalApplied > 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                    {fmt(totalApplied, currency)}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Balance Due</dt>
+                  <dd className={`font-mono font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {fmt(balanceDue, currency)}
+                  </dd>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="text-sm font-semibold text-gray-700">Total</dt>
+                  <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        </div>
       )}
     </DetailPageLayout>
   );

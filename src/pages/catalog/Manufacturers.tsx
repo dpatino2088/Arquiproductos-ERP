@@ -25,7 +25,11 @@ import {
   Book,
 } from 'lucide-react';
 
-const Manufacturers = forwardRef<ManufacturersRef, object>(function Manufacturers(_, ref) {
+interface ManufacturersProps {
+  readOnly?: boolean;
+}
+
+const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function Manufacturers({ readOnly = false }, ref) {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
@@ -96,6 +100,10 @@ const Manufacturers = forwardRef<ManufacturersRef, object>(function Manufacturer
   };
 
   const handleNew = () => {
+    if (readOnly) {
+      router.navigate('/partners/manufacturers');
+      return;
+    }
     setFormData({ name: '', code: '', notes: '' });
     setEditingId(null);
     setShowNewModal(true);
@@ -104,6 +112,10 @@ const Manufacturers = forwardRef<ManufacturersRef, object>(function Manufacturer
   useImperativeHandle(ref, () => ({ openNewModal: handleNew }), []);
 
   const handleEdit = (manufacturer: any) => {
+    if (readOnly) {
+      router.navigate('/partners/manufacturers');
+      return;
+    }
     setFormData({
       name: manufacturer.name,
       code: manufacturer.code || '',
@@ -174,7 +186,20 @@ const Manufacturers = forwardRef<ManufacturersRef, object>(function Manufacturer
 
   return (
     <div>
-      {/* Search Bar — spacing from status bar: mt-4 from parent */}
+      {/* Read-only notice */}
+      {readOnly && (
+        <div className="mb-3 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+          <span>This is a read-only view. Manage manufacturers in the Partners module.</span>
+          <button
+            onClick={() => router.navigate('/partners/manufacturers')}
+            className="text-blue-600 font-medium hover:underline ml-4 whitespace-nowrap"
+          >
+            Go to Partners
+          </button>
+        </div>
+      )}
+
+      {/* Search Bar */}
       <div className="mb-2">
         <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg">
           <div className="flex items-center gap-4">
@@ -265,18 +290,20 @@ const Manufacturers = forwardRef<ManufacturersRef, object>(function Manufacturer
                           <button 
                             onClick={() => handleEdit(manufacturer)}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            title={`Edit ${manufacturer.name}`}
+                            title={readOnly ? 'Manage in Partners' : `Edit ${manufacturer.name}`}
                           >
                             <Edit className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={() => handleDelete(manufacturer.id, manufacturer.name)}
-                            disabled={isDeleting}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                            title={`Delete ${manufacturer.name}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {!readOnly && (
+                            <button 
+                              onClick={() => handleDelete(manufacturer.id, manufacturer.name)}
+                              disabled={isDeleting}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                              title={`Delete ${manufacturer.name}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useAccessContext } from '../../hooks/useAccessContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { normalizeUUID } from '../../utils/uuid';
 import { Search, Download, FileText } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
@@ -32,9 +34,16 @@ interface SaleOrderGroup {
   total_cost: number;
 }
 
+interface QueryIssue {
+  step: string;
+  message: string;
+  code?: string;
+}
+
 export default function ApprovedBOMList() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
+  const { isInternal, internalRole } = useAccessContext();
   const [saleOrderGroups, setSaleOrderGroups] = useState<SaleOrderGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +52,8 @@ export default function ApprovedBOMList() {
   const [itemsPerPage, setItemsPerPage] = useState(10); // Show 10 SOs per page
   const [sortBy, setSortBy] = useState<'sale_order_no' | 'customer_name' | 'created_at'>('sale_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const internalRoleLower = (internalRole ?? '').toLowerCase();
+  const canViewCost = isInternal && ['super_admin', 'admin'].includes(internalRoleLower);
 
   // Register Manufacturing submodules when in Material tab
   useEffect(() => {
@@ -122,7 +133,7 @@ export default function ApprovedBOMList() {
           .from('SalesOrders')
           .select(`
             id,
-            sale_order_no,
+            sales_order_no,
             customer_id,
             created_at,
             organization_id
@@ -173,7 +184,7 @@ export default function ApprovedBOMList() {
         }
         
         const { data: allSalesOrderLines, error: solError } = await supabase
-          .from('SalesOrderLines')
+          .from('SaleOrderLines')
           .select('id, sales_order_id, organization_id')
           .in('sales_order_id', saleOrderIds)
           .eq('deleted', false);
@@ -205,7 +216,7 @@ export default function ApprovedBOMList() {
         // STEP 1: Fetch BOMInstances (no embedded joins)
         let materialList: any[] = [];
         let bomInstances: any[] = [];
-        let queryErrors: string[] = [];
+        let queryIssues: QueryIssue[] = [];
         
         if (saleOrderLineIds.length > 0) {
           if (import.meta.env.DEV) {
@@ -213,15 +224,19 @@ export default function ApprovedBOMList() {
           }
           
           const { data: bomInstancesData, error: bomError } = await supabase
-            .from('vw_bom_instances_safe')
-            .select('id, sales_order_line_id_safe, quote_line_id, organization_id')
-            .in('sales_order_line_id_safe', saleOrderLineIds)
+            .from('BOMInstances')
+            .select('id, sales_order_line_id, quote_line_id, organization_id')
+            .in('sales_order_line_id', saleOrderLineIds)
             .eq('deleted', false)
             .eq('organization_id', activeOrganizationId);
           
           if (bomError) {
             console.error('ApprovedBOMList query failed', { step: '1 - BOMInstances', error: bomError });
-            queryErrors.push('Failed to fetch BOMInstances');
+            queryIssues.push({
+              step: 'BOMInstances',
+              code: bomError.code,
+              message: bomError.message || 'Failed to fetch BOMInstances',
+            });
           } else {
             bomInstances = bomInstancesData || [];
             if (import.meta.env.DEV) {
@@ -239,14 +254,18 @@ export default function ApprovedBOMList() {
             
             const { data: bomLines, error: linesError } = await supabase
               .from('BOMInstanceLines')
-              .select('id, bom_instance_id, resolved_part_id, resolved_sku, part_role, category_code, qty, uom, unit_cost_exw, total_cost_exw, organization_id, description')
+              .select('id, bom_instance_id, resolved_part_id, part_role, qty, uom, unit_cost_exw, total_cost_exw, organization_id, calc_notes')
               .in('bom_instance_id', bomInstanceIds)
               .eq('deleted', false)
               .eq('organization_id', activeOrganizationId);
 
             if (linesError) {
               console.error('ApprovedBOMList query failed', { step: '2 - BOMInstanceLines', error: linesError });
-              queryErrors.push('Failed to fetch BOMInstanceLines');
+              queryIssues.push({
+                step: 'BOMInstanceLines',
+                code: linesError.code,
+                message: linesError.message || 'Failed to fetch BOMInstanceLines',
+              });
             } else if (bomLines && bomLines.length > 0) {
               if (import.meta.env.DEV) {
                 console.log('✅ ApprovedBOMList: Step 2 - Found', bomLines.length, 'BOMInstanceLines');
@@ -254,12 +273,11 @@ export default function ApprovedBOMList() {
               }
 
               // STEP 3: Build unique set of resolved_part_id and fetch CatalogItems
-              // Filter to valid UUIDs only to avoid PostgREST 400 errors
-              const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+              // Normalize UUIDs to avoid 22P02 from hidden/invalid characters.
               const catalogItemIds = [...new Set(
                 bomLines
-                  .map((bil: any) => bil.resolved_part_id)
-                  .filter((id: any) => typeof id === 'string' && UUID_RE.test(id))
+                  .map((bil: any) => normalizeUUID(typeof bil.resolved_part_id === 'string' ? bil.resolved_part_id : null))
+                  .filter((id: string | null): id is string => !!id)
               )];
               
               let catalogItemById = new Map<string, any>();
@@ -268,10 +286,10 @@ export default function ApprovedBOMList() {
                   console.log('🔍 ApprovedBOMList: Step 3 - Fetching CatalogItems for', catalogItemIds.length, 'valid UUIDs');
                 }
                 
-                // Chunk queries to avoid URL length issues (max 200 IDs per chunk)
+                // Chunk queries to avoid URL length issues on large .in() lists.
                 const chunks = [];
-                for (let i = 0; i < catalogItemIds.length; i += 200) {
-                  chunks.push(catalogItemIds.slice(i, i + 200));
+                for (let i = 0; i < catalogItemIds.length; i += 100) {
+                  chunks.push(catalogItemIds.slice(i, i + 100));
                 }
                 
                 let allCatalogItems: any[] = [];
@@ -280,8 +298,9 @@ export default function ApprovedBOMList() {
                 for (const chunk of chunks) {
                   const { data: chunkItems, error: chunkError } = await supabase
                     .from('CatalogItems')
-                    .select('id, sku, item_name, description, item_type, measure_basis, collection_name, variant_name')
-                    .in('id', chunk);
+                    .select('id, sku, name, description, item_type, measure_basis, collection_name, variant_name')
+                    .in('id', chunk)
+                    .eq('organization_id', activeOrganizationId);
                   
                   if (chunkError) {
                     catalogError = chunkError;
@@ -300,7 +319,11 @@ export default function ApprovedBOMList() {
                     partIdsSample: catalogItemIds.slice(0, 10),
                     partIdsCount: catalogItemIds.length
                   });
-                  queryErrors.push('Failed to fetch CatalogItems');
+                  queryIssues.push({
+                    step: 'CatalogItems',
+                    code: catalogError.code,
+                    message: catalogError.message || 'Failed to fetch CatalogItems',
+                  });
                 } else if (allCatalogItems.length > 0) {
                   allCatalogItems.forEach((ci: any) => {
                     if (ci.id) {
@@ -319,7 +342,12 @@ export default function ApprovedBOMList() {
               }
 
               // STEP 4: Build unique set of quote_line_id and fetch QuoteLines + ProductTypes
-              const quoteLineIds = [...new Set(bomInstances.map((bi: any) => bi.quote_line_id).filter(Boolean))];
+              // Normalize UUIDs and chunk queries to avoid 22P02 / URL length errors.
+              const quoteLineIds = [...new Set(
+                bomInstances
+                  .map((bi: any) => normalizeUUID(typeof bi.quote_line_id === 'string' ? bi.quote_line_id : null))
+                  .filter((id: string | null): id is string => !!id)
+              )];
               
               let quoteLineToProductTypeName = new Map<string, string>();
               if (quoteLineIds.length > 0) {
@@ -327,17 +355,41 @@ export default function ApprovedBOMList() {
                   console.log('🔍 ApprovedBOMList: Step 4a - Fetching QuoteLines for', quoteLineIds.length, 'quote lines');
                 }
                 
-                const { data: quoteLines, error: quoteLinesError } = await supabase
-                  .from('QuoteLines')
-                  .select('id, product_type_id')
-                  .in('id', quoteLineIds)
-                  .eq('deleted', false);
+                const chunks = [];
+                for (let i = 0; i < quoteLineIds.length; i += 100) {
+                  chunks.push(quoteLineIds.slice(i, i + 100));
+                }
+
+                let allQuoteLines: any[] = [];
+                let quoteLinesError: any = null;
+
+                for (const chunk of chunks) {
+                  const { data: chunkQuoteLines, error: chunkError } = await supabase
+                    .from('QuoteLines')
+                    .select('id, product_type_id')
+                    .in('id', chunk)
+                    .eq('organization_id', activeOrganizationId)
+                    .eq('deleted', false);
+
+                  if (chunkError) {
+                    quoteLinesError = chunkError;
+                    break;
+                  }
+
+                  if (chunkQuoteLines) {
+                    allQuoteLines = allQuoteLines.concat(chunkQuoteLines);
+                  }
+                }
 
                 if (quoteLinesError) {
                   console.error('ApprovedBOMList query failed', { step: '4a - QuoteLines', error: quoteLinesError });
-                  queryErrors.push('Failed to fetch QuoteLines');
-                } else if (quoteLines) {
-                  const productTypeIds = [...new Set(quoteLines.map((ql: any) => ql.product_type_id).filter(Boolean))];
+                  queryIssues.push({
+                    step: 'QuoteLines',
+                    code: quoteLinesError.code,
+                    message: quoteLinesError.message || 'Failed to fetch QuoteLines',
+                  });
+                } else if (allQuoteLines.length > 0) {
+                  const productTypeIds = [...new Set(allQuoteLines.map((ql: any) => ql.product_type_id).filter(Boolean))];
                   
                   if (productTypeIds.length > 0) {
                     if (import.meta.env.DEV) {
@@ -347,12 +399,15 @@ export default function ApprovedBOMList() {
                     const { data: productTypes, error: productTypesError } = await supabase
                       .from('ProductTypes')
                       .select('id, name')
-                      .in('id', productTypeIds)
-                      .eq('deleted', false);
+                      .in('id', productTypeIds);
 
                     if (productTypesError) {
                       console.error('ApprovedBOMList query failed', { step: '4b - ProductTypes', error: productTypesError });
-                      queryErrors.push('Failed to fetch ProductTypes');
+                      queryIssues.push({
+                        step: 'ProductTypes',
+                        code: productTypesError.code,
+                        message: productTypesError.message || 'Failed to fetch ProductTypes',
+                      });
                     } else if (productTypes) {
                       const productTypeById = new Map<string, string>();
                       productTypes.forEach((pt: any) => {
@@ -362,7 +417,7 @@ export default function ApprovedBOMList() {
                       });
                       
                       // Build quoteLineToProductTypeName map
-                      quoteLines.forEach((ql: any) => {
+                      allQuoteLines.forEach((ql: any) => {
                         if (ql.id && ql.product_type_id) {
                           const productTypeName = productTypeById.get(ql.product_type_id);
                           if (productTypeName) {
@@ -388,7 +443,7 @@ export default function ApprovedBOMList() {
               bomLines.forEach((bil: any) => {
                 const bomInstance = bomInstances.find((bi: any) => bi.id === bil.bom_instance_id);
                 if (bomInstance) {
-                  const saleOrderId = saleOrderLineToSO.get(bomInstance.sales_order_line_id_safe);
+                  const saleOrderId = saleOrderLineToSO.get(bomInstance.sales_order_line_id);
                   if (saleOrderId) {
                     // component_name: Fabric names come from collection + variant, not item_name
                     // Detect fabric using part_role first, then fallback to CatalogItems fields
@@ -396,17 +451,16 @@ export default function ApprovedBOMList() {
                     const isFabric = bil.part_role === 'fabric' || 
                                    (catalogItem && ((catalogItem.item_type === 'fabric') || (catalogItem.measure_basis === 'fabric')));
                     
+                    const resolvedSku = catalogItem?.sku ?? bil.calc_notes ?? 'N/A';
+                    const resolvedDesc = catalogItem?.description ?? bil.calc_notes ?? null;
                     let component_name = 'N/A';
                     if (isFabric && catalogItem) {
-                      // Fabric: use collection_name - variant_name (never show SKU as first choice)
                       const fabricName = [catalogItem.collection_name, catalogItem.variant_name].filter(Boolean).join(' - ');
-                      component_name = fabricName || catalogItem.item_name || catalogItem.description || bil.resolved_sku || 'N/A';
+                      component_name = fabricName || catalogItem.name || catalogItem.description || resolvedSku || 'N/A';
                     } else if (catalogItem) {
-                      // Non-fabric: use item_name -> description -> resolved_sku
-                      component_name = catalogItem.item_name ?? catalogItem.description ?? bil.resolved_sku ?? 'N/A';
+                      component_name = catalogItem.name ?? catalogItem.description ?? resolvedSku ?? 'N/A';
                     } else {
-                      // No catalog item found: fallback to resolved_sku
-                      component_name = bil.resolved_sku ?? bil.description ?? 'N/A';
+                      component_name = resolvedSku ?? resolvedDesc ?? 'N/A';
                     }
                     
                     // product_type_name: from ProductTypes via QuoteLines (from map)
@@ -416,14 +470,14 @@ export default function ApprovedBOMList() {
                     
                     materialList.push({
                       sales_order_id: saleOrderId,
-                      sku: bil.resolved_sku || 'N/A',
+                      sku: resolvedSku,
                       item_name: component_name,
                       product_type_name: productTypeName,
                       total_qty: Number(bil.qty) || 0,
                       uom: bil.uom || 'ea',
                       avg_unit_cost_exw: bil.unit_cost_exw ? Number(bil.unit_cost_exw) : 0,
                       total_cost_exw: Number(bil.total_cost_exw) || 0,
-                      category_code: bil.category_code || bil.part_role || 'accessory',
+                      category_code: bil.part_role || 'accessory',
                     });
                   }
                 }
@@ -441,11 +495,15 @@ export default function ApprovedBOMList() {
         }
         
         // Show non-blocking UI alert if any query failed
-        if (queryErrors.length > 0) {
+        if (queryIssues.length > 0) {
+          const details = queryIssues
+            .slice(0, 3)
+            .map((issue) => `${issue.step}${issue.code ? ` [${issue.code}]` : ''}: ${issue.message}`)
+            .join(' | ');
           useUIStore.getState().addNotification({
             type: 'warning',
             title: 'Data Loading Warning',
-            message: `Some data could not be loaded: ${queryErrors.join(', ')}. The list may be incomplete.`,
+            message: `Some data could not be loaded. The list may be incomplete. Details: ${details}`,
           });
         }
 
@@ -495,7 +553,7 @@ export default function ApprovedBOMList() {
             ? soMaterials.map((m: any) => {
                 return {
                   sales_order_id: so.id,
-                  sale_order_no: so.sale_order_no,
+                  sale_order_no: so.sales_order_no ?? so.sale_order_no ?? 'N/A',
                   quote_line_id: soLines[0]?.id || '',
                   // product_type_name: from ProductTypes via QuoteLines (already fetched in query)
                   product_type_name: m.product_type_name || 'Product',
@@ -517,7 +575,7 @@ export default function ApprovedBOMList() {
 
           groupsMap.set(so.id, {
             sales_order_id: so.id,
-            sale_order_no: so.sale_order_no,
+            sale_order_no: so.sales_order_no ?? so.sale_order_no ?? 'N/A',
             customer_name: customerName,
             created_at: so.created_at || new Date().toISOString(),
             components,
@@ -675,7 +733,8 @@ export default function ApprovedBOMList() {
                 Sale Orders: {filteredAndSortedGroups.length} | Total Items: {totals.totalItems}
               </p>
               <p className="text-xs text-blue-700">
-                Total Quantity: {totals.totalQty.toFixed(2)} | Total Cost: ${totals.totalCost.toFixed(2)}
+                Total Quantity: {totals.totalQty.toFixed(2)}
+                {canViewCost ? ` | Total Cost: $${totals.totalCost.toFixed(2)}` : ''}
               </p>
             </div>
           </div>
@@ -721,7 +780,7 @@ export default function ApprovedBOMList() {
                       </p>
                       {group.components.length > 0 ? (
                         <p className="text-xs text-gray-600">
-                          Total: ${group.total_cost.toFixed(2)}
+                          {canViewCost ? `Total: $${group.total_cost.toFixed(2)}` : 'Total available'}
                         </p>
                       ) : (
                         <p className="text-xs text-gray-400 italic">
@@ -743,8 +802,12 @@ export default function ApprovedBOMList() {
                           <th className="text-left py-3 px-6 text-xs font-medium text-gray-700">Component Name</th>
                           <th className="text-right py-3 px-6 text-xs font-medium text-gray-700">Qty</th>
                           <th className="text-right py-3 px-6 text-xs font-medium text-gray-700">UOM</th>
-                          <th className="text-right py-3 px-6 text-xs font-medium text-gray-700">Unit Cost</th>
-                          <th className="text-right py-3 px-6 text-xs font-medium text-gray-700">Total Cost</th>
+                          {canViewCost && (
+                            <th className="text-right py-3 px-6 text-xs font-medium text-gray-700">Unit Cost</th>
+                          )}
+                          {canViewCost && (
+                            <th className="text-right py-3 px-6 text-xs font-medium text-gray-700">Total Cost</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
@@ -759,8 +822,12 @@ export default function ApprovedBOMList() {
                                 : item.qty.toFixed(0)}
                             </td>
                             <td className="py-3 px-6 text-sm text-gray-700 text-right">{item.uom}</td>
-                            <td className="py-3 px-6 text-sm text-gray-700 text-right">${item.unit_cost.toFixed(2)}</td>
-                            <td className="py-3 px-6 text-sm text-gray-900 font-medium text-right">${item.total_cost.toFixed(2)}</td>
+                            {canViewCost && (
+                              <td className="py-3 px-6 text-sm text-gray-700 text-right">${item.unit_cost.toFixed(2)}</td>
+                            )}
+                            {canViewCost && (
+                              <td className="py-3 px-6 text-sm text-gray-900 font-medium text-right">${item.total_cost.toFixed(2)}</td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -772,10 +839,16 @@ export default function ApprovedBOMList() {
                           <td className="py-3 px-6 text-sm font-semibold text-gray-900 text-right">
                             {group.total_qty.toFixed(2)}
                           </td>
-                          <td colSpan={2}></td>
-                          <td className="py-3 px-6 text-sm font-semibold text-gray-900 text-right">
-                            ${group.total_cost.toFixed(2)}
-                          </td>
+                          {canViewCost ? (
+                            <>
+                              <td colSpan={2}></td>
+                              <td className="py-3 px-6 text-sm font-semibold text-gray-900 text-right">
+                                ${group.total_cost.toFixed(2)}
+                              </td>
+                            </>
+                          ) : (
+                            <td colSpan={1}></td>
+                          )}
                         </tr>
                       </tfoot>
                     </table>

@@ -70,7 +70,11 @@ const dealerSchema = z.object({
 
 type DealerFormValues = z.infer<typeof dealerSchema>;
 
-export default function DealerProfileForm() {
+interface DealerProfileFormProps {
+  basePath?: string;
+}
+
+export default function DealerProfileForm({ basePath = '/settings/dealer-profile' }: DealerProfileFormProps) {
   const [activeTab, setActiveTab] = useState<'details' | 'billing' | 'configurator-permissions' | 'terms'>('details');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -156,22 +160,23 @@ export default function DealerProfileForm() {
   // Get dealer ID from URL if in edit mode; sync activeTab when URL has /terms
   useEffect(() => {
     const path = window.location.pathname;
-    const match = path.match(/\/settings\/dealer-profile\/edit\/([^/]+)/);
+    const escapedBase = basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = path.match(new RegExp(`${escapedBase}/edit/([^/]+)`));
     if (match && match[1]) {
       setDealerId(match[1]);
       if (path.endsWith('/terms')) {
         setActiveTab('terms');
       }
     }
-  }, []);
+  }, [basePath]);
 
   // Sync activeTab when navigating via browser back/forward
   useEffect(() => {
     const onRouteChange = () => {
       const path = window.location.pathname;
-      if (path.includes('/settings/dealer-profile/edit/') && path.endsWith('/terms')) {
+      if (path.includes(`${basePath}/edit/`) && path.endsWith('/terms')) {
         setActiveTab('terms');
-      } else if (path.match(/\/settings\/dealer-profile\/edit\/[^/]+$/)) {
+      } else if (path.match(new RegExp(`${basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/edit/[^/]+$`))) {
         setActiveTab('details');
       }
     };
@@ -466,7 +471,7 @@ export default function DealerProfileForm() {
         });
       }
       
-      router.navigate('/settings/dealer-profile');
+      router.navigate(basePath);
     } catch (err: any) {
       console.error('Error saving dealer:', err);
       const errorMessage = err.message || 'Error saving dealer. Please try again.';
@@ -672,7 +677,7 @@ export default function DealerProfileForm() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.navigate('/settings/dealer-profile')}
+            onClick={() => router.navigate(basePath)}
             className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
             title="Close"
           >
@@ -711,7 +716,7 @@ export default function DealerProfileForm() {
             <button
               onClick={() => {
                 setActiveTab('details');
-                if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}`, false);
+                if (dealerId) router.navigate(`${basePath}/edit/${dealerId}`, false);
               }}
               className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'details'
@@ -736,7 +741,7 @@ export default function DealerProfileForm() {
             <button
               onClick={() => {
                 setActiveTab('billing');
-                if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}`, false);
+                if (dealerId) router.navigate(`${basePath}/edit/${dealerId}`, false);
               }}
               className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'billing'
@@ -763,7 +768,7 @@ export default function DealerProfileForm() {
                 <button
                   onClick={() => {
                     setActiveTab('configurator-permissions');
-                    if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}`, false);
+                    if (dealerId) router.navigate(`${basePath}/edit/${dealerId}`, false);
                   }}
                   className={`transition-colors flex items-center justify-start border-r ${
                     activeTab === 'configurator-permissions'
@@ -788,7 +793,7 @@ export default function DealerProfileForm() {
                 <button
                   onClick={() => {
                     setActiveTab('terms');
-                    if (dealerId) router.navigate(`/settings/dealer-profile/edit/${dealerId}/terms`, false);
+                    if (dealerId) router.navigate(`${basePath}/edit/${dealerId}/terms`, false);
                   }}
                   className={`transition-colors flex items-center justify-start ${
                     activeTab === 'terms'
