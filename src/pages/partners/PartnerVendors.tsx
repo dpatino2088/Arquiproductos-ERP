@@ -79,9 +79,9 @@ export default function PartnerVendors() {
     try {
       setLoading(true);
       await deleteVendor.mutateAsync(vendor.id);
-      addNotification({ type: 'success', message: 'Vendor deleted successfully' });
+      addNotification({ type: 'success', title: 'Vendor Deleted', message: 'Vendor deleted successfully' });
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to delete vendor' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to delete vendor' });
     } finally {
       setLoading(false);
     }

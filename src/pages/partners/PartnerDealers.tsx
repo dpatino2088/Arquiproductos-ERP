@@ -31,7 +31,9 @@ export default function PartnerDealers() {
   useEffect(() => {
     const update = () => setCurrentRoute(router.getCurrentRoute() || window.location.pathname);
     const remove = router.addListener(update);
-    return remove;
+    return () => {
+      remove();
+    };
   }, []);
 
   const isDealerFormRoute = currentRoute.includes('/partners/dealers/new') ||

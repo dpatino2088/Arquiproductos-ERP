@@ -13,6 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { router } from '../lib/router';
 import { supabase } from '../lib/supabase/client';
 import { fetchAuthContext, type AuthContextRow } from './authContext';
+import type { AuthChangeEvent } from '@supabase/supabase-js';
 
 type Props = {
   children: React.ReactNode;
@@ -82,7 +83,7 @@ export default function AuthGate({ children }: Props) {
 
     // Only re-run on actual sign-in / sign-out, not token refreshes.
     // TOKEN_REFRESHED fires on every tab-focus and would unmount children.
-    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
         run(!hasCompletedOnce);
       }

@@ -110,26 +110,26 @@ export default function PartnerDealerUserForm({ dealerUserId }: PartnerDealerUse
     const trimmedEmail = userEmail.trim();
 
     if (!trimmedName) {
-      addNotification({ type: 'error', message: 'Name is required' });
+      addNotification({ type: 'error', title: 'Validation', message: 'Name is required' });
       return;
     }
     if (!trimmedEmail) {
-      addNotification({ type: 'error', message: 'Email is required' });
+      addNotification({ type: 'error', title: 'Validation', message: 'Email is required' });
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(trimmedEmail)) {
-      addNotification({ type: 'error', message: 'Please enter a valid email address' });
+      addNotification({ type: 'error', title: 'Validation', message: 'Please enter a valid email address' });
       return;
     }
     if (!user?.id) {
-      addNotification({ type: 'error', message: 'You must be logged in' });
+      addNotification({ type: 'error', title: 'Session Required', message: 'You must be logged in' });
       return;
     }
 
     const effectiveDealerId = fixedDealer || dealerId;
     if (!effectiveDealerId) {
-      addNotification({ type: 'error', message: 'Dealer is required' });
+      addNotification({ type: 'error', title: 'Validation', message: 'Dealer is required' });
       return;
     }
 

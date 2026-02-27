@@ -153,7 +153,7 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
     draftRestoredRef.current = true;
     form.reset(draft.values);
     setBillingSameAsLocation(draft.billingSameAsLocation);
-    addNotification({ type: 'success', message: 'Borrador restaurado' });
+    addNotification({ type: 'success', title: 'Draft Restored', message: 'Draft restored' });
   }, [isEdit, form, addNotification]);
 
   // Save draft on unmount (e.g. when switching to another Partners tab)
@@ -256,16 +256,16 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
 
       if (isEdit) {
         await updateVendor.mutateAsync({ id: vendorId!, ...payload });
-        addNotification({ type: 'success', message: 'Vendor updated successfully' });
+        addNotification({ type: 'success', title: 'Vendor Updated', message: 'Vendor updated successfully' });
       } else {
         await createVendor.mutateAsync(payload);
-        addNotification({ type: 'success', message: 'Vendor created successfully' });
+        addNotification({ type: 'success', title: 'Vendor Created', message: 'Vendor created successfully' });
         savedSuccessfullyRef.current = true;
         clearVendorDraft();
       }
       router.navigate('/partners/vendors');
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to save vendor' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to save vendor' });
     } finally {
       setIsSaving(false);
     }
