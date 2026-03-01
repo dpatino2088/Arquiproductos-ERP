@@ -6,6 +6,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useCatalogItemDetail } from '../../hooks/useCatalogItemDetail';
 import { useCatalogCategories } from '../../hooks/useCatalog';
 import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
+import { getReturnToFromCurrentQuery, navigateBackContextual, resolveReturnTo, withReturnTo } from '../../lib/navigation/returnTo';
 import { ArrowLeft, Edit } from 'lucide-react';
 
 interface CatalogItemDetailProps {
@@ -23,12 +24,14 @@ export default function CatalogItemDetail({ itemId: propItemId }: CatalogItemDet
   const { activeDealerId } = useActiveDealer();
   const { userType } = useAccessContext();
   const { categories } = useCatalogCategories();
-  const returnToFromQuery = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('returnTo');
-  }, []);
+  const returnToFromQuery = useMemo(() => getReturnToFromCurrentQuery(), []);
   const returnTo = useMemo(
-    () => returnToFromQuery || (itemId ? sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null) || '/catalog/items',
+    () =>
+      resolveReturnTo({
+        queryReturnTo: returnToFromQuery,
+        storageReturnTo: itemId ? sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null,
+        fallback: '/catalog/items',
+      }),
     [returnToFromQuery, itemId]
   );
 
@@ -112,18 +115,22 @@ export default function CatalogItemDetail({ itemId: propItemId }: CatalogItemDet
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => router.navigate(returnTo)}
+            onClick={() =>
+              navigateBackContextual(router, {
+                queryReturnTo: returnToFromQuery,
+                storageReturnTo: itemId ? sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null,
+                fallback: '/catalog/items',
+              })
+            }
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
             aria-label="Close item detail"
           >
             <ArrowLeft className="w-4 h-4" />
-            Close
+            Back
           </button>
           <button
             type="button"
-            onClick={() =>
-              router.navigate(`/catalog/items/edit/${item.id}?returnTo=${encodeURIComponent(returnTo)}`)
-            }
+            onClick={() => router.navigate(withReturnTo(`/catalog/items/edit/${item.id}`, returnTo))}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90"
           >
             <Edit className="w-4 h-4" />

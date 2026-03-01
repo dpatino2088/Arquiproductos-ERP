@@ -5,8 +5,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Plus, Edit, Trash2, Search, Wrench, Copy, GripVertical, Package } from 'lucide-react';
-import Input from '../../components/ui/Input';
+import { Plus, Edit, Trash2, Search, Filter, Wrench, Copy, GripVertical, Package } from 'lucide-react';
 import BOMTemplateModal from './bom-templates/BOMTemplateModal';
 
 interface BOMTemplateRow {
@@ -36,6 +35,15 @@ interface BOMComponentRow {
   CatalogItems?: { item_name?: string; sku?: string };
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 export default function BOMTemplates() {
   const { activeOrganizationId } = useOrganizationContext();
   const { registerSubmodules } = useSubmoduleNav();
@@ -46,6 +54,8 @@ export default function BOMTemplates() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedProductTypes, setSelectedProductTypes] = useState<string[]>([]);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
   const [dragOverTemplateId, setDragOverTemplateId] = useState<string | null>(null);
 
@@ -141,15 +151,36 @@ export default function BOMTemplates() {
 
   useEffect(() => { loadTemplates(); }, [activeOrganizationId]);
 
+  const productTypeOptions = useMemo(
+    () => Array.from(new Set(templates.map((t) => t.ProductType?.name).filter(Boolean))) as string[],
+    [templates]
+  );
+  const totalActiveFilters = selectedProductTypes.length;
+
   const filteredTemplates = useMemo(() => {
-    if (!searchTerm) return templates;
-    const s = searchTerm.toLowerCase();
-    return templates.filter((t: any) =>
-      t.name?.toLowerCase().includes(s) || t.template_name?.toLowerCase().includes(s)
-      || t.description?.toLowerCase().includes(s) || t.ProductType?.name?.toLowerCase().includes(s)
-      || t.code?.toLowerCase().includes(s)
-    );
-  }, [templates, searchTerm]);
+    const normalizedSearch = normalizeSearchText(searchTerm);
+    const tokens = normalizedSearch ? normalizedSearch.split(/\s+/).filter(Boolean) : [];
+    let result = templates;
+    if (tokens.length > 0) {
+      result = result.filter((t: any) =>
+        {
+          const haystack = normalizeSearchText([
+            t.name,
+            t.template_name,
+            t.description,
+            t.ProductType?.name,
+            t.ProductType?.code,
+            t.code,
+          ].filter(Boolean).join(' '));
+          return tokens.every((token) => haystack.includes(token));
+        }
+      );
+    }
+    if (selectedProductTypes.length > 0) {
+      result = result.filter((t) => selectedProductTypes.includes(t.ProductType?.name || ''));
+    }
+    return result;
+  }, [templates, searchTerm, selectedProductTypes]);
 
   // ========== ACTIONS ==========
 
@@ -267,12 +298,21 @@ export default function BOMTemplates() {
     e.preventDefault();
     setDragOverTemplateId(null);
     if (!draggedTemplateId || draggedTemplateId === targetId || !activeOrganizationId) { setDraggedTemplateId(null); return; }
+    if (searchTerm.trim()) {
+      useUIStore.getState().addNotification({
+        type: 'info',
+        title: 'Reorder disabled while searching',
+        message: 'Clear search to reorder BOM templates.',
+      });
+      setDraggedTemplateId(null);
+      return;
+    }
 
-    const di = filteredTemplates.findIndex(t => t.id === draggedTemplateId);
-    const ti = filteredTemplates.findIndex(t => t.id === targetId);
+    const di = templates.findIndex(t => t.id === draggedTemplateId);
+    const ti = templates.findIndex(t => t.id === targetId);
     if (di === -1 || ti === -1) { setDraggedTemplateId(null); return; }
 
-    const reordered = [...filteredTemplates];
+    const reordered = [...templates];
     const [dragged] = reordered.splice(di, 1);
     reordered.splice(ti, 0, dragged);
 
@@ -295,22 +335,82 @@ export default function BOMTemplates() {
   // ========== RENDER ==========
 
   return (
-    <div>
+    <div className="py-6 px-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">BOM Templates</h2>
-          <p className="text-sm text-gray-500">Configure Bill of Materials for product types</p>
+          <h1 className="text-title font-semibold text-foreground">BOM Templates</h1>
         </div>
-        <button onClick={handleNewTemplate} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors">
+        <button onClick={handleNewTemplate} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90 transition-colors">
           <Plus className="w-4 h-4" />
           New BOM Template
         </button>
       </div>
 
-      <div className="mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input type="text" placeholder="Search BOM templates..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
+      <div className="mb-4 mt-4">
+        <div className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search BOM templates..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+              />
+            </div>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
+                showFilters || totalActiveFilters > 0
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              <Filter style={{ width: 14, height: 14 }} />
+              Filters
+              {totalActiveFilters > 0 && (
+                <span className="bg-white text-blue-600 rounded-full px-2 py-0.5 text-xs font-semibold">
+                  {totalActiveFilters}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {showFilters && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700">Product Type</span>
+                {selectedProductTypes.length > 0 && (
+                  <button
+                    onClick={() => setSelectedProductTypes([])}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {productTypeOptions.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() =>
+                      setSelectedProductTypes((prev) =>
+                        prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      selectedProductTypes.includes(name)
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

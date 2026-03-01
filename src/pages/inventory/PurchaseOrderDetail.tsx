@@ -18,6 +18,8 @@ import { useDirectoryVendors } from '../../hooks/useDirectoryVendors';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { useCostSettings } from '../../hooks/useCosts';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
+import { convertPurchaseQtyToInternal } from '../../lib/inventoryUnitModel';
 import { ArrowLeft, Plus, Trash2, Search, Package, FileDown, Eye, ChevronDown } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import { normalizeUUID } from '../../utils/uuid';
@@ -53,6 +55,9 @@ interface DraftLine {
   allocation_mo_id: string | null;
   allocation_mo_label: string | null;
   purchase_unit_snapshot: string | null;
+  purchase_mode_snapshot: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+  stock_basis_snapshot: 'ea' | 'linear_m' | null;
+  purchase_uom_snapshot: string | null;
   units_per_purchase_unit_snapshot: number | null;
   unit_of_measure_snapshot: string | null;
   is_roll_snapshot: boolean;
@@ -74,6 +79,7 @@ interface CatalogSearchResult {
   units_per_purchase_unit: number | null;
   manufacturer_id: string | null;
   is_roll: boolean;
+  measure_basis: 'unit' | 'linear' | 'area' | null;
   unit_of_measure: string | null;
   roll_width_value: number | null;
   roll_width_uom: string | null;
@@ -123,6 +129,32 @@ function formatRollDimensions(
   return '';
 }
 
+/** Internal quantity in meters when stock_basis is linear_m; null otherwise. */
+function lineInternalQtyM(
+  qty: number,
+  line: {
+    stock_basis_snapshot?: 'ea' | 'linear_m' | null;
+    purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+    purchase_uom_snapshot?: string | null;
+    unit?: string | null;
+    units_per_purchase_unit_snapshot?: number | null;
+    roll_length_value_snapshot?: number | null;
+    roll_length_uom_snapshot?: string | null;
+  }
+): number | null {
+  if (line.stock_basis_snapshot !== 'linear_m' || !(qty > 0)) return null;
+  const mode = line.purchase_mode_snapshot ?? 'unit_packaged';
+  const internal = convertPurchaseQtyToInternal({
+    qtyInPurchaseUnit: qty,
+    purchaseMode: mode,
+    purchaseUnit: line.purchase_uom_snapshot ?? line.unit ?? 'each',
+    unitsPerPurchaseUnit: line.units_per_purchase_unit_snapshot ?? undefined,
+    rollLengthValue: line.roll_length_value_snapshot ?? undefined,
+    rollLengthUom: line.roll_length_uom_snapshot ?? undefined,
+  });
+  return internal > 0 ? internal : null;
+}
+
 function formatRollPurchaseInfo(
   length: number | null | undefined,
   lengthUom: string | null | undefined,
@@ -155,6 +187,20 @@ function formatRollPurchaseInfo(
     return `(${pretty} ${luom || preferredUom || 'unit'})`;
   }
   return formatRollDimensions(width, length, lengthUom, widthUom);
+}
+
+function resolveLineUnit(item: {
+  is_roll: boolean;
+  measure_basis: string | null;
+  purchase_unit: string | null;
+  unit_of_measure: string | null;
+}): string {
+  const purchaseUnit = item.purchase_unit ?? 'each';
+  if (item.is_roll) return 'roll';
+  if (item.measure_basis === 'linear' && purchaseUnit === 'each') {
+    return item.unit_of_measure ?? 'm';
+  }
+  return purchaseUnit;
 }
 
 function normalizeSearchText(value: string): string {
@@ -203,6 +249,12 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
   const [lineMoSearch, setLineMoSearch] = useState('');
   const [lineMoOptions, setLineMoOptions] = useState<MOSearchResult[]>([]);
   const [lineMoDropdownId, setLineMoDropdownId] = useState<string | null>(null);
+  const handleBack = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo: getReturnToFromCurrentQuery(),
+      fallback: '/inventory/purchase-orders',
+    });
+  }, []);
 
   useEffect(() => {
     registerSubmodules('Inventory', INVENTORY_SUBMODULES);
@@ -274,14 +326,17 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
             allocation_type: l.allocation_type ?? 'stock',
             allocation_mo_id: l.allocation_mo_id ?? null,
             allocation_mo_label: l.allocation_mo_id ? (moLabelMap.get(l.allocation_mo_id) ?? l.allocation_mo_id.slice(0, 8)) : null,
-            purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? null,
+            purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? null,
+            purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems as { purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' } | null)?.purchase_mode ?? null,
+            stock_basis_snapshot: l.stock_basis_snapshot ?? (l.CatalogItems as { stock_basis?: 'ea' | 'linear_m' } | null)?.stock_basis ?? null,
+            purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? (l.CatalogItems as { unit_of_measure?: string } | null)?.unit_of_measure ?? null,
             units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
             unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,
             is_roll_snapshot: Boolean(l.is_roll_snapshot),
-            roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : null,
-            roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? null,
-            roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : null,
-            roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? null,
+            roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : (l.CatalogItems as { roll_width_value?: number } | null)?.roll_width_value ?? null,
+            roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? (l.CatalogItems as { roll_width_uom?: string } | null)?.roll_width_uom ?? null,
+            roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : (l.CatalogItems as { roll_length_value?: number } | null)?.roll_length_value ?? null,
+            roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? (l.CatalogItems as { roll_length_uom?: string } | null)?.roll_length_uom ?? null,
           })));
         })();
       } else {
@@ -300,14 +355,17 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           allocation_type: l.allocation_type ?? 'stock',
           allocation_mo_id: l.allocation_mo_id ?? null,
           allocation_mo_label: null,
-          purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? null,
+          purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? null,
+          purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems as { purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' } | null)?.purchase_mode ?? null,
+          stock_basis_snapshot: l.stock_basis_snapshot ?? (l.CatalogItems as { stock_basis?: 'ea' | 'linear_m' } | null)?.stock_basis ?? null,
+          purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? (l.CatalogItems as { unit_of_measure?: string } | null)?.unit_of_measure ?? null,
           units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
           unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,
           is_roll_snapshot: Boolean(l.is_roll_snapshot),
-          roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : null,
-          roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? null,
-          roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : null,
-          roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? null,
+          roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : (l.CatalogItems as { roll_width_value?: number } | null)?.roll_width_value ?? null,
+          roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? (l.CatalogItems as { roll_width_uom?: string } | null)?.roll_width_uom ?? null,
+          roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : (l.CatalogItems as { roll_length_value?: number } | null)?.roll_length_value ?? null,
+          roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? (l.CatalogItems as { roll_length_uom?: string } | null)?.roll_length_uom ?? null,
         })));
       }
     }
@@ -329,7 +387,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
               const itemIds = prefillItems.map(p => p.catalog_item_id);
               const { data: costData } = await supabase
                 .from('CatalogItems')
-                .select('id, cost_exw, purchase_unit, units_per_purchase_unit, is_roll, unit_of_measure, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom')
+                .select('id, cost_exw, purchase_unit, units_per_purchase_unit, is_roll, unit_of_measure, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom, purchase_mode, stock_basis, purchase_uom')
                 .in('id', itemIds);
               type CostRow = {
                 id: string;
@@ -342,6 +400,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 roll_width_uom: string | null;
                 roll_length_value: number | null;
                 roll_length_uom: string | null;
+                purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+                stock_basis?: 'ea' | 'linear_m' | null;
+                purchase_uom?: string | null;
               };
               const costMap = new Map<string, CostRow>((costData ?? []).map((c: any) => [c.id, c as CostRow]));
 
@@ -366,6 +427,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 } else {
                   unitCost = costExw;
                 }
+                const purchaseMode = (ci?.purchase_mode as 'unit_packaged' | 'linear_direct' | 'roll') ?? 'unit_packaged';
+                const stockBasis = (ci?.stock_basis as 'ea' | 'linear_m') ?? 'ea';
+                const purchaseUomSnap = ci?.purchase_uom ?? purchaseUom;
                 return {
                   tempId: crypto.randomUUID(),
                   catalog_item_id: p.catalog_item_id,
@@ -382,6 +446,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   allocation_mo_id: p.manufacturing_order_id ?? null,
                   allocation_mo_label: p.manufacturing_order_no ?? null,
                   purchase_unit_snapshot: pUnit,
+                  purchase_mode_snapshot: purchaseMode,
+                  stock_basis_snapshot: stockBasis,
+                  purchase_uom_snapshot: purchaseUomSnap,
                   units_per_purchase_unit_snapshot: unitsPerPU,
                   unit_of_measure_snapshot: purchaseUom,
                   is_roll_snapshot: isRoll,
@@ -505,13 +572,19 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     const rollLengthValue = item.roll_length_value != null ? Number(item.roll_length_value) : 0;
     const rollLengthUom = item.roll_length_uom ?? null;
 
+    let purchaseMode: 'unit_packaged' | 'linear_direct' | 'roll' = 'unit_packaged';
+    let stockBasis: 'ea' | 'linear_m' = 'ea';
+    let purchaseUomSnap: string = isRoll ? (rollLengthUom ?? uom) : uom;
+    const info = await fetchCatalogItemCostInfo(item.id);
+    if (costExw === 0) costExw = info.cost_exw;
     if (costExw === 0 || !item.purchase_unit) {
-      const info = await fetchCatalogItemCostInfo(item.id);
-      if (costExw === 0) costExw = info.cost_exw;
       pUnit = info.purchase_unit;
       unitsPerPU = info.units_per_purchase_unit;
       uom = info.unit_of_measure;
     }
+    purchaseMode = info.purchase_mode;
+    stockBasis = info.stock_basis;
+    purchaseUomSnap = info.purchase_uom;
     const purchaseUom = isRoll ? (rollLengthUom ?? uom) : uom;
 
     let unitCost: number;
@@ -548,6 +621,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       allocation_mo_id: null,
       allocation_mo_label: null,
       purchase_unit_snapshot: pUnit,
+      purchase_mode_snapshot: purchaseMode,
+      stock_basis_snapshot: stockBasis,
+      purchase_uom_snapshot: purchaseUomSnap,
       units_per_purchase_unit_snapshot: unitsPerPU,
       unit_of_measure_snapshot: purchaseUom,
       is_roll_snapshot: isRoll,
@@ -578,6 +654,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       allocation_mo_id: null,
       allocation_mo_label: null,
       purchase_unit_snapshot: null,
+      purchase_mode_snapshot: null,
+      stock_basis_snapshot: null,
+      purchase_uom_snapshot: null,
       units_per_purchase_unit_snapshot: null,
       unit_of_measure_snapshot: null,
       is_roll_snapshot: false,
@@ -627,6 +706,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           sku_snapshot: l.sku || null,
           item_name_snapshot: l.name || null,
           purchase_unit_snapshot: l.purchase_unit_snapshot,
+          purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
+          stock_basis_snapshot: l.stock_basis_snapshot ?? null,
+          purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
           units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot,
           unit_of_measure_snapshot: l.unit_of_measure_snapshot,
           is_roll_snapshot: l.is_roll_snapshot,
@@ -644,7 +726,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           lines: poLines,
         });
         addNotification({ type: 'success', title: 'Created', message: 'Purchase order created.' });
-        router.navigate(`/inventory/purchase-orders/${po.id}`);
+        router.navigate(withReturnTo(`/inventory/purchase-orders/${po.id}`));
       } else if (poId) {
         const existingLineIds = new Set(lines.map(l => l.id));
         const updateLines: UpdatePOLineInput[] = draftLines.map(l => ({
@@ -660,6 +742,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           sku_snapshot: l.sku || null,
           item_name_snapshot: l.name || null,
           purchase_unit_snapshot: l.purchase_unit_snapshot,
+          purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
+          stock_basis_snapshot: l.stock_basis_snapshot ?? null,
+          purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
           units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot,
           unit_of_measure_snapshot: l.unit_of_measure_snapshot,
           is_roll_snapshot: l.is_roll_snapshot,
@@ -692,7 +777,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     try {
       await deletePurchaseOrder(poId);
       addNotification({ type: 'success', title: 'Deleted', message: 'Purchase order deleted.' });
-      router.navigate('/inventory/purchase-orders');
+      handleBack();
     } catch (err: unknown) {
       addNotification({ type: 'error', title: 'Error', message: (err as Error).message || 'Failed to delete.' });
     }
@@ -895,7 +980,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
             <p className="text-sm text-red-700 mb-3">Purchase order not found. It may have been deleted.</p>
             <button
               type="button"
-              onClick={() => router.navigate('/inventory/purchase-orders')}
+              onClick={handleBack}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -916,7 +1001,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
         <div className="flex items-center gap-4 w-full max-w-6xl mx-auto px-4 md:px-6">
           <button
             type="button"
-            onClick={() => router.navigate('/inventory/purchase-orders')}
+            onClick={handleBack}
             className="p-1 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -1004,7 +1089,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
             )}
             <button
               type="button"
-              onClick={() => router.navigate('/inventory/purchase-orders')}
+              onClick={handleBack}
               className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Cancel
@@ -1415,7 +1500,13 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                             className="w-full min-w-[77px] px-2 py-1 border border-gray-200 rounded text-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20"
                           />
                         ) : (
-                          <span className="tabular-nums inline-block text-center w-full">{Number(line.ordered_qty).toFixed(2)}</span>
+                          <span className="tabular-nums inline-block text-center w-full">
+                            {Number(line.ordered_qty).toFixed(2)}
+                            {(() => {
+                              const internalM = lineInternalQtyM(line.ordered_qty, line);
+                              return internalM != null ? <span className="text-xs text-gray-500 block">→ {internalM.toFixed(2)} m</span> : null;
+                            })()}
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -1608,9 +1699,19 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                               <span className="text-gray-500 text-xs ml-1">{l.CatalogItems.name}</span>
                             )}
                           </td>
-                          <td className="px-4 py-2 text-right tabular-nums">{Number(l.ordered_qty).toFixed(2)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums">
+                            {Number(l.ordered_qty).toFixed(2)}
+                            {lineInternalQtyM(l.ordered_qty, l) != null && (
+                              <span className="text-xs text-gray-500 block">→ {lineInternalQtyM(l.ordered_qty, l)!.toFixed(2)} m</span>
+                            )}
+                          </td>
                           <td className="px-4 py-2 text-right tabular-nums">{Number(l.received_qty).toFixed(2)}</td>
-                          <td className="px-4 py-2 text-right tabular-nums font-medium">{remaining.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums font-medium">
+                            {remaining.toFixed(2)}
+                            {lineInternalQtyM(remaining, l) != null && (
+                              <span className="text-xs text-gray-500 block">→ {lineInternalQtyM(remaining, l)!.toFixed(2)} m</span>
+                            )}
+                          </td>
                           <td className="px-4 py-2">
                             <Input
                               type="number"

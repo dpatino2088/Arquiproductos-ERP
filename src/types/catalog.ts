@@ -17,6 +17,9 @@ export type CatalogItemType =
   | 'component'       // Components (pieces, each)
   | 'linear_component'; // Linear components (measured by length, default UOM: 'm')
 
+export type StockBasis = 'ea' | 'linear_m';
+export type PurchaseMode = 'unit_packaged' | 'linear_direct' | 'roll';
+
 export type QuoteStatus = 
   | 'draft'
   | 'sent'
@@ -53,6 +56,9 @@ export interface CatalogItem {
   item_role?: string | null; // Component role (e.g., 'bottom_bar', 'bracket', 'drive', 'motor', etc.)
   // Pricing fields
   cost_exw?: number | null; // Base cost (EXW = Ex Works) - numeric
+  purchase_mode?: PurchaseMode | null; // v2: how the item is purchased from vendor
+  stock_basis?: StockBasis | null; // v2: internal stock basis used by inventory
+  purchase_uom?: string | null; // v2: vendor-facing unit used for purchase qty input
   default_margin_pct?: number | null; // Default margin percentage for MSRP calculation
   msrp?: number | null; // Manufacturer's Suggested Retail Price
   // Legacy pricing fields (for backward compatibility)

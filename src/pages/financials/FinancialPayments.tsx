@@ -7,7 +7,8 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
-import { Search, FileText, DollarSign, Plus } from 'lucide-react';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
+import { Search, FileText, DollarSign, Plus, ArrowLeft } from 'lucide-react';
 
 const FINANCIAL_SUBMODULES = [
   { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
@@ -68,6 +69,20 @@ export default function FinancialPayments() {
   const [formDescription, setFormDescription] = useState('');
   const [formSalesOrderId, setFormSalesOrderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const listPath = '/financials/payments';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+  const handleBackContextual = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
+  }, [queryReturnTo]);
 
   useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
 
@@ -310,16 +325,29 @@ export default function FinancialPayments() {
           <h1 className="text-xl font-semibold text-foreground">Payments</h1>
           <p className="text-sm text-gray-500 mt-0.5">Payments received from dealers</p>
         </div>
-        {!formOpen && (
-          <button
-            type="button"
-            onClick={() => setFormOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90"
-          >
-            <Plus className="w-4 h-4" />
-            Record Payment
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {hasRedirectBack && (
+            <button
+              type="button"
+              onClick={handleBackContextual}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              title="Back"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
+            </button>
+          )}
+          {!formOpen && (
+            <button
+              type="button"
+              onClick={() => setFormOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90"
+            >
+              <Plus className="w-4 h-4" />
+              Record Payment
+            </button>
+          )}
+        </div>
       </div>
 
       {formOpen && (
@@ -448,7 +476,7 @@ export default function FinancialPayments() {
                   <tr
                     key={p.id}
                     className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(`/financials/payments/${p.id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/financials/payments/${p.id}`))}
                   >
                     <td className="px-4 py-4">{new Date(p.payment_date).toLocaleDateString()}</td>
                     <td className="px-4 py-4 text-gray-700">{p.Dealers?.dealer_name ?? '—'}</td>

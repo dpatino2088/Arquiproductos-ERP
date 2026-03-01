@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, resolveReturnTo } from '../../lib/navigation/returnTo';
 import { useUIStore } from '../../stores/ui-store';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -23,7 +24,7 @@ import ImageUpload from '../../components/ui/ImageUpload';
 import { syncCatalogItemProductTypes } from '../../lib/catalog-item-helpers';
 import { useProductTypes } from '../../hooks/useProductTypes';
 import { useOnVisibilityChange } from '../../lib/app-persistence';
-import { Info } from 'lucide-react';
+import { ArrowLeft, Info } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../../components/ui/Tooltip';
 import {
   fetchCatalogItemSupply,
@@ -33,6 +34,7 @@ import {
 } from '../../services/catalogItemSupply';
 import { CatalogItemRollSpecsSection } from '../../components/catalog/CatalogItemRollSpecsSection';
 import { normalizeRateToSystem, toMeters, toSquareMetersFromArea } from '../../lib/uom-conversions';
+import { resolveInventoryUnitModel } from '../../lib/inventoryUnitModel';
 // UOM conversions handled by backend trigger (trg_catalogitems_write_conversions)
 // Frontend only displays conversions from CatalogItemConversions table
 
@@ -92,7 +94,10 @@ const catalogItemSchema = z.object({
   cost_exw: z.number().min(0).optional().nullable(),
   
   // Purchase unit (for inventory/procurement)
-  purchase_unit: z.enum(['each', 'pack', 'set', 'box', 'case']),
+  purchase_mode: z.enum(['unit_packaged', 'linear_direct', 'roll']),
+  stock_basis: z.enum(['ea', 'linear_m']),
+  purchase_uom: z.string().min(1),
+  purchase_unit: z.enum(['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd']),
   units_per_purchase_unit: z.number().min(1),
   
   // Status
@@ -168,8 +173,11 @@ const catalogItemResolver: Resolver<CatalogItemFormValues> = async (values, cont
   }
   
   // Ensure purchase_unit has a valid value
-  if (!normalized.purchase_unit || !['each', 'pack', 'set', 'box', 'case'].includes(normalized.purchase_unit)) {
+  if (!normalized.purchase_unit || !['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd'].includes(normalized.purchase_unit)) {
     normalized.purchase_unit = 'each';
+  }
+  if (!normalized.purchase_uom || typeof normalized.purchase_uom !== 'string') {
+    normalized.purchase_uom = normalized.purchase_unit || 'each';
   }
   
   return zodResolver(catalogItemSchema)(normalized, context, options);
@@ -218,8 +226,11 @@ export default function CatalogItemNew() {
     []
   );
   const returnTo = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('returnTo') || returnToFromStorage || '/catalog/items';
+    return resolveReturnTo({
+      queryReturnTo: getReturnToFromCurrentQuery(),
+      storageReturnTo: returnToFromStorage,
+      fallback: '/catalog/items',
+    });
   }, [currentPath, returnToFromStorage]);
   const listCache = queryClient.getQueryData(
     catalogItemsListKey(scopeKey, defaultListFilters)
@@ -234,12 +245,14 @@ export default function CatalogItemNew() {
   // Hooks
   const { createItem, isCreating } = useCreateCatalogItem();
   const { updateItem, isUpdating } = useUpdateCatalogItem();
-  const { leafCategories: catalogCategories, loading: catalogCategoriesLoading } = useCatalogCategories();
+  const { categoryTree, leafCategories: catalogCategories, loading: catalogCategoriesLoading } = useCatalogCategories();
   const { productTypes, loading: productTypesLoading } = useProductTypes();
   const { margins: categoryMargins, loading: categoryMarginsLoading } = useCategoryMargins();
   
   // ProductTypes selection state
   const [selectedProductTypeIds, setSelectedProductTypeIds] = useState<string[]>([]);
+  // UI-only selector for parent category. DB keeps only category_id (leaf).
+  const [selectedParentCategoryId, setSelectedParentCategoryId] = useState<string>('');
   
   // Note: Pricing percentages are now managed by CategoryMargins (by category), not per-item
   // CatalogItemsMSRP is a cache of calculated results only
@@ -384,6 +397,9 @@ export default function CatalogItemNew() {
       roll_pricing_mode: null,
       color: null,
       cost_exw: null,
+      purchase_mode: 'unit_packaged',
+      stock_basis: 'ea',
+      purchase_uom: 'each',
       purchase_unit: 'each',
       units_per_purchase_unit: 1,
       is_active: true,
@@ -421,11 +437,15 @@ export default function CatalogItemNew() {
       roll_pricing_mode: null,
       color: null,
       cost_exw: null,
+      purchase_mode: 'unit_packaged',
+      stock_basis: 'ea',
+      purchase_uom: 'each',
       purchase_unit: 'each',
       units_per_purchase_unit: 1,
       is_active: true,
     });
     setSelectedProductTypeIds([]);
+    setSelectedParentCategoryId('');
   }, [itemId, reset]);
   
   // Watch values
@@ -435,9 +455,47 @@ export default function CatalogItemNew() {
   const rollLengthUom = watch('roll_length_uom');
   const rollType = watch('roll_type');
   const measureBasis = watch('measure_basis');
+  const purchaseMode = watch('purchase_mode');
+  const purchaseUom = watch('purchase_uom');
+  const purchaseUnit = watch('purchase_unit');
+  const unitsPerPurchase = watch('units_per_purchase_unit');
   const categoryId = watch('category_id');
   const costExw = watch('cost_exw');
   const pricingMode = watch('roll_pricing_mode');
+
+  const parentCategories = useMemo(
+    () => categoryTree.filter((cat) => cat.is_group && !cat.parent_id),
+    [categoryTree]
+  );
+  const parentCategoryNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    parentCategories.forEach((cat) => map.set(cat.id, cat.name));
+    return map;
+  }, [parentCategories]);
+
+  const categoryParentBySubcategoryId = useMemo(() => {
+    const map = new Map<string, string>();
+    catalogCategories.forEach((cat) => {
+      if (cat.parent_id) map.set(cat.id, cat.parent_id);
+    });
+    return map;
+  }, [catalogCategories]);
+
+  const filteredSubcategories = useMemo(() => {
+    if (!selectedParentCategoryId) return [];
+    return catalogCategories.filter((cat) => cat.parent_id === selectedParentCategoryId);
+  }, [catalogCategories, selectedParentCategoryId]);
+
+  useEffect(() => {
+    if (!categoryId) {
+      setSelectedParentCategoryId('');
+      return;
+    }
+    const parentId = categoryParentBySubcategoryId.get(categoryId);
+    if (parentId) {
+      setSelectedParentCategoryId(parentId);
+    }
+  }, [categoryId, categoryParentBySubcategoryId]);
   
   // CatalogItemsMSRP already stores shipping_cost/import_tax_cost/total_cost/dealer_price/msrp
   // in pricing_uom ($/m or $/m²), because pricing_cost_exw is the UOM-converted base.
@@ -638,7 +696,16 @@ export default function CatalogItemNew() {
           roll_pricing_mode: (data.is_roll && data.roll_pricing_mode === 'per_unit') ? 'per_linear_meter' : (data.roll_pricing_mode || null),
           color: data.color || null,
           cost_exw: data.cost_exw ? Number(data.cost_exw) : null,
-          purchase_unit: (data.purchase_unit && ['each', 'pack', 'set', 'box', 'case'].includes(data.purchase_unit)) ? data.purchase_unit : 'each',
+          purchase_mode: (data.purchase_mode && ['unit_packaged', 'linear_direct', 'roll'].includes(data.purchase_mode))
+            ? data.purchase_mode
+            : (data.is_roll ? 'roll' : (data.measure_basis === 'linear' ? 'linear_direct' : 'unit_packaged')),
+          stock_basis: (data.stock_basis && ['ea', 'linear_m'].includes(data.stock_basis))
+            ? data.stock_basis
+            : ((data.is_roll || data.measure_basis === 'linear') ? 'linear_m' : 'ea'),
+          purchase_uom: data.purchase_uom || data.purchase_unit || data.unit_of_measure || 'each',
+          purchase_unit: (data.purchase_unit && ['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd'].includes(data.purchase_unit))
+            ? data.purchase_unit
+            : 'each',
           units_per_purchase_unit: (data.units_per_purchase_unit && Number(data.units_per_purchase_unit) >= 1) ? Number(data.units_per_purchase_unit) : 1,
           is_active: data.is_active !== undefined ? data.is_active : true,
         };
@@ -794,7 +861,42 @@ export default function CatalogItemNew() {
       setValue('unit_of_measure', 'm');
     }
   }, [isRoll, rollLengthUom, rollWidthUom, unitOfMeasure, setValue]);
-  
+
+  useEffect(() => {
+    if (isRoll) {
+      if (purchaseUnit !== 'roll') {
+        setValue('purchase_unit', 'roll');
+      }
+      if (Number(unitsPerPurchase ?? 1) !== 1) {
+        setValue('units_per_purchase_unit', 1);
+      }
+      return;
+    }
+    if (purchaseUnit === 'each' && Number(unitsPerPurchase ?? 1) !== 1) {
+      setValue('units_per_purchase_unit', 1);
+    }
+  }, [isRoll, purchaseUnit, unitsPerPurchase, setValue]);
+
+  // Sync V2 model (purchase_mode, stock_basis, purchase_uom) when is_roll / measure_basis / purchase_unit change
+  useEffect(() => {
+    const model = resolveInventoryUnitModel({
+      isRoll: isRoll,
+      measureBasis: measureBasis ?? 'unit',
+      purchaseUnit: purchaseUnit ?? undefined,
+    });
+    setValue('purchase_mode', model.purchaseMode);
+    setValue('stock_basis', model.stockBasis);
+    const uom =
+      model.purchaseMode === 'roll'
+        ? 'roll'
+        : model.purchaseMode === 'linear_direct'
+          ? (['m', 'ft', 'yd'].includes((purchaseUnit || '').toLowerCase())
+            ? (purchaseUnit ?? 'm')
+            : (unitOfMeasure && ['m', 'ft', 'yd'].includes((unitOfMeasure || '').toLowerCase()) ? unitOfMeasure : 'm'))
+          : (purchaseUnit ?? 'each');
+    setValue('purchase_uom', uom);
+  }, [isRoll, measureBasis, purchaseUnit, unitOfMeasure, setValue]);
+
   // ✅ FIX: Restore state when tab becomes visible again
   useOnVisibilityChange(() => {
     if (!itemId || !sessionKey || !draftHydratedRef.current) return;
@@ -1176,11 +1278,18 @@ export default function CatalogItemNew() {
           {/* Close Button */}
           <button
             type="button"
-            onClick={() => router.navigate(returnTo)}
+            onClick={() =>
+              navigateBackContextual(router, {
+                queryReturnTo: getReturnToFromCurrentQuery(),
+                storageReturnTo: returnToFromStorage,
+                fallback: '/catalog/items',
+              })
+            }
             disabled={isSaving}
-            className="px-4 py-1.5 rounded border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-50"
           >
-            Close
+            <ArrowLeft className="w-4 h-4" />
+            Back
           </button>
           
           {/* Save Button (stay on page) */}
@@ -1426,22 +1535,59 @@ export default function CatalogItemNew() {
             </>
           )}
           
-          {/* Category - Always visible */}
+          {/* Category + Subcategory selectors (single-table taxonomy) */}
           <div className="col-span-3">
-            <Label htmlFor="category_id" className="text-xs">Category</Label>
+            <Label htmlFor="parent_category_id" className="text-xs">Category</Label>
             <SelectShadcn
-              value={watch('category_id') || '__none__'}
-              onValueChange={(value) => setValue('category_id', value === '__none__' ? null : value)}
+              value={selectedParentCategoryId || '__none__'}
+              onValueChange={(value) => {
+                const nextParentId = value === '__none__' ? '' : value;
+                setSelectedParentCategoryId(nextParentId);
+                const currentSubcategoryId = watch('category_id');
+                if (!nextParentId) {
+                  if (currentSubcategoryId) {
+                    setValue('category_id', null, { shouldDirty: true });
+                  }
+                  return;
+                }
+                const currentParentId = currentSubcategoryId
+                  ? categoryParentBySubcategoryId.get(currentSubcategoryId)
+                  : null;
+                if (currentSubcategoryId && currentParentId !== nextParentId) {
+                  setValue('category_id', null, { shouldDirty: true });
+                }
+              }}
               disabled={isReadOnly || catalogCategoriesLoading}
             >
-              <SelectTrigger className="h-auto py-1 text-xs w-1/2">
+              <SelectTrigger className="h-auto py-1 text-xs w-full">
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">None</SelectItem>
-                {catalogCategories.map((cat) => (
+                {parentCategories.map((cat) => (
                   <SelectItem key={cat.id} value={cat.id}>
-                    {cat.path}
+                    {cat.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </SelectShadcn>
+          </div>
+
+          <div className="col-span-3">
+            <Label htmlFor="category_id" className="text-xs">Subcategory</Label>
+            <SelectShadcn
+              value={watch('category_id') || '__none__'}
+              onValueChange={(value) => setValue('category_id', value === '__none__' ? null : value)}
+              disabled={isReadOnly || catalogCategoriesLoading || !selectedParentCategoryId}
+            >
+              <SelectTrigger className="h-auto py-1 text-xs w-full">
+                <SelectValue placeholder={selectedParentCategoryId ? 'Select subcategory' : 'Select category first'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">None</SelectItem>
+                {filteredSubcategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
+                    {(parentCategoryNameById.get(cat.parent_id || '') || 'Category')} {'>'} {cat.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1754,28 +1900,42 @@ export default function CatalogItemNew() {
             />
           </div>
           
-          {/* Purchase Unit Fields (for unit items only - procurement/inventory) */}
-          {watch('measure_basis') === 'unit' && !isRoll && (
+          {/* Purchase Unit Fields (unit + linear + roll guidance for procurement/inventory) */}
+          {(measureBasis === 'unit' || measureBasis === 'linear' || isRoll) && (
             <>
               <div className="col-span-3">
                 <Label htmlFor="purchase_unit" className="text-xs">Purchase Unit</Label>
                 <SelectShadcn
-                  value={watch('purchase_unit') || 'each'}
+                  value={isRoll ? 'roll' : (purchaseUnit || 'each')}
                   onValueChange={(value) => setValue('purchase_unit', value as any)}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || isRoll}
                 >
                   <SelectTrigger className="h-auto py-1 text-xs w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {isRoll && <SelectItem value="roll">Roll</SelectItem>}
                     <SelectItem value="each">Each</SelectItem>
                     <SelectItem value="pack">Pack</SelectItem>
                     <SelectItem value="set">Set</SelectItem>
                     <SelectItem value="box">Box</SelectItem>
                     <SelectItem value="case">Case</SelectItem>
+                    {measureBasis === 'linear' && !isRoll && (
+                      <>
+                        <SelectItem value="m">m (meters)</SelectItem>
+                        <SelectItem value="ft">ft (feet)</SelectItem>
+                        <SelectItem value="yd">yd (yards)</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </SelectShadcn>
-                <p className="text-xs text-gray-500 mt-1">How you purchase from supplier</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {isRoll
+                    ? 'Roll items are purchased as roll count (stored as linear meters internally).'
+                    : measureBasis === 'linear'
+                      ? 'Each = by length in Unit of Measure; m/ft/yd = direct linear purchase.'
+                      : 'How you purchase from supplier.'}
+                </p>
               </div>
               
               <div className="col-span-3">
@@ -1787,14 +1947,17 @@ export default function CatalogItemNew() {
                   min="1"
                   {...register('units_per_purchase_unit', { valueAsNumber: true })}
                   className="py-1 text-xs w-full"
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || isRoll || purchaseUnit === 'each'}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  {watch('purchase_unit') === 'pack' && 'Units per pack (e.g., 12)'}
-                  {watch('purchase_unit') === 'set' && 'Units per set (e.g., 6)'}
-                  {watch('purchase_unit') === 'box' && 'Units per box (e.g., 24)'}
-                  {watch('purchase_unit') === 'case' && 'Units per case (e.g., 100)'}
-                  {watch('purchase_unit') === 'each' && 'Always 1 for each'}
+                  {isRoll && 'Always 1 for roll-based purchasing'}
+                  {purchaseUnit === 'pack' && 'Units per pack (e.g., 12)'}
+                  {purchaseUnit === 'set' && 'Units per set (e.g., 6)'}
+                  {purchaseUnit === 'box' && 'Units per box (e.g., 24)'}
+                  {purchaseUnit === 'case' && 'Units per case (e.g., 100)'}
+                  {purchaseUnit === 'each' && (measureBasis === 'linear'
+                    ? 'Use Unit of Measure (m/ft/yd) for direct linear purchasing.'
+                    : 'Always 1 for each')}
                 </p>
               </div>
               

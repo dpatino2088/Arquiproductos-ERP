@@ -8,10 +8,11 @@ import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
 import { usePayments } from '../../hooks/usePayments';
-import { ChevronDown, Plus, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { ChevronDown, Plus, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 
@@ -295,7 +296,7 @@ export default function SalesOrderDetail() {
     try {
       const result = await createMO(salesOrderId, user.id, undefined, user.name);
       if (result?.mo_id) {
-        router.navigate(`/manufacturing/manufacturing-orders/${result.mo_id}`);
+        router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${result.mo_id}`));
       } else {
         refetch();
       }
@@ -347,7 +348,20 @@ export default function SalesOrderDetail() {
   const totalPaid = financialSummary?.total_paid ?? payments.reduce((sum, p) => sum + Number(p.amount), 0);
   const balance = financialSummary?.balance_due ?? (so?.total_amount ?? 0) - totalPaid;
 
-  const onBack = () => router.navigate('/sales/orders');
+  const listPath = '/sales/orders';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+  const onBack = () => router.navigate(listPath);
+  const onBackContextual = () =>
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
 
   if (!salesOrderId) {
     return (
@@ -453,29 +467,44 @@ export default function SalesOrderDetail() {
       onBack={onBack}
       contentClassName="pt-2 pb-6"
       actions={
-        actionButtons.length > 0 ? (
-          <div className="relative" ref={actionsRef}>
-            <button
-              type="button"
-              onClick={() => setActionsOpen(!actionsOpen)}
-              disabled={isActing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-            >
-              Actions
-              <ChevronDown className="w-4 h-4 text-gray-500" />
-            </button>
-            {actionsOpen && (
-              <div className="absolute right-0 mt-1 w-48 rounded-md border border-gray-200 bg-white shadow-lg z-10">
-                {actionButtons.map((btn) => (
-                  <button
-                    key={btn.label}
-                    type="button"
-                    onClick={btn.onClick}
-                    className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md"
-                  >
-                    {btn.label}
-                  </button>
-                ))}
+        hasRedirectBack || actionButtons.length > 0 ? (
+          <div className="flex items-center gap-2">
+            {hasRedirectBack && (
+              <button
+                type="button"
+                onClick={onBackContextual}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                title="Back"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+            )}
+            {actionButtons.length > 0 && (
+              <div className="relative" ref={actionsRef}>
+                <button
+                  type="button"
+                  onClick={() => setActionsOpen(!actionsOpen)}
+                  disabled={isActing}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Actions
+                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                </button>
+                {actionsOpen && (
+                  <div className="absolute right-0 mt-1 w-48 rounded-md border border-gray-200 bg-white shadow-lg z-10">
+                    {actionButtons.map((btn) => (
+                      <button
+                        key={btn.label}
+                        type="button"
+                        onClick={btn.onClick}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md"
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -493,7 +522,7 @@ export default function SalesOrderDetail() {
                   <dt className="text-gray-500">Quote</dt>
                   <dd>
                     {so.Quotes?.id && so.Quotes?.quote_no ? (
-                      <button onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)} className="text-primary hover:underline font-medium">
+                      <button onClick={() => router.navigate(withReturnTo(`/sales/quotes/${so.Quotes!.id}`))} className="text-primary hover:underline font-medium">
                         {so.Quotes.quote_no}
                       </button>
                     ) : '—'}
@@ -705,7 +734,7 @@ export default function SalesOrderDetail() {
                   <dt className="text-gray-500">Quote</dt>
                   <dd>
                     {so.Quotes?.id && so.Quotes?.quote_no ? (
-                      <button type="button" onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)}
+                      <button type="button" onClick={() => router.navigate(withReturnTo(`/sales/quotes/${so.Quotes!.id}`))}
                         className="text-primary hover:underline font-medium">{so.Quotes.quote_no}</button>
                     ) : '—'}
                   </dd>
@@ -802,7 +831,7 @@ export default function SalesOrderDetail() {
                   <tr
                     key={mo.id}
                     className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${mo.id}`))}
                   >
                     <td className="px-4 py-4 font-medium text-primary">{mo.manufacturing_order_no}</td>
                     <td className="px-4 py-4">
@@ -840,7 +869,7 @@ export default function SalesOrderDetail() {
                     {so.Quotes?.id && so.Quotes?.quote_no ? (
                       <button
                         type="button"
-                        onClick={() => router.navigate(`/sales/quotes/${so.Quotes!.id}`)}
+                        onClick={() => router.navigate(withReturnTo(`/sales/quotes/${so.Quotes!.id}`))}
                         className="text-primary hover:underline font-medium"
                       >
                         {so.Quotes.quote_no}
@@ -918,7 +947,7 @@ export default function SalesOrderDetail() {
                 {financialSummary?.latest_invoice_id && (
                   <button
                     type="button"
-                    onClick={() => router.navigate(`/financials/invoices/${financialSummary.latest_invoice_id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/financials/invoices/${financialSummary.latest_invoice_id}`))}
                     className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
                     View Invoice {financialSummary.latest_invoice_number}
@@ -937,9 +966,9 @@ export default function SalesOrderDetail() {
                         dealer_id: so.dealer_id ?? null,
                       })
                     );
-                    router.navigate('/financials/payments?new=1');
+                    router.navigate(withReturnTo('/financials/payments?new=1'));
                   }}
-                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-primary border border-primary rounded-lg hover:bg-primary/5 transition-colors"
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
                 >
                   <Plus className="w-4 h-4" />
                   Add Payment

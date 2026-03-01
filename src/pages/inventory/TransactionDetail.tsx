@@ -49,6 +49,10 @@ interface CatalogSearchResult {
   name: string;
 }
 
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 interface TransactionDetailProps {
   transactionId?: string;
 }
@@ -76,6 +80,9 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
   const [searchResults, setSearchResults] = useState<CatalogSearchResult[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
+  const isAdjustmentContext = window.location.pathname.startsWith('/inventory/adjustments');
+  const listPath = isAdjustmentContext ? '/inventory/adjustments' : '/inventory/transactions';
+  const detailBasePath = isAdjustmentContext ? '/inventory/adjustments' : '/inventory/transactions';
 
   useEffect(() => {
     registerSubmodules('Inventory', INVENTORY_SUBMODULES);
@@ -84,6 +91,13 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
   useEffect(() => {
     if (defaultWarehouse && !warehouseId) setWarehouseId(defaultWarehouse.id);
   }, [defaultWarehouse, warehouseId]);
+
+  useEffect(() => {
+    // Adjustments flow must always create adjustment movements.
+    if (isCreateMode && isAdjustmentContext && movementType !== 'adjustment') {
+      setMovementType('adjustment');
+    }
+  }, [isCreateMode, isAdjustmentContext, movementType]);
 
   useEffect(() => {
     if (movement && movement.status === 'draft') {
@@ -104,16 +118,55 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
 
   const searchCatalogItems = useCallback(async (query: string) => {
     if (!activeOrganizationId || query.length < 2) { setSearchResults([]); return; }
-    const { data } = await supabase
-      .from('CatalogItems')
-      .select('id, sku, name')
-      .eq('organization_id', activeOrganizationId)
-      .eq('deleted', false)
-      .eq('is_active', true)
-      .or(`sku.ilike.%${query}%,name.ilike.%${query}%`)
-      .limit(10);
-    setSearchResults((data ?? []) as CatalogSearchResult[]);
-  }, [activeOrganizationId]);
+    const trimmed = query.trim();
+    const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) { setSearchResults([]); return; }
+
+    const firstToken = tokens[0];
+    try {
+      const { data, error } = await supabase
+        .from('CatalogItems')
+        .select('id, sku, name')
+        .eq('organization_id', activeOrganizationId)
+        .eq('is_active', true)
+        .or(`sku.ilike.%${firstToken}%,name.ilike.%${firstToken}%`)
+        .limit(50);
+
+      if (error) throw error;
+
+      const rows = (data ?? []) as CatalogSearchResult[];
+      const normalizedNeedle = normalizeSearchText(trimmed);
+      const filtered = rows.filter((item) => {
+        const sku = (item.sku ?? '').toLowerCase();
+        const name = (item.name ?? '').toLowerCase();
+        const hay = `${sku} ${name}`;
+        const normalizedHay = normalizeSearchText(hay);
+        const tokenMatch = tokens.every((t) => hay.includes(t) || normalizedHay.includes(normalizeSearchText(t)));
+        const fuzzyMatch = normalizedNeedle.length >= 2 && normalizedHay.includes(normalizedNeedle);
+        return tokenMatch || fuzzyMatch;
+      });
+
+      filtered.sort((a, b) => {
+        const aSku = (a.sku ?? '').toLowerCase();
+        const bSku = (b.sku ?? '').toLowerCase();
+        const aName = (a.name ?? '').toLowerCase();
+        const bName = (b.name ?? '').toLowerCase();
+        const startsA = aSku.startsWith(firstToken) || aName.startsWith(firstToken);
+        const startsB = bSku.startsWith(firstToken) || bName.startsWith(firstToken);
+        if (startsA !== startsB) return startsA ? -1 : 1;
+        return aSku.localeCompare(bSku);
+      });
+
+      setSearchResults(filtered.slice(0, 10));
+    } catch {
+      setSearchResults([]);
+      addNotification({
+        type: 'error',
+        title: 'Search error',
+        message: 'Could not search catalog items. Please try again.',
+      });
+    }
+  }, [activeOrganizationId, addNotification]);
 
   useEffect(() => {
     const timer = setTimeout(() => { if (itemSearch.length >= 2) searchCatalogItems(itemSearch); else setSearchResults([]); }, 300);
@@ -158,7 +211,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
       const movId = isCreateMode
         ? (await createMovement({
             warehouse_id: warehouseId,
-            movement_type: movementType,
+            movement_type: isAdjustmentContext ? 'adjustment' : movementType,
             movement_date: movementDate,
             notes: notes || undefined,
           })).id
@@ -175,7 +228,9 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
       }
 
       for (const line of draftLines) {
-        const mt = isCreateMode ? movementType : (movement?.movement_type ?? movementType);
+        const mt = isCreateMode
+          ? (isAdjustmentContext ? 'adjustment' : movementType)
+          : (movement?.movement_type ?? movementType);
         const signedQty = mt === 'adjustment'
           ? line.quantity
           : ['return', 'receipt'].includes(mt) ? Math.abs(line.quantity) : -Math.abs(line.quantity);
@@ -190,7 +245,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
       addNotification({ type: 'success', title: 'Saved', message: isCreateMode ? 'Transaction saved as draft.' : 'Draft updated.' });
       if (isCreateMode) {
         sessionStorage.setItem('currentTransactionId', movId);
-        router.navigate(`/inventory/transactions/${movId}`);
+        router.navigate(`${detailBasePath}/${movId}`);
       } else {
         refetch();
       }
@@ -319,7 +374,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
         <div className="flex items-center gap-4 w-full max-w-6xl mx-auto px-4 md:px-6">
           <button
             type="button"
-            onClick={() => router.navigate('/inventory/transactions')}
+            onClick={() => router.navigate(listPath)}
             className="p-1 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -327,7 +382,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
               <h1 className="text-xl font-bold text-gray-900 truncate">
-                {isCreateMode ? 'New Transaction' : movement?.movement_no ?? 'Transaction'}
+                {isCreateMode ? (isAdjustmentContext ? 'New Adjustment' : 'New Transaction') : movement?.movement_no ?? 'Transaction'}
               </h1>
               {!isCreateMode && (
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${isConfirmed ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
@@ -337,7 +392,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
             </div>
             <p className="text-sm text-gray-500 truncate">
               {isCreateMode
-                ? 'Create a new inventory movement'
+                ? (isAdjustmentContext ? 'Create a new inventory adjustment' : 'Create a new inventory movement')
                 : `${TYPE_LABELS[movement!.movement_type] ?? movement!.movement_type} · ${movement!.Warehouses?.name ?? 'Unknown warehouse'}`}
             </p>
           </div>
@@ -437,9 +492,13 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                     <select
                       value={movementType}
                       onChange={e => setMovementType(e.target.value as MovementType)}
+                      disabled={isAdjustmentContext}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                     >
-                      {CREATABLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      {(isAdjustmentContext
+                        ? CREATABLE_TYPES.filter((t) => t.value === 'adjustment')
+                        : CREATABLE_TYPES
+                      ).map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                   </div>
                   <div>

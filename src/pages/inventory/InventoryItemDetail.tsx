@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Edit } from 'lucide-react';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
@@ -34,6 +35,12 @@ type InventoryHeaderData = {
   required: number;
   assigned: number;
   available: number;
+  /** When stock_basis === 'linear_m', on hand in meters. */
+  onHandM: number | null;
+  /** When is_roll and roll length known, estimated number of rolls. */
+  estimatedRolls: number | null;
+  /** When linear_m and width known, reference area in m². */
+  m2Reference: number | null;
 };
 
 type PurchaseHistoryRow = {
@@ -76,7 +83,24 @@ type WarehouseSeedRow = {
   required: number;
   assigned: number;
   available: number;
+  onHandM?: number | null;
+  estimatedRolls?: number | null;
+  m2Reference?: number | null;
 };
+
+/** Convert length/width value + UOM to meters. */
+function toMeters(value: number | null | undefined, uom: string | null | undefined): number | null {
+  const v = Number(value ?? 0);
+  if (!Number.isFinite(v)) return null;
+  const u = (uom ?? '').toLowerCase();
+  if (u === 'm' || u === 'meter' || u === 'meters' || u === 'metre' || u === 'metres') return v;
+  if (u === 'yd' || u === 'yard' || u === 'yards') return v * 0.9144;
+  if (u === 'ft' || u === 'foot' || u === 'feet') return v * 0.3048;
+  if (u === 'in' || u === 'inch' || u === 'inches') return v * 0.0254;
+  if (u === 'cm') return v / 100;
+  if (u === 'mm') return v / 1000;
+  return null;
+}
 
 function fmtQty(v: number | null | undefined): string {
   return Number(v ?? 0).toFixed(2);
@@ -150,6 +174,9 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         required: Number(row.required ?? 0),
         assigned: Number(row.assigned ?? 0),
         available: Number(row.available ?? 0),
+        onHandM: row.onHandM ?? null,
+        estimatedRolls: row.estimatedRolls ?? null,
+        m2Reference: row.m2Reference ?? null,
       } as InventoryHeaderData;
     }
     return undefined;
@@ -162,7 +189,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
 
       const { data: item, error: itemError } = await supabase
         .from('CatalogItems')
-        .select('id, sku, name, unit_of_measure, is_roll, CatalogCategories(name)')
+        .select('id, sku, name, unit_of_measure, is_roll, stock_basis, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, CatalogCategories(name)')
         .eq('id', itemId)
         .single();
       if (itemError) throw itemError;
@@ -174,6 +201,15 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         .eq('catalog_item_id', itemId);
       if (balError) throw balError;
       const onHand = (balanceRows ?? []).reduce((acc: number, r: any) => acc + Number(r.quantity ?? 0), 0);
+      const stockBasis = (item.stock_basis ?? '').toLowerCase();
+      const isRoll = !!item.is_roll;
+      const rollLengthM = toMeters(item.roll_length_value, item.roll_length_uom);
+      const widthM = item.roll_width_m != null && Number.isFinite(Number(item.roll_width_m))
+        ? Number(item.roll_width_m)
+        : toMeters(item.roll_width_value, item.roll_width_uom);
+      const onHandM = stockBasis === 'linear_m' ? onHand : null;
+      const estimatedRolls = isRoll && stockBasis === 'linear_m' && rollLengthM != null && rollLengthM > 0 ? onHand / rollLengthM : null;
+      const m2Reference = stockBasis === 'linear_m' && widthM != null && widthM > 0 ? onHand * widthM : null;
 
       const { data: onOrderRows, error: onOrderError } = await supabase
         .from('inventory_on_order')
@@ -204,6 +240,9 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         required,
         assigned,
         available: onHand - assigned,
+        onHandM,
+        estimatedRolls,
+        m2Reference,
       };
     },
     enabled: !!activeOrganizationId && !!itemId,
@@ -327,7 +366,9 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
           </button>
           <button
             type="button"
-            onClick={() => router.navigate(`/catalog/items/edit/${itemId}?returnTo=${encodeURIComponent('/inventory/warehouse')}`)}
+            onClick={() =>
+              router.navigate(withReturnTo(`/catalog/items/edit/${itemId}`, '/inventory/warehouse'))
+            }
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90"
           >
             <Edit className="w-4 h-4" />
@@ -349,6 +390,9 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
             <div><p className="text-gray-500">On Order</p><p className="font-medium tabular-nums">{fmtQty(header?.onOrder)}</p></div>
             <div><p className="text-gray-500">Assigned</p><p className="font-medium tabular-nums">{fmtQty(header?.assigned)}</p></div>
             <div><p className="text-gray-500">Available</p><p className="font-semibold tabular-nums">{fmtQty(header?.available)}</p></div>
+            {header?.onHandM != null ? <div><p className="text-gray-500">On Hand (m)</p><p className="font-medium tabular-nums">{fmtQty(header.onHandM)}</p></div> : null}
+            {header?.estimatedRolls != null ? <div><p className="text-gray-500">Est. Rolls</p><p className="font-medium tabular-nums">{Number(header.estimatedRolls).toFixed(1)}</p></div> : null}
+            {header?.m2Reference != null ? <div><p className="text-gray-500">m² ref</p><p className="font-medium tabular-nums">{Number(header.m2Reference).toFixed(2)}</p></div> : null}
           </div>
         )}
         {header && fetchingHeader ? <div className="mt-3 text-xs text-gray-500">Updating...</div> : null}

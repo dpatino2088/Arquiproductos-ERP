@@ -8,8 +8,9 @@ import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import { Search, ShoppingBag, Eye, Trash2, RefreshCw, Filter, Archive, RotateCcw } from 'lucide-react';
+import { Search, ShoppingBag, Eye, ExternalLink, Trash2, Archive, RotateCcw } from 'lucide-react';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 
 type SalesOrderRow = SalesOrder & {
   DirectoryCustomers?: { customer_name: string } | null;
@@ -41,10 +42,13 @@ export default function SalesOrdersPage() {
   const [moCountBySoId, setMoCountBySoId] = useState<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  const canArchiveOrder = useCallback((order: { status?: string | null }) => {
+    const s = (order.status || '').toLowerCase();
+    return s === 'cancelled' || s === 'canceled' || s === 'delivered' || s === 'closed' || s === 'completed' || s === 'finished' || s === 'terminated';
+  }, []);
 
   useEffect(() => {
     if (!activeOrganizationId || !orders.length) {
@@ -99,6 +103,14 @@ export default function SalesOrdersPage() {
   const handleArchive = useCallback(
     async (order: SalesOrderRow, e: React.MouseEvent) => {
       e.stopPropagation();
+      if (!canArchiveOrder(order)) {
+        addNotification({
+          type: 'error',
+          title: 'Cannot archive',
+          message: 'You can only archive orders that are cancelled or completed.',
+        });
+        return;
+      }
       const confirmed = await showConfirm({
         title: 'Archive order',
         message: `Archive order ${order.sales_order_no}? It will be hidden from the list, not deleted.`,
@@ -122,7 +134,7 @@ export default function SalesOrdersPage() {
         setDialogLoading(false);
       }
     },
-    [showConfirm, setDialogLoading, addNotification, refetch]
+    [showConfirm, setDialogLoading, addNotification, refetch, canArchiveOrder]
   );
 
   const handleRestore = useCallback(
@@ -178,20 +190,10 @@ export default function SalesOrdersPage() {
     [statusCounts, archivedOrdersCount]
   );
 
-  const statusFilterValues = useMemo(() => STATUS_VALUES.filter((v) => v !== 'all'), []);
-
-  const handleStatusToggle = useCallback((status: string) => {
-    setSelectedStatus((prev) =>
-      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
-    );
-  }, []);
-
   const filtered = useMemo(() => {
     let list = activeTab === 'archived' ? orders.filter((o) => o.archived) : nonArchivedOrders;
     if (activeTab !== 'archived') {
-      if (selectedStatus.length > 0) {
-        list = list.filter((o) => selectedStatus.includes(o.status || 'draft'));
-      } else if (activeTab !== 'all') {
+      if (activeTab !== 'all') {
         list = list.filter((o) => o.status === activeTab);
       }
     }
@@ -207,7 +209,7 @@ export default function SalesOrdersPage() {
       );
     }
     return list;
-  }, [orders, nonArchivedOrders, activeTab, searchTerm, selectedStatus]);
+  }, [orders, nonArchivedOrders, activeTab, searchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -235,9 +237,7 @@ export default function SalesOrdersPage() {
 
       {/* Search and Filters — mismo formato que Quotes: card py-6 px-6; botones px-2 py-1, icon 14px */}
       <div className="mb-4 mt-4">
-        <div
-          className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}
-        >
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -249,61 +249,7 @@ export default function SalesOrdersPage() {
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
-                showFilters || selectedStatus.length > 0
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <Filter style={{ width: 14, height: 14 }} />
-              Filters
-              {selectedStatus.length > 0 && (
-                <span className="bg-white text-blue-600 rounded-full px-2 py-0.5 text-xs font-semibold">
-                  {selectedStatus.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => refetch()}
-              className="flex items-center justify-center p-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors"
-              title="Refresh"
-            >
-              <RefreshCw style={{ width: 14, height: 14 }} />
-            </button>
           </div>
-
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Status</span>
-                {selectedStatus.length > 0 && (
-                  <button
-                    onClick={() => setSelectedStatus([])}
-                    className="text-xs text-gray-500 hover:text-gray-700"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {statusFilterValues.map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusToggle(status)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      selectedStatus.includes(status)
-                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    {STATUS_LABELS[status] || status}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -379,7 +325,7 @@ export default function SalesOrdersPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            router.navigate(`/sales/orders/${order.id}`);
+                            router.navigate(withReturnTo(`/sales/orders/${order.id}`));
                           }}
                           className="grid text-left text-primary hover:underline"
                         >
@@ -433,13 +379,26 @@ export default function SalesOrdersPage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              router.navigate(`/sales/orders/${order.id}`);
+                              router.navigate(withReturnTo(`/sales/orders/${order.id}`));
                             }}
                             className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
                             title="View"
                           >
                             <Eye style={{ width: 14, height: 14 }} />
                           </button>
+                          {order.quote_id && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.navigate(withReturnTo(`/sales/quotes/${order.quote_id}`));
+                              }}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Go to Quote"
+                            >
+                              <ExternalLink style={{ width: 14, height: 14 }} />
+                            </button>
+                          )}
                           {activeTab === 'archived' ? (
                             <button
                               type="button"
@@ -449,24 +408,27 @@ export default function SalesOrdersPage() {
                             >
                               <RotateCcw style={{ width: 14, height: 14 }} />
                             </button>
-                          ) : isPortal ? (
-                            <button
-                              type="button"
-                              onClick={(e) => handleArchive(order, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Archive"
-                            >
-                              <Archive style={{ width: 14, height: 14 }} />
-                            </button>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => handleDelete(order, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 style={{ width: 14, height: 14 }} />
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => handleArchive(order, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Archive"
+                              >
+                                <Archive style={{ width: 14, height: 14 }} />
+                              </button>
+                              {!isPortal && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDelete(order, e)}
+                                  className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>

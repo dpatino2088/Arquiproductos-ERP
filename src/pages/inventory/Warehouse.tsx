@@ -26,6 +26,20 @@ const INVENTORY_SUBMODULES = [
   { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand' },
 ];
 
+/** Convert length/width value + UOM to meters (for roll length/width). */
+function toMeters(value: number | null | undefined, uom: string | null | undefined): number | null {
+  const v = Number(value ?? 0);
+  if (!Number.isFinite(v)) return null;
+  const u = (uom ?? '').toLowerCase();
+  if (u === 'm' || u === 'meter' || u === 'meters' || u === 'metre' || u === 'metres') return v;
+  if (u === 'yd' || u === 'yard' || u === 'yards') return v * 0.9144;
+  if (u === 'ft' || u === 'foot' || u === 'feet') return v * 0.3048;
+  if (u === 'in' || u === 'inch' || u === 'inches') return v * 0.0254;
+  if (u === 'cm') return v / 100;
+  if (u === 'mm') return v / 1000;
+  return null;
+}
+
 interface StockRow {
   id: string;
   catalogItemId: string;
@@ -40,6 +54,12 @@ interface StockRow {
   required: number;
   available: number;
   balance: number;
+  /** When stock_basis === 'linear_m', on hand in meters (same as onHand). */
+  onHandM: number | null;
+  /** When is_roll and roll length known, estimated number of rolls. */
+  estimatedRolls: number | null;
+  /** When linear_m and width known, reference area in m² (length_m × width_m). */
+  m2Reference: number | null;
 }
 
 const getBalanceBadgeColor = (balance: number, required: number) => {
@@ -91,7 +111,7 @@ export default function Warehouse() {
 
       let balanceQuery = supabase
         .from('InventoryBalances')
-        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, is_roll, CatalogCategories(name))')
+        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, is_roll, stock_basis, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, CatalogCategories(name))')
         .eq('organization_id', activeOrganizationId);
 
       if (effectiveWarehouseId) {
@@ -134,21 +154,40 @@ export default function Warehouse() {
         });
       }
 
-      return (balances as any[]).map(b => ({
-        id: b.catalog_item_id + ':' + b.warehouse_id,
-        catalogItemId: b.catalog_item_id,
-        sku: b.CatalogItems?.sku ?? '—',
-        itemName: b.CatalogItems?.name ?? '—',
-        uom: b.CatalogItems?.is_roll ? 'm' : (b.CatalogItems?.unit_of_measure ?? 'ea'),
-        category: b.CatalogItems?.CatalogCategories?.name ?? null,
-        onHand: Number(b.quantity ?? 0),
-        warehouseName: b.Warehouses?.name ?? '—',
-        onOrder: onOrderMap.get(b.catalog_item_id) ?? 0,
-        assigned: assignedMap.get(b.catalog_item_id) ?? 0,
-        required: requiredMap.get(b.catalog_item_id) ?? 0,
-        available: Number(b.quantity ?? 0) - (assignedMap.get(b.catalog_item_id) ?? 0),
-        balance: Number(b.quantity ?? 0) + (onOrderMap.get(b.catalog_item_id) ?? 0) - (requiredMap.get(b.catalog_item_id) ?? 0),
-      }));
+      return (balances as any[]).map(b => {
+        const onHand = Number(b.quantity ?? 0);
+        const stockBasis = (b.CatalogItems?.stock_basis ?? '').toLowerCase();
+        const isRoll = !!b.CatalogItems?.is_roll;
+        const rollLengthM = toMeters(b.CatalogItems?.roll_length_value, b.CatalogItems?.roll_length_uom);
+        const widthM = b.CatalogItems?.roll_width_m != null && Number.isFinite(Number(b.CatalogItems.roll_width_m))
+          ? Number(b.CatalogItems.roll_width_m)
+          : toMeters(b.CatalogItems?.roll_width_value, b.CatalogItems?.roll_width_uom);
+        const onHandM = stockBasis === 'linear_m' ? onHand : null;
+        const estimatedRolls =
+          isRoll && stockBasis === 'linear_m' && rollLengthM != null && rollLengthM > 0
+            ? onHand / rollLengthM
+            : null;
+        const m2Reference =
+          stockBasis === 'linear_m' && widthM != null && widthM > 0 ? onHand * widthM : null;
+        return {
+          id: b.catalog_item_id + ':' + b.warehouse_id,
+          catalogItemId: b.catalog_item_id,
+          sku: b.CatalogItems?.sku ?? '—',
+          itemName: b.CatalogItems?.name ?? '—',
+          uom: b.CatalogItems?.is_roll ? 'm' : (b.CatalogItems?.unit_of_measure ?? 'ea'),
+          category: b.CatalogItems?.CatalogCategories?.name ?? null,
+          onHand,
+          warehouseName: b.Warehouses?.name ?? '—',
+          onOrder: onOrderMap.get(b.catalog_item_id) ?? 0,
+          assigned: assignedMap.get(b.catalog_item_id) ?? 0,
+          required: requiredMap.get(b.catalog_item_id) ?? 0,
+          available: onHand - (assignedMap.get(b.catalog_item_id) ?? 0),
+          balance: onHand + (onOrderMap.get(b.catalog_item_id) ?? 0) - (requiredMap.get(b.catalog_item_id) ?? 0),
+          onHandM,
+          estimatedRolls,
+          m2Reference,
+        };
+      });
     },
     enabled: !!activeOrganizationId,
     placeholderData: keepPreviousData,
@@ -251,6 +290,9 @@ export default function Warehouse() {
                 <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('onHand')}>
                   On Hand <SortIcon col="onHand" />
                 </th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700" title="Linear items: quantity in meters">m</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700" title="Rolls: estimated count">Rolls</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700" title="Reference area (m²)">m² ref</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">On Order</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Assigned</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Required</th>
@@ -265,7 +307,7 @@ export default function Warehouse() {
             </thead>
             <tbody>
               {paginated.length === 0 ? (
-                <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-500">No stock data found</td></tr>
+                <tr><td colSpan={15} className="px-4 py-8 text-center text-gray-500">No stock data found</td></tr>
               ) : paginated.map(row => (
                 <tr
                   key={row.id}
@@ -290,6 +332,9 @@ export default function Warehouse() {
                   <td className="px-4 py-3 text-gray-600">{row.category ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{row.warehouseName}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{Number(row.onHand).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onHandM != null ? Number(row.onHandM).toFixed(2) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.estimatedRolls != null ? Number(row.estimatedRolls).toFixed(1) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.m2Reference != null ? Number(row.m2Reference).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onOrder > 0 ? Number(row.onOrder).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.assigned > 0 ? Number(row.assigned).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.required > 0 ? Number(row.required).toFixed(2) : '—'}</td>

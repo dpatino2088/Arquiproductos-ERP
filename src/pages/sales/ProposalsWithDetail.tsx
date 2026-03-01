@@ -7,14 +7,22 @@ import { router } from '../../lib/router';
 import Proposals from './Proposals';
 import ProposalDetail from './ProposalDetail';
 
+function getPathnameOnly(path: string): string {
+  const q = path.indexOf('?');
+  const h = path.indexOf('#');
+  if (q !== -1) return path.slice(0, q);
+  if (h !== -1) return path.slice(0, h);
+  return path;
+}
+
 function getProposalIdFromPath(): string | null {
-  const path = router.getCurrentRoute() || window.location.pathname;
+  const path = getPathnameOnly(router.getCurrentRoute() || window.location.pathname);
   const m = path.match(/\/sales\/proposals\/([^/]+)(?:\/|$)/);
   return m ? m[1] : null;
 }
 
 function isProposalDetailPath(): boolean {
-  const path = router.getCurrentRoute() || window.location.pathname;
+  const path = getPathnameOnly(router.getCurrentRoute() || window.location.pathname);
   return /^\/sales\/proposals\/[^/]+(?:\/|$)/.test(path) && !path.includes('/print');
 }
 

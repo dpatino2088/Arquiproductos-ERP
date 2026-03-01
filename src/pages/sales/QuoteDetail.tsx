@@ -6,14 +6,15 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
-import LifecycleIndicator, { type LifecycleStep } from '../../components/shared/LifecycleIndicator';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency } from '../../lib/utils';
 import { createProposalFromQuote } from '../../hooks/useProposals';
 import { useSOActions } from '../../hooks/useSOActions';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { FileText, ShoppingBag } from 'lucide-react';
+import { FileText, ShoppingBag, Edit, ArrowLeft } from 'lucide-react';
+import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -79,10 +80,15 @@ interface SalesOrder {
   id: string;
   sales_order_no: string;
   status: string | null;
+  tax_amount: number | null;
   total_amount: number | null;
   expected_delivery_date: string | null;
   completed_at: string | null;
   created_at: string | null;
+}
+
+interface SalesOrderFinancialSummary {
+  total_paid: number | null;
 }
 
 interface ManufacturingOrder {
@@ -136,6 +142,7 @@ export default function QuoteDetail() {
   const [lines, setLines] = useState<QuoteLine[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [salesOrder, setSalesOrder] = useState<SalesOrder | null>(null);
+  const [salesOrderFinancial, setSalesOrderFinancial] = useState<SalesOrderFinancialSummary | null>(null);
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -192,7 +199,7 @@ export default function QuoteDetail() {
           .order('version_no', { ascending: false }),
         supabase
           .from('SalesOrders')
-          .select('id, sales_order_no, status, total_amount, expected_delivery_date, completed_at, created_at')
+          .select('id, sales_order_no, status, tax_amount, total_amount, expected_delivery_date, completed_at, created_at')
           .eq('quote_id', quoteId)
           .eq('deleted', false)
           .maybeSingle(),
@@ -217,32 +224,46 @@ export default function QuoteDetail() {
       } else {
         setProposals((proposalsRes.data ?? []) as Proposal[]);
       }
+      let salesOrderIdForCreator: string | null = null;
       if (soRes.error) {
         if (import.meta.env.DEV) console.warn('[QuoteDetail] SalesOrders error:', soRes.error);
+        setSalesOrder(null);
+        setSalesOrderFinancial(null);
         setMos([]);
       } else {
         const soData = soRes.data as SalesOrder | null;
+        salesOrderIdForCreator = soData?.id ?? null;
         setSalesOrder(soData);
         if (soData?.id) {
-          const mosRes = await supabase
-            .from('ManufacturingOrders')
-            .select('id, manufacturing_order_no, status')
-            .eq('sales_order_id', soData.id)
-            .eq('deleted', false)
-            .order('created_at', { ascending: false });
+          const [mosRes, soFinancialRes] = await Promise.all([
+            supabase
+              .from('ManufacturingOrders')
+              .select('id, manufacturing_order_no, status')
+              .eq('sales_order_id', soData.id)
+              .eq('deleted', false)
+              .order('created_at', { ascending: false }),
+            supabase
+              .from('sales_order_financial_summary')
+              .select('total_paid')
+              .eq('sales_order_id', soData.id)
+              .maybeSingle(),
+          ]);
           if (mosRes.error) {
             if (import.meta.env.DEV) console.warn('[QuoteDetail] ManufacturingOrders error:', mosRes.error);
             setMos([]);
           } else {
             setMos((mosRes.data ?? []) as ManufacturingOrder[]);
           }
+          setSalesOrderFinancial((soFinancialRes.data as SalesOrderFinancialSummary | null) ?? null);
         } else {
+          setSalesOrderFinancial(null);
           setMos([]);
         }
       }
       setTimeline((timelineRes.error ? [] : (timelineRes.data ?? [])) as TimelineEvent[]);
 
       const q = quoteRes.data as Quote;
+      let creatorAuthUserId: string | null = q.created_by_user_id ?? null;
       if (q.customer_id) {
         const custRes = await supabase.from('DirectoryCustomers').select('customer_name').eq('id', q.customer_id).eq('deleted', false).maybeSingle();
         if (myId !== requestIdRef.current) return;
@@ -257,10 +278,17 @@ export default function QuoteDetail() {
       } else {
         setContactName(null);
       }
-      if (q.created_by_user_id) {
-        const { data: appUser } = await supabase.from('AppUsers').select('display_name').eq('id', q.created_by_user_id).maybeSingle();
+      if (salesOrderIdForCreator) {
+        const soCreatorRes = await supabase.from('SalesOrders').select('created_by').eq('id', salesOrderIdForCreator).maybeSingle();
         if (myId !== requestIdRef.current) return;
-        setCreatedByName(appUser?.display_name ?? null);
+        if (!soCreatorRes.error && soCreatorRes.data?.created_by) {
+          creatorAuthUserId = soCreatorRes.data.created_by as string;
+        }
+      }
+      if (creatorAuthUserId) {
+        const appUserMap = await getAppUsersDisplayNames([creatorAuthUserId]);
+        if (myId !== requestIdRef.current) return;
+        setCreatedByName(appUserMap.get(creatorAuthUserId) ?? 'Legacy / Imported');
       } else {
         setCreatedByName(null);
       }
@@ -303,7 +331,7 @@ export default function QuoteDetail() {
         return;
       }
       addNotification({ type: 'success', title: 'Proposal Created', message: 'Proposal created from quote.' });
-      router.navigate(`/sales/proposals/${result.proposalId}`);
+      router.navigate(withReturnTo(`/sales/proposals/${result.proposalId}`));
     } finally {
       setActing(false);
     }
@@ -315,7 +343,7 @@ export default function QuoteDetail() {
     try {
       const data = await createSOFromQuote(quoteId, user.id, user.name);
       if (data?.sales_order_id) {
-        router.navigate(`/sales/orders/${data.sales_order_id}`);
+        router.navigate(withReturnTo(`/sales/orders/${data.sales_order_id}`));
       } else {
         refetch();
       }
@@ -324,34 +352,24 @@ export default function QuoteDetail() {
     }
   }, [quoteId, user, createSOFromQuote, refetch, acting]);
 
-  const handleCancel = useCallback(async () => {
-    if (!quoteId || !activeOrganizationId || acting) return;
-    setActing(true);
-    try {
-      const { error: updateErr } = await supabase
-        .from('Quotes')
-        .update({ status: 'cancelled' })
-        .eq('id', quoteId)
-        .eq('organization_id', activeOrganizationId);
-      if (updateErr) throw updateErr;
-      addNotification({ type: 'success', title: 'Quote Cancelled', message: 'Quote has been cancelled.' });
-      refetch();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to cancel quote';
-      addNotification({ type: 'error', title: 'Error', message: msg });
-    } finally {
-      setActing(false);
-    }
-  }, [quoteId, activeOrganizationId, acting, refetch, addNotification]);
-
-  const onBack = () => router.navigate('/sales/quotes');
+  const listPath = '/sales/quotes';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+  const onBack = () => router.navigate(listPath);
+  const onBackContextual = () =>
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
 
   const status = (quote?.status || '').toLowerCase();
-  const canCancel = ['draft', 'approved'].includes(status);
   const canCreateProposal = status === 'draft' && !hasActiveProposal;
   const canCreateSO = status === 'approved' && !salesOrder;
-
-  const currentLifecycleStage: 'quote' | 'proposal' | 'sales_order' | 'manufacturing' = salesOrder ? 'sales_order' : proposals.length > 0 ? 'proposal' : 'quote';
   const currentMfgStepIndex = useMemo(() => {
     if (mos.length === 0) {
       return -1;
@@ -365,87 +383,63 @@ export default function QuoteDetail() {
     return Math.min(...ranked);
   }, [mos]);
 
-  const lifecycleSteps: LifecycleStep[] = useMemo(() => {
-    if (!quote) {
-      return [
-        { id: 'quote', label: 'Quote', sublabel: '—', status: 'pending', href: undefined },
-        { id: 'proposal', label: 'Proposal', sublabel: '—', status: 'pending', href: undefined },
-        { id: 'sales_order', label: 'Sales Order', sublabel: '—', status: 'pending', href: undefined },
-        { id: 'manufacturing', label: 'Manufacturing', sublabel: '—', status: 'pending', href: undefined },
-      ];
-    }
-    const ids: ('quote' | 'proposal' | 'sales_order' | 'manufacturing')[] = ['quote', 'proposal', 'sales_order', 'manufacturing'];
-    const currentIndex = ids.indexOf(currentLifecycleStage);
-    const latestProposal = proposals.length > 0 ? proposals[0] : null;
-    const stages = [
-      { label: 'Quote', ref: quote.quote_no },
-      { label: 'Proposal', ref: proposals.length > 0 ? (proposals.length === 1 ? latestProposal?.proposal_no : `${proposals.length} proposal(s)`) : undefined, href: latestProposal ? `/sales/proposals/${latestProposal.id}` : undefined },
-      { label: 'Sales Order', ref: salesOrder?.sales_order_no, href: salesOrder ? `/sales/orders/${salesOrder.id}` : undefined },
-      { label: 'Manufacturing', ref: undefined },
-    ];
-    return stages.map((s, i) => ({
-      id: ids[i],
-      label: s.label,
-      sublabel: s.ref ?? '—',
-      status: i < currentIndex ? 'completed' : i === currentIndex ? 'active' : 'pending',
-      href: s.href,
-    }));
-  }, [quote, currentLifecycleStage, proposals.length, proposals[0]?.id, proposals[0]?.proposal_no, salesOrder?.sales_order_no, salesOrder?.id]);
-
   const actionButtons = useMemo(() => {
-    if (isPortal) return null;
     const btns: React.ReactNode[] = [];
-    btns.push(
-      <button
-        key="edit"
-        type="button"
-        onClick={() => router.navigate(`/sales/quotes/${quoteId}/edit`)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-      >
-        Edit
-      </button>
-    );
-    if (canCreateProposal) {
+    if (hasRedirectBack) {
       btns.push(
         <button
-          key="create-proposal"
+          key="back"
           type="button"
-          onClick={handleCreateProposal}
-          disabled={acting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          onClick={onBackContextual}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
         >
-          Create Proposal
+          <ArrowLeft className="w-4 h-4" />
+          Back
         </button>
       );
     }
-    if (canCreateSO) {
+    if (!isPortal) {
       btns.push(
         <button
-          key="create-so"
+          key="edit"
           type="button"
-          onClick={handleCreateSalesOrder}
-          disabled={acting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}/edit`))}
+          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+          title="Edit Quote"
         >
-          Create Sales Order
+          <Edit style={{ width: 14, height: 14 }} />
         </button>
       );
+      if (canCreateProposal) {
+        btns.push(
+          <button
+            key="create-proposal"
+            type="button"
+            onClick={handleCreateProposal}
+            disabled={acting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          >
+            Create Proposal
+          </button>
+        );
+      }
+      if (canCreateSO) {
+        btns.push(
+          <button
+            key="create-so"
+            type="button"
+            onClick={handleCreateSalesOrder}
+            disabled={acting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          >
+            Create Sales Order
+          </button>
+        );
+      }
     }
-    if (canCancel) {
-      btns.push(
-        <button
-          key="cancel"
-          type="button"
-          onClick={handleCancel}
-          disabled={acting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
-        >
-          Cancel
-        </button>
-      );
-    }
+    if (btns.length === 0) return null;
     return <div className="flex items-center gap-2">{btns}</div>;
-  }, [isPortal, quoteId, canCreateProposal, canCreateSO, canCancel, acting, handleCreateProposal, handleCreateSalesOrder, handleCancel]);
+  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, acting, handleCreateProposal, handleCreateSalesOrder, onBackContextual]);
 
   if (!quoteId) {
     return (
@@ -507,13 +501,25 @@ export default function QuoteDetail() {
     ? lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
     : (quote.total_amount ?? 0);
 
-  const headerStatus = <StatusBadge status={quote.status} type="quote" />;
+  const hasAnyPayment = (salesOrderFinancial?.total_paid ?? 0) > 0;
+  const statusForDisplay =
+    status === 'approved'
+      ? (hasAnyPayment ? 'approved_paid' : 'approved_unpaid')
+      : status;
+  const keyStatusCaption =
+    status === 'approved'
+      ? (hasAnyPayment ? 'Approved with payment' : 'Approved without payment')
+      : status === 'cancelled' || status === 'canceled'
+        ? 'Cancelled by reason'
+        : 'Draft';
+
+  const headerStatus = <StatusBadge status={statusForDisplay} type="quote" />;
   const latestProposal = proposals.length > 0 ? proposals[0] : null;
 
   return (
     <DetailPageLayout
       title={quote.quote_no}
-      subtitle="Quote"
+      subtitle="Quote Detail"
       status={headerStatus}
       {...({})}
       tabs={tabs}
@@ -572,7 +578,7 @@ export default function QuoteDetail() {
                     <dd>
                       <button
                         type="button"
-                        onClick={() => router.navigate(`/sales/proposals/${latestProposal.id}`)}
+                        onClick={() => router.navigate(withReturnTo(`/sales/proposals/${latestProposal.id}`))}
                         className="text-primary hover:underline font-medium"
                       >
                         {latestProposal.proposal_no}
@@ -586,7 +592,7 @@ export default function QuoteDetail() {
                     <dd>
                       <button
                         type="button"
-                        onClick={() => router.navigate(`/sales/orders/${salesOrder.id}`)}
+                        onClick={() => router.navigate(withReturnTo(`/sales/orders/${salesOrder.id}`))}
                         className="text-primary hover:underline font-medium"
                       >
                         {salesOrder.sales_order_no}
@@ -617,7 +623,7 @@ export default function QuoteDetail() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Tax</dt>
-                  <dd className="font-mono">{formatCurrencyDisplay(quote.tax_amount)}</dd>
+                  <dd className="font-mono">{formatCurrencyDisplay(quote.tax_amount ?? salesOrder?.tax_amount ?? 0)}</dd>
                 </div>
                 <div className="flex justify-between border-t pt-2">
                   <dt className="text-gray-500">Total</dt>
@@ -650,8 +656,11 @@ export default function QuoteDetail() {
                 <dd className="font-medium text-gray-900 mt-0.5">{quote.expires_at ? new Date(quote.expires_at).toLocaleDateString() : '—'}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">Approved</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{!isPortal && quote.approved_at ? new Date(quote.approved_at).toLocaleDateString() : '—'}</dd>
+                <dt className="text-gray-500">Status</dt>
+                <dd className="mt-0.5">
+                  <StatusBadge status={statusForDisplay} type="quote" size="sm" />
+                </dd>
+                <dd className="text-xs text-gray-500 mt-1">{keyStatusCaption}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Converted</dt>
@@ -660,12 +669,7 @@ export default function QuoteDetail() {
             </div>
           </div>
 
-          {/* Row 3: Origin & Progress — same as Sales Order */}
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <LifecycleIndicator steps={lifecycleSteps} title="Origin & Progress" />
-          </div>
-
-          {/* Row 4: Manufacturing Status */}
+          {/* Row 3: Manufacturing Status */}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>
             {mos.length === 0 ? (
@@ -796,7 +800,7 @@ export default function QuoteDetail() {
                   <tr
                     key={p.id}
                     className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(`/sales/proposals/${p.id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/sales/proposals/${p.id}`))}
                   >
                     <td className="px-4 py-4 font-medium text-primary">{p.proposal_no}</td>
                     <td className="px-4 py-4">{p.version_no}</td>

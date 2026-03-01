@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import type { ManufacturersRef } from './Manufacturers';
 import type { CategoriesRef } from './Categories';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
@@ -29,8 +30,6 @@ import {
   Filter,
   Plus,
   Upload,
-  List,
-  Grid3X3,
   SortAsc,
   SortDesc,
   Edit,
@@ -38,6 +37,7 @@ import {
   Eye,
   Trash2,
   Archive,
+  ArrowLeft,
   User,
   Image as ImageIcon,
   Package,
@@ -136,7 +136,6 @@ export default function Items() {
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [sortBy, setSortBy] = useState<'manufacturer' | 'sku' | 'itemName' | 'category' | 'measure_basis' | 'unit_price' | 'active' | 'family'>('sku');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedManufacturer, setSelectedManufacturer] = useState<string[]>([]);
@@ -145,10 +144,81 @@ export default function Items() {
   // Removed selectedItemType - using selectedCategory instead
   const [selectedMeasureBasis, setSelectedMeasureBasis] = useState<string[]>([]);
   const [selectedActive, setSelectedActive] = useState<string[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showMoveCategoryModal, setShowMoveCategoryModal] = useState(false);
+  const [bulkParentCategoryId, setBulkParentCategoryId] = useState('');
+  const [bulkTargetSubcategoryId, setBulkTargetSubcategoryId] = useState('');
+  const [isBulkMoving, setIsBulkMoving] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const manufacturerRef = useRef<ManufacturersRef>(null);
   const categoriesRef = useRef<CategoriesRef>(null);
+  const [routeSearch, setRouteSearch] = useState(window.location.search);
+  const [categoryFilterFromQuery, setCategoryFilterFromQuery] = useState(false);
+  const [showRedirectBack, setShowRedirectBack] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasReturnTo = !!params.get('returnTo');
+    const hasCategoryId = !!params.get('category_id');
+    try {
+      const hasStoredContext = !!window.sessionStorage.getItem('catalogItemsBackContext');
+      return hasReturnTo || hasCategoryId || hasStoredContext;
+    } catch {
+      return hasReturnTo || hasCategoryId;
+    }
+  });
+
+  useEffect(() => {
+    const unsubscribe = router.addListener(() => {
+      setRouteSearch(window.location.search);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+  const queryReturnTo = useMemo(() => getReturnToFromCurrentQuery(), [routeSearch]);
+  const categoryIdFromQuery = useMemo(() => {
+    const params = new URLSearchParams(routeSearch);
+    return params.get('category_id');
+  }, [routeSearch]);
+  const hasContextualBack = showRedirectBack && (activeTab === 'items');
+  const handleContextualBack = useCallback(() => {
+    const currentReturnTo = getReturnToFromCurrentQuery();
+    setShowRedirectBack(false);
+    if (currentReturnTo) {
+      navigateBackContextual(router, {
+        queryReturnTo: currentReturnTo,
+        fallback: '/catalog/items',
+      });
+      return;
+    }
+    // If filter came from Categories tab (same route), return to that tab.
+    // Clear query context to avoid re-enabling Back on next render.
+    router.navigate('/catalog/items', false);
+    setSelectedCategory([]);
+    setCategoryFilterFromQuery(false);
+    try {
+      window.sessionStorage.removeItem('catalogItemsBackContext');
+    } catch {
+      // no-op
+    }
+    setActiveTab('categories');
+  }, []);
+
+  useEffect(() => {
+    // Activate Back when redirected into this view, but do not auto-disable it here.
+    const params = new URLSearchParams(routeSearch);
+    const hasReturnTo = !!params.get('returnTo');
+    const hasCategoryId = !!params.get('category_id');
+    let hasStoredContext = false;
+    try {
+      hasStoredContext = !!window.sessionStorage.getItem('catalogItemsBackContext');
+    } catch {
+      hasStoredContext = false;
+    }
+    if (hasReturnTo || hasCategoryId || hasStoredContext) {
+      setShowRedirectBack(true);
+    }
+  }, [routeSearch]);
 
   // Format date to DD/MM/YY format
   const formatDate = (dateString?: string | null): string => {
@@ -279,19 +349,25 @@ export default function Items() {
     });
   }, [items, categoryMap]);
 
-  // Read category_id from URL params and filter
+  // Read category_id from URL params and filter (reactive to route query changes)
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
+    const urlParams = new URLSearchParams(routeSearch);
     const categoryIdParam = urlParams.get('category_id');
     
     if (categoryIdParam) {
       // Find the category name from the map
       const categoryName = categoryMap.get(categoryIdParam);
       if (categoryName) {
+        setActiveTab('items');
         setSelectedCategory([categoryName]);
+        setCategoryFilterFromQuery(true);
       }
+    } else if (categoryFilterFromQuery && !showRedirectBack) {
+      // Clear only query-driven filter; keep user-manual filters intact.
+      setSelectedCategory([]);
+      setCategoryFilterFromQuery(false);
     }
-  }, [categoryMap]);
+  }, [categoryMap, routeSearch, categoryFilterFromQuery, showRedirectBack]);
 
   // ✅ OPTIMIZACIÓN: Solo usar items que tengan todos los campos básicos cargados
   // Filtrar items incompletos para evitar mostrar campos vacíos
@@ -422,6 +498,20 @@ export default function Items() {
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
+  const selectedItemsCount = selectedItemIds.length;
+  const allPageSelected = paginatedItems.length > 0 && paginatedItems.every((item) => selectedItemIds.includes(item.id));
+
+  const parentCatalogCategories = useMemo(
+    () => catalogCategories.filter((cat: any) => cat.is_group && !cat.parent_id),
+    [catalogCategories]
+  );
+  const subcategoriesByParent = useMemo(
+    () =>
+      bulkParentCategoryId
+        ? catalogCategories.filter((cat: any) => !cat.is_group && cat.parent_id === bulkParentCategoryId)
+        : [],
+    [catalogCategories, bulkParentCategoryId]
+  );
 
   // Reset to first page when search changes
   useMemo(() => {
@@ -474,10 +564,68 @@ export default function Items() {
     setSearchTerm('');
   };
 
+  const toggleSelectItem = (itemId: string) => {
+    setSelectedItemIds((prev) => (prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]));
+  };
+
+  const toggleSelectAllPage = () => {
+    setSelectedItemIds((prev) => {
+      if (allPageSelected) {
+        const pageIds = new Set(paginatedItems.map((item) => item.id));
+        return prev.filter((id) => !pageIds.has(id));
+      }
+      const next = new Set(prev);
+      paginatedItems.forEach((item) => next.add(item.id));
+      return Array.from(next);
+    });
+  };
+
+  const openMoveCategoryModal = () => {
+    setBulkParentCategoryId('');
+    setBulkTargetSubcategoryId('');
+    setShowMoveCategoryModal(true);
+  };
+
+  const closeMoveCategoryModal = () => {
+    setShowMoveCategoryModal(false);
+    setBulkParentCategoryId('');
+    setBulkTargetSubcategoryId('');
+  };
+
+  const handleBulkMoveCategory = async () => {
+    if (!activeOrganizationId || selectedItemIds.length === 0 || !bulkTargetSubcategoryId) return;
+    try {
+      setIsBulkMoving(true);
+      const { error } = await supabase
+        .from('CatalogItems')
+        .update({ category_id: bulkTargetSubcategoryId, updated_at: new Date().toISOString() })
+        .eq('organization_id', activeOrganizationId)
+        .in('id', selectedItemIds);
+      if (error) throw new Error(error.message || 'Failed to move selected items');
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Category updated',
+        message: `${selectedItemIds.length} item(s) moved successfully.`,
+      });
+      setSelectedItemIds([]);
+      closeMoveCategoryModal();
+      refetch();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Move failed',
+        message: error instanceof Error ? error.message : 'Unknown error while moving items.',
+      });
+    } finally {
+      setIsBulkMoving(false);
+    }
+  };
+
   // Handlers for actions
   const handleEditItem = (item: Item, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    router.navigate(`/catalog/items/edit/${item.id}`);
+    router.navigate(withReturnTo(`/catalog/items/edit/${item.id}`));
   };
 
   const handleArchiveItem = async (item: Item, e: React.MouseEvent) => {
@@ -607,7 +755,7 @@ export default function Items() {
     <div className="py-6 px-6">
       {/* Header — title + contextual actions per tab (same as Quotes/Sales) */}
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="flex items-center gap-3">
           <h1 className="text-title font-semibold text-foreground">Catalog Items</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
@@ -620,9 +768,20 @@ export default function Items() {
                 <Upload className="w-4 h-4" />
                 Import
               </button>
+              {hasContextualBack && (
+                <button
+                  type="button"
+                  onClick={handleContextualBack}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                  title="Back"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back
+                </button>
+              )}
               <button
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                onClick={() => router.navigate('/catalog/items/new')}
+                onClick={() => router.navigate(withReturnTo('/catalog/items/new'))}
               >
                 <Plus className="w-4 h-4" />
                 Add New
@@ -661,7 +820,7 @@ export default function Items() {
           )}
           {activeTab === 'collection' && (
             <button
-              onClick={() => router.navigate('/catalog/items/new?is_fabric=true')}
+              onClick={() => router.navigate(withReturnTo('/catalog/items/new?is_fabric=true'))}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               title="Add new collection"
@@ -746,29 +905,29 @@ export default function Items() {
       {/* Tab Content — mt-4 below Status bar (same as Quotes/Sales) */}
       {activeTab === 'items' && (
         <>
-      {/* Search Bar */}
-      <div className="mb-2 mt-4">
-        <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg">
-          <div className="flex items-center gap-4">
+      {/* Search and Filters — Standard View A sizing */}
+      <div className="mb-4 mt-4">
+        <div className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
+          <div className="flex items-center gap-3">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search by SKU, name, collection, variant, color, description, manufacturer..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+              className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
                 showFilters || totalActiveFilters > 0
                   ? 'bg-primary text-white border-primary'
                   : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
               }`}
             >
-              <Filter className="w-4 h-4" />
+              <Filter style={{ width: 14, height: 14 }} />
               Filters
               {totalActiveFilters > 0 && (
                 <span className="bg-white text-primary rounded-full px-2 py-0.5 text-xs font-semibold">
@@ -776,28 +935,6 @@ export default function Items() {
                 </span>
               )}
             </button>
-            <div className="flex items-center gap-1 border border-gray-200 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setViewMode('table')}
-                className={`p-2 transition-colors ${
-                  viewMode === 'table'
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </button>
-            </div>
           </div>
 
           {/* Filters Dropdown */}
@@ -989,13 +1126,41 @@ export default function Items() {
         </div>
       </div>
 
+      {/* Bulk actions */}
+      {selectedItemsCount > 0 && (
+        <div className="bg-primary/5 border border-primary/20 rounded-lg px-4 py-3 mb-3 flex items-center justify-between">
+          <span className="text-sm text-gray-800">{selectedItemsCount} item(s) selected</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedItemIds([])}
+              className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50"
+            >
+              Clear selection
+            </button>
+            <button
+              onClick={openMoveCategoryModal}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90"
+            >
+              Move category
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table View */}
-      {viewMode === 'table' && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="table-fit-wrapper">
             <table className="table-fit">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-10">
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      onChange={toggleSelectAllPage}
+                      aria-label="Select all items on this page"
+                    />
+                  </th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs w-16">Image</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
@@ -1051,7 +1216,7 @@ export default function Items() {
               <tbody className="divide-y divide-gray-200">
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 px-6 text-center">
+                    <td colSpan={11} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                           <Search className="w-6 h-6 text-gray-400" />
@@ -1076,6 +1241,15 @@ export default function Items() {
                       onFocus={() => warmDetail(item.id)}
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
+                      <td className="py-3 px-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedItemIds.includes(item.id)}
+                          onChange={() => toggleSelectItem(item.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label={`Select ${item.itemName}`}
+                        />
+                      </td>
                       <td className="py-3 px-4">
                         {item.image ? (
                           <div 
@@ -1184,8 +1358,7 @@ export default function Items() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+      </div>
 
       {/* Pagination */}
       <div className="bg-white border border-gray-200 rounded-lg py-6 px-6">
@@ -1237,6 +1410,71 @@ export default function Items() {
         </div>
       </div>
 
+      {/* Move category modal */}
+      {showMoveCategoryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Move selected items</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Category <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={bulkParentCategoryId}
+                  onChange={(e) => {
+                    setBulkParentCategoryId(e.target.value);
+                    setBulkTargetSubcategoryId('');
+                  }}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                >
+                  <option value="">Select category</option>
+                  {parentCatalogCategories.map((cat: any) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Subcategory <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={bulkTargetSubcategoryId}
+                  onChange={(e) => setBulkTargetSubcategoryId(e.target.value)}
+                  disabled={!bulkParentCategoryId}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:bg-gray-100"
+                >
+                  <option value="">{bulkParentCategoryId ? 'Select subcategory' : 'Select category first'}</option>
+                  {subcategoriesByParent.map((sub: any) => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-gray-500">{selectedItemsCount} item(s) will be moved.</p>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={closeMoveCategoryModal}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkMoveCategory}
+                disabled={!bulkTargetSubcategoryId || isBulkMoving}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isBulkMoving ? 'Moving...' : 'Move'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Import Modal */}
       <ImportCatalog
         isOpen={showImportModal}
@@ -1256,7 +1494,7 @@ export default function Items() {
       )}
       {activeTab === 'categories' && (
         <div className="mt-4">
-          <Categories ref={categoriesRef} />
+          <Categories ref={categoriesRef} itemsForCounts={items} />
         </div>
       )}
       {activeTab === 'collection' && (

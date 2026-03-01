@@ -41,6 +41,9 @@ export default function Transactions({ defaultTypeFilter, title }: TransactionsP
   const { movements, loading, refetch } = useInventoryMovements(
     defaultTypeFilter ? { movementType: defaultTypeFilter } : undefined
   );
+  const isAdjustmentsView = defaultTypeFilter === 'adjustment';
+  const newPath = isAdjustmentsView ? '/inventory/adjustments/new' : '/inventory/transactions/new';
+  const detailBasePath = isAdjustmentsView ? '/inventory/adjustments' : '/inventory/transactions';
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<MovementType | ''>(defaultTypeFilter ?? '');
   const [statusFilter, setStatusFilter] = useState<MovementStatus | ''>('');
@@ -119,11 +122,11 @@ export default function Transactions({ defaultTypeFilter, title }: TransactionsP
         </div>
         <button
           type="button"
-          onClick={() => router.navigate('/inventory/transactions/new')}
+          onClick={() => router.navigate(newPath)}
           className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-700"
         >
           <Plus className="w-4 h-4" />
-          New Transaction
+          {isAdjustmentsView ? 'New Adjustment' : 'New Transaction'}
         </button>
       </div>
 
@@ -196,7 +199,7 @@ export default function Transactions({ defaultTypeFilter, title }: TransactionsP
                   className="border-t hover:bg-gray-50 cursor-pointer"
                   onClick={() => {
                     sessionStorage.setItem('currentTransactionId', m.id);
-                    router.navigate(`/inventory/transactions/${m.id}`);
+                    router.navigate(`${detailBasePath}/${m.id}`);
                   }}
                 >
                   <td className="px-4 py-3 font-medium text-gray-900">{m.movement_no ?? '—'}</td>

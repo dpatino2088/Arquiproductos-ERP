@@ -6,6 +6,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useUIStore } from '../../stores/ui-store';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { FileText, DollarSign } from 'lucide-react';
 
 const FINANCIAL_SUBMODULES = [
@@ -105,6 +106,23 @@ export default function PaymentDetail() {
   const [dealersList, setDealersList] = useState<{ id: string; dealer_name: string; dealer_no: string | null }[]>([]);
   const [assignDealerId, setAssignDealerId] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const listPath = '/financials/payments';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+  const onBack = useCallback(() => {
+    router.navigate(listPath);
+  }, []);
+  const onBackContextual = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
+  }, [queryReturnTo]);
 
   useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
 
@@ -235,7 +253,7 @@ export default function PaymentDetail() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-700">{error || 'Payment not found'}</p>
         </div>
-        <button onClick={() => router.navigate('/financials/payments')}
+        <button onClick={onBack}
           className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
           Back to Payments
         </button>
@@ -259,8 +277,18 @@ export default function PaymentDetail() {
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
-      onBack={() => router.navigate('/financials/payments')}
+      onBack={onBack}
       contentClassName="pt-2 pb-6"
+      actions={hasRedirectBack ? (
+        <button
+          type="button"
+          onClick={onBackContextual}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+          title="Back"
+        >
+          Back
+        </button>
+      ) : undefined}
     >
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -313,7 +341,7 @@ export default function PaymentDetail() {
                 <dt className="text-gray-500">Sales Order</dt>
                 <dd>
                   <button type="button"
-                    onClick={() => router.navigate(`/sales/orders/${payment.SalesOrder!.id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/sales/orders/${payment.SalesOrder!.id}`))}
                     className="text-primary hover:underline font-medium">
                     {payment.SalesOrder.sales_order_no}
                   </button>

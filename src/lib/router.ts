@@ -13,7 +13,7 @@ export class Router {
     
     // Handle browser back/forward buttons
     window.addEventListener('popstate', () => {
-      this.navigate(window.location.pathname, false);
+      this.navigate(`${window.location.pathname}${window.location.search}${window.location.hash}`, false);
     });
   }
 
@@ -205,7 +205,7 @@ export class Router {
 
   // Initialize with current path
   init() {
-    this.navigate(window.location.pathname, false);
+    this.navigate(`${window.location.pathname}${window.location.search}${window.location.hash}`, false);
   }
 }
 

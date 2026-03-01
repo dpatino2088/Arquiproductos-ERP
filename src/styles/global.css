@@ -231,13 +231,41 @@
 @layer base {
   * { border-color: hsl(var(--border)); }
   html, body { overflow-x: hidden; }
-  body { @apply bg-background text-foreground; font-family: var(--font-family); font-size: var(--font-size-body); line-height: 1.5; }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-family);
+    font-size: var(--font-size-body);
+    line-height: 1.5;
+  }
 
-  .btn { height: 32px; padding: 0 12px; font-size: 12px; border-radius: 0; @apply inline-flex items-center justify-center font-medium transition-colors; }
-  .btn-primary { @apply bg-primary text-primary-foreground hover:bg-primary/90; }
+  .btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease, opacity .15s ease;
+  }
+  .btn-primary {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+  .btn-primary:hover {
+    background-color: color-mix(in srgb, hsl(var(--primary)) 90%, black);
+  }
   .btn-secondary {
-    @apply bg-background border text-foreground hover:bg-muted;
+    background-color: hsl(var(--background));
+    border-width: 1px;
+    border-style: solid;
     border-color: hsl(var(--border));
+    color: hsl(var(--foreground));
+  }
+  .btn-secondary:hover {
+    background-color: hsl(var(--muted));
   }
   .btn-save { background-color: var(--save-hex); color: var(--white-hex); }
   .btn-save:hover:not(:disabled) { background-color: var(--save-hover); }
@@ -261,7 +289,17 @@
     cursor: not-allowed;
   }
 
-  .icon-btn { width: 32px; height: 32px; @apply inline-flex items-center justify-center hover:bg-muted transition-colors; }
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color .15s ease, color .15s ease;
+  }
+  .icon-btn:hover {
+    background-color: hsl(var(--muted));
+  }
 
   /* Tablas: sin scroll lateral, todo visible en una vista */
   .table-fit-wrapper { overflow-x: hidden; }

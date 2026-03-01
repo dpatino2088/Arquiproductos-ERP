@@ -20,6 +20,7 @@ import TimelineView from '../../components/shared/TimelineView';
 import { ChevronDown } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
 import { formatCurrency } from '../../lib/utils';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 
 interface ManufacturingOrderDetailProps {
   moId?: string;
@@ -75,6 +76,23 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [moLines, setMoLines] = useState<MOLine[]>([]);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const listPath = '/manufacturing/manufacturing-orders';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+  const onBack = useCallback(() => {
+    router.navigate(listPath);
+  }, []);
+  const onBackContextual = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
+  }, [queryReturnTo]);
 
   useEffect(() => { registerSubmodules('Manufacturing', MFG_SUBMODULES); }, [registerSubmodules]);
 
@@ -185,7 +203,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-700">Manufacturing order ID is required</p>
         </div>
-        <button onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
+        <button onClick={onBack}
           className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
           Back to Manufacturing Orders
         </button>
@@ -203,7 +221,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-700">{error || 'Manufacturing order not found'}</p>
         </div>
-        <button onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
+        <button onClick={onBack}
           className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
           Back to Manufacturing Orders
         </button>
@@ -249,30 +267,44 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
-      onBack={() => router.navigate('/manufacturing/manufacturing-orders')}
+      onBack={onBack}
       contentClassName="pt-2 pb-6"
-      actions={actionItems.length > 0 ? (
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setActionsOpen(!actionsOpen)}
-            disabled={isTransitioning}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-          >
-            Actions <ChevronDown className="w-4 h-4" />
-          </button>
-          {actionsOpen && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[180px] py-1">
-                {actionItems.map((item, i) => (
-                  <button key={i} type="button" onClick={item.onClick}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </>
+      actions={hasRedirectBack || actionItems.length > 0 ? (
+        <div className="flex items-center gap-2">
+          {hasRedirectBack && (
+            <button
+              type="button"
+              onClick={onBackContextual}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              title="Back"
+            >
+              Back
+            </button>
+          )}
+          {actionItems.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setActionsOpen(!actionsOpen)}
+                disabled={isTransitioning}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Actions <ChevronDown className="w-4 h-4" />
+              </button>
+              {actionsOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[180px] py-1">
+                    {actionItems.map((item, i) => (
+                      <button key={i} type="button" onClick={item.onClick}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}>
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       ) : undefined}
@@ -319,7 +351,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Sales Order</dt>
                   <dd>
-                    <button type="button" onClick={() => router.navigate(`/sales/orders/${so.id}`)}
+                    <button type="button" onClick={() => router.navigate(withReturnTo(`/sales/orders/${so.id}`))}
                       className="text-primary hover:underline font-medium">{so.sales_order_no}</button>
                   </dd>
                 </div>

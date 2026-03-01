@@ -29,7 +29,8 @@ export default function Collections() {
   const [productTypeMapLoaded, setProductTypeMapLoaded] = useState(false);
   
   const [searchTerm, setSearchTerm] = useState('');
-  const [manufacturerId, setManufacturerId] = useState<string>('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedManufacturers, setSelectedManufacturers] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [selectedCollectionName, setSelectedCollectionName] = useState<string | null>(null);
@@ -117,11 +118,11 @@ export default function Collections() {
     if (!collections) return [];
     let result = collections;
 
-    // Filter by manufacturer (collections that have at least one item from this manufacturer)
-    if (manufacturerId) {
+    // Filter by manufacturers (collections that have at least one item from selected manufacturers)
+    if (selectedManufacturers.length > 0) {
       result = result.filter(c => {
         const ids = c.manufacturer_ids;
-        return ids && ids.length > 0 && ids.includes(manufacturerId);
+        return ids && ids.length > 0 && selectedManufacturers.some((mId) => ids.includes(mId));
       });
     }
 
@@ -145,7 +146,7 @@ export default function Collections() {
     }
 
     return result;
-  }, [collections, searchTerm, manufacturerId, catalogItems, productTypeNamesByItemId, productTypeMapLoaded]);
+  }, [collections, searchTerm, selectedManufacturers, catalogItems, productTypeNamesByItemId, productTypeMapLoaded]);
 
   // Pagination
   const totalPages = Math.ceil(filteredCollections.length / itemsPerPage);
@@ -157,16 +158,16 @@ export default function Collections() {
   // Reset page when search or manufacturer filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, manufacturerId]);
+  }, [searchTerm, selectedManufacturers]);
 
   if (loading && collections.length === 0) return <div className="py-6 px-6" />;
 
   return (
     <div>
       {/* Filters — spacing from status bar: mt-4 from parent */}
-      {/* Search Bar + Manufacturer */}
-      <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg mb-2">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+      {/* Search Bar + Filters */}
+      <div className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'} mb-4`}>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           {/* Search bar — tal cual, primero */}
           <div className="flex-1 relative min-w-0">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -175,30 +176,64 @@ export default function Collections() {
               placeholder="Search by SKU, collection name, variant name, or product type..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+              className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               aria-label="Search by SKU, collection name, variant name, or product type"
             />
           </div>
-          {/* Manufacturer filter — a la derecha del search */}
-          <div className="flex items-center gap-2 flex-shrink-0 min-w-0 sm:min-w-[200px]">
-            <Filter className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden />
-            <label htmlFor="collections-manufacturer-filter" className="text-gray-600 text-sm whitespace-nowrap hidden sm:inline">
-              Manufacturer
-            </label>
-            <select
-              id="collections-manufacturer-filter"
-              value={manufacturerId}
-              onChange={(e) => setManufacturerId(e.target.value)}
-              className="w-full min-w-[160px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-              aria-label="Filter by manufacturer"
-            >
-              <option value="">All manufacturers</option>
-              {manufacturersWithIsRoll.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
+              showFilters || selectedManufacturers.length > 0
+                ? 'bg-primary text-white border-primary'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <Filter style={{ width: 14, height: 14 }} />
+            Filters
+            {selectedManufacturers.length > 0 && (
+              <span className="bg-white text-primary rounded-full px-2 py-0.5 text-xs font-semibold">
+                {selectedManufacturers.length}
+              </span>
+            )}
+          </button>
         </div>
+
+        {showFilters && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">Manufacturers</span>
+              {selectedManufacturers.length > 0 && (
+                <button
+                  onClick={() => setSelectedManufacturers([])}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="max-h-40 overflow-y-auto">
+              {manufacturersWithIsRoll.map((m) => (
+                <div
+                  key={m.id}
+                  onClick={() =>
+                    setSelectedManufacturers((prev) =>
+                      prev.includes(m.id) ? prev.filter((id) => id !== m.id) : [...prev, m.id]
+                    )
+                  }
+                  className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedManufacturers.includes(m.id)}
+                    readOnly
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-gray-700">{m.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error State */}
@@ -226,7 +261,7 @@ export default function Collections() {
                     <Package className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                     <p className="text-gray-600 mb-2">No collections found</p>
                     <p className="text-sm text-gray-500">
-                      {(searchTerm || manufacturerId) ? 'Try adjusting your search or manufacturer filter' : 'Start by adding roll items with collections'}
+                      {(searchTerm || selectedManufacturers.length > 0) ? 'Try adjusting your search or manufacturer filters' : 'Start by adding roll items with collections'}
                     </p>
                   </td>
                 </tr>
@@ -410,7 +445,7 @@ export default function Collections() {
                         </h3>
                         
                         {/* SKU */}
-                        <div className="mb-2">
+                        <div className="mb-4">
                           <p className="text-xs text-gray-500 mb-0.5">SKU</p>
                           <p className="text-sm text-gray-700 font-mono truncate" title={variant.sku ?? undefined}>
                             {variant.sku}

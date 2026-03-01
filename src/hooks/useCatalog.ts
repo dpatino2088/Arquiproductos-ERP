@@ -207,6 +207,9 @@ export function useCatalogItems(
             roll_type: (item as any).roll_type || null, collection_name: item.collection_name || null, variant_name: item.variant_name || null,
             roll_width: item.roll_width || item.roll_width_m || null, roll_width_m: item.roll_width_m || item.roll_width || null, fabric_pricing_mode: item.fabric_pricing_mode || null,
             color: item.color || null, item_role: (item as any).item_role || null, cost_exw: item.cost_exw || null, default_margin_pct: item.default_margin_pct || null,
+            purchase_mode: (item.purchase_mode as CatalogItem['purchase_mode']) ?? null,
+            stock_basis: (item.stock_basis as CatalogItem['stock_basis']) ?? null,
+            purchase_uom: item.purchase_uom ?? item.purchase_unit ?? null,
             msrp: finalMsrp, cost_price: item.cost_exw || item.cost_price || 0, unit_price: salePrice,
             is_active: item.is_active !== undefined && item.is_active !== null ? Boolean(item.is_active) : (item.active !== undefined && item.active !== null ? Boolean(item.active) : true),
             active: item.active !== undefined && item.active !== null ? Boolean(item.active) : (item.is_active !== undefined && item.is_active !== null ? Boolean(item.is_active) : true),
@@ -1194,19 +1197,59 @@ export function useOperatingDrives() {
   return { drives, loading, error };
 }
 
-// Hook para cargar ItemCategories
-export interface ItemCategory {
+// Hook para cargar y administrar CatalogCategories
+export interface CatalogCategory {
   id: string;
   organization_id: string;
   name: string;
   code?: string | null;
+  parent_id?: string | null;
+  sort_order: number;
   is_group: boolean;
-  parent_category_id?: string | null;
-  sort_order?: number | null;
   deleted: boolean;
   archived: boolean;
   created_at: string;
   updated_at?: string | null;
+}
+
+export type ItemCategory = CatalogCategory;
+export type CatalogCategoryCRUD = CatalogCategory;
+
+const CATALOG_CATEGORY_SELECT = 'id, organization_id, name, code, parent_id, sort_order, is_group, deleted, archived, created_at, updated_at';
+
+function sortCatalogCategories(a: CatalogCategory, b: CatalogCategory): number {
+  const aParent = a.parent_id ?? '';
+  const bParent = b.parent_id ?? '';
+  if (aParent !== bParent) return aParent.localeCompare(bParent);
+  if ((a.sort_order ?? 0) !== (b.sort_order ?? 0)) return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  return (a.name || '').localeCompare(b.name || '');
+}
+
+function mapCatalogCategoryRow(row: any): CatalogCategory {
+  return {
+    id: row.id,
+    organization_id: row.organization_id,
+    name: row.name ?? '',
+    code: row.code ?? null,
+    parent_id: row.parent_id ?? null,
+    sort_order: row.sort_order ?? 0,
+    is_group: row.parent_id == null ? true : Boolean(row.is_group),
+    deleted: Boolean(row.deleted),
+    archived: Boolean(row.archived),
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? null,
+  };
+}
+
+async function fetchCatalogCategoriesRows(activeOrganizationId: string): Promise<CatalogCategory[]> {
+  const { data, error } = await supabase
+    .from('CatalogCategories')
+    .select(CATALOG_CATEGORY_SELECT)
+    .eq('organization_id', activeOrganizationId)
+    .eq('deleted', false);
+
+  if (error) throw error;
+  return (data || []).map(mapCatalogCategoryRow).sort(sortCatalogCategories);
 }
 
 export function useItemCategories() {
@@ -1216,8 +1259,11 @@ export function useItemCategories() {
   const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
+    let mounted = true;
+
     async function fetchCategories() {
       if (!activeOrganizationId) {
+        if (!mounted) return;
         setLoading(false);
         setCategories([]);
         setError(null);
@@ -1225,77 +1271,37 @@ export function useItemCategories() {
       }
 
       try {
-        setLoading(true);
-        setError(null);
-
-        // ✅ FIX: Use CatalogCategories (real table) instead of ItemCategories
-        const { data, error: queryError } = await supabase
-          .from('CatalogCategories')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true });
-
-        if (queryError) {
-          if (import.meta.env.DEV) {
-            // ✅ FIX: Formatear error para evitar "[circular]"
-            const errorDetails = { 
-              message: queryError.message, 
-              code: queryError.code, 
-              details: queryError.details,
-              hint: queryError.hint 
-            };
-            console.error('Error fetching CatalogCategories:', errorDetails);
-          }
-          throw queryError;
+        if (mounted) {
+          setLoading(true);
+          setError(null);
         }
-
-        setCategories(data || []);
+        const rows = await fetchCatalogCategoriesRows(activeOrganizationId);
+        if (mounted) setCategories(rows);
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading categories';
-        if (import.meta.env.DEV) {
-          // ✅ FIX: Formatear error para evitar "[circular]"
-          const errorDetails = err instanceof Error 
-            ? { message: err.message, name: err.name, stack: err.stack }
-            : typeof err === 'object' && err !== null
-            ? { message: (err as any).message || String(err), code: (err as any).code, details: (err as any).details }
-            : String(err);
-          console.error('Error fetching CatalogCategories:', errorDetails);
-        }
-        setError(errorMessage);
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : 'Error loading categories');
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
 
     fetchCategories();
+    return () => {
+      mounted = false;
+    };
   }, [activeOrganizationId]);
 
   return { categories, loading, error };
 }
 
-// Hook para cargar solo las categorías hoja (leaf categories - no grupos)
+// Hook para cargar solo subcategorías (leaf nodes)
 export function useLeafItemCategories() {
   const { categories, loading, error } = useItemCategories();
-  
-  const leafCategories = categories.filter(cat => !cat.is_group);
-  
+  const leafCategories = useMemo(
+    () => categories.filter((cat) => !cat.is_group && Boolean(cat.parent_id)),
+    [categories]
+  );
   return { categories: leafCategories, loading, error };
-}
-
-// Hook para CRUD de CatalogCategories (UPDATED to use real table)
-export interface CatalogCategoryCRUD {
-  id: string;
-  organization_id: string;
-  name: string;
-  code?: string | null;
-  parent_id?: string | null; // DB uses parent_id (not parent_category_id)
-  sort_order: number;
-  is_group: boolean; // true = parent group (not selectable for SKUs), false = leaf (selectable)
-  deleted: boolean;
-  archived: boolean;
-  created_at: string;
-  updated_at?: string | null;
 }
 
 export function useItemCategoriesCRUD() {
@@ -1307,118 +1313,129 @@ export function useItemCategoriesCRUD() {
   const [isDeleting, setIsDeleting] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
 
-  useEffect(() => {
-    async function fetchCategories() {
-      if (!activeOrganizationId) {
-        setLoading(false);
-        setCategories([]);
-        setError(null);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        // CatalogCategories table does NOT have deleted/archived columns
-        // Query without those filters
-        const { data, error: queryError } = await supabase
-          .from('CatalogCategories')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true });
-
-        if (queryError) {
-          if (import.meta.env.DEV) {
-            console.error('❌ Error fetching CatalogCategories:', queryError.message);
-            console.error('Full error:', queryError);
-          }
-          throw queryError;
-        }
-
-        if (import.meta.env.DEV) {
-          console.log('✅ CatalogCategories loaded:', data?.length || 0, 'categories');
-        }
-
-        setCategories(data || []);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Error loading categories';
-        if (import.meta.env.DEV) {
-          console.error('❌ Error in useItemCategoriesCRUD:', errorMessage);
-        }
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
+  const refetch = useCallback(async () => {
+    if (!activeOrganizationId) {
+      setCategories([]);
+      setLoading(false);
+      return;
     }
-
-    fetchCategories();
+    setLoading(true);
+    setError(null);
+    try {
+      const rows = await fetchCatalogCategoriesRows(activeOrganizationId);
+      setCategories(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error loading categories');
+    } finally {
+      setLoading(false);
+    }
   }, [activeOrganizationId]);
 
-  const createCategory = async (categoryData: Omit<CatalogCategoryCRUD, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>) => {
-    if (!activeOrganizationId) {
-      throw new Error('No organization selected');
-    }
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
+  const createCategory = async (
+    categoryData: Omit<CatalogCategoryCRUD, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>
+  ) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
     setIsCreating(true);
     try {
-      const { data, error } = await supabase
-        .from('CatalogCategories') // UPDATED: Use CatalogCategories
+      const isGroup = Boolean(categoryData.is_group);
+      const parentId = isGroup ? null : (categoryData.parent_id || null);
+      if (!isGroup && !parentId) {
+        throw new Error('A subcategory must have a parent category');
+      }
+
+      const { data, error: insertError } = await supabase
+        .from('CatalogCategories')
         .insert({
-          ...categoryData,
           organization_id: activeOrganizationId,
+          name: categoryData.name.trim(),
+          code: categoryData.code?.trim() || null,
+          parent_id: parentId,
+          is_group: isGroup,
+          sort_order: categoryData.sort_order ?? 0,
           deleted: false,
           archived: false,
         })
-        .select()
+        .select(CATALOG_CATEGORY_SELECT)
         .single();
-
-      if (error) throw error;
-      
-      // Refresh categories
-      setCategories(prev => [...prev, data]);
-      return data;
+      if (insertError) throw insertError;
+      const created = mapCatalogCategoryRow(data);
+      setCategories((prev) => [...prev, created].sort(sortCatalogCategories));
+      return created;
     } finally {
       setIsCreating(false);
     }
   };
 
   const updateCategory = async (id: string, categoryData: Partial<CatalogCategoryCRUD>) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
     setIsUpdating(true);
     try {
-      const { data, error } = await supabase
-        .from('CatalogCategories') // UPDATED: Use CatalogCategories
-        .update({
-          ...categoryData,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .select()
-        .single();
+      const nextIsGroup = categoryData.is_group;
+      const payload: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (categoryData.name !== undefined) payload.name = categoryData.name.trim();
+      if (categoryData.code !== undefined) payload.code = categoryData.code?.trim() || null;
+      if (categoryData.sort_order !== undefined) payload.sort_order = categoryData.sort_order ?? 0;
+      if (nextIsGroup !== undefined) payload.is_group = Boolean(nextIsGroup);
+      if (categoryData.parent_id !== undefined) {
+        payload.parent_id = nextIsGroup ? null : (categoryData.parent_id || null);
+      }
 
-      if (error) throw error;
-      
-      // Refresh categories
-      setCategories(prev => prev.map(cat => cat.id === id ? data : cat));
-      return data;
+      const { data, error: updateError } = await supabase
+        .from('CatalogCategories')
+        .update(payload)
+        .eq('id', id)
+        .eq('organization_id', activeOrganizationId)
+        .select(CATALOG_CATEGORY_SELECT)
+        .single();
+      if (updateError) throw updateError;
+
+      const updated = mapCatalogCategoryRow(data);
+      setCategories((prev) => prev.map((cat) => (cat.id === id ? updated : cat)).sort(sortCatalogCategories));
+      return updated;
     } finally {
       setIsUpdating(false);
     }
   };
 
   const deleteCategory = async (id: string) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
     setIsDeleting(true);
     try {
-      const { error } = await supabase
-        .from('CatalogCategories') // UPDATED: Use CatalogCategories
-        .update({ deleted: true })
-        .eq('id', id);
+      const { count: childrenCount, error: childErr } = await supabase
+        .from('CatalogCategories')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', activeOrganizationId)
+        .eq('parent_id', id)
+        .or('deleted.is.null,deleted.eq.false');
+      if (childErr) throw new Error(childErr.message || 'Failed to validate child categories');
+      if ((childrenCount || 0) > 0) {
+        throw new Error('Cannot delete category with existing subcategories');
+      }
 
-      if (error) throw error;
-      
-      // Refresh categories
-      setCategories(prev => prev.filter(cat => cat.id !== id));
+      const { count: itemCount, error: itemErr } = await supabase
+        .from('CatalogItems')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', activeOrganizationId)
+        .eq('category_id', id);
+      if (itemErr) throw new Error(itemErr.message || 'Failed to validate assigned items');
+      if ((itemCount || 0) > 0) {
+        throw new Error('Cannot delete category with assigned items');
+      }
+
+      const { error: deleteErr } = await supabase
+        .from('CatalogCategories')
+        .update({ deleted: true, archived: true, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('organization_id', activeOrganizationId);
+      if (deleteErr) throw new Error(deleteErr.message || 'Failed to delete category');
+
+      setCategories((prev) => prev.filter((cat) => cat.id !== id));
     } finally {
       setIsDeleting(false);
     }
@@ -1428,6 +1445,7 @@ export function useItemCategoriesCRUD() {
     categories,
     loading,
     error,
+    refetch,
     createCategory,
     updateCategory,
     deleteCategory,
@@ -1435,21 +1453,6 @@ export function useItemCategoriesCRUD() {
     isUpdating,
     isDeleting,
   };
-}
-
-// Hook para cargar CatalogCategories (category tree using parent_id)
-export interface CatalogCategory {
-  id: string;
-  organization_id: string;
-  name: string;
-  code?: string | null;
-  parent_id?: string | null;
-  sort_order?: number | null;
-  is_group?: boolean; // true = parent group (not selectable), false = leaf (selectable)
-  deleted?: boolean; // Optional - table may not have this column
-  archived?: boolean;
-  created_at: string;
-  updated_at?: string | null;
 }
 
 export function useCatalogCategories() {
@@ -1471,48 +1474,8 @@ export function useCatalogCategories() {
         setLoading(true);
         setError(null);
 
-        // CatalogCategories table does NOT have deleted/archived columns
-        const { data, error: queryError } = await supabase
-          .from('CatalogCategories')
-          .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .order('sort_order', { ascending: true, nullsFirst: false })
-          .order('name', { ascending: true });
-        let categoriesData = data;
-        let categoriesError = queryError;
-
-        // If CatalogCategories doesn't exist, fall back to ItemCategories
-        if (categoriesError && (categoriesError.code === '42P01' || categoriesError.message?.includes('does not exist'))) {
-          if (import.meta.env.DEV) {
-            console.log('CatalogCategories table not found, using ItemCategories as fallback');
-          }
-          const { data: itemCategories, error: itemCatError } = await supabase
-            .from('ItemCategories')
-            .select('*')
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false)
-            .order('sort_order', { ascending: true })
-            .order('name', { ascending: true });
-
-          if (itemCatError) throw itemCatError;
-          
-          // Map ItemCategories to CatalogCategories format
-          categoriesData = (itemCategories || []).map((cat: any) => ({
-            id: cat.id,
-            organization_id: cat.organization_id,
-            name: cat.name,
-            parent_id: cat.parent_category_id || cat.parent_id || null,
-            sort_order: cat.sort_order || null,
-            deleted: cat.deleted || false, // Default to false if not present
-            created_at: cat.created_at,
-            updated_at: cat.updated_at || null,
-          }));
-          categoriesError = null;
-        }
-
-        if (categoriesError) throw categoriesError;
-        
-        setCategories(categoriesData || []);
+        const rows = await fetchCatalogCategoriesRows(activeOrganizationId);
+        setCategories(rows);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading categories';
         if (import.meta.env.DEV) {
@@ -1527,16 +1490,20 @@ export function useCatalogCategories() {
     fetchCategories();
   }, [activeOrganizationId]);
 
-  // Helper function to build category tree
-  const buildCategoryTree = useCallback((categories: CatalogCategory[]): Array<CatalogCategory & { level: number; path: string }> => {
-    const tree: Array<CatalogCategory & { level: number; path: string }> = [];
-    const categoryMap = new Map<string, CatalogCategory>(categories.map(cat => [cat.id, cat]));
-    
+  // Helper function to build ordered category tree with path
+  const categoryTree = useMemo(() => {
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    const output: Array<CatalogCategory & { level: number; path: string }> = [];
+
+    const parents = categories
+      .filter((c) => c.parent_id == null && c.is_group)
+      .sort(sortCatalogCategories);
+
     const buildPath = (category: CatalogCategory): string => {
       const path: string[] = [category.name];
       let current = category;
       while (current.parent_id) {
-        const parent = categoryMap.get(current.parent_id);
+        const parent = byId.get(current.parent_id);
         if (!parent) break;
         path.unshift(parent.name);
         current = parent;
@@ -1544,37 +1511,31 @@ export function useCatalogCategories() {
       return path.join(' > ');
     };
 
-    const getLevel = (category: CatalogCategory): number => {
-      let level = 0;
-      let current = category;
-      while (current.parent_id) {
-        const parent = categoryMap.get(current.parent_id);
-        if (!parent) break;
-        level++;
-        current = parent;
-      }
-      return level;
-    };
-
-    categories.forEach(cat => {
-      tree.push({
-        ...cat,
-        level: getLevel(cat),
-        path: buildPath(cat),
+    parents.forEach((parent) => {
+      output.push({ ...parent, level: 0, path: buildPath(parent) });
+      const children = categories
+        .filter((c) => c.parent_id === parent.id && !c.is_group)
+        .sort(sortCatalogCategories);
+      children.forEach((child) => {
+        output.push({ ...child, level: 1, path: buildPath(child) });
       });
     });
 
-    return tree.sort((a, b) => {
-      if (a.level !== b.level) return a.level - b.level;
-      return a.path.localeCompare(b.path);
-    });
-  }, []);
+    // Keep orphan leaves visible at the end for recovery workflows
+    const parentIds = new Set(parents.map((p) => p.id));
+    categories
+      .filter((c) => !c.is_group && c.parent_id && !parentIds.has(c.parent_id))
+      .sort(sortCatalogCategories)
+      .forEach((orphan) => {
+        output.push({ ...orphan, level: 1, path: buildPath(orphan) });
+      });
 
-  const categoryTree = buildCategoryTree(categories);
-  
-  // Helper: get only leaf categories (is_group=false) for CatalogItems selection
+    return output;
+  }, [categories]);
+
+  // Helper: get only valid subcategories for CatalogItems selection
   const leafCategories = useMemo(() => {
-    return categoryTree.filter(cat => !cat.is_group);
+    return categoryTree.filter((cat) => !cat.is_group && Boolean(cat.parent_id));
   }, [categoryTree]);
 
   return { categories, categoryTree, leafCategories, loading, error };

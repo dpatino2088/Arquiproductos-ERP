@@ -645,6 +645,25 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/inventory/adjustments/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('transaction-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/adjustments/:id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/inventory\/adjustments\/([^/]+)/);
+        if (match?.[1] && match[1] !== 'new') {
+          sessionStorage.setItem('currentTransactionId', match[1]);
+        }
+        setCurrentPage('transaction-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/inventory/material-demand', () => {
       if (isAuthenticated) {
         setCurrentPage('material-demand');
@@ -978,7 +997,7 @@ function App() {
     if (!isAuthenticated) return;
 
     const handleLocationChange = () => {
-      const currentPath = window.location.pathname;
+      const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       const routerPath = router.getCurrentRoute();
       
       // If URL changed but router hasn't been notified, trigger navigation
@@ -1130,7 +1149,12 @@ function App() {
         return <TransactionDetail />;
       case 'transaction-detail': {
         const txId = sessionStorage.getItem('currentTransactionId');
-        return txId ? <TransactionDetail transactionId={txId} /> : <Transactions />;
+        if (txId) return <TransactionDetail transactionId={txId} />;
+        const path = window.location.pathname;
+        if (path.startsWith('/inventory/adjustments')) {
+          return <Transactions defaultTypeFilter="adjustment" title="Adjustments" />;
+        }
+        return <Transactions />;
       }
       case 'material-demand':
         return <MaterialDemand />;

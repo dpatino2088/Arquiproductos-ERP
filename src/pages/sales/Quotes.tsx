@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 
-import { useQuotes, approveQuote, waitForSalesOrder, type QuoteListItem } from '../../hooks/useQuotes';
+import { useQuotes, type QuoteListItem } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { supabase } from '../../lib/supabase/client';
@@ -10,8 +11,8 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { getSupabaseErrorMessage, isRLSError, safeError } from '../../lib/supabase-error-utils';
 import { 
-  Search, Plus, Upload, List, Grid3X3, Edit, Trash2, Archive, RotateCcw,
-  ShoppingCart, FileText, RefreshCw, Filter,
+  Search, Plus, List, Grid3X3, Edit, Trash2, Archive, RotateCcw,
+  FileText, RefreshCw,
   SortAsc, SortDesc, Eye
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
@@ -20,17 +21,6 @@ import StatusTabs from '../../components/shared/StatusTabs';
 
 /** Usado en la tabla; mismo shape que useQuotes devuelve (QuoteListItem) */
 type EnrichedQuote = QuoteListItem;
-
-const getStatusBadgeColor = (status: QuoteStatus) => {
-  switch (status) {
-    case 'draft': return 'bg-gray-100 text-gray-700';
-    case 'sent': return 'bg-blue-100 text-blue-700';
-    case 'approved': return 'bg-green-100 text-green-700';
-    case 'rejected': return 'bg-red-100 text-red-700';
-    case 'cancelled': return 'bg-orange-100 text-orange-700';
-    default: return 'bg-gray-100 text-gray-700';
-  }
-};
 
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
@@ -75,16 +65,21 @@ export default function Quotes() {
   }, [loading, setGlobalLoading]);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [sortBy, setSortBy] = useState<'quote_no' | 'status' | 'customer_name' | 'total' | 'created_at'>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedStatus, setSelectedStatus] = useState<QuoteStatus[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusTab, setStatusTab] = useState('all');
 
   const quotes = hookQuotes;
+  const getStatusForDisplay = useCallback((quote: EnrichedQuote) => {
+    const raw = (quote.status || '').toLowerCase();
+    if (raw === 'approved') {
+      return quote.has_payment ? 'approved_paid' : 'approved_unpaid';
+    }
+    return raw;
+  }, []);
 
   const [proposalByQuoteMap, setProposalByQuoteMap] = useState<Record<string, { id: string; no: string }>>({});
   const [soNumberMap, setSONumberMap] = useState<Record<string, { id: string; no: string }>>({});
@@ -138,20 +133,12 @@ export default function Quotes() {
     () => [
       { label: 'All', value: 'all', count: statusTabCounts.all || 0 },
       { label: 'Draft', value: 'draft', count: statusTabCounts.draft || 0 },
-      { label: 'Pending Confirmation', value: 'approved', count: statusTabCounts.approved || 0 },
-      { label: 'Confirmed', value: 'converted', count: statusTabCounts.converted || 0 },
+      { label: 'Approved', value: 'approved', count: statusTabCounts.approved || 0 },
       { label: 'Cancelled', value: 'cancelled', count: (statusTabCounts.cancelled || 0) + (statusTabCounts.canceled || 0) },
-      { label: 'Expired', value: 'expired', count: statusTabCounts.expired || 0 },
       { label: 'Archived', value: 'archived', count: archivedQuotesCount },
     ],
     [statusTabCounts, archivedQuotesCount]
   );
-
-  /** Solo se puede archivar cuando el status es cancelled, rejected o expired */
-  const canArchiveQuote = useCallback((q: EnrichedQuote) => {
-    const s = (q.status || '').toLowerCase();
-    return s === 'cancelled' || s === 'canceled' || s === 'rejected' || s === 'expired';
-  }, []);
 
   /** Returns quote IDs that have at least one (non-deleted) proposal */
   const getQuoteIdsWithProposals = useCallback(async (quoteIds: string[]): Promise<Set<string>> => {
@@ -260,7 +247,6 @@ export default function Quotes() {
   const handleArchive = useCallback(
     async (quote: EnrichedQuote, e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!canArchiveQuote(quote)) return;
       const confirmed = await showConfirm({
         title: 'Archivar cotización',
         message: `¿Archivar ${quote.quote_no}? No se eliminará, solo se ocultará de la lista activa.`,
@@ -289,7 +275,7 @@ export default function Quotes() {
         setDialogLoading(false);
       }
     },
-    [showConfirm, setDialogLoading, refetch, canArchiveQuote]
+    [showConfirm, setDialogLoading, refetch]
   );
 
   const handleRestore = useCallback(
@@ -382,43 +368,7 @@ export default function Quotes() {
   // === EDIT HANDLER ===
   const handleEdit = (quote: EnrichedQuote, e: React.MouseEvent) => {
     e.stopPropagation();
-    router.navigate(`/sales/quotes/${quote.id}/edit`);
-  };
-
-  // === CREATE SALE ORDER HANDLER ===
-  const handleCreateSaleOrder = async (quote: EnrichedQuote, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      if (quote.status !== 'approved') {
-        const error = await approveQuote(quote.id, activeOrganizationId!);
-        if (error) {
-          useUIStore.getState().addNotification({
-            type: 'error',
-            title: 'Error',
-            message: 'No se pudo aprobar la cotización.',
-          });
-          return;
-        }
-      }
-
-      const salesOrder = await waitForSalesOrder(quote.id, activeOrganizationId!);
-      if (salesOrder) {
-        router.navigate(`/sales/orders/${salesOrder.id}`);
-      } else {
-        useUIStore.getState().addNotification({
-          type: 'error',
-          title: 'Error',
-          message: 'No se pudo crear la orden de venta.',
-        });
-      }
-    } catch (err) {
-      console.error('[Quotes] Create sale order error:', safeError(err));
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'Ocurrió un error al crear la orden de venta.',
-      });
-    }
+    router.navigate(withReturnTo(`/sales/quotes/${quote.id}/edit`));
   };
 
   // === SORTING ===
@@ -429,15 +379,6 @@ export default function Quotes() {
       setSortBy(field);
       setSortOrder('asc');
     }
-  };
-
-  // === STATUS TOGGLE ===
-  const handleStatusToggle = (status: QuoteStatus) => {
-    setSelectedStatus(prev => 
-      prev.includes(status) 
-        ? prev.filter(s => s !== status)
-        : [...prev, status]
-    );
   };
 
   // === FILTERED & SORTED QUOTES ===
@@ -469,11 +410,6 @@ export default function Quotes() {
       );
     }
 
-    // Legacy status filter (from filter panel)
-    if (selectedStatus.length > 0) {
-      result = result.filter(q => selectedStatus.includes(q.status));
-    }
-
     // Sort
     result = [...result].sort((a, b) => {
       const factor = sortOrder === 'asc' ? 1 : -1;
@@ -491,7 +427,7 @@ export default function Quotes() {
     });
 
     return result;
-  }, [quotes, nonArchivedQuotes, searchTerm, selectedStatus, sortBy, sortOrder, statusTab]);
+  }, [quotes, nonArchivedQuotes, searchTerm, sortBy, sortOrder, statusTab]);
 
   // Pagination
   const totalPages = Math.ceil(filteredQuotes.length / itemsPerPage);
@@ -516,8 +452,6 @@ export default function Quotes() {
       return next;
     });
   }, [paginatedQuotes, selectedIds]);
-
-  const statusOptions: QuoteStatus[] = ['draft', 'sent', 'approved', 'rejected', 'cancelled'];
 
   // === RENDER ===
   // ✅ NUNCA retornar vacío por loading — usar overlay en su lugar (igual que Directory)
@@ -557,10 +491,6 @@ export default function Quotes() {
               Eliminar seleccionados ({selectedIds.size})
             </button>
           )}
-          <button className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors">
-            <Upload style={{ width: 14, height: 14 }} />
-            Import
-          </button>
           <button
             onClick={() => router.navigate('/sales/quotes/new')}
             className="flex items-center gap-2 px-2 py-1 rounded text-white text-sm hover:opacity-90 transition-colors"
@@ -576,7 +506,7 @@ export default function Quotes() {
 
       {/* Search and Filters — card py-6 px-6; botones px-2 py-1, icon 14px */}
       <div className="mb-4 mt-4">
-        <div className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -588,62 +518,7 @@ export default function Quotes() {
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
-                showFilters || selectedStatus.length > 0
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-              }`}
-            >
-              <Filter style={{ width: 14, height: 14 }} />
-              Filters
-              {selectedStatus.length > 0 && (
-                <span className="bg-white text-blue-600 rounded-full px-2 py-0.5 text-xs font-semibold">
-                  {selectedStatus.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => refetch()}
-              className="flex items-center justify-center p-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 transition-colors"
-              title="Actualizar"
-            >
-              <RefreshCw style={{ width: 14, height: 14 }} />
-            </button>
           </div>
-
-          {/* Filters Panel */}
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Status</span>
-                {selectedStatus.length > 0 && (
-                  <button
-                    onClick={() => setSelectedStatus([])}
-                    className="text-xs text-gray-500 hover:text-gray-700"
-                  >
-                    Limpiar
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {statusOptions.map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusToggle(status)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      selectedStatus.includes(status)
-                        ? getStatusBadgeColor(status)
-                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -674,7 +549,6 @@ export default function Quotes() {
               )}
               <col style={{ width: '9%' }} />
               <col style={{ width: '8%' }} />
-              <col style={{ width: '7%' }} />
               <col style={{ width: '10%' }} />
               <col style={{ width: '11%' }} />
               <col style={{ width: '9%' }} />
@@ -716,7 +590,6 @@ export default function Quotes() {
                 )}
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Proposal</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">SO #</th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Priority</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
                   <button onClick={() => handleSort('created_at')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
                     Date
@@ -735,7 +608,7 @@ export default function Quotes() {
             <tbody className="divide-y divide-gray-100">
               {paginatedQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={isInternal ? 11 : 10} className="py-12 px-4 text-center">
+                  <td colSpan={isInternal ? 10 : 9} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
                       <p className="text-gray-600 mb-2">No se encontraron cotizaciones</p>
@@ -760,14 +633,14 @@ export default function Quotes() {
                     </td>
                     <td className="py-4 px-4 text-gray-900 text-sm font-medium text-left">
                       <button
-                        onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/quotes/${quote.id}`); }}
+                        onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
                         className="text-primary hover:underline"
                       >
                         {quote.quote_no}
                       </button>
                     </td>
                     <td className="py-4 px-4 text-center">
-                      <StatusBadge status={quote.status} type="quote" size="sm" />
+                      <StatusBadge status={getStatusForDisplay(quote)} type="quote" size="sm" />
                     </td>
                     {isInternal ? (
                       <>
@@ -781,7 +654,7 @@ export default function Quotes() {
                       {proposalByQuoteMap[quote.id]
                         ? (
                           <button
-                            onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/proposals/${proposalByQuoteMap[quote.id].id}`); }}
+                            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/proposals/${proposalByQuoteMap[quote.id].id}`)); }}
                             className="text-primary hover:underline font-medium"
                           >
                             {proposalByQuoteMap[quote.id].no}
@@ -791,13 +664,8 @@ export default function Quotes() {
                     </td>
                     <td className="py-4 px-4 text-sm text-center">
                       {soNumberMap[quote.id]
-                        ? <button onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/orders/${soNumberMap[quote.id].id}`); }} className="text-primary hover:underline font-medium">{soNumberMap[quote.id].no}</button>
+                        ? <button onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }} className="text-primary hover:underline font-medium">{soNumberMap[quote.id].no}</button>
                         : <span className="text-gray-400">—</span>}
-                    </td>
-                    <td className="py-4 px-4 text-center">
-                      {quote.priority && quote.priority.toLowerCase() !== 'normal'
-                        ? <StatusBadge status={quote.priority} type="priority" size="sm" />
-                        : <span className="text-gray-400 text-sm">—</span>}
                     </td>
                     <td className="py-4 px-4 text-gray-600 text-sm text-center">
                       {new Date(quote.created_at).toLocaleDateString()}
@@ -809,9 +677,9 @@ export default function Quotes() {
                       <div className="flex items-center gap-1 justify-end flex-nowrap">
                         <button
                           type="button"
-                          onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/quotes/${quote.id}`); }}
+                          onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
                           className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                          title="View"
+                          title="Quote Detail"
                         >
                           <Eye style={{ width: 14, height: 14 }} />
                         </button>
@@ -836,17 +704,6 @@ export default function Quotes() {
                           </>
                         ) : (
                           <>
-                            {quote.status === 'approved' && (
-                              <button
-                                type="button"
-                                onClick={(e) => handleCreateSaleOrder(quote, e)}
-                                className="p-1.5 hover:bg-gray-100 rounded transition-colors"
-                                style={{ color: 'var(--primary-brand-hex)' }}
-                                title="Create Sales Order"
-                              >
-                                <ShoppingCart style={{ width: 14, height: 14 }} />
-                              </button>
-                            )}
                             <button
                               type="button"
                               onClick={(e) => handleEdit(quote, e)}
@@ -855,16 +712,14 @@ export default function Quotes() {
                             >
                               <Edit style={{ width: 14, height: 14 }} />
                             </button>
-                            {canArchiveQuote(quote) && (
-                              <button
-                                type="button"
-                                onClick={(e) => handleArchive(quote, e)}
-                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                                title="Archive"
-                              >
-                                <Archive style={{ width: 14, height: 14 }} />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleArchive(quote, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                              title="Archive"
+                            >
+                              <Archive style={{ width: 14, height: 14 }} />
+                            </button>
                             <button
                               type="button"
                               onClick={(e) => handleDelete(quote, e)}

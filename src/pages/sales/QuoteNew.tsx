@@ -381,7 +381,6 @@ const formatCurrency = (amount: number, currency: string = 'USD') => {
 // Quote status options
 const QUOTE_STATUS_OPTIONS = [
   { value: 'draft', label: 'Draft' },
-  { value: 'sent', label: 'Sent' },
   { value: 'approved', label: 'Approved' },
   { value: 'canceled', label: 'Cancelled' },
 ] as const;
@@ -399,7 +398,7 @@ const CURRENCY_OPTIONS = [
 const quoteSchema = z.object({
   quote_no: z.string().min(1, 'Quote number is required'),
   customer_id: z.string().uuid('Invalid customer ID').optional().or(z.literal('')),
-  status: z.enum(['draft', 'sent', 'approved', 'canceled']),
+  status: z.enum(['draft', 'approved', 'canceled']),
   currency: z.string().min(1, 'Currency is required'),
   description: z.string().optional(),
   notes: z.string().optional(),
@@ -793,8 +792,8 @@ export default function QuoteNew() {
           setValue('quote_no', quoteNo, { shouldValidate: true });
           setValue('customer_id', data.customer_id || '');
           const rawStatus = data.status as string;
-          type FormStatus = 'draft' | 'sent' | 'approved' | 'canceled';
-          const formStatus: FormStatus = rawStatus === 'rejected' || rawStatus === 'cancelled' ? 'canceled' : (['draft', 'sent', 'approved', 'canceled'].includes(rawStatus) ? (rawStatus as FormStatus) : 'draft');
+          type FormStatus = 'draft' | 'approved' | 'canceled';
+          const formStatus: FormStatus = rawStatus === 'rejected' || rawStatus === 'cancelled' || rawStatus === 'sent' ? 'canceled' : (['draft', 'approved', 'canceled'].includes(rawStatus) ? (rawStatus as FormStatus) : 'draft');
           setValue('status', (formStatus === 'canceled' ? 'draft' : formStatus) || 'draft');
           setValue('currency', 'USD'); // Default for UI formatting (not stored in DB)
           setValue('description', (data as any).description ?? '');
@@ -3387,10 +3386,18 @@ export default function QuoteNew() {
         exempt_tax: data.exempt_tax ?? false,
       };
 
+      const persistedStatus = normalizeStatus((quoteData as any)?.status);
+      const nextStatus = normalizeStatus(quoteDataPayload.status);
+      const isTransitioningToApproved = nextStatus === 'approved' && (!quoteId || persistedStatus !== 'approved');
+      if (isTransitioningToApproved) {
+        const confirmed = window.confirm('Approving this quote will lock status changes. Continue?');
+        if (!confirmed) return;
+      }
+
       if (quoteId) {
         // Update existing quote
         // Check if status is changing to 'approved' - use approveQuote function
-        const isApproving = normalizeStatus(quoteDataPayload.status) === 'approved';
+        const isApproving = isTransitioningToApproved;
         
         // If approving, update other fields FIRST, then approve (safer transaction order)
         if (isApproving) {
@@ -3481,6 +3488,8 @@ export default function QuoteNew() {
 
   // Get selected contact (selectedCustomer already defined above for contacts loading)
   const selectedContact = contacts.find(c => c.id === selectedContactId);
+  const persistedStatus = normalizeStatus((quoteData as any)?.status);
+  const isStatusLocked = Boolean(quoteId && persistedStatus === 'approved');
 
   return (
     <div className="py-6 min-w-0 max-w-full">
@@ -3585,8 +3594,10 @@ export default function QuoteNew() {
               <Label htmlFor="status">Status *</Label>
             <SelectShadcn
               value={watch('status') || 'draft'}
+              disabled={isStatusLocked}
               onValueChange={(value) => {
-                const validStatus = value as 'draft' | 'sent' | 'approved' | 'canceled';
+                if (isStatusLocked) return;
+                const validStatus = value as 'draft' | 'approved' | 'canceled';
                 setValue('status', validStatus);
               }}
             >
@@ -3601,6 +3612,11 @@ export default function QuoteNew() {
                 ))}
               </SelectContent>
             </SelectShadcn>
+            {isStatusLocked && (
+              <p className="mt-1 text-xs text-gray-500">
+                Status is locked because this quote is approved.
+              </p>
+            )}
             </div>
 
             {/* Currency */}

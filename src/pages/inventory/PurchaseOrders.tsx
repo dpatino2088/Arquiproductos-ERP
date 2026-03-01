@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { usePurchaseOrders, PurchaseOrderStatus } from '../../hooks/usePurchaseOrders';
 import { useWarehouses } from '../../hooks/useWarehouses';
@@ -176,7 +177,7 @@ export default function PurchaseOrders() {
                 <tr
                   key={po.id}
                   className="border-t hover:bg-gray-50 cursor-pointer"
-                  onClick={() => router.navigate(`/inventory/purchase-orders/${po.id}`)}
+                  onClick={() => router.navigate(withReturnTo(`/inventory/purchase-orders/${po.id}`))}
                 >
                   <td className="px-4 py-3 font-medium text-gray-900">{po.po_number ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-700">{po.DirectoryVendors?.name ?? '—'}</td>

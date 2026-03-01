@@ -395,6 +395,13 @@ function Layout({ children }: LayoutProps) {
   useEffect(() => {
     const updateRoute = () => {
       const route = router.getCurrentRoute();
+      const previousRoute = previousRouteRef.current;
+      const previousModule = previousRoute.split('/')[1];
+      const newModule = route.split('/')[1];
+      if (previousModule && newModule && previousModule !== newModule) {
+        clearSubmoduleNav();
+      }
+      previousRouteRef.current = route;
       setCurrentRoute(route);
       saveCurrentRouteForModule(route);
     };
@@ -405,7 +412,7 @@ function Layout({ children }: LayoutProps) {
     return () => {
       removeListener();
     };
-  }, [saveCurrentRouteForModule]);
+  }, [saveCurrentRouteForModule, clearSubmoduleNav]);
 
   // OBSOLETO: Este código está duplicado y usa el schema antiguo.
   // OrganizationContext ya maneja esto correctamente.
@@ -602,6 +609,7 @@ function Layout({ children }: LayoutProps) {
   const [hoveredNavHref, setHoveredNavHref] = useState<string | null>(null);
   const [popoverRect, setPopoverRect] = useState<{ left: number; top: number } | null>(null);
   const hoverLeaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousRouteRef = useRef<string>(router.getCurrentRoute() || '/');
 
   const clearHoverLeaveTimeout = useCallback(() => {
     if (hoverLeaveTimeoutRef.current) {

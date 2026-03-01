@@ -6,6 +6,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import StatusTabs from '../../components/shared/StatusTabs';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 import { Search, FileText, DollarSign, Plus } from 'lucide-react';
 
 const FINANCIAL_SUBMODULES = [
@@ -194,13 +195,13 @@ export default function Invoices() {
                   <tr
                     key={inv.id}
                     className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(`/financials/invoices/${inv.id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/financials/invoices/${inv.id}`))}
                   >
                     <td className="px-4 py-4 font-medium text-primary">{inv.invoice_number}</td>
                     <td className="px-4 py-4 text-gray-700">{inv.Dealers?.dealer_name ?? '—'}</td>
                     <td className="px-4 py-4 text-gray-500">
                       {inv.SalesOrders?.sales_order_no
-                        ? <button type="button" onClick={(e) => { e.stopPropagation(); router.navigate(`/sales/orders/${inv.sales_order_id}`); }}
+                        ? <button type="button" onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${inv.sales_order_id}`)); }}
                             className="text-primary hover:underline">{inv.SalesOrders.sales_order_no}</button>
                         : '—'}
                     </td>

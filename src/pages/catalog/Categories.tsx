@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo, useImperativeHandle, forwardRef } from 'react';
-import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 
 export interface CategoriesRef {
   openNew: () => void;
   openNewParent: () => void;
+}
+interface CategoriesProps {
+  itemsForCounts?: Array<{ category_id?: string | null }>;
 }
 import { useItemCategoriesCRUD } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -12,40 +14,45 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 import { 
   Search, 
   Plus,
   Edit,
   Trash2,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  SortAsc,
-  SortDesc,
-  Package,
-  Building2,
-  FolderTree,
-  Book,
   Eye,
+  ArrowRightLeft,
 } from 'lucide-react';
 
-const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref) {
-  const { registerSubmodules } = useSubmoduleNav();
+const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categories({ itemsForCounts = [] }, ref) {
   const { categories, loading, error, createCategory, updateCategory, deleteCategory, isCreating, isDeleting } = useItemCategoriesCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const { activeOrganizationId } = useOrganizationContext();
 
-  // Don't register submodules here - Catalog.tsx handles that
-  // This component is now used as a tab content within Items.tsx
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [showMoveItemsModal, setShowMoveItemsModal] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [modalMode, setModalMode] = useState<'category' | 'subcategory'>('category');
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
+  const [formData, setFormData] = useState({ name: '', code: '', parent_id: '', sort_order: 0 });
+  const [moveSourceSubcategory, setMoveSourceSubcategory] = useState<{ id: string; name: string } | null>(null);
+  const [moveTargetSubcategoryId, setMoveTargetSubcategoryId] = useState('');
+  const [isMovingItems, setIsMovingItems] = useState(false);
   const [itemCounts, setItemCounts] = useState<Map<string, number>>(new Map());
 
-  // Fetch item counts per category
   useEffect(() => {
+    if (itemsForCounts.length > 0) {
+      const counts = new Map<string, number>();
+      itemsForCounts.forEach((item) => {
+        const catId = item.category_id;
+        if (!catId) return;
+        counts.set(catId, (counts.get(catId) || 0) + 1);
+      });
+      setItemCounts(counts);
+      return;
+    }
+
     async function fetchItemCounts() {
       if (!activeOrganizationId) return;
 
@@ -54,8 +61,6 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
           .from('CatalogItems')
           .select('category_id')
           .eq('organization_id', activeOrganizationId)
-          .eq('is_active', true)
-          .eq('archived', false)
           .not('category_id', 'is', null);
 
         if (error) {
@@ -77,124 +82,89 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
     }
 
     fetchItemCounts();
-  }, [activeOrganizationId, categories]); // Re-fetch when categories change
+  }, [activeOrganizationId, categories, itemsForCounts]);
 
-  // Build tree structure
-  interface CategoryNode {
-    id: string;
-    organization_id: string;
-    parent_id?: string | null; // DB column name
-    name: string;
-    code?: string | null;
-    is_group?: boolean;
-    sort_order: number; // Required, defaults to 0 if null/undefined
-    deleted: boolean;
-    archived: boolean;
-    created_at: string;
-    updated_at?: string | null;
-    children: CategoryNode[];
-  }
-
-  const categoryTree = useMemo(() => {
-    const categoryMap = new Map<string, CategoryNode>(
-      categories.map(c => [c.id, { ...c, children: [] as CategoryNode[], sort_order: c.sort_order ?? 0 }])
-    );
-    const roots: CategoryNode[] = [];
-
-    categories.forEach(category => {
-      const node = categoryMap.get(category.id);
-      if (!node) return;
-      
-      // Use parent_id (DB column name)
-      const parentId = category.parent_id;
-      
-      if (parentId && categoryMap.has(parentId)) {
-        const parent = categoryMap.get(parentId);
-        if (parent) {
-          parent.children.push(node);
-        }
-      } else {
-        roots.push(node);
-      }
-    });
-
-    // Sort roots and children
-    const sortNodes = (nodes: CategoryNode[]) => {
-      nodes.sort((a, b) => {
-        if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
-        return a.name.localeCompare(b.name);
-      });
-      nodes.forEach(node => {
-        if (node.children.length > 0) {
-          sortNodes(node.children);
-        }
-      });
-    };
-
-    sortNodes(roots);
-    return roots;
+  const parentCategories = useMemo(() => {
+    return categories
+      .filter((c) => c.is_group && !c.parent_id)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
   }, [categories]);
 
-  // Flatten tree for search
-  const flattenTree = (nodes: CategoryNode[], level = 0): Array<CategoryNode & { level: number }> => {
-    const result: Array<CategoryNode & { level: number }> = [];
-    nodes.forEach(node => {
-      result.push({ ...node, level });
-      if (node.children && node.children.length > 0) {
-        result.push(...flattenTree(node.children, level + 1));
-      }
-    });
-    return result;
-  };
+  const subcategories = useMemo(() => {
+    return categories
+      .filter((c) => !c.is_group && Boolean(c.parent_id))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
+  }, [categories]);
 
-  const filteredCategories = useMemo(() => {
-    if (!searchTerm) return flattenTree(categoryTree);
-    
+  useEffect(() => {
+    if (!parentCategories.length) {
+      setSelectedParentId(null);
+      return;
+    }
+    if (!selectedParentId || !parentCategories.some((p) => p.id === selectedParentId)) {
+      setSelectedParentId(parentCategories[0].id);
+    }
+  }, [parentCategories, selectedParentId]);
+
+  const filteredParents = useMemo(() => {
     const searchLower = searchTerm.toLowerCase();
-    return flattenTree(categoryTree).filter(c => 
-      c.name.toLowerCase().includes(searchLower) ||
-      (c.code && c.code.toLowerCase().includes(searchLower))
-    );
-  }, [categoryTree, searchTerm]);
+    if (!searchLower) return parentCategories;
+    return parentCategories.filter((c) => c.name.toLowerCase().includes(searchLower) || (c.code || '').toLowerCase().includes(searchLower));
+  }, [parentCategories, searchTerm]);
 
-  const toggleExpand = (id: string) => {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  const filteredSubcategories = useMemo(() => {
+    const searchLower = searchTerm.toLowerCase();
+    const byParent = selectedParentId ? subcategories.filter((c) => c.parent_id === selectedParentId) : subcategories;
+    if (!searchLower) return byParent;
+    return byParent.filter((c) => c.name.toLowerCase().includes(searchLower) || (c.code || '').toLowerCase().includes(searchLower));
+  }, [searchTerm, selectedParentId, subcategories]);
 
-  const handleNew = (parentId?: string, isGroup: boolean = false) => {
-    setFormData({ 
-      name: '', 
-      code: '', 
-      parent_id: parentId || '', 
-      is_group: isGroup,
-      sort_order: 0 
+  const subcategoryCountByParent = useMemo(() => {
+    const counts = new Map<string, number>();
+    subcategories.forEach((sub) => {
+      if (!sub.parent_id) return;
+      counts.set(sub.parent_id, (counts.get(sub.parent_id) || 0) + 1);
     });
-    setEditingId(null);
+    return counts;
+  }, [subcategories]);
+
+  const itemsCountByParent = useMemo(() => {
+    const counts = new Map<string, number>();
+    subcategories.forEach((sub) => {
+      if (!sub.parent_id) return;
+      counts.set(sub.parent_id, (counts.get(sub.parent_id) || 0) + (itemCounts.get(sub.id) || 0));
+    });
+    return counts;
+  }, [subcategories, itemCounts]);
+
+  const openCategoryModal = (mode: 'category' | 'subcategory', parentId?: string | null) => {
+    setModalMode(mode);
     setShowNewModal(true);
+    setEditingCategoryId(null);
+    setFormData({
+      name: '',
+      code: '',
+      parent_id: mode === 'subcategory' ? (parentId || selectedParentId || '') : '',
+      sort_order: 0,
+    });
   };
 
-  useImperativeHandle(ref, () => ({
-    openNew: () => handleNew(),
-    openNewParent: () => handleNew(undefined, true),
-  }), []);
+  const closeModal = () => {
+    setShowNewModal(false);
+    setEditingCategoryId(null);
+    setFormData({ name: '', code: '', parent_id: '', sort_order: 0 });
+    setModalMode('category');
+  };
 
   const handleEdit = (category: any) => {
+    setEditingCategoryId(category.id);
+    setModalMode(category.is_group ? 'category' : 'subcategory');
     setFormData({
-      name: category.name,
+      name: category.name || '',
       code: category.code || '',
       parent_id: category.parent_id || '',
-      is_group: category.is_group || false,
       sort_order: category.sort_order || 0,
     });
-    setEditingId(category.id);
     setShowNewModal(true);
   };
 
@@ -203,42 +173,53 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
       const data = {
         name: formData.name.trim(),
         code: formData.code.trim() || null,
-        parent_id: formData.parent_id || null, // UPDATED: use parent_id
-        is_group: formData.is_group,
-        sort_order: formData.sort_order,
+        parent_id: modalMode === 'subcategory' ? (formData.parent_id || null) : null,
+        is_group: modalMode === 'category',
+        sort_order: formData.sort_order ?? 0,
       };
 
-      if (editingId) {
-        await updateCategory(editingId, data);
+      if (modalMode === 'subcategory' && !data.parent_id) {
+        throw new Error('Subcategory requires a parent category');
+      }
+
+      if (editingCategoryId) {
+        await updateCategory(editingCategoryId, data);
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Category updated',
-          message: 'Category has been updated successfully.',
+          message: 'Saved successfully.',
         });
       } else {
-        await createCategory(data);
+        const created = await createCategory(data as any);
+        if (modalMode === 'category' && created?.id) {
+          setSelectedParentId(created.id);
+        }
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Category created',
-          message: 'Category has been created successfully.',
+          message: 'Created successfully.',
         });
       }
-      setShowNewModal(false);
-      setFormData({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
-      setEditingId(null);
+
+      closeModal();
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Error',
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
   };
 
+  useImperativeHandle(ref, () => ({
+    openNew: () => openCategoryModal('subcategory'),
+    openNewParent: () => openCategoryModal('category'),
+  }), [selectedParentId]);
+
   const handleDelete = async (id: string, name: string) => {
     const confirmed = await showConfirm({
       title: 'Eliminar Categoría',
-      message: `¿Estás seguro de que deseas eliminar "${name}"? Esto también eliminará todas las subcategorías. Esta acción no se puede deshacer.`,
+        message: `¿Eliminar "${name}"?`,
       variant: 'danger',
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
@@ -265,107 +246,105 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
     }
   };
 
-  const renderCategory = (category: CategoryNode & { level?: number }, level: number = 0) => {
-    const hasChildren = category.children && category.children.length > 0;
-    const isExpanded = expandedCategories.has(category.id);
-    const indent = level * 24;
-    const isGroup = category.is_group || false;
+  const openMoveItemsModal = (source: { id: string; name: string }) => {
+    setMoveSourceSubcategory(source);
+    setMoveTargetSubcategoryId('');
+    setShowMoveItemsModal(true);
+  };
 
-    return (
-      <div key={category.id}>
-        <div 
-          className="flex items-center py-2 px-4 hover:bg-gray-50 transition-colors border-b border-gray-100"
-          style={{ paddingLeft: `${16 + indent}px` }}
-        >
-          <div className="flex items-center flex-1 min-w-0">
-            {hasChildren ? (
-              <button
-                onClick={() => toggleExpand(category.id)}
-                className="mr-2 text-gray-400 hover:text-gray-600"
-              >
-                {isExpanded ? (
-                  <FolderOpen className="w-4 h-4" />
-                ) : (
-                  <Folder className="w-4 h-4" />
-                )}
-              </button>
-            ) : (
-              <div className="w-6 mr-2" />
-            )}
-            <span className="text-xs text-gray-900 font-medium flex-1 truncate">{category.name}</span>
-            {category.code && (
-              <span className="text-xs text-gray-500 ml-2">{category.code}</span>
-            )}
-            {isGroup && (
-              <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                Group
-              </span>
-            )}
-            {!isGroup && itemCounts.get(category.id) !== undefined && (
-              <span className="ml-2 text-xs text-gray-500">
-                ({itemCounts.get(category.id)} items)
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1 ml-4">
-            {!isGroup && itemCounts.get(category.id) && itemCounts.get(category.id)! > 0 && (
-              <button
-                onClick={() => router.navigate(`/catalog/items?category_id=${category.id}`)}
-                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                title={`View ${itemCounts.get(category.id)} items in ${category.name}`}
-              >
-                <Eye className="w-3 h-3" />
-              </button>
-            )}
-            {!isGroup && (
-              <button
-                onClick={() => handleNew(category.id, false)}
-                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                title="Add subcategory"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
-            )}
-            <button
-              onClick={() => handleEdit(category)}
-              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-              title={`Edit ${category.name}`}
-            >
-              <Edit className="w-3 h-3" />
-            </button>
-            <button
-              onClick={() => handleDelete(category.id, category.name)}
-              disabled={isDeleting}
-              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-              title={`Delete ${category.name}`}
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-        {hasChildren && isExpanded && (
-          <div>
-            {category.children.map((child) => renderCategory(child, level + 1))}
-          </div>
-        )}
-      </div>
-    );
+  const closeMoveItemsModal = () => {
+    setShowMoveItemsModal(false);
+    setMoveSourceSubcategory(null);
+    setMoveTargetSubcategoryId('');
+  };
+
+  const handleMoveItems = async () => {
+    if (!moveSourceSubcategory || !moveTargetSubcategoryId || !activeOrganizationId) return;
+    if (moveSourceSubcategory.id === moveTargetSubcategoryId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Invalid destination',
+        message: 'Choose a different subcategory.',
+      });
+      return;
+    }
+
+    try {
+      setIsMovingItems(true);
+
+      const { count: sourceCount, error: countError } = await supabase
+        .from('CatalogItems')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', activeOrganizationId)
+        .eq('category_id', moveSourceSubcategory.id);
+
+      if (countError) {
+        throw new Error(countError.message || 'Failed to count source items');
+      }
+
+      const toMove = sourceCount || 0;
+      if (toMove === 0) {
+        useUIStore.getState().addNotification({
+          type: 'warning',
+          title: 'No items to move',
+          message: `Subcategory "${moveSourceSubcategory.name}" has no assigned items.`,
+        });
+        closeMoveItemsModal();
+        return;
+      }
+
+      const { error: moveError } = await supabase
+        .from('CatalogItems')
+        .update({ category_id: moveTargetSubcategoryId, updated_at: new Date().toISOString() })
+        .eq('organization_id', activeOrganizationId)
+        .eq('category_id', moveSourceSubcategory.id);
+
+      if (moveError) {
+        throw new Error(moveError.message || 'Failed to move items');
+      }
+
+      setItemCounts((prev) => {
+        const next = new Map(prev);
+        const sourceCurrent = next.get(moveSourceSubcategory.id) || 0;
+        const targetCurrent = next.get(moveTargetSubcategoryId) || 0;
+        const moved = Math.min(sourceCurrent, toMove);
+        next.set(moveSourceSubcategory.id, Math.max(0, sourceCurrent - moved));
+        next.set(moveTargetSubcategoryId, targetCurrent + moved);
+        return next;
+      });
+
+      const targetName = subcategories.find((s) => s.id === moveTargetSubcategoryId)?.name || 'target';
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Items moved',
+        message: `${toMove} item(s) moved from "${moveSourceSubcategory.name}" to "${targetName}".`,
+      });
+      closeMoveItemsModal();
+    } catch (error) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Move failed',
+        message: error instanceof Error ? error.message : 'Unknown error while moving items.',
+      });
+    } finally {
+      setIsMovingItems(false);
+    }
   };
 
   return (
     <div>
       {/* Search Bar — spacing from status bar: mt-4 from parent */}
-      <div className="mb-2">
-        <div className="bg-white border border-gray-200 py-4 px-6 rounded-lg">
-          <div className="flex items-center gap-4">
+      <div className="mb-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center gap-3">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search categories by name or code..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
           </div>
@@ -383,59 +362,136 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
           <p className="text-sm text-red-600">Error: {error}</p>
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          {searchTerm ? (
-            <div>
-              {filteredCategories.length === 0 ? (
-                <div className="py-12 px-6 text-center">
-                  <p className="text-gray-600 mb-2">No categories found</p>
-                  <p className="text-sm text-gray-500">Try adjusting your search criteria</p>
-                </div>
-              ) : (
-                filteredCategories.map((category) => (
-                  <div 
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Categories</h3>
+              <button
+                onClick={() => openCategoryModal('category')}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-gray-200 hover:bg-gray-50"
+              >
+                <Plus className="w-3 h-3" />
+                Add
+              </button>
+            </div>
+            {filteredParents.length === 0 ? (
+              <div className="py-10 text-center text-sm text-gray-500">No categories found</div>
+            ) : (
+              <div>
+                {filteredParents.map((category) => (
+                  <div
                     key={category.id}
-                    className="flex items-center py-2 px-4 hover:bg-gray-50 transition-colors border-b border-gray-100"
-                    style={{ paddingLeft: `${16 + category.level * 24}px` }}
+                    className={`px-4 py-2 border-b border-gray-100 flex items-center gap-2 ${selectedParentId === category.id ? 'bg-primary/5' : 'hover:bg-gray-50'}`}
                   >
-                    <span className="text-xs text-gray-900 font-medium flex-1">{category.name}</span>
-                    {category.code && (
-                      <span className="text-xs text-gray-500 ml-2">{category.code}</span>
-                    )}
-                    <div className="flex items-center gap-1 ml-4">
-                      <button
-                        onClick={() => handleEdit(category)}
-                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                        title={`Edit ${category.name}`}
-                      >
-                        <Edit className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(category.id, category.name)}
-                        disabled={isDeleting}
-                        className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                        title={`Delete ${category.name}`}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setSelectedParentId(category.id)}
+                      className="flex-1 text-left min-w-0"
+                    >
+                      <div className="text-xs font-medium text-gray-900 truncate">{category.name}</div>
+                      <div className="text-[11px] text-gray-500 truncate">
+                        {(subcategoryCountByParent.get(category.id) || 0)} subcategories · {(itemsCountByParent.get(category.id) || 0)} items
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => openCategoryModal('subcategory', category.id)}
+                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                      title="Add subcategory"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => handleEdit(category)}
+                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                      title="Edit category"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(category.id, category.name)}
+                      disabled={isDeleting}
+                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
+                      title="Delete category"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
                   </div>
-                ))
-              )}
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Subcategories</h3>
+              <button
+                onClick={() => openCategoryModal('subcategory', selectedParentId)}
+                disabled={!selectedParentId}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Plus className="w-3 h-3" />
+                Add
+              </button>
             </div>
-          ) : (
-            <div>
-              {categoryTree.length === 0 ? (
-                <div className="py-12 px-6 text-center">
-                  <Folder className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600 mb-2">No categories found</p>
-                  <p className="text-sm text-gray-500">Start by adding categories</p>
-                </div>
-              ) : (
-                categoryTree.map(category => renderCategory(category, 0))
-              )}
-            </div>
-          )}
+            {!selectedParentId ? (
+              <div className="py-10 text-center text-sm text-gray-500">Select a category to see subcategories</div>
+            ) : filteredSubcategories.length === 0 ? (
+              <div className="py-10 text-center text-sm text-gray-500">No subcategories for this category</div>
+            ) : (
+              <div>
+                {filteredSubcategories.map((sub) => (
+                  <div key={sub.id} className="px-4 py-2 border-b border-gray-100 flex items-center gap-2 hover:bg-gray-50">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium text-gray-900 truncate">{sub.name}</div>
+                      <div className="text-[11px] text-gray-500 truncate">
+                        {itemCounts.get(sub.id) || 0} items{sub.code ? ` · ${sub.code}` : ''}
+                      </div>
+                    </div>
+                    {(itemCounts.get(sub.id) || 0) > 0 && (
+                      <button
+                        onClick={() => {
+                          window.sessionStorage.setItem(
+                            'catalogItemsBackContext',
+                            JSON.stringify({
+                              fromTab: 'categories',
+                              selectedCategoryId: sub.id,
+                              savedAt: Date.now(),
+                            })
+                          );
+                          router.navigate(withReturnTo(`/catalog/items?category_id=${sub.id}`));
+                        }}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                        title="View items"
+                      >
+                        <Eye className="w-3 h-3" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => openMoveItemsModal({ id: sub.id, name: sub.name })}
+                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                      title="Move items to another subcategory"
+                    >
+                      <ArrowRightLeft className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => handleEdit(sub)}
+                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                      title="Edit subcategory"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(sub.id, sub.name)}
+                      disabled={isDeleting}
+                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
+                      title="Delete subcategory"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -444,18 +500,16 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <button
-              onClick={() => {
-                setShowNewModal(false);
-                setFormData({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
-                setEditingId(null);
-              }}
+              onClick={closeModal}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
             >
               <span className="text-2xl">&times;</span>
             </button>
 
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              {editingId ? 'Edit Category' : 'New Category'}
+              {editingCategoryId
+                ? `Edit ${modalMode === 'category' ? 'Category' : 'Subcategory'}`
+                : `New ${modalMode === 'category' ? 'Category' : 'Subcategory'}`}
             </h2>
 
             <div className="space-y-4">
@@ -485,36 +539,19 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Is Group (Parent Category)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.is_group}
-                    onChange={(e) => setFormData({ ...formData, is_group: e.target.checked, parent_id: e.target.checked ? formData.parent_id : '' })}
-                    className="w-4 h-4"
-                  />
-                  <span className="text-sm text-gray-700">
-                    This is a parent group (not selectable for SKUs)
-                  </span>
-                </label>
-              </div>
-
-              {!formData.is_group && (
+              {modalMode === 'subcategory' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Parent Category
+                    Parent Category <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.parent_id}
                     onChange={(e) => setFormData({ ...formData, parent_id: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
-                    <option value="">None (Root Category)</option>
+                    <option value="">Select parent category</option>
                     {categories
-                      .filter(c => (c.is_group || false) && (!editingId || c.id !== editingId))
+                      .filter(c => c.is_group && (!editingCategoryId || c.id !== editingCategoryId))
                       .map(category => (
                         <option key={category.id} value={category.id}>
                           {category.name} {category.code && `(${category.code})`}
@@ -540,21 +577,84 @@ const Categories = forwardRef<CategoriesRef, object>(function Categories(_, ref)
 
             <div className="flex items-center justify-end gap-3 mt-6">
               <button
-                onClick={() => {
-                  setShowNewModal(false);
-                  setFormData({ name: '', code: '', parent_id: '', is_group: false, sort_order: 0 });
-                  setEditingId(null);
-                }}
+                onClick={closeModal}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
-                disabled={!formData.name.trim() || isCreating}
+                disabled={!formData.name.trim() || isCreating || (modalMode === 'subcategory' && !formData.parent_id)}
                 className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isCreating ? 'Saving...' : editingId ? 'Update' : 'Create'}
+                {isCreating ? 'Saving...' : editingCategoryId ? 'Update' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move Items Modal */}
+      {showMoveItemsModal && moveSourceSubcategory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <button
+              onClick={closeMoveItemsModal}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <span className="text-2xl">&times;</span>
+            </button>
+
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Move items</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">From subcategory</label>
+                <input
+                  type="text"
+                  value={moveSourceSubcategory.name}
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-700"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {itemCounts.get(moveSourceSubcategory.id) || 0} item(s) currently assigned
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  To subcategory <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={moveTargetSubcategoryId}
+                  onChange={(e) => setMoveTargetSubcategoryId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                >
+                  <option value="">Select destination subcategory</option>
+                  {subcategories
+                    .filter((s) => s.id !== moveSourceSubcategory.id)
+                    .map((subcategory) => (
+                      <option key={subcategory.id} value={subcategory.id}>
+                        {subcategory.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                onClick={closeMoveItemsModal}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMoveItems}
+                disabled={!moveTargetSubcategoryId || isMovingItems}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isMovingItems ? 'Moving...' : 'Move items'}
               </button>
             </div>
           </div>

@@ -37,6 +37,8 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     draft: 'gray',
     sent: 'blue',
     approved: 'amber',
+    approved_unpaid: 'amber',
+    approved_paid: 'green',
     converted: 'green',
     cancelled: 'red',
     canceled: 'red',
@@ -114,6 +116,13 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
   },
 };
 
+const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<string, string>>> = {
+  quote: {
+    approved_unpaid: 'Approved',
+    approved_paid: 'Approved',
+  },
+};
+
 function toTitleCase(value: string): string {
   return value
     .split('_')
@@ -126,7 +135,7 @@ export default function StatusBadge({ status, type, size = 'sm' }: StatusBadgePr
   const colorKey = STATUS_MAPS[type]?.[normalized] ?? 'gray';
   const colorClasses = COLOR_CLASSES[colorKey] ?? COLOR_CLASSES.gray;
   const dotClasses = DOT_CLASSES[colorKey] ?? DOT_CLASSES.gray;
-  const label = toTitleCase(normalized);
+  const label = STATUS_LABEL_OVERRIDES[type]?.[normalized] ?? toTitleCase(normalized);
 
   return (
     <span

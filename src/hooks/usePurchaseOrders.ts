@@ -44,6 +44,9 @@ export interface PurchaseOrderLine {
   sku_snapshot?: string | null;
   item_name_snapshot?: string | null;
   purchase_unit_snapshot?: string | null;
+  purchase_uom_snapshot?: string | null;
+  purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+  stock_basis_snapshot?: 'ea' | 'linear_m' | null;
   units_per_purchase_unit_snapshot?: number | null;
   unit_of_measure_snapshot?: string | null;
   is_roll_snapshot?: boolean | null;
@@ -53,7 +56,17 @@ export interface PurchaseOrderLine {
   roll_length_uom_snapshot?: string | null;
   created_at: string;
   updated_at: string;
-  CatalogItems?: { sku: string; name: string; cost_exw?: number | null; unit_of_measure?: string | null } | null;
+  CatalogItems?: {
+    sku: string;
+    name: string;
+    cost_exw?: number | null;
+    unit_of_measure?: string | null;
+    measure_basis?: 'unit' | 'linear' | 'area' | null;
+    is_roll?: boolean | null;
+    purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+    stock_basis?: 'ea' | 'linear_m' | null;
+    purchase_uom?: string | null;
+  } | null;
 }
 
 function safeLineSubtotal(lines: { ordered_qty: number; unit_cost: number }[] | undefined): number {
@@ -163,7 +176,7 @@ export function usePurchaseOrderDetail(poId: string | null) {
       if (!poId) return [];
       const { data, error } = await supabase
         .from('PurchaseOrderLines')
-        .select('*, CatalogItems(sku, name, cost_exw, unit_of_measure), allocation_type, allocation_mo_id, allocation_notes')
+        .select('*, CatalogItems(sku, name, cost_exw, unit_of_measure, measure_basis, is_roll, purchase_mode, stock_basis, purchase_uom, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom), allocation_type, allocation_mo_id, allocation_notes')
         .eq('purchase_order_id', poId)
         .order('created_at', { ascending: true });
       if (error) throw error;
@@ -193,6 +206,9 @@ export interface CreatePOLineInput {
   sku_snapshot?: string | null;
   item_name_snapshot?: string | null;
   purchase_unit_snapshot?: string | null;
+  purchase_uom_snapshot?: string | null;
+  purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+  stock_basis_snapshot?: 'ea' | 'linear_m' | null;
   units_per_purchase_unit_snapshot?: number | null;
   unit_of_measure_snapshot?: string | null;
   is_roll_snapshot?: boolean | null;
@@ -261,6 +277,9 @@ export function useCreatePurchaseOrder() {
           sku_snapshot: l.sku_snapshot ?? null,
           item_name_snapshot: l.item_name_snapshot ?? null,
           purchase_unit_snapshot: l.purchase_unit_snapshot ?? null,
+          purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
+          purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
+          stock_basis_snapshot: l.stock_basis_snapshot ?? null,
           units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot ?? null,
           unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? null,
           is_roll_snapshot: l.is_roll_snapshot ?? null,
@@ -300,6 +319,9 @@ export interface UpdatePOLineInput {
   sku_snapshot?: string | null;
   item_name_snapshot?: string | null;
   purchase_unit_snapshot?: string | null;
+  purchase_uom_snapshot?: string | null;
+  purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
+  stock_basis_snapshot?: 'ea' | 'linear_m' | null;
   units_per_purchase_unit_snapshot?: number | null;
   unit_of_measure_snapshot?: string | null;
   is_roll_snapshot?: boolean | null;
@@ -390,6 +412,9 @@ export function useUpdatePurchaseOrder() {
               sku_snapshot: l.sku_snapshot ?? null,
               item_name_snapshot: l.item_name_snapshot ?? null,
               purchase_unit_snapshot: l.purchase_unit_snapshot ?? null,
+              purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
+              purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
+              stock_basis_snapshot: l.stock_basis_snapshot ?? null,
               units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot ?? null,
               unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? null,
               is_roll_snapshot: l.is_roll_snapshot ?? null,
@@ -417,6 +442,9 @@ export function useUpdatePurchaseOrder() {
             sku_snapshot: l.sku_snapshot ?? null,
             item_name_snapshot: l.item_name_snapshot ?? null,
             purchase_unit_snapshot: l.purchase_unit_snapshot ?? null,
+            purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
+            purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
+            stock_basis_snapshot: l.stock_basis_snapshot ?? null,
             units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot ?? null,
             unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? null,
             is_roll_snapshot: l.is_roll_snapshot ?? null,
@@ -494,6 +522,9 @@ export function useReceivePurchaseOrder() {
 export interface CatalogItemCostInfo {
   cost_exw: number;
   purchase_unit: string;
+  purchase_uom: string;
+  purchase_mode: 'unit_packaged' | 'linear_direct' | 'roll';
+  stock_basis: 'ea' | 'linear_m';
   units_per_purchase_unit: number;
   unit_of_measure: string;
 }
@@ -505,13 +536,26 @@ export interface CatalogItemCostInfo {
 export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogItemCostInfo> {
   const { data, error } = await supabase
     .from('CatalogItems')
-    .select('cost_exw, purchase_unit, units_per_purchase_unit, unit_of_measure')
+    .select('cost_exw, purchase_unit, purchase_uom, purchase_mode, stock_basis, units_per_purchase_unit, unit_of_measure')
     .eq('id', itemId)
     .single();
-  if (error || !data) return { cost_exw: 0, purchase_unit: 'each', units_per_purchase_unit: 1, unit_of_measure: 'ea' };
+  if (error || !data) {
+    return {
+      cost_exw: 0,
+      purchase_unit: 'each',
+      purchase_uom: 'each',
+      purchase_mode: 'unit_packaged',
+      stock_basis: 'ea',
+      units_per_purchase_unit: 1,
+      unit_of_measure: 'ea',
+    };
+  }
   return {
     cost_exw: Number(data.cost_exw ?? 0),
     purchase_unit: data.purchase_unit ?? 'each',
+    purchase_uom: data.purchase_uom ?? data.purchase_unit ?? 'each',
+    purchase_mode: (data.purchase_mode as 'unit_packaged' | 'linear_direct' | 'roll' | null) ?? 'unit_packaged',
+    stock_basis: (data.stock_basis as 'ea' | 'linear_m' | null) ?? 'ea',
     units_per_purchase_unit: Number(data.units_per_purchase_unit ?? 1),
     unit_of_measure: data.unit_of_measure ?? 'ea',
   };

@@ -5,6 +5,7 @@ import { useUIStore } from '../../stores/ui-store';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText, DollarSign, ChevronDown } from 'lucide-react';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
@@ -111,11 +112,29 @@ export default function InvoiceDetail() {
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const [applyAmount, setApplyAmount] = useState('');
   const [applying, setApplying] = useState(false);
+  const listPath = '/financials/invoices';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
 
   useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
 
   const fmt = (v: number, currency = 'USD') =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
+
+  const handleBack = useCallback(() => {
+    router.navigate(listPath);
+  }, []);
+  const handleBackContextual = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
+  }, [queryReturnTo]);
 
   const refetch = useCallback(async () => {
     if (!invoiceId || !activeOrganizationId) { setLoading(false); return; }
@@ -211,7 +230,7 @@ export default function InvoiceDetail() {
         .eq('id', invoiceId);
       if (err) throw err;
       addNotification({ type: 'success', title: 'Deleted', message: 'Invoice deleted.' });
-      router.navigate('/financials/invoices');
+      handleBack();
     } catch (e: unknown) {
       addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to delete invoice' });
     } finally {
@@ -413,7 +432,7 @@ export default function InvoiceDetail() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-700">{error || 'Invoice not found'}</p>
         </div>
-        <button onClick={() => router.navigate('/financials/invoices')}
+        <button onClick={handleBack}
           className="mt-4 px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
           Back to Invoices
         </button>
@@ -451,34 +470,48 @@ export default function InvoiceDetail() {
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
-      onBack={() => router.navigate('/financials/invoices')}
+      onBack={handleBack}
       contentClassName="pt-2 pb-6"
-      actions={actionItems.length > 0 ? (
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setActionsOpen(!actionsOpen)}
-            disabled={updatingStatus}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-          >
-            Actions <ChevronDown className="w-4 h-4" />
-          </button>
-          {actionsOpen && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[160px] py-1">
-                {actionItems.map((item, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={item.onClick}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </>
+      actions={hasRedirectBack || actionItems.length > 0 ? (
+        <div className="flex items-center gap-2">
+          {hasRedirectBack && (
+            <button
+              type="button"
+              onClick={handleBackContextual}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              title="Back"
+            >
+              Back
+            </button>
+          )}
+          {actionItems.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setActionsOpen(!actionsOpen)}
+                disabled={updatingStatus}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Actions <ChevronDown className="w-4 h-4" />
+              </button>
+              {actionsOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[160px] py-1">
+                    {actionItems.map((item, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={item.onClick}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       ) : undefined}
@@ -551,7 +584,7 @@ export default function InvoiceDetail() {
                 <dt className="text-gray-500">Sales Order</dt>
                 <dd>
                   <button type="button"
-                    onClick={() => router.navigate(`/sales/orders/${invoice.SalesOrders!.id}`)}
+                    onClick={() => router.navigate(withReturnTo(`/sales/orders/${invoice.SalesOrders!.id}`))}
                     className="text-primary hover:underline font-medium">
                     {invoice.SalesOrders.sales_order_no}
                   </button>
@@ -728,7 +761,7 @@ export default function InvoiceDetail() {
                     <tr
                       key={a.id}
                       className="border-t hover:bg-gray-50 cursor-pointer"
-                      onClick={() => router.navigate(`/financials/payments/${a.payment_id}`)}
+                      onClick={() => router.navigate(withReturnTo(`/financials/payments/${a.payment_id}`))}
                     >
                       <td className="px-4 py-4">{a.Payments?.payment_date ? new Date(a.Payments.payment_date).toLocaleDateString() : '—'}</td>
                       <td className="px-4 py-4 capitalize">{a.Payments?.method ?? '—'}</td>

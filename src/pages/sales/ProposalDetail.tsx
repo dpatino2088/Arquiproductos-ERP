@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { getSupabaseErrorMessage, isRLSError } from '../../lib/supabase-error-utils';
@@ -18,7 +19,7 @@ import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -501,8 +502,31 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const handleSaveAndClose = useCallback(async () => {
     await handleSave();
-    router.navigate('/sales/proposals');
+    navigateBackContextual(router, {
+      queryReturnTo: getReturnToFromCurrentQuery(),
+      fallback: '/sales/proposals',
+    });
   }, [handleSave]);
+
+  const listPath = '/sales/proposals';
+  const queryReturnTo = getReturnToFromCurrentQuery();
+  const normalizePath = (path: string | null | undefined) => {
+    const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return trimmed || '/';
+  };
+  const hasRedirectBack =
+    !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+
+  const handleBack = useCallback(() => {
+    router.navigate(listPath);
+  }, []);
+
+  const handleBackContextual = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo,
+      fallback: listPath,
+    });
+  }, [queryReturnTo]);
 
   const updateLineAdjustment = useCallback(
     (lineId: string, lineAdjustmentPct: number | null) => {
@@ -1051,7 +1075,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     return (
       <div className="p-6">
         <p className="text-gray-500">Proposal ID not found.</p>
-        <button onClick={() => router.navigate('/sales/proposals')} className="mt-2 text-blue-600 hover:underline">
+        <button onClick={handleBack} className="mt-2 text-blue-600 hover:underline">
           Back to Proposals
         </button>
       </div>
@@ -1066,7 +1090,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     return (
       <div className="p-6">
         <p className="text-red-600">{error || 'Proposal not found'}</p>
-        <button onClick={() => router.navigate('/sales/proposals')} className="mt-2 text-blue-600 hover:underline">
+        <button onClick={handleBack} className="mt-2 text-blue-600 hover:underline">
           Back to Proposals
         </button>
       </div>
@@ -1086,7 +1110,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const contactDisplay = contact
     ? [contact.contact_name, contact.contact_email].filter(Boolean).join(' · ')
     : '';
-
   const actionButtons = (
     <div className="flex items-center gap-2">
       <div className="relative" ref={printDropdownRef}>
@@ -1134,14 +1157,17 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           </div>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => router.navigate('/sales/proposals')}
-        className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-        title="Close"
-      >
-        Close
-      </button>
+      {hasRedirectBack && (
+        <button
+          type="button"
+          onClick={handleBackContextual}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
+          title="Back"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
+      )}
       <button
         type="button"
         onClick={handleSave}
@@ -1175,7 +1201,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
-      onBack={() => router.navigate('/sales/proposals')}
+      onBack={handleBack}
       actions={actionButtons}
     >
       {activeTab === 'overview' && (
@@ -1189,7 +1215,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   <dt className="text-gray-500">Quote</dt>
                   <dd>
                     {quote ? (
-                      <button onClick={() => router.navigate(`/sales/quotes/${quote.id}`)} className="text-primary hover:underline font-medium">
+                      <button onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quote.id}`))} className="text-primary hover:underline font-medium">
                         {quote.quote_no}
                       </button>
                     ) : '—'}
@@ -1363,7 +1389,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               )}
               {quote && (
                 <button
-                  onClick={() => router.navigate(`/sales/quotes/${quote.id}/edit`)}
+                  onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quote.id}/edit`))}
                   className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
                 >
                   Back to Quote

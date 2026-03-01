@@ -29,6 +29,9 @@ export interface QuoteListItem {
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') */
   created_by: string;
   archived?: boolean;
+  sale_order_id?: string | null;
+  total_paid?: number;
+  has_payment?: boolean;
   [key: string]: unknown;
 }
 
@@ -151,8 +154,40 @@ export function useQuotes(dealerId?: string | null) {
         }
       }
 
+      let saleOrderByQuoteId = new Map<string, { id: string; quote_id: string }>();
+      if (quoteIds.length > 0) {
+        const { data: saleOrdersData } = await supabase
+          .from('SalesOrders')
+          .select('id, quote_id, created_at')
+          .in('quote_id', quoteIds)
+          .eq('organization_id', activeOrganizationId)
+          .or('deleted.is.false,deleted.is.null')
+          .order('created_at', { ascending: false });
+        if (signal?.aborted) return;
+        (saleOrdersData || []).forEach((so: any) => {
+          if (so?.quote_id && so?.id && !saleOrderByQuoteId.has(so.quote_id)) {
+            saleOrderByQuoteId.set(so.quote_id, { id: so.id, quote_id: so.quote_id });
+          }
+        });
+      }
+
+      const salesOrderIds = Array.from(new Set(Array.from(saleOrderByQuoteId.values()).map((so) => so.id)));
+      const paidBySalesOrderId = new Map<string, number>();
+      if (salesOrderIds.length > 0) {
+        const { data: financialData } = await supabase
+          .from('sales_order_financial_summary')
+          .select('sales_order_id, total_paid')
+          .in('sales_order_id', salesOrderIds);
+        if (signal?.aborted) return;
+        (financialData || []).forEach((row: any) => {
+          paidBySalesOrderId.set(row.sales_order_id, Number(row.total_paid ?? 0));
+        });
+      }
+
       const enrichedQuotes = quotesData.map((quote: any) => {
         const lines = quoteLinesMap.get(quote.id) || [];
+        const salesOrder = saleOrderByQuoteId.get(quote.id) ?? null;
+        const totalPaid = salesOrder?.id ? (paidBySalesOrderId.get(salesOrder.id) ?? 0) : 0;
         const total = lines.reduce((sum: number, l: any) => {
           const dealerTotal = Number(l.dealer_price_total ?? 0);
           const msrpTotal = Number(l.msrp ?? 0);
@@ -169,6 +204,9 @@ export function useQuotes(dealerId?: string | null) {
           contact_name: quote.contact_id ? (contactsMap.get(quote.contact_id) || 'Contacto no encontrado') : '-',
           total,
           created_by: createdBy,
+          sale_order_id: salesOrder?.id ?? null,
+          total_paid: totalPaid,
+          has_payment: totalPaid > 0,
         };
       });
 
