@@ -202,7 +202,7 @@ export function useCatalogItems(
           const unitOfMeasure = item.unit_of_measure || item.uom || 'unit';
           return {
             id: item.id, organization_id: item.organization_id, sku: item.sku || '', name: itemName, item_name: item.item_name || item.name || null,
-            description: item.description || null, manufacturer_id: item.manufacturer_id || null, category_id: item.category_id || null, item_category_id: item.item_category_id || null,
+            description: item.description || null, manufacturer_id: item.manufacturer_id || null, manufacturer: item.manufacturer || item.metadata?.manufacturer || null, category_id: item.category_id || null, item_category_id: item.item_category_id || null,
             measure_basis: normalizedMeasureBasis, unit_of_measure: unitOfMeasure, uom: unitOfMeasure, is_fabric: item.is_fabric || false,
             roll_type: (item as any).roll_type || null, collection_name: item.collection_name || null, variant_name: item.variant_name || null,
             roll_width: item.roll_width || item.roll_width_m || null, roll_width_m: item.roll_width_m || item.roll_width || null, fabric_pricing_mode: item.fabric_pricing_mode || null,

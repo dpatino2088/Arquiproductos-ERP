@@ -531,7 +531,7 @@ export default function Items() {
         updated_at: (item as any).updated_at || item.created_at || undefined,
         active: activeStatus, // ✅ Siempre definido antes de renderizar
         discontinued: item.discontinued || false,
-        manufacturer: item.metadata?.manufacturer || 'Not specified',
+        manufacturer: item.manufacturer || item.metadata?.manufacturer || 'Not specified',
         category: categoryName || 'N/A',
         family: item.metadata?.family || 'Not specified',
         image: item.image_url || item.metadata?.image || null,

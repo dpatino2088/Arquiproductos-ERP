@@ -37,6 +37,7 @@ export interface CatalogItem {
   item_name?: string | null;  // Legacy: kept for backward compatibility
   description?: string | null;
   manufacturer_id?: string | null;
+  manufacturer?: string | null; // Denormalized manufacturer name (from Manufacturers or metadata)
   category_id?: string | null; // NEW: FK to CatalogCategories.id
   item_category_id?: string | null; // Legacy: kept for backward compatibility
   measure_basis: MeasureBasis; // Required: 'unit' | 'linear' | 'area'

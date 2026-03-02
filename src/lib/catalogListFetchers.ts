@@ -25,6 +25,7 @@ function enrichItems(d: Record<string, unknown>[], msrpMap: Map<string, MsrpRow>
       item_name: (item.item_name ?? item.name) as string | null,
       description: (item.description as string) ?? null,
       manufacturer_id: (item.manufacturer_id as string) ?? null,
+      manufacturer: ((item.manufacturer as string) ?? (item.metadata as Record<string, unknown>)?.manufacturer as string) ?? null,
       category_id: (item.category_id as string) ?? null,
       item_category_id: (item.item_category_id as string) ?? null,
       measure_basis: normalizedMeasureBasis as CatalogItem['measure_basis'],
