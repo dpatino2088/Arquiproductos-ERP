@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
 import { Tooltip, TooltipProvider } from '../../../components/ui/Tooltip';
-import { CANONICAL_COMPONENT_ROLES, getRoleLabel } from '../../../lib/bom/roles';
+import { getRoleLabel, getAllRoleOptions } from '../../../lib/bom/roles';
 import { BOM_QTY_TYPES } from './types';
 import { useBOMTemplateForm } from './useBOMTemplateForm';
 import BOMEngineeringModal from './BOMEngineeringModal';
@@ -29,6 +29,7 @@ const QTY_TYPE_LABELS: Record<string, string> = {
   per_width: 'Per Width',
   per_height: 'Per Height',
   per_area: 'Per Area',
+  per_spacing: 'Per Spacing',
 };
 
 export interface BOMTemplateModalProps {
@@ -111,7 +112,14 @@ export default function BOMTemplateModal({
 
   const getQtyDisplay = (comp: BOMComponentDraft) => {
     if (comp.qty_type === 'fixed') return String(comp.qty_value ?? '—');
-    return QTY_TYPE_LABELS[comp.qty_type || 'fixed'] || comp.qty_type || '—';
+    if (comp.qty_type === 'per_spacing') {
+      const sp = comp.qty_spacing_mm ?? 500;
+      const min = comp.qty_min;
+      return `Every ${sp}mm${min != null ? ` (min ${min})` : ''}`;
+    }
+    const label = QTY_TYPE_LABELS[comp.qty_type || 'fixed'] || comp.qty_type || '—';
+    const mult = comp.qty_value != null && comp.qty_value !== 1 ? ` x${comp.qty_value}` : '';
+    return `${label}${mult}`;
   };
 
   // Group flatFilteredItems by category for dropdown
@@ -273,14 +281,18 @@ export default function BOMTemplateModal({
                     <div>
                       <Label>Category filter</Label>
                       <SelectShadcn
-                        value={form.selectedCategoryFilter}
-                        onValueChange={form.setSelectedCategoryFilter}
+                        value={form.selectedCategoryFilter || '__all__'}
+                        onValueChange={(value) =>
+                          form.setSelectedCategoryFilter(
+                            value === '__all__' ? '' : value
+                          )
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="All categories" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">All categories</SelectItem>
+                          <SelectItem value="__all__">All categories</SelectItem>
                           {form.categories.map((c) => (
                             <SelectItem key={c.id} value={c.id}>
                               {c.name}
@@ -365,9 +377,9 @@ export default function BOMTemplateModal({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">— None —</SelectItem>
-                          {CANONICAL_COMPONENT_ROLES.map((role) => (
-                            <SelectItem key={role} value={role}>
-                              {getRoleLabel(role)}
+                          {getAllRoleOptions().map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -382,7 +394,11 @@ export default function BOMTemplateModal({
                             ...prev,
                             qty_type: v as any,
                             qty_value:
-                              v === 'fixed' ? prev.qty_value ?? 1 : null,
+                              v === 'fixed' ? (prev.qty_value ?? 1)
+                              : v === 'per_spacing' ? null
+                              : (prev.qty_value ?? 1),
+                            qty_spacing_mm: v === 'per_spacing' ? (prev.qty_spacing_mm ?? 500) : null,
+                            qty_min: v === 'per_spacing' ? prev.qty_min : null,
                           }))
                         }
                       >
@@ -429,14 +445,79 @@ export default function BOMTemplateModal({
                       </div>
                     </div>
                   )}
-                  {form.formData.qty_type !== 'fixed' && (
-                    <div>
-                      <Label>UOM</Label>
-                      <Input
-                        value={form.formData.uom}
-                        readOnly
-                        className="bg-gray-50 max-w-xs"
-                      />
+                  {(form.formData.qty_type === 'per_width' || form.formData.qty_type === 'per_height' || form.formData.qty_type === 'per_area') && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Multiplier</Label>
+                        <Input
+                          type="number"
+                          min={0.01}
+                          step={0.01}
+                          value={form.formData.qty_value ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            const n = v === '' ? null : parseFloat(v);
+                            form.setFormData((prev) => ({
+                              ...prev,
+                              qty_value: n,
+                            }));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label>UOM</Label>
+                        <Input
+                          value={form.formData.uom}
+                          readOnly
+                          className="bg-gray-50"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {form.formData.qty_type === 'per_spacing' && (
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <Label>Spacing (mm)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={form.formData.qty_spacing_mm ?? 500}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10) || 500;
+                            form.setFormData((prev) => ({
+                              ...prev,
+                              qty_spacing_mm: n,
+                            }));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label>Min Qty</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={form.formData.qty_min ?? ''}
+                          placeholder="No min"
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            const n = v === '' ? null : parseInt(v, 10);
+                            form.setFormData((prev) => ({
+                              ...prev,
+                              qty_min: n,
+                            }));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label>UOM</Label>
+                        <Input
+                          value={form.formData.uom}
+                          readOnly
+                          className="bg-gray-50"
+                        />
+                      </div>
                     </div>
                   )}
                   <div className="flex items-center gap-4">
@@ -758,6 +839,7 @@ export default function BOMTemplateModal({
         setShowChildDropdown={form.setShowChildDropdown}
         catalogItems={form.catalogItems}
         categories={form.categories}
+        parentComponentRole={form.editingParentComponentRole}
         onClose={form.handleCloseChildrenModal}
         onAddChild={form.handleAddChild}
         onDeleteChild={form.handleDeleteChild}

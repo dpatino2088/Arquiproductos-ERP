@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
-import { getReturnToFromCurrentQuery, navigateBackContextual, resolveReturnTo } from '../../lib/navigation/returnTo';
+import { getCatalogItemsReturnTo, getReturnToFromCurrentQuery, navigateBackContextual, resolveReturnTo, setCatalogItemsRestoreOnBack, setCatalogItemsReturnTo, withCatalogItemsRestore } from '../../lib/navigation/returnTo';
 import { useUIStore } from '../../stores/ui-store';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -189,14 +189,18 @@ export default function CatalogItemNew() {
   
   // Track current path so itemId stays in sync with navigation
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);
+  const [routeSearch, setRouteSearch] = useState<string>(window.location.search);
   useEffect(() => {
-    const syncPath = () => setCurrentPath(window.location.pathname);
-    syncPath();
-    const unsubscribe = router.addListener(syncPath);
-    window.addEventListener('popstate', syncPath);
+    const syncRoute = () => {
+      setCurrentPath(window.location.pathname);
+      setRouteSearch(window.location.search);
+    };
+    syncRoute();
+    const unsubscribe = router.addListener(syncRoute);
+    window.addEventListener('popstate', syncRoute);
     return () => {
       unsubscribe();
-      window.removeEventListener('popstate', syncPath);
+      window.removeEventListener('popstate', syncRoute);
     };
   }, []);
 
@@ -225,13 +229,25 @@ export default function CatalogItemNew() {
     () => ({ q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 500 }),
     []
   );
+  const queryReturnTo = useMemo(() => getReturnToFromCurrentQuery(), [routeSearch]);
   const returnTo = useMemo(() => {
     return resolveReturnTo({
-      queryReturnTo: getReturnToFromCurrentQuery(),
-      storageReturnTo: returnToFromStorage,
+      queryReturnTo,
+      storageReturnTo: returnToFromStorage ?? getCatalogItemsReturnTo(),
       fallback: '/catalog/items',
     });
-  }, [currentPath, returnToFromStorage]);
+  }, [queryReturnTo, returnToFromStorage]);
+
+  useEffect(() => {
+    if (!returnTo.startsWith('/catalog/items')) return;
+    setCatalogItemsReturnTo(returnTo);
+    if (!itemId) return;
+    try {
+      window.sessionStorage.setItem(`catalogItemReturnTo:${itemId}`, returnTo);
+    } catch {
+      // no-op
+    }
+  }, [returnTo, itemId]);
   const listCache = queryClient.getQueryData(
     catalogItemsListKey(scopeKey, defaultListFilters)
   ) as CatalogItem[] | undefined;
@@ -715,11 +731,18 @@ export default function CatalogItemNew() {
             const parsed = JSON.parse(sessionData);
             if (parsed?.values) {
               formValues = { ...dbValues, ...parsed.values };
-              if (Array.isArray(parsed?.productTypeIds)) {
+              if (Array.isArray(parsed?.productTypeIds) && parsed.productTypeIds.length > 0) {
                 setSelectedProductTypeIds(parsed.productTypeIds);
               }
               
-              // If roll fields are missing in session but exist in DB, restore them
+              // Always restore category_id from DB if session has null/undefined
+              if (!formValues.category_id && dbValues.category_id) {
+                formValues.category_id = dbValues.category_id;
+              }
+              if (!formValues.manufacturer_id && dbValues.manufacturer_id) {
+                formValues.manufacturer_id = dbValues.manufacturer_id;
+              }
+
               const isRollItem = !!(formValues.is_roll || dbValues.is_roll);
               if (isRollItem) {
                 if (!formValues.collection_name && dbValues.collection_name) {
@@ -907,7 +930,7 @@ export default function CatalogItemNew() {
         const parsed = JSON.parse(sessionData);
         if (parsed?.values) {
           reset(parsed.values);
-          if (Array.isArray(parsed?.productTypeIds)) {
+          if (Array.isArray(parsed?.productTypeIds) && parsed.productTypeIds.length > 0) {
             setSelectedProductTypeIds(parsed.productTypeIds);
           }
           if (import.meta.env.DEV) {
@@ -1218,7 +1241,16 @@ export default function CatalogItemNew() {
       // Navigate based on user action (use intent captured at submit start)
       shouldCloseAfterSaveRef.current = false;
       if (closeAfterSave) {
-        router.navigate(returnTo);
+        setCatalogItemsRestoreOnBack(false);
+        setCatalogItemsReturnTo(null);
+        if (itemId) {
+          try {
+            window.sessionStorage.removeItem(`catalogItemReturnTo:${itemId}`);
+          } catch {
+            // no-op
+          }
+        }
+        router.navigate('/catalog/items');
       } else if (!itemId && finalItemId) {
         // For new items, navigate to edit mode preserving active tab
         const newPath = `/catalog/items/edit/${finalItemId}?returnTo=${encodeURIComponent(returnTo)}`;
@@ -1265,26 +1297,58 @@ export default function CatalogItemNew() {
     <div className="py-6 px-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setCatalogItemsRestoreOnBack(false);
+              setCatalogItemsReturnTo(null);
+              if (itemId) {
+                try {
+                  window.sessionStorage.removeItem(`catalogItemReturnTo:${itemId}`);
+                } catch {
+                  // no-op
+                }
+              }
+              router.navigate('/catalog/items');
+            }}
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+            title="Back to item list"
+            aria-label="Back to item list"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">
             {itemId ? 'Edit Item' : 'New Item'}
           </h1>
           <p className="text-xs text-gray-500">
             {itemId ? 'Edit catalog item' : 'Create a new catalog item'}
           </p>
+          </div>
         </div>
         
         <div className="flex items-center gap-3">
           {/* Close Button */}
           <button
             type="button"
-            onClick={() =>
-              navigateBackContextual(router, {
-                queryReturnTo: getReturnToFromCurrentQuery(),
-                storageReturnTo: returnToFromStorage,
+            onClick={() => {
+              setCatalogItemsRestoreOnBack(true);
+              const target = resolveReturnTo({
+                queryReturnTo,
+                storageReturnTo: returnToFromStorage ?? getCatalogItemsReturnTo(),
                 fallback: '/catalog/items',
-              })
-            }
+              });
+              if (target.startsWith('/catalog/items')) {
+                router.navigate(withCatalogItemsRestore(target));
+                return;
+              }
+              navigateBackContextual(router, {
+                queryReturnTo,
+                storageReturnTo: returnToFromStorage ?? getCatalogItemsReturnTo(),
+                fallback: '/catalog/items',
+              });
+            }}
             disabled={isSaving}
             className="inline-flex items-center gap-2 px-4 py-1.5 rounded border border-gray-300 bg-white text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-50"
           >
@@ -1587,7 +1651,7 @@ export default function CatalogItemNew() {
                 <SelectItem value="__none__">None</SelectItem>
                 {filteredSubcategories.map((cat) => (
                   <SelectItem key={cat.id} value={cat.id}>
-                    {(parentCategoryNameById.get(cat.parent_id || '') || 'Category')} {'>'} {cat.name}
+                    {cat.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1793,7 +1857,7 @@ export default function CatalogItemNew() {
           {/* Specs - ONLY for roll items (below Roll Width/Length row) */}
           {isRoll && (
             <>
-              <div className="col-span-6 mt-2 pt-4 border-t border-gray-200">
+              <div className="col-span-12 col-start-1 mt-2 pt-4 border-t border-gray-200">
                 {!itemId || !activeOrganizationId ? (
                   <div className="bg-amber-50 border border-amber-200 rounded p-3">
                     <p className="text-xs text-amber-800">Save the item first to edit specs.</p>
@@ -1806,14 +1870,13 @@ export default function CatalogItemNew() {
                   />
                 )}
               </div>
-              <div className="col-span-6 mt-2 pt-4 border-t border-gray-200" />
             </>
           )}
           
           {/* Supply Type + Origin — one row, before Product Types / Image (edit only) */}
           {itemId && activeOrganizationId && (
             <>
-              <div className="col-span-3">
+              <div className="col-span-3 col-start-1">
                 <Label className="text-xs">Supply Type</Label>
                 <SelectShadcn
                   value={supplyType}

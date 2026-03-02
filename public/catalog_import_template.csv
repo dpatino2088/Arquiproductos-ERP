@@ -1,0 +1,5 @@
+sku,name,description,category_group,subcategory,measure_basis,unit_of_measure,cost_exw,purchase_unit,units_per_purchase_unit,is_roll,roll_type,roll_width_value,roll_width_uom,roll_length_value,roll_length_uom,roll_pricing_mode,manufacturer,product_types,supply_type,supply_origin,can_rotate,weldable,raw_material,openness_factor,weight_gsm,notes,is_active
+SKU-001,Captiva Blackout 118.11,Sample roll fabric item,Rolls,Fabric,linear,yd,22.75,roll,1,true,fabric,2.80,m,29.965,yd,per_linear_meter,Vertilux,roller|drapery,stock,local,false,false,PVC,5,280,,true
+SKU-002,Power Supply 24V,Sample systems power supply item,Systems,Power Supplies,unit,ea,35.50,each,1,false,,,,,,,,roller|dual_shade|triple_shade,stock,local,,,,,,,true
+SKU-003,Bracket set 5pc,Linear component sold by box,Hardware,Brackets,unit,ea,18.00,box,5,false,,,,,,,Lutron,roller|dual_shade,order,import,,,,,,,true
+SKU-004,Window Film 1.52m,Sample window film roll by area,Rolls,Fabric,area,m,12.50,roll,1,true,window_film,1.52,m,30,m,per_square_meter,Vertilux,window_film,stock,local,false,true,PET,0,76,,true

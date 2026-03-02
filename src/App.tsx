@@ -80,6 +80,8 @@ const Manufacturing = lazy(() => import('./pages/manufacturing/Manufacturing'));
 const BillOfMaterials = lazy(() => import('./pages/manufacturing/BillOfMaterials'));
 const ApprovedBOMList = lazy(() => import('./pages/catalog/ApprovedBOMList'));
 const Financials = lazy(() => import('./pages/financials/Financials'));
+const DealerAccounts = lazy(() => import('./pages/financials/DealerAccounts'));
+const DealerAccountDetail = lazy(() => import('./pages/financials/DealerAccountDetail'));
 const Invoices = lazy(() => import('./pages/financials/Invoices'));
 const InvoiceNew = lazy(() => import('./pages/financials/InvoiceNew'));
 const InvoiceDetail = lazy(() => import('./pages/financials/InvoiceDetail'));
@@ -87,6 +89,7 @@ const FinancialPayments = lazy(() => import('./pages/financials/FinancialPayment
 const PaymentDetail = lazy(() => import('./pages/financials/PaymentDetail'));
 const Partners = lazy(() => import('./pages/partners/Partners'));
 const PartnerDealers = lazy(() => import('./pages/partners/PartnerDealers'));
+const DealerDetail = lazy(() => import('./pages/partners/DealerDetail'));
 const PartnerVendors = lazy(() => import('./pages/partners/PartnerVendors'));
 const PartnerVendorForm = lazy(() => import('./pages/partners/PartnerVendorForm'));
 const PartnerManufacturers = lazy(() => import('./pages/partners/PartnerManufacturers'));
@@ -761,6 +764,12 @@ function App() {
     router.addRoute('/financials/invoices', () => {
       if (isAuthenticated) { setCurrentPage('financials-invoices'); } else { setCurrentPage('login'); }
     });
+    router.addRoute('/financials/accounts', () => {
+      if (isAuthenticated) { setCurrentPage('financials-accounts'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/accounts/:dealerId', () => {
+      if (isAuthenticated) { setCurrentPage('financials-account-detail'); } else { setCurrentPage('login'); }
+    });
     router.addRoute('/financials/invoices/new', () => {
       if (isAuthenticated) { setCurrentPage('financials-invoice-new'); } else { setCurrentPage('login'); }
     });
@@ -786,6 +795,12 @@ function App() {
     });
     router.addRoute('/partners/dealers/edit/:id', () => {
       if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealers/edit/:id/terms', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/partners/dealers/:id', () => {
+      if (isAuthenticated) { setCurrentPage('partners-dealer-detail'); } else { setCurrentPage('login'); }
     });
     router.addRoute('/partners/dealer-users/new', () => {
       if (isAuthenticated) { setCurrentPage('partners-dealers'); } else { setCurrentPage('login'); }
@@ -1172,6 +1187,10 @@ function App() {
         return <RequireModule module="manufacturing"><ApprovedBOMList /></RequireModule>; // Legacy support - redirect to ApprovedBOMList
       case 'financials':
         return <RequireModule module="financials"><Financials /></RequireModule>;
+      case 'financials-accounts':
+        return <RequireModule module="financials"><DealerAccounts /></RequireModule>;
+      case 'financials-account-detail':
+        return <RequireModule module="financials"><DealerAccountDetail /></RequireModule>;
       case 'financials-invoices':
         return <RequireModule module="financials"><Invoices /></RequireModule>;
       case 'financials-invoice-new':
@@ -1186,6 +1205,8 @@ function App() {
         return <RequireModule module="settings"><Partners /></RequireModule>;
       case 'partners-dealers':
         return <RequireModule module="settings"><PartnerDealers /></RequireModule>;
+      case 'partners-dealer-detail':
+        return <RequireModule module="settings"><DealerDetail /></RequireModule>;
       case 'partners-vendors':
         return <RequireModule module="settings"><PartnerVendors /></RequireModule>;
       case 'partners-vendor-form': {

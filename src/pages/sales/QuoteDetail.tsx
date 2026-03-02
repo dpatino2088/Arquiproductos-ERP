@@ -643,29 +643,68 @@ export default function QuoteDetail() {
             </div>
           </div>
 
-          {/* Row 2: Key Dates — same grid style as Sales Order */}
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Key Dates</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <dt className="text-gray-500">Created</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{new Date(quote.created_at).toLocaleDateString()}</dd>
+          {/* Row 2: Key Date | Delivery Expected | Status | Payment Status — 4 cards, same height */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+            {/* Card 1: Key Date */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Key Date</h3>
+              <dl className="space-y-2 text-sm">
+                <div>
+                  <dt className="text-gray-500">Created</dt>
+                  <dd className="font-medium text-gray-900 mt-0.5">{new Date(quote.created_at).toLocaleDateString()}</dd>
+                </div>
+              </dl>
+            </div>
+            {/* Card 2: Delivery Expected */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Delivery Expected</h3>
+              <p className="font-medium text-gray-900 mt-0.5">
+                {salesOrder?.expected_delivery_date
+                  ? new Date(salesOrder.expected_delivery_date).toLocaleDateString()
+                  : '—'}
+              </p>
+            </div>
+            {/* Card 3: Status */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Status</h3>
+              <div className="mt-0.5">
+                <StatusBadge status={statusForDisplay} type="quote" size="sm" />
               </div>
-              <div>
-                <dt className="text-gray-500">Expires</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{quote.expires_at ? new Date(quote.expires_at).toLocaleDateString() : '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-gray-500">Status</dt>
-                <dd className="mt-0.5">
-                  <StatusBadge status={statusForDisplay} type="quote" size="sm" />
-                </dd>
-                <dd className="text-xs text-gray-500 mt-1">{keyStatusCaption}</dd>
-              </div>
-              <div>
-                <dt className="text-gray-500">Converted</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{!isPortal && quote.converted_at ? new Date(quote.converted_at).toLocaleDateString() : '—'}</dd>
-              </div>
+              <p className="text-xs text-gray-500 mt-1">{keyStatusCaption}</p>
+            </div>
+            {/* Card 4: Payment Status */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Payment Status</h3>
+              {salesOrder ? (
+                <>
+                  <div className="mt-0.5">
+                    {(() => {
+                      const total = salesOrder.total_amount ?? 0;
+                      const paid = salesOrderFinancial?.total_paid ?? 0;
+                      const paymentStatus = total <= 0 ? 'pending' : paid <= 0 ? 'pending' : paid >= total ? 'paid' : 'partial';
+                      return (
+                        <StatusBadge
+                          status={paymentStatus}
+                          type="payment"
+                          size="sm"
+                        />
+                      );
+                    })()}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {(() => {
+                      const total = salesOrder.total_amount ?? 0;
+                      const paid = salesOrderFinancial?.total_paid ?? 0;
+                      if (total <= 0) return 'No amount';
+                      if (paid <= 0) return 'Unpaid';
+                      if (paid >= total) return 'Completed';
+                      return 'Partial';
+                    })()}
+                  </p>
+                </>
+              ) : (
+                <p className="font-medium text-gray-500 mt-0.5">—</p>
+              )}
             </div>
           </div>
 

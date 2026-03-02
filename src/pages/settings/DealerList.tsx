@@ -5,10 +5,11 @@ import { useDealers, type Dealer } from '../../hooks/useDealers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useUIStore } from '../../stores/ui-store';
-import { Building, Plus, Edit, Trash2, Search, Filter, List, Grid3X3 } from 'lucide-react';
+import { Building, Plus, Edit, Trash2, Search, Filter, List, Grid3X3, Eye } from 'lucide-react';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 
 interface StatusBadgeProps {
   status: string;
@@ -95,6 +96,14 @@ export default function DealerList({ basePath = '/settings/dealer-profile', modu
 
   const handleEdit = (dealer: Dealer) => {
     router.navigate(`${basePath}/edit/${dealer.id}`);
+  };
+
+  const handleViewDetail = (dealer: Dealer) => {
+    if (basePath === '/partners/dealers') {
+      router.navigate(withReturnTo(`/financials/accounts/${dealer.id}`, '/partners/dealers'));
+      return;
+    }
+    handleEdit(dealer);
   };
 
   const handleDelete = async (dealer: Dealer) => {
@@ -269,14 +278,14 @@ export default function DealerList({ basePath = '/settings/dealer-profile', modu
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Phone</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Status</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Date Added</th>
-                  {canManageDealers && !roleLoading && (
+                  {(basePath === '/partners/dealers' || canManageDealers) && !roleLoading && (
                     <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Actions</th>
                   )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredDealers.map((dealer) => (
-                  <tr key={dealer.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => handleEdit(dealer)}>
+                  <tr key={dealer.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap font-mono">
                       {dealer.dealer_no || '-'}
                     </td>
@@ -297,32 +306,45 @@ export default function DealerList({ basePath = '/settings/dealer-profile', modu
                         ? new Date(dealer.created_at).toLocaleDateString()
                         : '-'}
                     </td>
-                    {canManageDealers && !roleLoading && (
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                    {(basePath === '/partners/dealers' || canManageDealers) && !roleLoading && (
+                      <td className="py-4 px-6">
                         <div className="flex items-center gap-2 justify-end">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEdit(dealer);
-                            }}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            title="Edit dealer"
-                            disabled={dealer.deleted}
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          {!dealer.deleted && (
+                          {basePath === '/partners/dealers' && (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDelete(dealer);
-                              }}
-                              disabled={archivingId === dealer.id}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                              title="Eliminar (archivar) dealer"
+                              type="button"
+                              onClick={() => handleViewDetail(dealer)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              title="Ver cuenta financiera"
+                              disabled={dealer.deleted}
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Eye className="w-4 h-4" />
                             </button>
+                          )}
+                          {canManageDealers && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleEdit(dealer)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                title="Editar dealer"
+                                disabled={dealer.deleted}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              {!dealer.deleted && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await handleDelete(dealer);
+                                  }}
+                                  disabled={archivingId === dealer.id}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                                  title="Eliminar (archivar) dealer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>

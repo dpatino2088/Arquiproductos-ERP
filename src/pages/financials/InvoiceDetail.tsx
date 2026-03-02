@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
@@ -10,6 +10,8 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText, DollarSign, ChevronDown } from 'lucide-react';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFLine, InvoicePDFData, InvoicePDFDealer, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
+import { generateNextSequentialNumber } from '../../lib/sequential-numbers';
+import { getSupabaseErrorMessageDetailed } from '../../lib/supabase-error-utils';
 
 const FINANCIAL_SUBMODULES = [
   { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
@@ -71,6 +73,16 @@ interface PaymentApplication {
   Payments?: { payment_date: string; method: string; reference: string | null; recorded_by_name: string | null } | null;
 }
 
+interface CreditNote {
+  id: string;
+  credit_note_number: string;
+  issue_date: string;
+  amount: number;
+  reason: string | null;
+  status: string;
+  created_at: string;
+}
+
 function getInvoiceId(): string | null {
   const match = window.location.pathname.match(/\/financials\/invoices\/([^/]+)/);
   return match ? match[1] : null;
@@ -102,6 +114,7 @@ export default function InvoiceDetail() {
   const [invoice, setInvoice] = useState<InvoiceHeader | null>(null);
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [applications, setApplications] = useState<PaymentApplication[]>([]);
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('lines');
@@ -112,8 +125,17 @@ export default function InvoiceDetail() {
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const [applyAmount, setApplyAmount] = useState('');
   const [applying, setApplying] = useState(false);
+  const [voidDialogOpen, setVoidDialogOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [creditDialogOpen, setCreditDialogOpen] = useState(false);
+  const [creditAmount, setCreditAmount] = useState('');
+  const [creditReason, setCreditReason] = useState('');
+  const [creatingCredit, setCreatingCredit] = useState(false);
+  const hasAutoOpenedPdfRef = useRef(false);
   const listPath = '/financials/invoices';
   const queryReturnTo = getReturnToFromCurrentQuery();
+  const queryParams = new URLSearchParams(window.location.search);
+  const openPdfOnly = queryParams.get('pdf') === '1';
   const normalizePath = (path: string | null | undefined) => {
     const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
     return trimmed || '/';
@@ -141,7 +163,7 @@ export default function InvoiceDetail() {
     setLoading(true);
     setError(null);
     try {
-      const [invRes, linesRes, appsRes] = await Promise.all([
+      const [invRes, linesRes, appsRes, creditsRes] = await Promise.all([
         supabase
           .from('DealerInvoices')
           .select('id, invoice_number, status, issue_date, due_date, currency_code, subtotal, tax_total, total, notes, sales_order_id, dealer_id, created_at')
@@ -159,8 +181,15 @@ export default function InvoiceDetail() {
           .select('id, applied_amount, payment_id, created_at')
           .eq('invoice_id', invoiceId)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('DealerCreditNotes')
+          .select('id, credit_note_number, issue_date, amount, reason, status, created_at')
+          .eq('invoice_id', invoiceId)
+          .eq('deleted', false)
+          .order('created_at', { ascending: false }),
       ]);
       if (invRes.error) throw invRes.error;
+      if (creditsRes.error) throw creditsRes.error;
       const inv = invRes.data as InvoiceHeader;
 
       const [dealerRes, soRes] = await Promise.all([
@@ -192,8 +221,9 @@ export default function InvoiceDetail() {
       } else {
         setApplications([]);
       }
+      setCreditNotes((creditsRes.data ?? []) as CreditNote[]);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load invoice');
+      setError(getSupabaseErrorMessageDetailed(e));
     } finally {
       setLoading(false);
     }
@@ -235,6 +265,93 @@ export default function InvoiceDetail() {
       addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to delete invoice' });
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  const voidInvoice = async () => {
+    if (!invoiceId || !invoice) return;
+    if (voidReason.trim().length < 3) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Please provide a void reason.' });
+      return;
+    }
+    setUpdatingStatus(true);
+    try {
+      const currentApplied = applications.reduce((sum, row) => sum + Number(row.applied_amount), 0);
+      if (currentApplied > 0.005) {
+        throw new Error('Invoice has applied payments. Unapply payments before voiding.');
+      }
+      const appendedNotes = [invoice.notes, `VOID REASON: ${voidReason.trim()}`].filter(Boolean).join('\n');
+      const { error: err } = await supabase
+        .from('DealerInvoices')
+        .update({ status: 'void', notes: appendedNotes })
+        .eq('id', invoiceId);
+      if (err) throw err;
+      setVoidDialogOpen(false);
+      setVoidReason('');
+      addNotification({ type: 'success', title: 'Invoice Voided', message: 'Invoice status updated to void.' });
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const createCreditNote = async () => {
+    if (!activeOrganizationId || !invoice?.dealer_id || !invoiceId) return;
+    const amount = Number(creditAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Credit amount must be greater than 0.' });
+      return;
+    }
+    if (creditReason.trim().length < 3) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Please provide a reason for the credit.' });
+      return;
+    }
+    const creditedSoFar = creditNotes
+      .filter((row) => row.status !== 'void')
+      .reduce((sum, row) => sum + Number(row.amount), 0);
+    const creditableRemaining = Math.max(Number(invoice.total) - creditedSoFar, 0);
+    if (amount > creditableRemaining + 0.0001) {
+      addNotification({
+        type: 'error',
+        title: 'Validation',
+        message: `Credit exceeds remaining creditable amount (${fmt(creditableRemaining, currency)}).`,
+      });
+      return;
+    }
+
+    setCreatingCredit(true);
+    try {
+      const creditNo = await generateNextSequentialNumber(
+        'CN',
+        'DealerCreditNotes',
+        'credit_note_number',
+        activeOrganizationId
+      );
+      const { error: insertErr } = await supabase
+        .from('DealerCreditNotes')
+        .insert({
+          organization_id: activeOrganizationId,
+          dealer_id: invoice.dealer_id,
+          invoice_id: invoiceId,
+          credit_note_number: creditNo,
+          issue_date: new Date().toISOString().slice(0, 10),
+          amount,
+          reason: creditReason.trim(),
+          status: 'issued',
+          deleted: false,
+        });
+      if (insertErr) throw insertErr;
+      setCreditDialogOpen(false);
+      setCreditAmount('');
+      setCreditReason('');
+      addNotification({ type: 'success', title: 'Credit Note Created', message: `${creditNo} created successfully.` });
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setCreatingCredit(false);
     }
   };
 
@@ -416,6 +533,20 @@ export default function InvoiceDetail() {
     doc.save(`${invoice.invoice_number}.pdf`);
   };
 
+  useEffect(() => {
+    if (!openPdfOnly) return;
+    if (!invoice || lines.length === 0) return;
+    if (hasAutoOpenedPdfRef.current) return;
+    hasAutoOpenedPdfRef.current = true;
+    (async () => {
+      const doc = await buildInvoicePDFDoc();
+      if (!doc) return;
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      window.location.replace(url);
+    })();
+  }, [openPdfOnly, invoice, lines.length, buildInvoicePDFDoc]);
+
   if (!invoiceId) return <div className="p-6 text-red-600">Invalid URL</div>;
 
   if (loading && !invoice) {
@@ -442,13 +573,17 @@ export default function InvoiceDetail() {
 
   const currency = invoice.currency_code || 'USD';
   const totalApplied = applications.reduce((s, a) => s + Number(a.applied_amount), 0);
-  const balanceDue = Math.max(invoice.total - totalApplied, 0);
+  const totalCredited = creditNotes
+    .filter((row) => row.status !== 'void')
+    .reduce((s, row) => s + Number(row.amount), 0);
+  const balanceDue = Math.max(invoice.total - totalApplied - totalCredited, 0);
   const status = invoice.status;
   const dealer = invoice.Dealers;
 
   const tabs = [
     { id: 'lines', label: 'Lines', count: lines.length },
     { id: 'payments', label: 'Payments Applied', count: applications.length },
+    { id: 'credits', label: 'Credits', count: creditNotes.length },
   ];
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean }[] = [];
@@ -456,10 +591,22 @@ export default function InvoiceDetail() {
   actionItems.push({ label: 'Download PDF', onClick: handleDownloadPDF });
   if (status === 'draft') {
     actionItems.push({ label: 'Issue Invoice', onClick: () => updateStatus('issued') });
-    actionItems.push({ label: 'Delete', onClick: deleteInvoice, danger: true });
+    if (totalApplied <= 0.005 && totalCredited <= 0.005) {
+      actionItems.push({ label: 'Delete Draft', onClick: deleteInvoice, danger: true });
+    }
   }
-  if (status === 'issued' || status === 'partial') {
-    actionItems.push({ label: 'Void Invoice', onClick: () => updateStatus('void'), danger: true });
+  if (status === 'issued' || status === 'partial' || status === 'paid') {
+    actionItems.push({ label: 'Void Invoice', onClick: () => setVoidDialogOpen(true), danger: true });
+    const creditableRemaining = Math.max(Number(invoice.total) - totalCredited, 0);
+    if (creditableRemaining > 0.005) {
+      actionItems.push({
+        label: 'Create Credit',
+        onClick: () => {
+          setCreditAmount(String(creditableRemaining.toFixed(2)));
+          setCreditDialogOpen(true);
+        },
+      });
+    }
   }
 
   return (
@@ -650,6 +797,12 @@ export default function InvoiceDetail() {
                 </dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-gray-500">Credited</dt>
+                <dd className={`font-mono ${totalCredited > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
+                  {fmt(totalCredited, currency)}
+                </dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-gray-500">Balance Due</dt>
                 <dd className={`font-mono font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {fmt(balanceDue, currency)}
@@ -793,6 +946,12 @@ export default function InvoiceDetail() {
                   </dd>
                 </div>
                 <div className="flex justify-between">
+                  <dt className="text-gray-500">Credited</dt>
+                  <dd className={`font-mono ${totalCredited > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
+                    {fmt(totalCredited, currency)}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
                   <dt className="text-gray-500">Balance Due</dt>
                   <dd className={`font-mono font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
                     {fmt(balanceDue, currency)}
@@ -803,6 +962,120 @@ export default function InvoiceDetail() {
                   <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
                 </div>
               </dl>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'credits' && (
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Credit #</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Date</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Reason</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {creditNotes.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No credit notes</td></tr>
+              ) : (
+                creditNotes.map((cn) => (
+                  <tr key={cn.id} className="border-t hover:bg-gray-50">
+                    <td className="px-4 py-4 font-medium text-primary">{cn.credit_note_number}</td>
+                    <td className="px-4 py-4">{cn.issue_date ? new Date(cn.issue_date).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-4 text-gray-600">{cn.reason ?? '—'}</td>
+                    <td className="px-4 py-4 text-center">
+                      <StatusBadge status={cn.status} type="invoice" size="sm" />
+                    </td>
+                    <td className="px-4 py-4 text-right font-mono text-amber-700">{fmt(cn.amount, currency)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {voidDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Void Invoice</h4>
+            <p className="text-xs text-gray-600 mb-3">
+              This keeps the audit trail. If the invoice has payments applied, unapply them first.
+            </p>
+            <textarea
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="Reason for void..."
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => { setVoidDialogOpen(false); setVoidReason(''); }}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={voidInvoice}
+                disabled={updatingStatus}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg disabled:opacity-50"
+              >
+                {updatingStatus ? 'Voiding...' : 'Void Invoice'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {creditDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Create Credit Note</h4>
+            <p className="text-xs text-gray-600 mb-3">
+              Creates an audit-safe credit adjustment linked to this invoice.
+            </p>
+            <div className="space-y-2">
+              <input
+                type="number"
+                min={0.01}
+                step={0.01}
+                value={creditAmount}
+                onChange={(e) => setCreditAmount(e.target.value)}
+                placeholder="Amount"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              />
+              <textarea
+                value={creditReason}
+                onChange={(e) => setCreditReason(e.target.value)}
+                placeholder="Reason for credit..."
+                rows={3}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => { setCreditDialogOpen(false); setCreditAmount(''); setCreditReason(''); }}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={createCreditNote}
+                disabled={creatingCredit}
+                className="px-3 py-1.5 text-sm text-white bg-primary rounded-lg disabled:opacity-50"
+              >
+                {creatingCredit ? 'Creating...' : 'Create Credit'}
+              </button>
             </div>
           </div>
         </div>

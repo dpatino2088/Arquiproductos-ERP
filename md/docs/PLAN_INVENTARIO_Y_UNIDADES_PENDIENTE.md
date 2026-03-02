@@ -10,6 +10,7 @@ Plan actualizado restando lo ya hecho. Solo se listan fases y tareas pendientes.
   - CSS: `body` con `background-color: hsl(var(--background))`; sin `@apply bg-background` en `global.css`.
   - Tabs: `Layout` llama `clearSubmoduleNav()` cuando cambia el módulo (path); no quedan tabs de otro módulo.
   - HMR: `useSubmoduleNav` solo exporta Provider y hook.
+  - UX catálogo: en `Catalog Items`, botón **Back** desde `new/edit/detail` restaura contexto de lista (filtros + paginación + scroll); **Save & Close** vuelve limpio a `/catalog/items` sin filtros persistidos.
 - **Adjustments**
   - Rutas propias: `/inventory/adjustments`, `/inventory/adjustments/new`, `/inventory/adjustments/:id`.
   - `Transactions.tsx` y `TransactionDetail.tsx` usan `newPath`, `detailBasePath`, `listPath` según pathname; tipo fijo "adjustment" en contexto adjustments; "Back" vuelve a la lista correcta.

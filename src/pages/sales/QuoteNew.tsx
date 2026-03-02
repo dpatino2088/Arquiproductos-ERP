@@ -24,6 +24,7 @@ import { normalizeConfiguratorConfig, normalizeConfig } from './product-config/c
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { generateQuotePDF, type PDFVariant } from '../../lib/pdf/generateQuotePDF';
 import { useCostSettings } from '../../hooks/useCosts';
 import { useDealerTiers } from '../../hooks/useDealerTiers';
@@ -614,6 +615,11 @@ export default function QuoteNew() {
   const [previewLineId, setPreviewLineId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
+  const [pendingApproveSubmission, setPendingApproveSubmission] = useState<{
+    data: QuoteFormValues;
+    shouldNavigate: boolean;
+  } | null>(null);
   const [initialLineConfig, setInitialLineConfig] = useState<ProductConfig | undefined>(undefined);
   const [dealerInfo, setDealerInfo] = useState<{ id: string; name: string; number: string | null; dealer_tier_id: string | null } | null>(null);
   const configuratorDraftKey = quoteId ? `productConfiguratorDraft:${quoteId}` : null;
@@ -3357,7 +3363,11 @@ export default function QuoteNew() {
   };
 
   // Handle form submit
-  const onSubmit = async (data: QuoteFormValues, shouldNavigate: boolean = false) => {
+  const onSubmit = async (
+    data: QuoteFormValues,
+    shouldNavigate: boolean = false,
+    skipApproveConfirm: boolean = false
+  ) => {
     if (!activeOrganizationId) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -3389,9 +3399,10 @@ export default function QuoteNew() {
       const persistedStatus = normalizeStatus((quoteData as any)?.status);
       const nextStatus = normalizeStatus(quoteDataPayload.status);
       const isTransitioningToApproved = nextStatus === 'approved' && (!quoteId || persistedStatus !== 'approved');
-      if (isTransitioningToApproved) {
-        const confirmed = window.confirm('Approving this quote will lock status changes. Continue?');
-        if (!confirmed) return;
+      if (isTransitioningToApproved && !skipApproveConfirm) {
+        setPendingApproveSubmission({ data, shouldNavigate });
+        setApproveConfirmOpen(true);
+        return;
       }
 
       if (quoteId) {
@@ -3484,6 +3495,18 @@ export default function QuoteNew() {
   // Wrapper for Save and Close button
   const handleSaveAndClose = async (data: QuoteFormValues) => {
     await onSubmit(data, true); // Pass true to navigate after saving
+  };
+  const handleCloseApproveConfirm = () => {
+    if (isSaving || isUpdating) return;
+    setApproveConfirmOpen(false);
+    setPendingApproveSubmission(null);
+  };
+  const handleConfirmApprove = async () => {
+    if (!pendingApproveSubmission) return;
+    const pending = pendingApproveSubmission;
+    setApproveConfirmOpen(false);
+    setPendingApproveSubmission(null);
+    await onSubmit(pending.data, pending.shouldNavigate, true);
   };
 
   // Get selected contact (selectedCustomer already defined above for contacts loading)
@@ -4174,6 +4197,19 @@ export default function QuoteNew() {
           </div>
         );
       })()}
+      <ConfirmDialog
+        isOpen={approveConfirmOpen}
+        onClose={handleCloseApproveConfirm}
+        onConfirm={() => {
+          void handleConfirmApprove();
+        }}
+        title="Approve quote"
+        message="Approving this quote will lock status changes. Continue?"
+        confirmText="Approve"
+        cancelText="Cancel"
+        variant="warning"
+        isLoading={isSaving || isUpdating}
+      />
     </div>
   );
 }

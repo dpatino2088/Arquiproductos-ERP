@@ -7,9 +7,10 @@ import StatusTabs from '../../components/shared/StatusTabs';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
-import { Search, FileText, DollarSign, Plus } from 'lucide-react';
+import { Search, FileText, DollarSign, Plus, Building2 } from 'lucide-react';
 
 const FINANCIAL_SUBMODULES = [
+  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
   { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
   { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
 ];

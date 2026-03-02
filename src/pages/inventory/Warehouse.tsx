@@ -111,7 +111,7 @@ export default function Warehouse() {
 
       let balanceQuery = supabase
         .from('InventoryBalances')
-        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, is_roll, stock_basis, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, CatalogCategories(name))')
+        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, is_roll, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, CatalogCategories(name))')
         .eq('organization_id', activeOrganizationId);
 
       if (effectiveWarehouseId) {
@@ -156,19 +156,21 @@ export default function Warehouse() {
 
       return (balances as any[]).map(b => {
         const onHand = Number(b.quantity ?? 0);
-        const stockBasis = (b.CatalogItems?.stock_basis ?? '').toLowerCase();
+        const measureBasis = (b.CatalogItems?.measure_basis ?? '').toLowerCase();
+        const uom = (b.CatalogItems?.unit_of_measure ?? '').toLowerCase();
+        const isLinearStock = measureBasis === 'linear' || ['m', 'yd', 'ft'].includes(uom);
         const isRoll = !!b.CatalogItems?.is_roll;
         const rollLengthM = toMeters(b.CatalogItems?.roll_length_value, b.CatalogItems?.roll_length_uom);
         const widthM = b.CatalogItems?.roll_width_m != null && Number.isFinite(Number(b.CatalogItems.roll_width_m))
           ? Number(b.CatalogItems.roll_width_m)
           : toMeters(b.CatalogItems?.roll_width_value, b.CatalogItems?.roll_width_uom);
-        const onHandM = stockBasis === 'linear_m' ? onHand : null;
+        const onHandM = isLinearStock ? onHand : null;
         const estimatedRolls =
-          isRoll && stockBasis === 'linear_m' && rollLengthM != null && rollLengthM > 0
+          isRoll && isLinearStock && rollLengthM != null && rollLengthM > 0
             ? onHand / rollLengthM
             : null;
         const m2Reference =
-          stockBasis === 'linear_m' && widthM != null && widthM > 0 ? onHand * widthM : null;
+          isLinearStock && widthM != null && widthM > 0 ? onHand * widthM : null;
         return {
           id: b.catalog_item_id + ':' + b.warehouse_id,
           catalogItemId: b.catalog_item_id,
@@ -220,6 +222,10 @@ export default function Warehouse() {
 
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const paginated = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const selectedWarehouseName = useMemo(
+    () => warehouses.find((w) => w.id === effectiveWarehouseId)?.name ?? null,
+    [warehouses, effectiveWarehouseId]
+  );
 
   const handleSort = (col: typeof sortBy) => {
     if (sortBy === col) setSortOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -232,23 +238,24 @@ export default function Warehouse() {
   };
 
   return (
-    <div className="py-6 px-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="px-6 py-6">
+      <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">Warehouse Stock</h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {filtered.length} item{filtered.length === 1 ? '' : 's'} in stock
+          <h1 className="text-2xl font-semibold text-foreground leading-tight">Warehouse Inventory</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--gray-500)' }}>
+            {filtered.length} SKU{filtered.length === 1 ? '' : 's'} in stock
+            {selectedWarehouseName ? ` · ${selectedWarehouseName}` : ' · All warehouses'}
           </p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="mb-4 flex items-center gap-3 flex-wrap">
+      <div className="mb-5 flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
             type="text"
-            placeholder="Search by SKU, item name, or category..."
+            placeholder="Search SKU, item name, or category..."
             value={searchTerm}
             onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
             className="pl-10"
@@ -275,7 +282,7 @@ export default function Warehouse() {
           <div className="h-10 bg-gray-100 rounded" />
         </div>
       ) : (
-        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>

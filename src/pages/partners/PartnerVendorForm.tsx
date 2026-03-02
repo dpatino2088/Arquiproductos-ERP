@@ -145,16 +145,43 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
     registerSubmodules('Partners', PARTNERS_SUBMODULES);
   }, [registerSubmodules]);
 
-  // Restore draft for new vendor form when returning to the page
+  // New vendor form: always start blank (clear draft and reset form so we don't pre-fill with another vendor's data)
   useEffect(() => {
-    if (isEdit || draftRestoredRef.current) return;
-    const draft = loadVendorDraft();
-    if (!draft) return;
-    draftRestoredRef.current = true;
-    form.reset(draft.values);
-    setBillingSameAsLocation(draft.billingSameAsLocation);
-    addNotification({ type: 'success', title: 'Draft Restored', message: 'Draft restored' });
-  }, [isEdit, form, addNotification]);
+    if (!isEdit) {
+      clearVendorDraft();
+      draftRestoredRef.current = false;
+      form.reset({
+        name: '',
+        ein: '',
+        website: '',
+        email: '',
+        work_phone: '',
+        fax: '',
+        street_address_line_1: '',
+        street_address_line_2: '',
+        city: '',
+        state: '',
+        zip_code: '',
+        country: 'United States',
+        billing_street_address_line_1: '',
+        billing_street_address_line_2: '',
+        billing_city: '',
+        billing_state: '',
+        billing_zip_code: '',
+        billing_country: 'United States',
+        notes: '',
+        primary_contact_name: '',
+        contact_email: '',
+        contact_phone: '',
+        payment_terms: '',
+        delivery_terms: '',
+        transport: '',
+        tax_rule: 'taxable',
+        manufacturer_id: '',
+      });
+      setBillingSameAsLocation(true);
+    }
+  }, [isEdit, form]);
 
   // Save draft on unmount (e.g. when switching to another Partners tab)
   useEffect(() => {

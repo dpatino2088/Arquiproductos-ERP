@@ -2,6 +2,10 @@ interface ReturnToRouter {
   navigate: (path: string, pushState?: boolean) => void;
 }
 
+export const CATALOG_ITEMS_LIST_STATE_KEY = 'catalogItems:listState:v1';
+export const CATALOG_ITEMS_RESTORE_ON_BACK_KEY = 'catalogItems:restoreOnBack:v1';
+export const CATALOG_ITEMS_RETURN_TO_KEY = 'catalogItems:returnTo:v1';
+
 interface ResolveReturnToParams {
   queryReturnTo?: string | null;
   storageReturnTo?: string | null;
@@ -57,4 +61,45 @@ export function navigateBackContextual(
 ): void {
   const target = resolveReturnTo({ queryReturnTo, storageReturnTo, fallback });
   router.navigate(target);
+}
+
+export function setCatalogItemsRestoreOnBack(shouldRestore: boolean): void {
+  try {
+    if (shouldRestore) {
+      window.sessionStorage.setItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY, '1');
+      return;
+    }
+    window.sessionStorage.removeItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+export function setCatalogItemsReturnTo(path: string | null): void {
+  try {
+    const safe = sanitizeInternalPath(path);
+    if (!safe) {
+      window.sessionStorage.removeItem(CATALOG_ITEMS_RETURN_TO_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(CATALOG_ITEMS_RETURN_TO_KEY, safe);
+  } catch {
+    // no-op
+  }
+}
+
+export function getCatalogItemsReturnTo(): string | null {
+  try {
+    return sanitizeInternalPath(window.sessionStorage.getItem(CATALOG_ITEMS_RETURN_TO_KEY));
+  } catch {
+    return null;
+  }
+}
+
+export function withCatalogItemsRestore(path: string): string {
+  const safe = sanitizeInternalPath(path);
+  if (!safe || !safe.startsWith('/catalog/items')) return path;
+  const url = new URL(safe, window.location.origin);
+  url.searchParams.set('restoreList', '1');
+  return `${url.pathname}${url.search}`;
 }

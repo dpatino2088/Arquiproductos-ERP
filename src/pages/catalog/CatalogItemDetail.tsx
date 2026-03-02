@@ -6,7 +6,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useCatalogItemDetail } from '../../hooks/useCatalogItemDetail';
 import { useCatalogCategories } from '../../hooks/useCatalog';
 import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
-import { getReturnToFromCurrentQuery, navigateBackContextual, resolveReturnTo, withReturnTo } from '../../lib/navigation/returnTo';
+import { getCatalogItemsReturnTo, getReturnToFromCurrentQuery, navigateBackContextual, resolveReturnTo, setCatalogItemsRestoreOnBack, setCatalogItemsReturnTo, withCatalogItemsRestore, withReturnTo } from '../../lib/navigation/returnTo';
 import { ArrowLeft, Edit } from 'lucide-react';
 
 interface CatalogItemDetailProps {
@@ -20,19 +20,24 @@ function fmtCurrency(value?: number | null): string {
 
 export default function CatalogItemDetail({ itemId: propItemId }: CatalogItemDetailProps) {
   const [itemId, setItemId] = useState<string | null>(propItemId ?? null);
+  const [routeSearch, setRouteSearch] = useState<string>(window.location.search);
   const { activeOrganizationId } = useOrganizationContext();
   const { activeDealerId } = useActiveDealer();
   const { userType } = useAccessContext();
   const { categories } = useCatalogCategories();
-  const returnToFromQuery = useMemo(() => getReturnToFromCurrentQuery(), []);
+  const returnToFromQuery = useMemo(() => getReturnToFromCurrentQuery(), [routeSearch]);
+  const returnToFromStorage = useMemo(
+    () => (itemId ? sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null) ?? getCatalogItemsReturnTo(),
+    [itemId]
+  );
   const returnTo = useMemo(
     () =>
       resolveReturnTo({
         queryReturnTo: returnToFromQuery,
-        storageReturnTo: itemId ? sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null,
+        storageReturnTo: returnToFromStorage,
         fallback: '/catalog/items',
       }),
-    [returnToFromQuery, itemId]
+    [returnToFromQuery, returnToFromStorage]
   );
 
   const scopeKey = useMemo(
@@ -56,11 +61,26 @@ export default function CatalogItemDetail({ itemId: propItemId }: CatalogItemDet
   }, [itemId]);
 
   useEffect(() => {
+    const syncSearch = () => setRouteSearch(window.location.search);
+    const unsubscribe = router.addListener(syncSearch);
+    window.addEventListener('popstate', syncSearch);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('popstate', syncSearch);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!itemId) return;
     if (returnToFromQuery) {
       sessionStorage.setItem(`catalogItemReturnTo:${itemId}`, returnToFromQuery);
     }
   }, [itemId, returnToFromQuery]);
+
+  useEffect(() => {
+    if (!returnTo.startsWith('/catalog/items')) return;
+    setCatalogItemsReturnTo(returnTo);
+  }, [returnTo]);
 
   const { data: item, isLoading, error } = useCatalogItemDetail(scopeKey, itemId, {
     orgId: activeOrganizationId ?? null,
@@ -115,13 +135,23 @@ export default function CatalogItemDetail({ itemId: propItemId }: CatalogItemDet
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              setCatalogItemsRestoreOnBack(true);
+              const target = resolveReturnTo({
+                queryReturnTo: returnToFromQuery,
+                storageReturnTo: returnToFromStorage,
+                fallback: '/catalog/items',
+              });
+              if (target.startsWith('/catalog/items')) {
+                router.navigate(withCatalogItemsRestore(target));
+                return;
+              }
               navigateBackContextual(router, {
                 queryReturnTo: returnToFromQuery,
-                storageReturnTo: itemId ? sessionStorage.getItem(`catalogItemReturnTo:${itemId}`) : null,
+                storageReturnTo: returnToFromStorage,
                 fallback: '/catalog/items',
-              })
-            }
+              });
+            }}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
             aria-label="Close item detail"
           >

@@ -71,6 +71,14 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     unassigned: 'orange',
     unapplied: 'blue',
     applied: 'green',
+    collection_unpaid: 'gray',
+    collection_partial: 'amber',
+    collection_paid: 'green',
+    collection_overpaid: 'purple',
+    billing_not_invoiced: 'gray',
+    billing_partially_invoiced: 'blue',
+    billing_fully_invoiced: 'green',
+    billing_over_invoiced: 'orange',
   },
   invoice: {
     draft: 'gray',
@@ -120,6 +128,18 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
   quote: {
     approved_unpaid: 'Approved',
     approved_paid: 'Approved',
+  },
+  payment: {
+    pending: 'Unpaid',
+    paid: 'Completed',
+    collection_unpaid: 'Unpaid',
+    collection_partial: 'Partial',
+    collection_paid: 'Paid',
+    collection_overpaid: 'Overpaid',
+    billing_not_invoiced: 'Not Invoiced',
+    billing_partially_invoiced: 'Partially Invoiced',
+    billing_fully_invoiced: 'Fully Invoiced',
+    billing_over_invoiced: 'Over Invoiced',
   },
 };
 

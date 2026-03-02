@@ -42,14 +42,21 @@ export interface CatalogItem {
   measure_basis: MeasureBasis; // Required: 'unit' | 'linear' | 'area'
   unit_of_measure: string; // Required: 'unit_of_measure'
   uom?: string; // Legacy: kept for backward compatibility (mapped from unit_of_measure)
-  is_fabric: boolean; // Required: determines variant_name vs color usage
-  // Fields when is_fabric=true
+  is_fabric: boolean; // Legacy alias for is_roll — kept for backward compatibility
+  is_roll?: boolean; // DB column: determines roll vs component
+  // Fields when is_roll=true
   roll_type?: 'fabric' | 'window_film' | 'vinyl' | 'mesh' | 'paper' | 'other' | null; // DB enum: public.roll_type
-  collection_name?: string | null; // Only when is_fabric=true
-  variant_name?: string | null;  // Used ONLY when is_fabric=true (stores color/variant label)
-  roll_width?: number | null; // 'roll_width' numeric
-  roll_width_m?: number | null; // Legacy: kept for backward compatibility
-  fabric_pricing_mode?: FabricPricingMode | null; // Only when is_fabric=true
+  collection_name?: string | null; // Only when is_roll=true
+  variant_name?: string | null;  // Used ONLY when is_roll=true (stores color/variant label)
+  roll_width_value?: number | null; // Real DB field: raw dimension value (e.g. 2.8)
+  roll_width_uom?: string | null; // Real DB field: dimension unit (m, yd, ft, in)
+  roll_width_m?: number | null; // DB field: normalized to meters (computed by trigger from value+uom)
+  roll_length_value?: number | null; // Real DB field: roll length raw value
+  roll_length_uom?: string | null; // Real DB field: roll length unit (m, yd, ft, in)
+  roll_length_m?: number | null; // DB field: normalized to meters (computed by trigger)
+  roll_width?: number | null; // Legacy column (still in DB, not used by app)
+  fabric_pricing_mode?: FabricPricingMode | null; // Legacy alias for roll_pricing_mode
+  roll_pricing_mode?: string | null; // DB column: per_linear_meter, per_square_meter, per_unit
   // Fields when is_fabric=false
   color?: string | null; // Used ONLY when is_fabric=false
   // ✅ FIX: item_role field for component role identification

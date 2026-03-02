@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { useUIStore } from '../stores/ui-store';
+import { getAppUsersDisplayNames } from '../lib/appUsersDisplayNames';
+
+export interface PaymentInvoiceRef {
+  invoice_id: string;
+  invoice_number: string;
+}
 
 export interface Payment {
   id: string;
@@ -14,34 +20,154 @@ export interface Payment {
   created_at: string;
   bank_name?: string | null;
   description?: string | null;
+  recorded_by_name?: string | null;
+  recorded_by_display_name?: string;
+  invoice_refs?: PaymentInvoiceRef[];
 }
 
 export function usePayments(salesOrderId: string | null) {
-  useOrganizationContext();
+  const { activeOrganizationId } = useOrganizationContext();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
 
   const fetchPayments = useCallback(async () => {
-    if (!salesOrderId) {
+    if (!salesOrderId || !activeOrganizationId) {
       setPayments([]);
       return;
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      // 1) Payments directly linked to this SO
+      const { data: directData, error: directError } = await supabase
         .from('Payments')
-        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, created_at, bank_name, description')
+        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at, bank_name, description')
+        .eq('organization_id', activeOrganizationId)
         .eq('sales_order_id', salesOrderId)
         .eq('deleted', false)
         .order('payment_date', { ascending: false });
-      if (error) throw error;
-      setPayments((data ?? []) as Payment[]);
+      if (directError) throw directError;
+
+      // 2) Payments related to invoices of this SO (even if payment.sales_order_id is null/other)
+      const { data: soInvoices, error: soInvoicesError } = await supabase
+        .from('DealerInvoices')
+        .select('id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('sales_order_id', salesOrderId)
+        .eq('deleted', false);
+      const soInvoiceIds = soInvoicesError
+        ? []
+        : ((soInvoices ?? []) as Array<{ id: string }>).map((row) => row.id);
+      let relatedRows: Payment[] = [];
+      if (soInvoiceIds.length > 0) {
+        const { data: soApplications, error: soApplicationsError } = await supabase
+          .from('PaymentApplications')
+          .select('payment_id')
+          .in('invoice_id', soInvoiceIds);
+        if (!soApplicationsError) {
+          const relatedPaymentIds = Array.from(
+            new Set(
+              ((soApplications ?? []) as Array<{ payment_id: string | null }>)
+                .map((row) => row.payment_id)
+                .filter((id): id is string => Boolean(id))
+            )
+          );
+
+          if (relatedPaymentIds.length > 0) {
+            const { data: relatedData, error: relatedError } = await supabase
+              .from('Payments')
+              .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at, bank_name, description')
+              .eq('organization_id', activeOrganizationId)
+              .in('id', relatedPaymentIds)
+              .eq('deleted', false)
+              .order('payment_date', { ascending: false });
+            if (!relatedError) {
+              relatedRows = (relatedData ?? []) as Payment[];
+            }
+          }
+        }
+      }
+
+      const dedupedRowsById = new Map<string, Payment>();
+      ([...((directData ?? []) as Payment[]), ...relatedRows]).forEach((row) => {
+        dedupedRowsById.set(row.id, row);
+      });
+      const rows = Array.from(dedupedRowsById.values()).sort(
+        (a, b) => new Date(b.payment_date || b.created_at).getTime() - new Date(a.payment_date || a.created_at).getTime()
+      );
+      if (rows.length === 0) {
+        setPayments([]);
+        return;
+      }
+
+      try {
+        const paymentIds = rows.map((p) => p.id);
+        const missingRecordedByIds = rows
+          .filter((p) => !p.recorded_by_name && p.recorded_by)
+          .map((p) => p.recorded_by as string);
+        const appUserNameMap = await getAppUsersDisplayNames(missingRecordedByIds);
+
+        const { data: applicationsData } = await supabase
+          .from('PaymentApplications')
+          .select('payment_id, invoice_id')
+          .in('payment_id', paymentIds);
+
+        const invoiceIds = Array.from(
+          new Set(
+            ((applicationsData ?? []) as Array<{ payment_id: string; invoice_id: string | null }>)
+              .map((row) => row.invoice_id)
+              .filter((id): id is string => Boolean(id))
+          )
+        );
+        const { data: invoicesData } = invoiceIds.length > 0
+          ? await supabase
+              .from('DealerInvoices')
+              .select('id, invoice_number')
+              .eq('organization_id', activeOrganizationId)
+              .in('id', invoiceIds)
+          : { data: [] as Array<{ id: string; invoice_number: string }> };
+
+        const invoiceNumberById = new Map<string, string>(
+          ((invoicesData ?? []) as Array<{ id: string; invoice_number: string }>).map((inv) => [inv.id, inv.invoice_number])
+        );
+
+        const invoiceRefsByPaymentId = new Map<string, PaymentInvoiceRef[]>();
+        ((applicationsData ?? []) as Array<{ payment_id: string; invoice_id: string | null }>).forEach((app) => {
+          if (!app.invoice_id) return;
+          const invoiceNumber = invoiceNumberById.get(app.invoice_id);
+          if (!invoiceNumber) return;
+          const list = invoiceRefsByPaymentId.get(app.payment_id) ?? [];
+          if (!list.some((ref) => ref.invoice_id === app.invoice_id)) {
+            list.push({ invoice_id: app.invoice_id, invoice_number: invoiceNumber });
+            invoiceRefsByPaymentId.set(app.payment_id, list);
+          }
+        });
+
+        const enrichedRows = rows.map((row) => ({
+          ...row,
+          recorded_by_display_name:
+            row.recorded_by_name?.trim() ||
+            (row.recorded_by ? appUserNameMap.get(row.recorded_by) : undefined) ||
+            '—',
+          invoice_refs: invoiceRefsByPaymentId.get(row.id) ?? [],
+        }));
+
+        setPayments(enrichedRows);
+      } catch {
+        // Keep payments visible even if enrichment fails.
+        setPayments(
+          rows.map((row) => ({
+            ...row,
+            recorded_by_display_name: row.recorded_by_name?.trim() || '—',
+            invoice_refs: [],
+          }))
+        );
+      }
     } catch {
       setPayments([]);
     } finally {
       setLoading(false);
     }
-  }, [salesOrderId]);
+  }, [salesOrderId, activeOrganizationId]);
 
   useEffect(() => {
     void fetchPayments();

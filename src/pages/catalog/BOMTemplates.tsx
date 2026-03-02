@@ -5,8 +5,12 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Plus, Edit, Trash2, Search, Filter, Wrench, Copy, GripVertical, Package } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Filter, Wrench, Copy, GripVertical, Package, Shield, Ruler } from 'lucide-react';
 import BOMTemplateModal from './bom-templates/BOMTemplateModal';
+import BOMRolesTab from './bom-templates/BOMRolesTab';
+import BOMEngineeringTab from './bom-templates/BOMEngineeringTab';
+
+type BOMInternalTab = 'templates' | 'roles' | 'engineering';
 
 interface BOMTemplateRow {
   id: string;
@@ -58,6 +62,7 @@ export default function BOMTemplates() {
   const [selectedProductTypes, setSelectedProductTypes] = useState<string[]>([]);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
   const [dragOverTemplateId, setDragOverTemplateId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<BOMInternalTab>('templates');
 
   const PERSISTENCE_KEY = 'bomTemplates:editState';
   const [showTemplateModal, setShowTemplateModal] = useState(() => {
@@ -222,6 +227,13 @@ export default function BOMTemplates() {
 
   const handleDuplicateTemplate = async (template: BOMTemplateRow) => {
     if (!activeOrganizationId) return;
+    const confirmed = await showConfirm({
+      title: 'Duplicate BOM Template',
+      message: `Are you sure you want to duplicate "${template.name || template.template_name || 'this template'}"?`,
+      variant: 'default',
+      confirmText: 'Duplicate',
+    });
+    if (!confirmed) return;
     try {
       setLoading(true);
       const baseCode = ((template as any).code || 'BOM').trim().toUpperCase();
@@ -336,17 +348,54 @@ export default function BOMTemplates() {
 
   return (
     <div className="py-6 px-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-title font-semibold text-foreground">BOM Templates</h1>
+          <h1 className="text-title font-semibold text-foreground">BOM</h1>
         </div>
-        <button onClick={handleNewTemplate} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90 transition-colors">
-          <Plus className="w-4 h-4" />
-          New BOM Template
-        </button>
+        {activeTab === 'templates' && (
+          <button onClick={handleNewTemplate} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90 transition-colors">
+            <Plus className="w-4 h-4" />
+            New BOM Template
+          </button>
+        )}
       </div>
 
-      <div className="mb-4 mt-4">
+      {/* Internal tab bar */}
+      <div className="flex gap-1 mb-5 border-b border-gray-200">
+        {([
+          { key: 'templates' as BOMInternalTab, label: 'Templates', icon: Wrench },
+          { key: 'roles' as BOMInternalTab, label: 'Roles', icon: Shield },
+          { key: 'engineering' as BOMInternalTab, label: 'Engineering', icon: Ruler },
+        ]).map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Roles tab */}
+      <div hidden={activeTab !== 'roles'}>
+        <BOMRolesTab />
+      </div>
+
+      {/* Engineering tab */}
+      <div hidden={activeTab !== 'engineering'}>
+        <BOMEngineeringTab />
+      </div>
+
+      {/* Templates tab */}
+      <div hidden={activeTab !== 'templates'}>
+
+      <div className="mb-4">
         <div className={`bg-white border border-gray-200 py-6 px-6 ${showFilters ? 'rounded-t-lg' : 'rounded-lg'}`}>
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
@@ -483,6 +532,8 @@ export default function BOMTemplates() {
           })}
         </div>
       )}
+
+      </div>{/* end templates tab */}
 
       {showTemplateModal && (
         <BOMTemplateModal

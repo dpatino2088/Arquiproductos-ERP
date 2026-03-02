@@ -129,3 +129,32 @@ export function warehouseStockListKey(scopeKey: string, warehouseId: string): un
 export function inventoryItemDetailKey(scopeKey: string, itemId: string): unknown[] {
   return ['inventory', 'items', 'detail', DETAIL_QUERY_VERSION, scopeKey, itemId ?? ''];
 }
+
+/** Dealer financial cockpit list */
+export function dealerFinancialAccountsListKey(
+  scopeKey: string,
+  filters: { q: string; risk: string; sortKey: string; page: number; pageSize: number }
+): unknown[] {
+  return [
+    'financials',
+    'dealer-accounts',
+    'list',
+    LIST_QUERY_VERSION,
+    scopeKey,
+    filters.q,
+    filters.risk,
+    filters.sortKey,
+    filters.page,
+    filters.pageSize,
+  ];
+}
+
+/** Dealer financial detail summary */
+export function dealerFinancialDetailKey(scopeKey: string, dealerId: string): unknown[] {
+  return ['financials', 'dealer-accounts', 'detail', DETAIL_QUERY_VERSION, scopeKey, dealerId];
+}
+
+/** Dealer financial timeline */
+export function dealerFinancialTimelineKey(scopeKey: string, dealerId: string): unknown[] {
+  return ['financials', 'dealer-accounts', 'timeline', LIST_QUERY_VERSION, scopeKey, dealerId];
+}

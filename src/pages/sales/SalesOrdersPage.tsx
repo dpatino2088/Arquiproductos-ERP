@@ -40,6 +40,7 @@ export default function SalesOrdersPage() {
   const { salesOrders, loading, error, refetch } = useSalesOrders();
   const orders: SalesOrderRow[] = (salesOrders ?? []) as SalesOrderRow[];
   const [moCountBySoId, setMoCountBySoId] = useState<Record<string, number>>({});
+  const [financialBySoId, setFinancialBySoId] = useState<Record<string, { total_paid: number }>>({});
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -70,6 +71,27 @@ export default function SalesOrdersPage() {
         setMoCountBySoId(countBySo);
       });
   }, [activeOrganizationId, orders]);
+
+  useEffect(() => {
+    if (!orders.length) {
+      setFinancialBySoId({});
+      return;
+    }
+    const soIds = orders.map((o) => o.id);
+    supabase
+      .from('sales_order_financial_summary')
+      .select('sales_order_id, total_paid')
+      .in('sales_order_id', soIds)
+      .then(({ data }: { data: { sales_order_id: string; total_paid: number | null }[] | null }) => {
+        const nextBySo: Record<string, { total_paid: number }> = {};
+        (data || []).forEach((row) => {
+          nextBySo[row.sales_order_id] = {
+            total_paid: Number(row.total_paid ?? 0),
+          };
+        });
+        setFinancialBySoId(nextBySo);
+      });
+  }, [orders]);
 
   const handleDelete = useCallback(
     async (order: SalesOrderRow, e: React.MouseEvent) => {
@@ -295,7 +317,7 @@ export default function SalesOrdersPage() {
                     <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Customer</th>
                   )}
                   <th className={TH_CENTER}>Status</th>
-                  {!isPortal && <th className={TH_CENTER}>Priority</th>}
+                  {!isPortal && <th className={TH_CENTER}>Collection</th>}
                   {!isPortal && <th className={TH_CENTER}>MOs</th>}
                   <th className={TH_CENTER}>Date</th>
                   <th className={TH_CENTER}>Total</th>
@@ -354,11 +376,18 @@ export default function SalesOrdersPage() {
                       {!isPortal && (
                         <td className={TD_CENTER}>
                           <div className="flex justify-center">
-                            {order.priority && order.priority !== 'normal' ? (
-                              <StatusBadge status={order.priority} type="priority" size="sm" />
-                            ) : (
-                              '—'
-                            )}
+                            {(() => {
+                              const total = order.total_amount ?? 0;
+                              const paid = financialBySoId[order.id]?.total_paid ?? 0;
+                              const status = total <= 0
+                                ? 'collection_unpaid'
+                                : paid <= 0
+                                  ? 'collection_unpaid'
+                                  : paid >= total
+                                    ? (paid > total ? 'collection_overpaid' : 'collection_paid')
+                                    : 'collection_partial';
+                              return <StatusBadge status={status} type="payment" size="sm" />;
+                            })()}
                           </div>
                         </td>
                       )}

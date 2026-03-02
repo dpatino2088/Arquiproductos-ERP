@@ -36,10 +36,16 @@ export interface BOMComponent {
   qty_type?: BOMQtyType | null; // Quantity type: fixed, per_width, per_area, by_option
   qty_value?: number | null; // Quantity value (for fixed: count, for per_width/per_area: multiplier)
   // Engineering fields
+  depends_on_role?: string | null; // Role this component depends on (for cut rules)
   affects_role?: string | null; // Role that this component affects (for cut operations)
-  cut_axis?: string | null; // Cut axis: none, width, height
+  cut_axis?: string | null; // Cut axis: none, width, height, length
   cut_delta_mm?: number | null; // Cut delta in mm
-  cut_delta_scope?: string | null; // Cut delta scope
+  cut_delta_scope?: string | null; // Cut delta scope: per_side, per_item
+  // Engineering v1.5 metadata (future-proof for dynamic delta resolution)
+  engineering_delta_source?: 'fixed' | 'derived' | null;
+  engineering_attr_key?: string | null;
+  engineering_scope?: 'total' | 'per_side' | null;
+  engineering_source_role?: string | null;
   // Joined data
   component_sku?: string;
   component_name?: string;

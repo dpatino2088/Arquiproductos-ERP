@@ -8,6 +8,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useUIStore } from '../../stores/ui-store';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { FileText, DollarSign } from 'lucide-react';
+import { getSupabaseErrorMessageDetailed } from '../../lib/supabase-error-utils';
 
 const FINANCIAL_SUBMODULES = [
   { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
@@ -61,6 +62,18 @@ interface InvoiceApplication {
   Invoice?: { invoice_number: string; total: number; status: string } | null;
 }
 
+interface AvailableInvoiceOption {
+  id: string;
+  invoice_number: string;
+  issue_date: string;
+  total: number;
+  status: string;
+  sales_order_id: string | null;
+  sales_order_no: string | null;
+  applied_amount: number;
+  balance_due: number;
+}
+
 function getErrorMessage(err: unknown): string {
   if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string') {
     return (err as { message: string }).message;
@@ -106,6 +119,15 @@ export default function PaymentDetail() {
   const [dealersList, setDealersList] = useState<{ id: string; dealer_name: string; dealer_no: string | null }[]>([]);
   const [assignDealerId, setAssignDealerId] = useState('');
   const [assigning, setAssigning] = useState(false);
+  const [applyFormOpen, setApplyFormOpen] = useState(false);
+  const [availableInvoices, setAvailableInvoices] = useState<AvailableInvoiceOption[]>([]);
+  const [loadingAvailableInvoices, setLoadingAvailableInvoices] = useState(false);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [applyAmount, setApplyAmount] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [voidDialogOpen, setVoidDialogOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidingPayment, setVoidingPayment] = useState(false);
   const listPath = '/financials/payments';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -237,6 +259,257 @@ export default function PaymentDetail() {
     }
   };
 
+  const loadAvailableInvoices = useCallback(async () => {
+    if (!activeOrganizationId || !payment?.dealer_id) {
+      setAvailableInvoices([]);
+      return;
+    }
+    setLoadingAvailableInvoices(true);
+    try {
+      const { data: invoicesData, error: invoicesErr } = await supabase
+        .from('DealerInvoices')
+        .select('id, invoice_number, issue_date, total, status, sales_order_id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('dealer_id', payment.dealer_id)
+        .eq('deleted', false)
+        .order('issue_date', { ascending: false });
+      if (invoicesErr) throw invoicesErr;
+
+      const invoiceRows = (invoicesData ?? []) as Array<{
+        id: string;
+        invoice_number: string;
+        issue_date: string;
+        total: number;
+        status: string;
+        sales_order_id: string | null;
+      }>;
+      if (invoiceRows.length === 0) {
+        setAvailableInvoices([]);
+        return;
+      }
+
+      const invoiceIds = invoiceRows.map((row) => row.id);
+      const soIds = [...new Set(invoiceRows.map((row) => row.sales_order_id).filter(Boolean))] as string[];
+
+      const [appsRes, salesOrdersRes] = await Promise.all([
+        supabase
+          .from('PaymentApplications')
+          .select('invoice_id, applied_amount')
+          .in('invoice_id', invoiceIds),
+        soIds.length > 0
+          ? supabase
+              .from('SalesOrders')
+              .select('id, sales_order_no')
+              .in('id', soIds)
+          : Promise.resolve({ data: [] as Array<{ id: string; sales_order_no: string }>, error: null }),
+      ]);
+
+      if (appsRes.error) throw appsRes.error;
+      if (salesOrdersRes.error) throw salesOrdersRes.error;
+
+      const appliedByInvoiceId = new Map<string, number>();
+      ((appsRes.data ?? []) as Array<{ invoice_id: string; applied_amount: number | null }>).forEach((app) => {
+        const current = appliedByInvoiceId.get(app.invoice_id) ?? 0;
+        appliedByInvoiceId.set(app.invoice_id, current + Number(app.applied_amount ?? 0));
+      });
+
+      const soNumberById = new Map<string, string>(
+        ((salesOrdersRes.data ?? []) as Array<{ id: string; sales_order_no: string }>).map((so) => [so.id, so.sales_order_no])
+      );
+
+      const options = invoiceRows
+        .map((row) => {
+          const appliedAmount = appliedByInvoiceId.get(row.id) ?? 0;
+          const balanceDue = Math.max(0, Number(row.total ?? 0) - appliedAmount);
+          return {
+            id: row.id,
+            invoice_number: row.invoice_number,
+            issue_date: row.issue_date,
+            total: Number(row.total ?? 0),
+            status: row.status,
+            sales_order_id: row.sales_order_id,
+            sales_order_no: row.sales_order_id ? soNumberById.get(row.sales_order_id) ?? null : null,
+            applied_amount: appliedAmount,
+            balance_due: balanceDue,
+          } satisfies AvailableInvoiceOption;
+        })
+        .filter((row) => row.status !== 'void' && row.balance_due > 0.005);
+
+      setAvailableInvoices(options);
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getErrorMessage(e) });
+      setAvailableInvoices([]);
+    } finally {
+      setLoadingAvailableInvoices(false);
+    }
+  }, [activeOrganizationId, payment?.dealer_id, addNotification]);
+
+  const handleOpenApplyForm = async () => {
+    if (!payment?.dealer_id) {
+      addNotification({ type: 'error', title: 'Dealer required', message: 'Assign a dealer before applying this payment.' });
+      return;
+    }
+    setApplyFormOpen(true);
+    setSelectedInvoiceId('');
+    setApplyAmount('');
+    await loadAvailableInvoices();
+  };
+
+  const handleApplyToInvoice = async () => {
+    if (!paymentId || !selectedInvoiceId || !applyAmount) return;
+    const amount = Number(applyAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Amount must be greater than 0.' });
+      return;
+    }
+
+    const selectedInvoice = availableInvoices.find((inv) => inv.id === selectedInvoiceId);
+    if (!selectedInvoice) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Select a valid invoice.' });
+      return;
+    }
+
+    const maxAssignable = Math.max(0, Math.min(unapplied, selectedInvoice.balance_due));
+    if (amount > maxAssignable + 0.0001) {
+      addNotification({
+        type: 'error',
+        title: 'Validation',
+        message: `Amount exceeds available balance (${fmt(maxAssignable)}).`,
+      });
+      return;
+    }
+
+    setApplying(true);
+    try {
+      const { error: applyErr } = await supabase.rpc('apply_payment', {
+        p_payment_id: paymentId,
+        p_invoice_id: selectedInvoiceId,
+        p_amount: amount,
+      });
+      if (applyErr) throw applyErr;
+
+      const newAppliedForInvoice = selectedInvoice.applied_amount + amount;
+      let nextInvoiceStatus = selectedInvoice.status;
+      if (newAppliedForInvoice >= selectedInvoice.total - 0.0001) {
+        nextInvoiceStatus = 'paid';
+      } else if (newAppliedForInvoice > 0) {
+        nextInvoiceStatus = 'partial';
+      }
+      if (nextInvoiceStatus !== selectedInvoice.status) {
+        await supabase
+          .from('DealerInvoices')
+          .update({ status: nextInvoiceStatus })
+          .eq('id', selectedInvoiceId);
+      }
+
+      addNotification({
+        type: 'success',
+        title: 'Payment Applied',
+        message: `${fmt(amount)} applied to invoice ${selectedInvoice.invoice_number}.`,
+      });
+      setApplyFormOpen(false);
+      setSelectedInvoiceId('');
+      setApplyAmount('');
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getErrorMessage(e) });
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const recalcInvoiceStatus = useCallback(async (invoiceId: string) => {
+    const [invoiceRes, appsRes, creditsRes] = await Promise.all([
+      supabase
+        .from('DealerInvoices')
+        .select('id, total, status')
+        .eq('id', invoiceId)
+        .maybeSingle(),
+      supabase
+        .from('PaymentApplications')
+        .select('applied_amount')
+        .eq('invoice_id', invoiceId),
+      supabase
+        .from('DealerCreditNotes')
+        .select('amount, status')
+        .eq('invoice_id', invoiceId)
+        .eq('deleted', false),
+    ]);
+    if (invoiceRes.error) throw invoiceRes.error;
+    if (appsRes.error) throw appsRes.error;
+    if (creditsRes.error) throw creditsRes.error;
+    if (!invoiceRes.data) return;
+
+    const invoiceTotal = Number((invoiceRes.data as { total?: number }).total ?? 0);
+    const applied = ((appsRes.data ?? []) as Array<{ applied_amount: number | null }>)
+      .reduce((sum, row) => sum + Number(row.applied_amount ?? 0), 0);
+    const credited = ((creditsRes.data ?? []) as Array<{ amount: number | null; status: string | null }>)
+      .filter((row) => row.status !== 'void')
+      .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+    const covered = applied + credited;
+
+    let nextStatus = 'issued';
+    if (covered >= invoiceTotal - 0.0001) nextStatus = 'paid';
+    else if (covered > 0.0001) nextStatus = 'partial';
+
+    const currentStatus = String((invoiceRes.data as { status?: string }).status ?? 'issued');
+    if (currentStatus !== 'void' && currentStatus !== nextStatus) {
+      const { error: updateErr } = await supabase
+        .from('DealerInvoices')
+        .update({ status: nextStatus })
+        .eq('id', invoiceId);
+      if (updateErr) throw updateErr;
+    }
+  }, []);
+
+  const handleUnapply = async (application: InvoiceApplication) => {
+    try {
+      const { error: delErr } = await supabase
+        .from('PaymentApplications')
+        .delete()
+        .eq('id', application.id);
+      if (delErr) throw delErr;
+      await recalcInvoiceStatus(application.invoice_id);
+      addNotification({ type: 'success', title: 'Unapplied', message: 'Application removed successfully.' });
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    }
+  };
+
+  const handleVoidPayment = async () => {
+    if (!paymentId || !payment) return;
+    if (voidReason.trim().length < 3) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Please provide a void reason.' });
+      return;
+    }
+    if (totalApplied > 0.005) {
+      addNotification({
+        type: 'error',
+        title: 'Validation',
+        message: 'Payment has applied amounts. Unapply all applications before voiding.',
+      });
+      return;
+    }
+    setVoidingPayment(true);
+    try {
+      const notes = [payment.notes, `VOID REASON: ${voidReason.trim()}`].filter(Boolean).join('\n');
+      const { error: updErr } = await supabase
+        .from('Payments')
+        .update({ deleted: true, notes, updated_at: new Date().toISOString() })
+        .eq('id', paymentId);
+      if (updErr) throw updErr;
+      setVoidDialogOpen(false);
+      setVoidReason('');
+      addNotification({ type: 'success', title: 'Payment Voided', message: 'Payment removed from active ledger.' });
+      onBack();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setVoidingPayment(false);
+    }
+  };
+
   if (!paymentId) return <div className="p-6 text-red-600">Invalid URL</div>;
 
   if (loading && !payment) {
@@ -279,16 +552,29 @@ export default function PaymentDetail() {
       onTabChange={setActiveTab}
       onBack={onBack}
       contentClassName="pt-2 pb-6"
-      actions={hasRedirectBack ? (
-        <button
-          type="button"
-          onClick={onBackContextual}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-          title="Back"
-        >
-          Back
-        </button>
-      ) : undefined}
+      actions={(
+        <div className="flex items-center gap-2">
+          {hasRedirectBack && (
+            <button
+              type="button"
+              onClick={onBackContextual}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              title="Back"
+            >
+              Back
+            </button>
+          )}
+          {unapplied >= payment.amount - 0.005 && (
+            <button
+              type="button"
+              onClick={() => setVoidDialogOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-50"
+            >
+              Void Payment
+            </button>
+          )}
+        </div>
+      )}
     >
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -428,8 +714,83 @@ export default function PaymentDetail() {
       </div>
 
       {activeTab === 'invoices' && (
-        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
-          <table className="w-full text-sm">
+        <div className="space-y-4">
+          {unapplied > 0.005 && payment.dealer_id && !applyFormOpen && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => { void handleOpenApplyForm(); }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+              >
+                Apply to Invoice
+              </button>
+            </div>
+          )}
+          {applyFormOpen && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-800">Apply Payment to Dealer Invoice</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Invoice</label>
+                  <select
+                    value={selectedInvoiceId}
+                    onChange={(e) => {
+                      setSelectedInvoiceId(e.target.value);
+                      const inv = availableInvoices.find((row) => row.id === e.target.value);
+                      if (inv) setApplyAmount(String(Math.min(unapplied, inv.balance_due).toFixed(2)));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">-- Select --</option>
+                    {availableInvoices.map((inv) => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoice_number}
+                        {inv.sales_order_no ? ` (${inv.sales_order_no})` : ''}
+                        {` - Balance ${fmt(inv.balance_due)}`}
+                      </option>
+                    ))}
+                  </select>
+                  {!loadingAvailableInvoices && availableInvoices.length === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">No open invoices with balance for this dealer.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Amount</label>
+                  <input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={applyAmount}
+                    onChange={(e) => setApplyAmount(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void handleApplyToInvoice(); }}
+                    disabled={applying || !selectedInvoiceId || !applyAmount}
+                    className="flex-1 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {applying ? 'Applying...' : 'Apply'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setApplyFormOpen(false);
+                      setSelectedInvoiceId('');
+                      setApplyAmount('');
+                    }}
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Invoice #</th>
@@ -437,11 +798,12 @@ export default function PaymentDetail() {
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Applied</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-700">Invoice Status</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Date</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Actions</th>
               </tr>
             </thead>
             <tbody>
               {applications.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No invoices linked to this payment</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No invoices linked to this payment</td></tr>
               ) : (
                 applications.map((a) => (
                   <tr
@@ -456,6 +818,15 @@ export default function PaymentDetail() {
                       {a.Invoice ? <StatusBadge status={a.Invoice.status} type="invoice" size="sm" /> : '—'}
                     </td>
                     <td className="px-4 py-4 text-gray-500">{new Date(a.created_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); void handleUnapply(a); }}
+                        className="px-2 py-1 text-xs font-medium text-red-700 border border-red-200 rounded hover:bg-red-50"
+                      >
+                        Unapply
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -466,11 +837,47 @@ export default function PaymentDetail() {
                   <td />
                   <td />
                   <td className="px-4 py-4 text-right font-semibold font-mono text-green-700">{fmt(totalApplied)}</td>
-                  <td colSpan={2} />
+                  <td colSpan={3} />
                 </tr>
               </tfoot>
             )}
-          </table>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {voidDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Void Payment</h4>
+            <p className="text-xs text-gray-600 mb-3">
+              This operation preserves audit trail. Payment must be fully unapplied first.
+            </p>
+            <textarea
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="Reason for void..."
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => { setVoidDialogOpen(false); setVoidReason(''); }}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleVoidPayment(); }}
+                disabled={voidingPayment}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg disabled:opacity-50"
+              >
+                {voidingPayment ? 'Voiding...' : 'Void Payment'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </DetailPageLayout>

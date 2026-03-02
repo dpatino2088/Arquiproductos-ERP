@@ -216,3 +216,108 @@ export function getSubRoleLabel(subRole: string | null | undefined): string {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
+
+// ── DB-driven role lists (cached in-memory) ──
+
+import { supabase } from '../supabase/client';
+
+interface DBRole {
+  role_code: string;
+  label: string;
+  role_type: 'parent_only' | 'child_only' | 'both';
+  active: boolean;
+}
+
+interface DBDependency {
+  role_code: string;
+  parent_role_code: string;
+}
+
+let _cachedRoles: DBRole[] | null = null;
+let _cachedDeps: DBDependency[] | null = null;
+let _fetchPromise: Promise<void> | null = null;
+
+async function ensureRolesLoaded(): Promise<void> {
+  if (_cachedRoles) return;
+  if (_fetchPromise) return _fetchPromise;
+  _fetchPromise = (async () => {
+    try {
+      const [rolesRes, depsRes] = await Promise.all([
+        supabase
+          .from('CatalogItemRoles')
+          .select('role_code, label, role_type, active')
+          .order('sort_order')
+          .order('label'),
+        supabase
+          .from('RoleDependencies')
+          .select('role_code, parent_role_code'),
+      ]);
+      _cachedRoles = (rolesRes.data ?? []) as DBRole[];
+      _cachedDeps = (depsRes.data ?? []) as DBDependency[];
+    } catch {
+      _cachedRoles = null;
+      _cachedDeps = null;
+    }
+    _fetchPromise = null;
+  })();
+  return _fetchPromise;
+}
+
+export function invalidateRolesCache(): void {
+  _cachedRoles = null;
+  _cachedDeps = null;
+}
+
+/**
+ * Get parent/both roles for the component_role dropdown (BOMTemplateModal).
+ * Falls back to CANONICAL_COMPONENT_ROLES if DB hasn't loaded.
+ */
+export function getParentRoleOptions(): Array<{ value: string; label: string }> {
+  ensureRolesLoaded();
+  if (_cachedRoles) {
+    return _cachedRoles
+      .filter((r) => r.active && r.role_type !== 'child_only')
+      .map((r) => ({ value: r.role_code, label: r.label }));
+  }
+  return CANONICAL_COMPONENT_ROLES.map((r) => ({ value: r, label: getRoleLabel(r) }));
+}
+
+/**
+ * Get child roles for the child_role dropdown (BOMChildrenModal).
+ * Optionally filtered by parent role using RoleDependencies.
+ * Falls back to VALID_CHILD_ROLES if DB hasn't loaded.
+ */
+export function getChildRoleOptions(parentRole?: string | null): Array<{ value: string; label: string }> {
+  ensureRolesLoaded();
+  if (_cachedRoles) {
+    let childCodes: Set<string> | null = null;
+    if (parentRole && _cachedDeps) {
+      const depCodes = _cachedDeps
+        .filter((d) => d.parent_role_code === parentRole)
+        .map((d) => d.role_code);
+      if (depCodes.length > 0) childCodes = new Set(depCodes);
+    }
+    return _cachedRoles
+      .filter((r) => {
+        if (!r.active) return false;
+        if (r.role_type === 'parent_only') return false;
+        if (childCodes && !childCodes.has(r.role_code)) return false;
+        return true;
+      })
+      .map((r) => ({ value: r.role_code, label: r.label }));
+  }
+  return (VALID_CHILD_ROLES as readonly string[]).map((r) => ({ value: r, label: getRoleLabel(r) }));
+}
+
+/**
+ * Get all active roles (for any dropdown that needs the full list).
+ */
+export function getAllRoleOptions(): Array<{ value: string; label: string }> {
+  ensureRolesLoaded();
+  if (_cachedRoles) {
+    return _cachedRoles
+      .filter((r) => r.active)
+      .map((r) => ({ value: r.role_code, label: r.label }));
+  }
+  return CANONICAL_COMPONENT_ROLES.map((r) => ({ value: r, label: getRoleLabel(r) }));
+}

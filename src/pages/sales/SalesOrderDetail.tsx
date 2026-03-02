@@ -11,10 +11,11 @@ import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { usePayments } from '../../hooks/usePayments';
-import { ChevronDown, Plus, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft } from 'lucide-react';
+import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
+import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
+import type { InvoicePDFData, InvoicePDFDealer, InvoicePDFLine, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -82,6 +83,36 @@ interface ManufacturingOrder {
   created_at: string;
 }
 
+interface SOInvoice {
+  id: string;
+  invoice_number: string;
+  status: string;
+  issue_date: string;
+  total: number;
+  currency_code: string;
+}
+
+interface InvoicePdfDealer {
+  dealer_name: string;
+  dealer_no: string | null;
+  dealer_email: string | null;
+  dealer_phone: string | null;
+  identification_number: string | null;
+  billing_same_as_location: boolean;
+  street_address_line_1: string | null;
+  street_address_line_2: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+  country: string | null;
+  billing_street_address_line_1: string | null;
+  billing_street_address_line_2: string | null;
+  billing_city: string | null;
+  billing_state: string | null;
+  billing_zip_code: string | null;
+  billing_country: string | null;
+}
+
 const MFG_STATUS_STEPS = [
   { id: 'draft', label: 'Pending Review' },
   { id: 'planned', label: 'Planned' },
@@ -102,14 +133,21 @@ function normalizeMfgStatus(status: string | null | undefined): string {
   return normalized;
 }
 
-interface Payment {
-  id: string;
-  amount: number;
-  payment_method: string;
-  reference_number: string | null;
-  payment_date: string;
-  recorded_by: string | null;
-  created_at: string;
+function formatInvoiceBillingAddress(d: InvoicePdfDealer): string {
+  const useBilling = !d.billing_same_as_location;
+  const street1 = useBilling ? d.billing_street_address_line_1 : d.street_address_line_1;
+  const street2 = useBilling ? d.billing_street_address_line_2 : d.street_address_line_2;
+  const city = useBilling ? d.billing_city : d.city;
+  const state = useBilling ? d.billing_state : d.state;
+  const zip = useBilling ? d.billing_zip_code : d.zip_code;
+  const country = useBilling ? d.billing_country : d.country;
+  const parts: string[] = [];
+  if (street1) parts.push(street1);
+  if (street2) parts.push(street2);
+  const cityLine = [city, state, zip].filter(Boolean).join(', ');
+  if (cityLine) parts.push(cityLine);
+  if (country) parts.push(country);
+  return parts.join('\n') || '—';
 }
 
 interface TimelineEvent {
@@ -140,13 +178,13 @@ export default function SalesOrderDetail() {
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
+  const [linkedInvoices, setLinkedInvoices] = useState<SOInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
 
-  const { payments, loading: paymentsLoading, refetch: refetchPayments } = usePayments(salesOrderId);
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
 
@@ -159,7 +197,7 @@ export default function SalesOrderDetail() {
     setLoading(true);
     setError(null);
     try {
-      const [soRes, linesRes, mosRes, timelineRes, financialRes] = await Promise.all([
+      const [soRes, linesRes, mosRes, timelineRes, financialRes, invoicesRes] = await Promise.all([
         supabase
           .from('SalesOrders')
           .select(`
@@ -203,6 +241,13 @@ export default function SalesOrderDetail() {
           .select('invoice_count, total_invoiced, total_paid, balance_due, invoice_status, latest_invoice_id, latest_invoice_number')
           .eq('sales_order_id', salesOrderId)
           .maybeSingle(),
+        supabase
+          .from('DealerInvoices')
+          .select('id, invoice_number, status, issue_date, total, currency_code')
+          .eq('sales_order_id', salesOrderId)
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .order('issue_date', { ascending: false }),
       ]);
 
       if (soRes.error) throw soRes.error;
@@ -249,6 +294,12 @@ export default function SalesOrderDetail() {
         setTimeline((timelineRes.data ?? []) as TimelineEvent[]);
       }
       setFinancialSummary((financialRes.data as FinancialSummary | null) ?? null);
+      if (invoicesRes.error) {
+        if (import.meta.env.DEV) console.warn('[SalesOrderDetail] DealerInvoices error:', invoicesRes.error);
+        setLinkedInvoices([]);
+      } else {
+        setLinkedInvoices((invoicesRes.data ?? []) as SOInvoice[]);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load sales order';
       setError(msg);
@@ -261,10 +312,6 @@ export default function SalesOrderDetail() {
   useEffect(() => {
     refetch();
   }, [refetch]);
-
-  useEffect(() => {
-    refetchPayments();
-  }, [refetchPayments, salesOrderId]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -345,8 +392,183 @@ export default function SalesOrderDetail() {
   }, [mos]);
 
   const currency = 'USD';
-  const totalPaid = financialSummary?.total_paid ?? payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const balance = financialSummary?.balance_due ?? (so?.total_amount ?? 0) - totalPaid;
+  const orderTotal = Math.max(0, Number(so?.total_amount ?? 0));
+  const totalInvoiced = Math.max(0, Number(financialSummary?.total_invoiced ?? 0));
+  const totalPaid = financialSummary?.total_paid ?? 0;
+  const receivableBalance = Math.max(0, Number(financialSummary?.balance_due ?? orderTotal - totalPaid));
+  const billableRemaining = Math.max(0, orderTotal - totalInvoiced);
+  const collectionStatus =
+    totalPaid <= 0.005
+      ? 'collection_unpaid'
+      : totalPaid >= orderTotal + 0.005
+        ? (totalPaid > orderTotal + 0.005 ? 'collection_overpaid' : 'collection_paid')
+        : 'collection_partial';
+  const canCreateInvoice = isInternal && billableRemaining > 0.005;
+
+  const loadOrganizationLogoOptions = useCallback(async (): Promise<GenerateInvoicePDFOptions> => {
+    const tryLogo = async (path: string): Promise<string | undefined> => {
+      try {
+        const res = await fetch(path, { cache: 'no-store' });
+        if (!res.ok) return undefined;
+        const blob = await res.blob();
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return undefined;
+      }
+    };
+
+    let organizationName = 'Arquiproductos';
+    if (activeOrganizationId) {
+      const { data: orgData } = await supabase
+        .from('Organizations')
+        .select('name')
+        .eq('id', activeOrganizationId)
+        .maybeSingle();
+      organizationName = (orgData as { name?: string } | null)?.name ?? 'Arquiproductos';
+    }
+
+    const logoPaths = [
+      '/images/Arquiproductos.png',
+      '/images/arquiproductos.png',
+      '/images/Arquiproductos.jpg',
+      '/images/arquiproductos.jpg',
+    ];
+    let logoPngBase64: string | undefined;
+    for (const path of logoPaths) {
+      logoPngBase64 = await tryLogo(path);
+      if (logoPngBase64) break;
+    }
+
+    let logoWidthPx = 100;
+    let logoHeightPx = 100;
+    if (logoPngBase64) {
+      const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => resolve({ w: 100, h: 100 });
+        img.src = logoPngBase64!;
+      });
+      logoWidthPx = dims.w;
+      logoHeightPx = dims.h;
+    }
+
+    return {
+      organizationName,
+      logoPngBase64,
+      logoWidthPx,
+      logoHeightPx,
+    };
+  }, [activeOrganizationId]);
+
+  const handlePreviewInvoicePdf = useCallback(
+    async (invoiceId: string) => {
+      const previewWindow = window.open('', '_blank');
+      if (!previewWindow) {
+        addNotification({
+          type: 'error',
+          title: 'Pop-up blocked',
+          message: 'Please allow pop-ups to preview the invoice PDF.',
+        });
+        return;
+      }
+
+      previewWindow.document.write('<html><body style="font-family: sans-serif; padding: 16px;">Generating invoice PDF...</body></html>');
+      previewWindow.document.close();
+
+      try {
+        const [invoiceRes, linesRes, applicationsRes] = await Promise.all([
+          supabase
+            .from('DealerInvoices')
+            .select(`
+              id, invoice_number, status, issue_date, due_date, currency_code, subtotal, tax_total, total, notes, sales_order_id,
+              Dealers:dealer_id (
+                dealer_name, dealer_no, dealer_email, dealer_phone, identification_number,
+                billing_same_as_location,
+                street_address_line_1, street_address_line_2, city, state, zip_code, country,
+                billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country
+              ),
+              SalesOrders:sales_order_id (sales_order_no)
+            `)
+            .eq('id', invoiceId)
+            .eq('deleted', false)
+            .maybeSingle(),
+          supabase
+            .from('DealerInvoiceLines')
+            .select('description, qty, unit_price, line_subtotal')
+            .eq('invoice_id', invoiceId)
+            .order('sort_order', { ascending: true }),
+          supabase
+            .from('PaymentApplications')
+            .select('applied_amount')
+            .eq('invoice_id', invoiceId),
+        ]);
+
+        if (invoiceRes.error || !invoiceRes.data) {
+          throw new Error(invoiceRes.error?.message || 'Invoice not found');
+        }
+        if (linesRes.error) throw linesRes.error;
+        if (applicationsRes.error) throw applicationsRes.error;
+
+        const invoice = invoiceRes.data as any;
+        const lines = (linesRes.data ?? []) as Array<{ description: string; qty: number; unit_price: number; line_subtotal: number }>;
+        const applications = (applicationsRes.data ?? []) as Array<{ applied_amount: number }>;
+
+        const totalApplied = applications.reduce((sum, app) => sum + Number(app.applied_amount ?? 0), 0);
+        const pdfData: InvoicePDFData = {
+          invoice_number: invoice.invoice_number,
+          status: invoice.status,
+          issue_date: invoice.issue_date,
+          due_date: invoice.due_date,
+          currency_code: invoice.currency_code || 'USD',
+          subtotal: Number(invoice.subtotal ?? 0),
+          tax_total: Number(invoice.tax_total ?? 0),
+          total: Number(invoice.total ?? 0),
+          total_paid: totalApplied,
+          balance_due: Math.max(Number(invoice.total ?? 0) - totalApplied, 0),
+          notes: invoice.notes ?? null,
+          sales_order_no: invoice.SalesOrders?.sales_order_no ?? null,
+        };
+
+        const dealer = invoice.Dealers as InvoicePdfDealer | null;
+        const pdfDealer: InvoicePDFDealer | null = dealer
+          ? {
+              dealer_name: dealer.dealer_name,
+              dealer_no: dealer.dealer_no ?? null,
+              identification_number: dealer.identification_number ?? null,
+              billing_address: formatInvoiceBillingAddress(dealer),
+              email: dealer.dealer_email ?? null,
+              phone: dealer.dealer_phone ?? null,
+            }
+          : null;
+
+        const pdfLines: InvoicePDFLine[] = lines.map((line) => ({
+          description: line.description ?? '',
+          qty: Number(line.qty ?? 0),
+          unit_price: Number(line.unit_price ?? 0),
+          line_subtotal: Number(line.line_subtotal ?? 0),
+        }));
+
+        const logoOptions = await loadOrganizationLogoOptions();
+        const doc = generateInvoicePDF(pdfData, pdfDealer, pdfLines, logoOptions);
+        const blob = doc.output('blob');
+        const url = URL.createObjectURL(blob);
+        previewWindow.location.replace(url);
+      } catch (error: any) {
+        previewWindow.close();
+        addNotification({
+          type: 'error',
+          title: 'PDF preview failed',
+          message: error?.message || 'Could not generate invoice PDF.',
+        });
+      }
+    },
+    [addNotification, loadOrganizationLogoOptions]
+  );
 
   const listPath = '/sales/orders';
   const queryReturnTo = getReturnToFromCurrentQuery();
@@ -416,7 +638,6 @@ export default function SalesOrderDetail() {
 
   const soStatus = (so.status || 'draft').toLowerCase();
   const hasPaidAmount = totalPaid > 0;
-  const invoiceStatus = financialSummary?.invoice_status ?? 'none';
   const manufacturingProgressCard = (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
       <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>
@@ -460,7 +681,7 @@ export default function SalesOrderDetail() {
       title={so.sales_order_no}
       subtitle="Order Detail"
       status={<StatusBadge status={so.status} type="salesOrder" />}
-      paymentStatus={invoiceStatus !== 'none' ? <StatusBadge status={invoiceStatus} type="payment" /> : undefined}
+      paymentStatus={<StatusBadge status={collectionStatus} type="payment" />}
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
@@ -578,7 +799,7 @@ export default function SalesOrderDetail() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Balance Due</dt>
-                  <dd className="font-mono font-semibold">{formatCurrency(balance, currency)}</dd>
+                  <dd className="font-mono font-semibold">{formatCurrency(receivableBalance, currency)}</dd>
                 </div>
               </dl>
             </div>
@@ -894,12 +1115,8 @@ export default function SalesOrderDetail() {
                   <dd className="font-medium text-gray-900">{new Date(so.created_at).toLocaleDateString()}</dd>
                 </div>
                 <div className="flex justify-between items-center border-t pt-2">
-                  <dt className="text-gray-500">Invoice Status</dt>
-                  <dd>
-                    {invoiceStatus !== 'none'
-                      ? <StatusBadge status={invoiceStatus} type="payment" />
-                      : <span className="text-gray-400 text-xs">No invoice</span>}
-                  </dd>
+                  <dt className="text-gray-500">Payment Status</dt>
+                  <dd><StatusBadge status={collectionStatus} type="payment" /></dd>
                 </div>
               </dl>
             </div>
@@ -937,85 +1154,101 @@ export default function SalesOrderDetail() {
                   </dd>
                 </div>
                 <div className="flex justify-between border-t pt-2">
-                  <dt className="font-medium text-gray-700">Balance Due</dt>
-                  <dd className={`font-semibold font-mono ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {formatCurrency(balance, currency)}
+                  <dt className="font-medium text-gray-700">Billable Remaining</dt>
+                  <dd className={`font-semibold font-mono ${billableRemaining > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {formatCurrency(billableRemaining, currency)}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="font-medium text-gray-700">Receivable Balance</dt>
+                  <dd className={`font-semibold font-mono ${receivableBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {formatCurrency(receivableBalance, currency)}
                   </dd>
                 </div>
               </dl>
               <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
-                {financialSummary?.latest_invoice_id && (
+                {canCreateInvoice ? (
                   <button
                     type="button"
-                    onClick={() => router.navigate(withReturnTo(`/financials/invoices/${financialSummary.latest_invoice_id}`))}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    onClick={() => router.navigate(withReturnTo(`/financials/invoices/new?sales_order_id=${so.id}`))}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
                   >
-                    View Invoice {financialSummary.latest_invoice_number}
+                    <FileText className="w-4 h-4" />
+                    Create Invoice
                   </button>
+                ) : (
+                  <div className="w-full px-3 py-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg text-center">
+                    Fully invoiced / No billable remaining
+                  </div>
                 )}
-                <a
-                  href="/financials/payments?new=1"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    sessionStorage.setItem(
-                      'financials_payment_prefill',
-                      JSON.stringify({
-                        source: 'sales_order',
-                        sales_order_id: so.id,
-                        sales_order_no: so.sales_order_no,
-                        dealer_id: so.dealer_id ?? null,
-                      })
-                    );
-                    router.navigate(withReturnTo('/financials/payments?new=1'));
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Payment
-                </a>
               </div>
             </div>
           </div>
 
-          {/* Payments table */}
+          {/* Invoices list */}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-900">Invoice List</h3>
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Date</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700">Amount</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Method</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Reference</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Bank</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Description</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Recorded By</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Invoice #</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Issue Date</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">View</th>
                 </tr>
               </thead>
               <tbody>
-                {paymentsLoading ? (
+                {linkedInvoices.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">Loading...</td>
-                  </tr>
-                ) : payments.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">No payments recorded</td>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">No invoices for this order</td>
                   </tr>
                 ) : (
-                  payments.map((p) => (
-                    <tr key={p.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-4">{new Date(p.payment_date || p.created_at).toLocaleDateString()}</td>
-                      <td className="px-4 py-4 text-right font-mono">{formatCurrency(p.amount, currency)}</td>
-                      <td className="px-4 py-4">{p.payment_method ?? '—'}</td>
-                      <td className="px-4 py-4">{p.reference_number ?? '—'}</td>
-                      <td className="px-4 py-4">{p.bank_name ?? '—'}</td>
-                      <td className="px-4 py-4 max-w-[12rem] truncate" title={p.description ?? undefined}>{p.description ?? '—'}</td>
-                      <td className="px-4 py-4">—</td>
+                  linkedInvoices.map((inv) => (
+                    <tr key={inv.id} className="border-t hover:bg-gray-50">
+                      <td className="px-4 py-4">
+                        {isInternal ? (
+                          <button
+                            type="button"
+                            onClick={() => router.navigate(withReturnTo(`/financials/invoices/${inv.id}`))}
+                            className="text-primary hover:underline font-medium"
+                          >
+                            {inv.invoice_number}
+                          </button>
+                        ) : (
+                          <span className="font-medium text-gray-700">{inv.invoice_number}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-gray-700">{new Date(inv.issue_date).toLocaleDateString()}</td>
+                      <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(inv.total, inv.currency_code || currency)}</td>
+                      <td className="px-4 py-4 text-center">
+                        <StatusBadge status={inv.status} type="invoice" size="sm" />
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        {isInternal ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handlePreviewInvoicePdf(inv.id);
+                            }}
+                            className="inline-flex items-center justify-center p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                            title="View invoice PDF"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
           </div>
+
         </div>
       )}
 

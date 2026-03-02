@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { X, Info } from 'lucide-react';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import {
@@ -8,8 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
-import { CANONICAL_COMPONENT_ROLES, getRoleLabel, isValidRole } from '../../../lib/bom/roles';
+import { getAllRoleOptions } from '../../../lib/bom/roles';
 import { useUIStore } from '../../../stores/ui-store';
+import type { EngineeringData } from './types';
 
 const CUT_AXIS_OPTIONS = [
   { value: 'none', label: 'None' },
@@ -24,15 +25,25 @@ const DELTA_SCOPE_OPTIONS = [
   { value: 'per_side', label: 'Per side' },
 ] as const;
 
+const DELTA_SOURCE_OPTIONS = [
+  { value: 'fixed', label: 'Fixed (manual value)' },
+  { value: 'derived', label: 'Derived from component (v2)' },
+] as const;
+
+const ENG_ATTR_KEY_OPTIONS = [
+  { value: 'takeup_mm', label: 'takeup_mm' },
+  { value: 'offset_mm', label: 'offset_mm' },
+] as const;
+
+const ENG_SCOPE_OPTIONS = [
+  { value: 'total', label: 'Total' },
+  { value: 'per_side', label: 'Per side' },
+] as const;
+
 export interface BOMEngineeringModalProps {
   showEngineeringModal: boolean;
-  engineeringData: {
-    depends_on_role: string;
-    cut_axis: 'length' | 'width' | 'height' | 'none';
-    cut_delta_mm: number | null;
-    cut_delta_scope: 'per_side' | 'per_item' | 'none';
-  };
-  setEngineeringData: (data: any) => void;
+  engineeringData: EngineeringData;
+  setEngineeringData: (data: EngineeringData) => void;
   onSave: () => void;
   onClose: () => void;
 }
@@ -48,6 +59,7 @@ export default function BOMEngineeringModal({
   if (!showEngineeringModal) return null;
 
   const isDependsOnRoleDisabled = engineeringData.cut_axis === 'none';
+  const isDerived = engineeringData.engineering_delta_source === 'derived';
 
   const handleCutAxisChange = (value: string) => {
     const next = value as 'length' | 'width' | 'height' | 'none';
@@ -59,7 +71,6 @@ export default function BOMEngineeringModal({
   };
 
   const handleDependsOnRoleChange = (value: string) => {
-    if (!isValidRole(value)) return;
     setEngineeringData({ ...engineeringData, depends_on_role: value });
   };
 
@@ -76,10 +87,39 @@ export default function BOMEngineeringModal({
     });
   };
 
+  const handleDeltaSourceChange = (value: string) => {
+    const src = value as 'fixed' | 'derived';
+    setEngineeringData({
+      ...engineeringData,
+      engineering_delta_source: src,
+      ...(src === 'fixed' ? { engineering_attr_key: '', engineering_source_role: '' } : {}),
+    });
+  };
+
+  const handleSourceRoleChange = (value: string) => {
+    setEngineeringData({
+      ...engineeringData,
+      engineering_source_role: value === 'none' ? '' : value,
+    });
+  };
+
+  const handleAttrKeyChange = (value: string) => {
+    setEngineeringData({ ...engineeringData, engineering_attr_key: value });
+  };
+
+  const handleEngScopeChange = (value: string) => {
+    setEngineeringData({
+      ...engineeringData,
+      engineering_scope: value as 'total' | 'per_side',
+    });
+  };
+
+  const roleOptions = getAllRoleOptions();
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
       <div
-        className="bg-white max-w-md w-full rounded shadow-lg"
+        className="bg-white max-w-md w-full rounded shadow-lg max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
@@ -94,7 +134,7 @@ export default function BOMEngineeringModal({
           </button>
         </div>
 
-        <div className="px-4 py-4 space-y-4">
+        <div className="px-4 py-4 space-y-4 overflow-y-auto flex-1">
           <div>
             <Label htmlFor="cut-axis">Cut Axis</Label>
             <SelectShadcn
@@ -126,9 +166,9 @@ export default function BOMEngineeringModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— None —</SelectItem>
-                {CANONICAL_COMPONENT_ROLES.map((role) => (
-                  <SelectItem key={role} value={role}>
-                    {getRoleLabel(role)}
+                {roleOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -169,6 +209,113 @@ export default function BOMEngineeringModal({
                 ))}
               </SelectContent>
             </SelectShadcn>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Delta Source (v2 Preparation)</p>
+
+            <div>
+              <Label htmlFor="delta-source">Source Type</Label>
+              <SelectShadcn
+                value={engineeringData.engineering_delta_source}
+                onValueChange={handleDeltaSourceChange}
+              >
+                <SelectTrigger id="delta-source">
+                  <SelectValue placeholder="Select source" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DELTA_SOURCE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </SelectShadcn>
+            </div>
+
+            {isDerived && (
+              <>
+                <div className="mt-3">
+                  <Label htmlFor="source-role">Source Role</Label>
+                  <SelectShadcn
+                    value={engineeringData.engineering_source_role || 'none'}
+                    onValueChange={handleSourceRoleChange}
+                  >
+                    <SelectTrigger id="source-role">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— None —</SelectItem>
+                      {roleOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                </div>
+
+                <div className="mt-3">
+                  <Label htmlFor="attr-key">Attribute Key</Label>
+                  <SelectShadcn
+                    value={engineeringData.engineering_attr_key || 'takeup_mm'}
+                    onValueChange={handleAttrKeyChange}
+                  >
+                    <SelectTrigger id="attr-key">
+                      <SelectValue placeholder="Select attribute" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ENG_ATTR_KEY_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                </div>
+
+                <div className="mt-3">
+                  <Label htmlFor="eng-scope">Engineering Scope</Label>
+                  <SelectShadcn
+                    value={engineeringData.engineering_scope}
+                    onValueChange={handleEngScopeChange}
+                  >
+                    <SelectTrigger id="eng-scope">
+                      <SelectValue placeholder="Select scope" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ENG_SCOPE_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="bg-gray-50 border border-gray-200 rounded p-3 flex gap-2">
+            <Info className="h-4 w-4 text-gray-400 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-gray-600">
+              {isDerived ? (
+                <>
+                  <span className="font-medium">Derived delta (v2):</span>{' '}
+                  Cut adjustment will be resolved from{' '}
+                  <span className="font-mono text-amber-700">
+                    {engineeringData.engineering_source_role || '?'}.{engineeringData.engineering_attr_key || '?'}
+                  </span>{' '}
+                  ({engineeringData.engineering_scope}).{' '}
+                  Currently uses <span className="font-mono">cut_delta_mm = {engineeringData.cut_delta_mm ?? 0}</span> as fallback.
+                </>
+              ) : (
+                <>
+                  <span className="font-medium">Fixed delta:</span>{' '}
+                  Cut adjustment: <span className="font-mono">{engineeringData.cut_delta_mm ?? 0} mm</span> (manual value)
+                </>
+              )}
+            </div>
           </div>
         </div>
 

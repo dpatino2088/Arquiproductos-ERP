@@ -7,6 +7,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useCostSettings } from '../../hooks/useCosts';
 import { generateNextInvoiceNumber } from '../../lib/sequential-numbers';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { ArrowLeft, Plus, Trash2, FileText, DollarSign } from 'lucide-react';
 
 const FINANCIAL_SUBMODULES = [
@@ -54,6 +55,8 @@ interface SalesOrderOption {
   tax_amount: number | null;
   status: string | null;
 }
+
+type SoPrefillSource = 'billable_remaining' | 'so_total_fallback';
 
 function getQueryParam(name: string): string | null {
   const url = new URL(window.location.href);
@@ -126,6 +129,13 @@ export default function InvoiceNew() {
   const [loadingSalesOrders, setLoadingSalesOrders] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadingSO, setLoadingSO] = useState(false);
+  const [prefillInfo, setPrefillInfo] = useState<{
+    source: SoPrefillSource;
+    targetAmount: number;
+    billableRemaining: number;
+  } | null>(null);
+  const listPath = '/financials/invoices';
+  const queryReturnTo = getReturnToFromCurrentQuery();
 
   useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
 
@@ -160,7 +170,7 @@ export default function InvoiceNew() {
     if (!activeOrganizationId) return;
     setLoadingSO(true);
     try {
-      const [soRes, linesRes] = await Promise.all([
+      const [soRes, linesRes, summaryRes] = await Promise.all([
         supabase
           .from('SalesOrders')
           .select('id, sales_order_no, dealer_id, total_amount, subtotal, tax_amount')
@@ -175,12 +185,32 @@ export default function InvoiceNew() {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('line_number', { ascending: true, nullsFirst: false }),
+        supabase
+          .from('sales_order_financial_summary')
+          .select('balance_due, total_invoiced')
+          .eq('sales_order_id', soId)
+          .maybeSingle(),
       ]);
       if (soRes.error) throw soRes.error;
       const so = soRes.data;
       setSalesOrderId(so.id);
       setSalesOrderNo(so.sales_order_no);
       setSelectedDealerId(so.dealer_id);
+
+      const soTotalAmount = Math.max(0, safeNumber(so.total_amount, 0));
+      const summaryTotalInvoiced = summaryRes.data
+        ? Math.max(0, safeNumber((summaryRes.data as { total_invoiced?: number | null }).total_invoiced, 0))
+        : 0;
+      const billableRemaining = Math.max(0, Number((soTotalAmount - summaryTotalInvoiced).toFixed(2)));
+      // For SO-based invoicing, use billable remaining to avoid over-invoicing.
+      const targetInvoiceAmount = summaryRes.data ? billableRemaining : Math.max(0, soTotalAmount);
+      const prefillSource: SoPrefillSource = summaryRes.data ? 'billable_remaining' : 'so_total_fallback';
+      setPrefillInfo({
+        source: prefillSource,
+        targetAmount: targetInvoiceAmount,
+        billableRemaining,
+      });
+      const roundToCents = (value: number) => Number(value.toFixed(2));
 
       const mappedLines: InvoiceLine[] = [];
       if (!linesRes.error && linesRes.data && linesRes.data.length > 0) {
@@ -204,7 +234,56 @@ export default function InvoiceNew() {
         }
       }
 
-      setLines(mappedLines.length > 0 ? mappedLines : [createCustomLine()]);
+      if (mappedLines.length === 0) {
+        const soLabel = so.sales_order_no?.startsWith('SO-') ? so.sales_order_no : `SO-${so.sales_order_no}`;
+        setLines([{
+          key: newLineKey(),
+          description: `Balance due ${soLabel}`,
+          qty: 1,
+          unit_price: roundToCents(targetInvoiceAmount),
+          base_subtotal: roundToCents(targetInvoiceAmount),
+          billing_percent: targetInvoiceAmount > 0 ? 100 : 0,
+          billing_amount: roundToCents(targetInvoiceAmount),
+        }]);
+        return;
+      }
+
+      const soSubtotalBase = mappedLines.reduce((sum, line) => sum + Math.max(0, line.base_subtotal), 0);
+      let allocated = 0;
+      const lastIndex = mappedLines.length - 1;
+      const rebalancedLines = mappedLines.map((line, idx) => {
+        const qty = Math.max(1, safeNumber(line.qty, 1));
+        let billingAmount = 0;
+        if (targetInvoiceAmount > 0) {
+          if (soSubtotalBase > 0) {
+            if (idx === lastIndex) {
+              billingAmount = roundToCents(Math.max(0, targetInvoiceAmount - allocated));
+            } else {
+              const weightedAmount = roundToCents((targetInvoiceAmount * Math.max(0, line.base_subtotal)) / soSubtotalBase);
+              const available = roundToCents(Math.max(0, targetInvoiceAmount - allocated));
+              billingAmount = Math.min(weightedAmount, available);
+              allocated = roundToCents(allocated + billingAmount);
+            }
+          } else if (idx === 0) {
+            billingAmount = roundToCents(targetInvoiceAmount);
+          }
+        }
+
+        const unitPrice = Number((billingAmount / qty).toFixed(6));
+        const billingPercent = line.base_subtotal > 0
+          ? Number(Math.max(0, Math.min(100, (billingAmount / line.base_subtotal) * 100)).toFixed(2))
+          : (billingAmount > 0 ? 100 : 0);
+
+        return {
+          ...line,
+          qty,
+          unit_price: unitPrice,
+          billing_amount: billingAmount,
+          billing_percent: billingPercent,
+        };
+      });
+
+      setLines(rebalancedLines);
     } catch (e) {
       console.error('Failed to load SO:', e);
       addNotification({ type: 'error', title: 'Error', message: 'Failed to load sales order data' });
@@ -262,6 +341,7 @@ export default function InvoiceNew() {
     if (!exists && !loadingSalesOrders) {
       setSalesOrderId(null);
       setSalesOrderNo(null);
+      setPrefillInfo(null);
       setLines([createCustomLine()]);
     }
   }, [salesOrderId, salesOrders, loadingSalesOrders, createCustomLine]);
@@ -310,6 +390,7 @@ export default function InvoiceNew() {
     if (!soId) {
       setSalesOrderId(null);
       setSalesOrderNo(null);
+      setPrefillInfo(null);
       setLines([createCustomLine()]);
       return;
     }
@@ -370,6 +451,14 @@ export default function InvoiceNew() {
       addNotification({ type: 'error', title: 'Validation', message: 'Add at least one line with a description.' });
       return;
     }
+    if (salesOrderId && prefillInfo && total > prefillInfo.billableRemaining + 0.005) {
+      addNotification({
+        type: 'error',
+        title: 'Validation',
+        message: `Invoice total exceeds SO billable remaining (${fmt(prefillInfo.billableRemaining)}).`,
+      });
+      return;
+    }
     setSaving(true);
     try {
       const { data: inv, error: invErr } = await supabase
@@ -411,7 +500,10 @@ export default function InvoiceNew() {
       }
 
       addNotification({ type: 'success', title: 'Invoice Created', message: `Invoice ${invoiceNumber} saved as draft.` });
-      router.navigate(`/financials/invoices/${inv.id}`);
+      const detailPath = queryReturnTo
+        ? withReturnTo(`/financials/invoices/${inv.id}`, queryReturnTo)
+        : `/financials/invoices/${inv.id}`;
+      router.navigate(detailPath);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to create invoice';
       addNotification({ type: 'error', title: 'Error', message: msg });
@@ -427,7 +519,7 @@ export default function InvoiceNew() {
         <div className="flex items-center gap-4 w-full max-w-6xl mx-auto px-4 md:px-6">
           <button
             type="button"
-            onClick={() => router.navigate('/financials/invoices')}
+            onClick={() => router.navigate(listPath)}
             className="p-1 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -439,9 +531,23 @@ export default function InvoiceNew() {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {queryReturnTo && (
+              <button
+                type="button"
+                onClick={() =>
+                  navigateBackContextual(router, {
+                    queryReturnTo,
+                    fallback: listPath,
+                  })
+                }
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Back
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => router.navigate('/financials/invoices')}
+              onClick={() => router.navigate(listPath)}
               className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Cancel
@@ -488,6 +594,7 @@ export default function InvoiceNew() {
                         setDealerSearch('');
                         setSalesOrderId(null);
                         setSalesOrderNo(null);
+                        setPrefillInfo(null);
                         setLines([createCustomLine()]);
                       }}
                       className="text-xs text-gray-500 hover:text-gray-700"
@@ -517,6 +624,7 @@ export default function InvoiceNew() {
                               setDealerSearch('');
                               setSalesOrderId(null);
                               setSalesOrderNo(null);
+                              setPrefillInfo(null);
                               setLines([createCustomLine()]);
                             }}
                             className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0"
@@ -554,7 +662,18 @@ export default function InvoiceNew() {
                   ))}
                 </select>
                 {salesOrderNo && (
-                  <p className="mt-2 text-xs text-gray-500">Reference: {salesOrderNo}</p>
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-gray-500">Reference: {salesOrderNo}</p>
+                    {prefillInfo && (
+                      <p className="text-xs text-gray-500">
+                        Prefill source:{' '}
+                        {prefillInfo.source === 'billable_remaining'
+                          ? 'SO billable remaining'
+                          : 'SO total amount fallback'}
+                        {' '}({fmt(prefillInfo.targetAmount)}). Billable remaining: {fmt(prefillInfo.billableRemaining)}.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 

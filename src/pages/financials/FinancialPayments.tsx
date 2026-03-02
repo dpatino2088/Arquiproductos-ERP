@@ -8,9 +8,10 @@ import { router } from '../../lib/router';
 import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { Search, FileText, DollarSign, Plus, ArrowLeft } from 'lucide-react';
+import { Search, FileText, DollarSign, Plus, ArrowLeft, Building2 } from 'lucide-react';
 
 const FINANCIAL_SUBMODULES = [
+  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
   { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
   { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
 ];

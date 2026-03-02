@@ -1,7 +1,15 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
-import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
+import {
+  CATALOG_ITEMS_LIST_STATE_KEY,
+  CATALOG_ITEMS_RESTORE_ON_BACK_KEY,
+  setCatalogItemsReturnTo,
+  getReturnToFromCurrentQuery,
+  navigateBackContextual,
+  setCatalogItemsRestoreOnBack,
+  withReturnTo,
+} from '../../lib/navigation/returnTo';
 import type { ManufacturersRef } from './Manufacturers';
 import type { CategoriesRef } from './Categories';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
@@ -16,6 +24,7 @@ import { warmDetailIfNeeded } from '../../lib/zeroLoading';
 import { useNearViewportWarm } from '../../hooks/useNearViewportWarm';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useInventoryAvailability } from '../../hooks/useInventoryAvailability';
+import { useAuthSession } from '../../hooks/useAuthSession';
 import { InventoryAvailabilityBadge } from '../../components/inventory/InventoryAvailabilityBadge';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
@@ -28,6 +37,8 @@ import Collections from './Collections';
 import { 
   Search, 
   Filter,
+  X,
+  ChevronUp,
   Plus,
   Upload,
   SortAsc,
@@ -66,6 +77,77 @@ interface Item {
   image?: string;
 }
 
+interface CatalogItemsListStateSnapshot {
+  searchTerm: string;
+  showFilters: boolean;
+  currentPage: number;
+  itemsPerPage: number;
+  sortBy: 'manufacturer' | 'sku' | 'itemName' | 'category' | 'measure_basis' | 'unit_price' | 'active' | 'family';
+  sortOrder: 'asc' | 'desc';
+  selectedManufacturer: string[];
+  selectedCategory: string[];
+  selectedFamily: string[];
+  selectedMeasureBasis: string[];
+  selectedActive: string[];
+  scrollY: number;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (!error) return 'Error desconocido';
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object') {
+    const err = error as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [err.message, err.details, err.hint].filter(Boolean);
+    if (parts.length > 0) return parts.join(' | ');
+    if (err.code) return `Database error (${err.code})`;
+  }
+  return String(error);
+}
+
+function isTemplateLinkedDeleteWarning(error: unknown): boolean {
+  const msg = getErrorMessage(error);
+  return msg.includes('WARNING_TEMPLATE_LINKED');
+}
+
+function cleanTemplateLinkedWarningMessage(error: unknown): string {
+  return getErrorMessage(error).replace('WARNING_TEMPLATE_LINKED:', '').trim();
+}
+
+function splitCsvParam(value: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((v) => decodeURIComponent(v).trim())
+    .filter(Boolean);
+}
+
+function hasCatalogListParams(params: URLSearchParams): boolean {
+  return (
+    params.has('q') ||
+    params.has('manufacturer') ||
+    params.has('category') ||
+    params.has('family') ||
+    params.has('measureBasis') ||
+    params.has('active') ||
+    params.has('page') ||
+    params.has('pageSize') ||
+    params.has('sortBy') ||
+    params.has('sortOrder') ||
+    params.has('filtersOpen')
+  );
+}
+
+function hasCatalogRestoreSignal(params: URLSearchParams): boolean {
+  try {
+    return (
+      params.get('restoreList') === '1' ||
+      window.sessionStorage.getItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY) === '1'
+    );
+  } catch {
+    return params.get('restoreList') === '1';
+  }
+}
+
 export default function Items() {
   const { registerSubmodules } = useSubmoduleNav();
   const { items, loading, loadingMore, error, refetch } = useCatalogItems();
@@ -91,6 +173,7 @@ export default function Items() {
     }
   }, [registerSubmodules]);
   const { activeOrganizationId } = useOrganizationContext();
+  const { userId, loading: authLoading } = useAuthSession();
   const { activeDealerId } = useActiveDealer();
   const { userType } = useAccessContext();
   const queryClient = useQueryClient();
@@ -122,16 +205,14 @@ export default function Items() {
   );
   const rowRefForViewport = useNearViewportWarm(warmDetail, { rootMargin: '200px' });
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
-  const catalogItemIds = useMemo(
-    () => [...new Set((items ?? []).map((i) => i.id).filter(Boolean))],
-    [items]
-  );
+  // Defer catalogItemIds until after pagination to avoid re-fetching on every progressive batch
+  const [deferredCatalogItemIds, setDeferredCatalogItemIds] = useState<string[]>([]);
   const { map: availabilityMap } = useInventoryAvailability({
     organizationId: activeOrganizationId ?? null,
     warehouseId: defaultWarehouse?.id ?? null,
-    catalogItemIds,
+    catalogItemIds: deferredCatalogItemIds,
   });
-  const { deleteItem, isDeleting } = useDeleteCatalogItem();
+  const { deleteItem, deleteItems, isDeleting } = useDeleteCatalogItem();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -151,21 +232,14 @@ export default function Items() {
   const [bulkTargetSubcategoryId, setBulkTargetSubcategoryId] = useState('');
   const [isBulkMoving, setIsBulkMoving] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const isRestoringListStateRef = useRef(false);
+  const hasHydratedDbStateRef = useRef(false);
+  const persistDbTimerRef = useRef<number | null>(null);
+  const lastDbStatePayloadRef = useRef<string>('');
   const manufacturerRef = useRef<ManufacturersRef>(null);
   const categoriesRef = useRef<CategoriesRef>(null);
   const [routeSearch, setRouteSearch] = useState(window.location.search);
   const [categoryFilterFromQuery, setCategoryFilterFromQuery] = useState(false);
-  const [showRedirectBack, setShowRedirectBack] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    const hasReturnTo = !!params.get('returnTo');
-    const hasCategoryId = !!params.get('category_id');
-    try {
-      const hasStoredContext = !!window.sessionStorage.getItem('catalogItemsBackContext');
-      return hasReturnTo || hasCategoryId || hasStoredContext;
-    } catch {
-      return hasReturnTo || hasCategoryId;
-    }
-  });
 
   useEffect(() => {
     const unsubscribe = router.addListener(() => {
@@ -175,20 +249,152 @@ export default function Items() {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(routeSearch);
+      const restoreFromQuery = params.get('restoreList') === '1';
+      const shouldRestore = hasCatalogRestoreSignal(params);
+      if (!shouldRestore) return;
+      // Guardrail: contextual restore must never fall back to DB hydration.
+      // We either restore from snapshot or land on clean list state.
+      hasHydratedDbStateRef.current = true;
+      const raw = window.sessionStorage.getItem(CATALOG_ITEMS_LIST_STATE_KEY);
+      window.sessionStorage.removeItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY);
+      if (!raw) {
+        if (restoreFromQuery) {
+          router.navigate('/catalog/items', false);
+        }
+        return;
+      }
+
+      const snapshot = JSON.parse(raw) as Partial<CatalogItemsListStateSnapshot>;
+      isRestoringListStateRef.current = true;
+      setSearchTerm(snapshot.searchTerm ?? '');
+      setShowFilters(Boolean(snapshot.showFilters));
+      setCurrentPage(Math.max(1, Number(snapshot.currentPage ?? 1)));
+      setItemsPerPage(Math.max(1, Number(snapshot.itemsPerPage ?? 25)));
+      setSortBy((snapshot.sortBy as CatalogItemsListStateSnapshot['sortBy']) ?? 'sku');
+      setSortOrder((snapshot.sortOrder as 'asc' | 'desc') ?? 'asc');
+      setSelectedManufacturer(Array.isArray(snapshot.selectedManufacturer) ? snapshot.selectedManufacturer : []);
+      setSelectedCategory(Array.isArray(snapshot.selectedCategory) ? snapshot.selectedCategory : []);
+      setSelectedFamily(Array.isArray(snapshot.selectedFamily) ? snapshot.selectedFamily : []);
+      setSelectedMeasureBasis(Array.isArray(snapshot.selectedMeasureBasis) ? snapshot.selectedMeasureBasis : []);
+      setSelectedActive(Array.isArray(snapshot.selectedActive) ? snapshot.selectedActive : []);
+
+      const scrollY = Number(snapshot.scrollY ?? 0);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: Number.isFinite(scrollY) ? Math.max(0, scrollY) : 0, behavior: 'auto' });
+          if (restoreFromQuery) {
+            window.history.replaceState({}, '', '/catalog/items');
+          }
+          isRestoringListStateRef.current = false;
+        });
+      });
+    } catch {
+      isRestoringListStateRef.current = false;
+    }
+  }, [routeSearch]);
+
+  useEffect(() => {
+    if (authLoading || !userId) return;
+    if (hasHydratedDbStateRef.current) return;
+
+    const params = new URLSearchParams(routeSearch);
+    if (hasCatalogRestoreSignal(params)) return;
+    if (hasCatalogListParams(params)) return;
+
+    hasHydratedDbStateRef.current = true;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc('get_catalog_items_list_state');
+      if (cancelled || error || !data || typeof data !== 'object' || Array.isArray(data)) return;
+
+      const snapshot = data as Partial<CatalogItemsListStateSnapshot>;
+      isRestoringListStateRef.current = true;
+      setSearchTerm(snapshot.searchTerm ?? '');
+      setShowFilters(Boolean(snapshot.showFilters));
+      setCurrentPage(Math.max(1, Number(snapshot.currentPage ?? 1)));
+      setItemsPerPage(Math.max(1, Number(snapshot.itemsPerPage ?? 25)));
+      setSortBy((snapshot.sortBy as CatalogItemsListStateSnapshot['sortBy']) ?? 'sku');
+      setSortOrder((snapshot.sortOrder as 'asc' | 'desc') ?? 'asc');
+      setSelectedManufacturer(Array.isArray(snapshot.selectedManufacturer) ? snapshot.selectedManufacturer : []);
+      setSelectedCategory(Array.isArray(snapshot.selectedCategory) ? snapshot.selectedCategory : []);
+      setSelectedFamily(Array.isArray(snapshot.selectedFamily) ? snapshot.selectedFamily : []);
+      setSelectedMeasureBasis(Array.isArray(snapshot.selectedMeasureBasis) ? snapshot.selectedMeasureBasis : []);
+      setSelectedActive(Array.isArray(snapshot.selectedActive) ? snapshot.selectedActive : []);
+      requestAnimationFrame(() => {
+        isRestoringListStateRef.current = false;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, userId, routeSearch]);
   const queryReturnTo = useMemo(() => getReturnToFromCurrentQuery(), [routeSearch]);
+  const hasContextualLinkBack = useMemo(() => {
+    const params = new URLSearchParams(routeSearch);
+    const hasReturnTo = !!params.get('returnTo');
+    const hasCategoryId = !!params.get('category_id');
+    try {
+      const hasStoredContext = !!window.sessionStorage.getItem('catalogItemsBackContext');
+      return hasReturnTo || hasCategoryId || hasStoredContext;
+    } catch {
+      return hasReturnTo || hasCategoryId;
+    }
+  }, [routeSearch]);
+  const hasActiveFilters = useMemo(
+    () =>
+      searchTerm.trim().length > 0 ||
+      selectedManufacturer.length > 0 ||
+      selectedCategory.length > 0 ||
+      selectedFamily.length > 0 ||
+      selectedMeasureBasis.length > 0 ||
+      selectedActive.length > 0,
+    [
+      searchTerm,
+      selectedManufacturer,
+      selectedCategory,
+      selectedFamily,
+      selectedMeasureBasis,
+      selectedActive,
+    ]
+  );
   const categoryIdFromQuery = useMemo(() => {
     const params = new URLSearchParams(routeSearch);
     return params.get('category_id');
   }, [routeSearch]);
-  const hasContextualBack = showRedirectBack && (activeTab === 'items');
+  const hasContextualBack = activeTab === 'items' && (hasContextualLinkBack || hasActiveFilters);
   const handleContextualBack = useCallback(() => {
     const currentReturnTo = getReturnToFromCurrentQuery();
-    setShowRedirectBack(false);
     if (currentReturnTo) {
       navigateBackContextual(router, {
         queryReturnTo: currentReturnTo,
         fallback: '/catalog/items',
       });
+      return;
+    }
+    if (hasActiveFilters) {
+      setSearchTerm('');
+      setSelectedManufacturer([]);
+      setSelectedCategory([]);
+      setSelectedFamily([]);
+      setSelectedMeasureBasis([]);
+      setSelectedActive([]);
+      setShowFilters(false);
+      setCurrentPage(1);
+      setSortBy('sku');
+      setSortOrder('asc');
+      setCategoryFilterFromQuery(false);
+      try {
+        window.sessionStorage.removeItem(CATALOG_ITEMS_LIST_STATE_KEY);
+        window.sessionStorage.removeItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY);
+      } catch {
+        // no-op
+      }
+      router.navigate('/catalog/items', false);
       return;
     }
     // If filter came from Categories tab (same route), return to that tab.
@@ -202,23 +408,7 @@ export default function Items() {
       // no-op
     }
     setActiveTab('categories');
-  }, []);
-
-  useEffect(() => {
-    // Activate Back when redirected into this view, but do not auto-disable it here.
-    const params = new URLSearchParams(routeSearch);
-    const hasReturnTo = !!params.get('returnTo');
-    const hasCategoryId = !!params.get('category_id');
-    let hasStoredContext = false;
-    try {
-      hasStoredContext = !!window.sessionStorage.getItem('catalogItemsBackContext');
-    } catch {
-      hasStoredContext = false;
-    }
-    if (hasReturnTo || hasCategoryId || hasStoredContext) {
-      setShowRedirectBack(true);
-    }
-  }, [routeSearch]);
+  }, [hasActiveFilters]);
 
   // Format date to DD/MM/YY format
   const formatDate = (dateString?: string | null): string => {
@@ -362,12 +552,12 @@ export default function Items() {
         setSelectedCategory([categoryName]);
         setCategoryFilterFromQuery(true);
       }
-    } else if (categoryFilterFromQuery && !showRedirectBack) {
+    } else if (categoryFilterFromQuery && !hasContextualLinkBack) {
       // Clear only query-driven filter; keep user-manual filters intact.
       setSelectedCategory([]);
       setCategoryFilterFromQuery(false);
     }
-  }, [categoryMap, routeSearch, categoryFilterFromQuery, showRedirectBack]);
+  }, [categoryMap, routeSearch, categoryFilterFromQuery, hasContextualLinkBack]);
 
   // ✅ OPTIMIZACIÓN: Solo usar items que tengan todos los campos básicos cargados
   // Filtrar items incompletos para evitar mostrar campos vacíos
@@ -498,6 +688,17 @@ export default function Items() {
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
+
+  // Only fetch inventory availability for the current visible page
+  useEffect(() => {
+    const ids = paginatedItems.map((i) => i.id).filter(Boolean);
+    setDeferredCatalogItemIds((prev) => {
+      const key = ids.join(',');
+      const prevKey = prev.join(',');
+      return key === prevKey ? prev : ids;
+    });
+  }, [paginatedItems]);
+
   const selectedItemsCount = selectedItemIds.length;
   const allPageSelected = paginatedItems.length > 0 && paginatedItems.every((item) => selectedItemIds.includes(item.id));
 
@@ -513,10 +714,164 @@ export default function Items() {
     [catalogCategories, bulkParentCategoryId]
   );
 
-  // Reset to first page when search changes
-  useMemo(() => {
+  // Reset to first page when search changes (except when restoring list state)
+  useEffect(() => {
+    if (isRestoringListStateRef.current) return;
     setCurrentPage(1);
   }, [searchTerm]);
+
+  const saveListStateSnapshot = useCallback(() => {
+    const snapshot: CatalogItemsListStateSnapshot = {
+      searchTerm,
+      showFilters,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      selectedManufacturer,
+      selectedCategory,
+      selectedFamily,
+      selectedMeasureBasis,
+      selectedActive,
+      scrollY: window.scrollY || 0,
+    };
+    try {
+      window.sessionStorage.setItem(CATALOG_ITEMS_LIST_STATE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // no-op
+    }
+  }, [
+    searchTerm,
+    showFilters,
+    currentPage,
+    itemsPerPage,
+    sortBy,
+    sortOrder,
+    selectedManufacturer,
+    selectedCategory,
+    selectedFamily,
+    selectedMeasureBasis,
+    selectedActive,
+  ]);
+
+  const buildCatalogItemsReturnTo = useCallback(() => {
+    const params = new URLSearchParams();
+    if (searchTerm.trim()) params.set('q', searchTerm.trim());
+    if (selectedManufacturer.length > 0) params.set('manufacturer', selectedManufacturer.map(encodeURIComponent).join(','));
+    if (selectedCategory.length > 0) params.set('category', selectedCategory.map(encodeURIComponent).join(','));
+    if (selectedFamily.length > 0) params.set('family', selectedFamily.map(encodeURIComponent).join(','));
+    if (selectedMeasureBasis.length > 0) params.set('measureBasis', selectedMeasureBasis.map(encodeURIComponent).join(','));
+    if (selectedActive.length > 0) params.set('active', selectedActive.map(encodeURIComponent).join(','));
+    if (currentPage > 1) params.set('page', String(currentPage));
+    if (itemsPerPage !== 25) params.set('pageSize', String(itemsPerPage));
+    if (sortBy !== 'sku') params.set('sortBy', sortBy);
+    if (sortOrder !== 'asc') params.set('sortOrder', sortOrder);
+    if (showFilters) params.set('filtersOpen', '1');
+    const qs = params.toString();
+    return qs ? `/catalog/items?${qs}` : '/catalog/items';
+  }, [
+    searchTerm,
+    selectedManufacturer,
+    selectedCategory,
+    selectedFamily,
+    selectedMeasureBasis,
+    selectedActive,
+    currentPage,
+    itemsPerPage,
+    sortBy,
+    sortOrder,
+    showFilters,
+  ]);
+
+  // Keep a fresh list snapshot in sessionStorage so Back restores exact latest list state.
+  useEffect(() => {
+    if (isRestoringListStateRef.current) return;
+    saveListStateSnapshot();
+  }, [saveListStateSnapshot]);
+
+  useEffect(() => {
+    if (authLoading || !userId) return;
+    if (isRestoringListStateRef.current) return;
+
+    const payload = {
+      searchTerm,
+      showFilters,
+      currentPage,
+      itemsPerPage,
+      sortBy,
+      sortOrder,
+      selectedManufacturer,
+      selectedCategory,
+      selectedFamily,
+      selectedMeasureBasis,
+      selectedActive,
+    };
+    const serialized = JSON.stringify(payload);
+    if (serialized === lastDbStatePayloadRef.current) return;
+
+    if (persistDbTimerRef.current) {
+      window.clearTimeout(persistDbTimerRef.current);
+    }
+    persistDbTimerRef.current = window.setTimeout(() => {
+      void supabase.rpc('set_catalog_items_list_state', { p_state: payload });
+      lastDbStatePayloadRef.current = serialized;
+      persistDbTimerRef.current = null;
+    }, 500);
+
+    return () => {
+      if (persistDbTimerRef.current) {
+        window.clearTimeout(persistDbTimerRef.current);
+        persistDbTimerRef.current = null;
+      }
+    };
+  }, [
+    authLoading,
+    userId,
+    searchTerm,
+    showFilters,
+    currentPage,
+    itemsPerPage,
+    sortBy,
+    sortOrder,
+    selectedManufacturer,
+    selectedCategory,
+    selectedFamily,
+    selectedMeasureBasis,
+    selectedActive,
+  ]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(routeSearch);
+    if (hasCatalogRestoreSignal(params)) return;
+    const hasRichListParams = hasCatalogListParams(params);
+    if (!hasRichListParams) return;
+
+    isRestoringListStateRef.current = true;
+    setSearchTerm(params.get('q') ?? '');
+    setSelectedManufacturer(splitCsvParam(params.get('manufacturer')));
+    setSelectedCategory(splitCsvParam(params.get('category')));
+    setSelectedFamily(splitCsvParam(params.get('family')));
+    setSelectedMeasureBasis(splitCsvParam(params.get('measureBasis')));
+    setSelectedActive(splitCsvParam(params.get('active')));
+
+    const nextPage = Math.max(1, Number(params.get('page') ?? 1));
+    const nextPageSize = Math.max(1, Number(params.get('pageSize') ?? 25));
+    const nextSortBy = params.get('sortBy');
+    const nextSortOrder = params.get('sortOrder');
+    setCurrentPage(Number.isFinite(nextPage) ? nextPage : 1);
+    setItemsPerPage(Number.isFinite(nextPageSize) ? nextPageSize : 25);
+    if (nextSortBy && ['manufacturer', 'sku', 'itemName', 'category', 'measure_basis', 'unit_price', 'active', 'family'].includes(nextSortBy)) {
+      setSortBy(nextSortBy as typeof sortBy);
+    }
+    if (nextSortOrder === 'asc' || nextSortOrder === 'desc') {
+      setSortOrder(nextSortOrder);
+    }
+    setShowFilters(params.get('filtersOpen') === '1');
+
+    requestAnimationFrame(() => {
+      isRestoringListStateRef.current = false;
+    });
+  }, [routeSearch]);
 
   // Handle sorting
   const handleSort = (field: typeof sortBy) => {
@@ -563,6 +918,30 @@ export default function Items() {
     setSelectedActive([]);
     setSearchTerm('');
   };
+
+  const handleGoToCatalogBase = useCallback(() => {
+    setActiveTab('items');
+    setSearchTerm('');
+    setSelectedManufacturer([]);
+    setSelectedCategory([]);
+    setSelectedFamily([]);
+    setSelectedMeasureBasis([]);
+    setSelectedActive([]);
+    setShowFilters(false);
+    setCurrentPage(1);
+    setSortBy('sku');
+    setSortOrder('asc');
+    setCategoryFilterFromQuery(false);
+    setCatalogItemsReturnTo(null);
+    try {
+      window.sessionStorage.removeItem('catalogItemsBackContext');
+      window.sessionStorage.removeItem(CATALOG_ITEMS_LIST_STATE_KEY);
+      window.sessionStorage.removeItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY);
+    } catch {
+      // no-op
+    }
+    router.navigate('/catalog/items', false);
+  }, []);
 
   const toggleSelectItem = (itemId: string) => {
     setSelectedItemIds((prev) => (prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]));
@@ -625,7 +1004,16 @@ export default function Items() {
   // Handlers for actions
   const handleEditItem = (item: Item, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    router.navigate(withReturnTo(`/catalog/items/edit/${item.id}`));
+    saveListStateSnapshot();
+    setCatalogItemsRestoreOnBack(true);
+    const returnTo = buildCatalogItemsReturnTo();
+    setCatalogItemsReturnTo(returnTo);
+    try {
+      window.sessionStorage.setItem(`catalogItemReturnTo:${item.id}`, returnTo);
+    } catch {
+      // no-op
+    }
+    router.navigate(withReturnTo(`/catalog/items/edit/${item.id}`, returnTo));
   };
 
   const handleArchiveItem = async (item: Item, e: React.MouseEvent) => {
@@ -707,10 +1095,45 @@ export default function Items() {
       });
       refetch();
         } catch (error) {
+      const isWarning = isTemplateLinkedDeleteWarning(error);
       useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error al eliminar',
-        message: error instanceof Error ? error.message : 'Error desconocido',
+        type: isWarning ? 'warning' : 'error',
+        title: isWarning ? 'No se puede eliminar' : 'Error al eliminar',
+        message: isWarning ? cleanTemplateLinkedWarningMessage(error) : getErrorMessage(error),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkDeleteItems = async () => {
+    if (selectedItemIds.length === 0) return;
+
+    const confirmed = await showConfirm({
+      title: 'Eliminar items seleccionados',
+      message: `¿Estás seguro de que deseas eliminar ${selectedItemIds.length} item(s)? Esta acción no se puede deshacer.`,
+      variant: 'danger',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+    });
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      await deleteItems(selectedItemIds);
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Items eliminados',
+        message: `${selectedItemIds.length} item(s) eliminados correctamente.`,
+      });
+      setSelectedItemIds([]);
+      refetch();
+    } catch (error) {
+      const isWarning = isTemplateLinkedDeleteWarning(error);
+      useUIStore.getState().addNotification({
+        type: isWarning ? 'warning' : 'error',
+        title: isWarning ? 'No se pueden eliminar los seleccionados' : 'Error al eliminar',
+        message: isWarning ? cleanTemplateLinkedWarningMessage(error) : getErrorMessage(error),
       });
     } finally {
       setLoading(false);
@@ -756,6 +1179,17 @@ export default function Items() {
       {/* Header — title + contextual actions per tab (same as Quotes/Sales) */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
+          {activeTab === 'items' && (
+            <button
+              type="button"
+              onClick={handleGoToCatalogBase}
+              className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+              title="Back to catalog"
+              aria-label="Back to catalog"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
           <h1 className="text-title font-semibold text-foreground">Catalog Items</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
@@ -781,7 +1215,13 @@ export default function Items() {
               )}
               <button
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                onClick={() => router.navigate(withReturnTo('/catalog/items/new'))}
+                onClick={() => {
+                  saveListStateSnapshot();
+                  setCatalogItemsRestoreOnBack(true);
+                  const returnTo = buildCatalogItemsReturnTo();
+                  setCatalogItemsReturnTo(returnTo);
+                  router.navigate(withReturnTo('/catalog/items/new', returnTo));
+                }}
               >
                 <Plus className="w-4 h-4" />
                 Add New
@@ -820,7 +1260,13 @@ export default function Items() {
           )}
           {activeTab === 'collection' && (
             <button
-              onClick={() => router.navigate(withReturnTo('/catalog/items/new?is_fabric=true'))}
+              onClick={() => {
+                saveListStateSnapshot();
+                setCatalogItemsRestoreOnBack(true);
+                const returnTo = buildCatalogItemsReturnTo();
+                setCatalogItemsReturnTo(returnTo);
+                router.navigate(withReturnTo('/catalog/items/new?is_fabric=true', returnTo));
+              }}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
               title="Add new collection"
@@ -920,12 +1366,15 @@ export default function Items() {
               />
             </div>
             <button
+              type="button"
               onClick={() => setShowFilters(!showFilters)}
               className={`flex items-center gap-2 px-2 py-1 text-sm font-medium rounded border transition-colors ${
                 showFilters || totalActiveFilters > 0
                   ? 'bg-primary text-white border-primary'
                   : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
               }`}
+              title={showFilters ? 'Minimizar filtros' : 'Mostrar filtros'}
+              aria-expanded={showFilters}
             >
               <Filter style={{ width: 14, height: 14 }} />
               Filters
@@ -935,11 +1384,37 @@ export default function Items() {
                 </span>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearAllFilters();
+                setCurrentPage(1);
+              }}
+              disabled={!hasActiveFilters}
+              className="inline-flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded border border-gray-200 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              title="Clear filters"
+              aria-label="Clear filters"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Filters Dropdown */}
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-gray-700">Filtros por categoría, fabricante, etc.</span>
+                <button
+                  type="button"
+                  onClick={() => setShowFilters(false)}
+                  className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+                  title="Minimizar para ver más la lista"
+                  aria-label="Minimizar filtros"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                  Minimizar
+                </button>
+              </div>
               <div className="grid grid-cols-3 gap-4 mb-4">
                 {/* Measure Basis Filter */}
                 <div>
@@ -1142,6 +1617,13 @@ export default function Items() {
               className="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90"
             >
               Move category
+            </button>
+            <button
+              onClick={handleBulkDeleteItems}
+              disabled={isDeleting}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50"
+            >
+              Delete selected
             </button>
           </div>
         </div>

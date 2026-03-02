@@ -381,6 +381,40 @@ export function useCreateCatalogItem() {
   return { createItem, isCreating };
 }
 
+export function useUpsertCatalogItemBySku() {
+  const [isUpserting, setIsUpserting] = useState(false);
+  const { activeOrganizationId } = useOrganizationContext();
+
+  const upsertItemBySku = async (
+    itemData: Omit<CatalogItem, 'id' | 'organization_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'>
+  ) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+
+    setIsUpserting(true);
+    try {
+      const payload = {
+        ...itemData,
+        organization_id: activeOrganizationId,
+      };
+
+      const { data, error } = await supabase
+        .from('CatalogItems')
+        .upsert(payload, { onConflict: 'organization_id,sku' })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } finally {
+      setIsUpserting(false);
+    }
+  };
+
+  return { upsertItemBySku, isUpserting };
+}
+
 export function useUpdateCatalogItem() {
   const [isUpdating, setIsUpdating] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
@@ -450,20 +484,88 @@ export function useDeleteCatalogItem() {
   const [isDeleting, setIsDeleting] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
 
+  const getBlockedItemIdsByBom = async (ids: string[]): Promise<Set<string>> => {
+    const blocked = new Set<string>();
+    if (!activeOrganizationId || ids.length === 0) return blocked;
+
+    // 1) Legacy/current BOM components table reference
+    const bomComponentsResult = await supabase
+      .from('BOMComponents')
+      .select('component_item_id')
+      .eq('organization_id', activeOrganizationId)
+      .in('component_item_id', ids)
+      .eq('deleted', false);
+
+    if (!bomComponentsResult.error) {
+      (bomComponentsResult.data || []).forEach((row: { component_item_id?: string | null }) => {
+        if (row.component_item_id) blocked.add(row.component_item_id);
+      });
+    } else {
+      // Fallback if deleted column is not present in this env/schema
+      const fallback = await supabase
+        .from('BOMComponents')
+        .select('component_item_id')
+        .eq('organization_id', activeOrganizationId)
+        .in('component_item_id', ids);
+      if (!fallback.error) {
+        (fallback.data || []).forEach((row: { component_item_id?: string | null }) => {
+          if (row.component_item_id) blocked.add(row.component_item_id);
+        });
+      }
+    }
+
+    // 2) Newer BOM slots table reference
+    const bomSlotsResult = await supabase
+      .from('BOMTemplateSlots')
+      .select('catalog_item_id')
+      .eq('organization_id', activeOrganizationId)
+      .in('catalog_item_id', ids);
+
+    if (!bomSlotsResult.error) {
+      (bomSlotsResult.data || []).forEach((row: { catalog_item_id?: string | null }) => {
+        if (row.catalog_item_id) blocked.add(row.catalog_item_id);
+      });
+    }
+
+    return blocked;
+  };
+
+  const assertItemsCanBeDeleted = async (ids: string[]) => {
+    const blocked = await getBlockedItemIdsByBom(ids);
+    if (blocked.size === 0) return;
+
+    const blockedIds = Array.from(blocked);
+    const { data } = await supabase
+      .from('CatalogItems')
+      .select('sku')
+      .eq('organization_id', activeOrganizationId)
+      .in('id', blockedIds);
+    const skuList = (data || []).map((r: { sku?: string | null }) => r.sku).filter(Boolean).slice(0, 8);
+    const suffix = blockedIds.length > 8 ? '...' : '';
+    const skuText = skuList.length > 0 ? ` (${skuList.join(', ')}${suffix})` : '';
+    throw new Error(
+      `WARNING_TEMPLATE_LINKED: No se puede eliminar item(s) porque pertenecen a un template BOM. Remueve la referencia del template primero${skuText}.`
+    );
+  };
+
   const deleteItem = async (id: string) => {
     if (!activeOrganizationId) {
       throw new Error('No organization selected');
     }
     setIsDeleting(true);
     try {
+      await assertItemsCanBeDeleted([id]);
+
       // Same considerations as updateItem: scope by org + don't depend on returned rows
       const { error } = await supabase
         .from('CatalogItems')
-        .update({ deleted: true })
+        .update({ is_active: false, updated_at: new Date().toISOString() })
         .eq('id', id)
         .eq('organization_id', activeOrganizationId);
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(formatSupabaseError(error) || 'Failed to delete item');
+      }
 
       // Best-effort refetch
       try {
@@ -482,7 +584,33 @@ export function useDeleteCatalogItem() {
     }
   };
 
-  return { deleteItem, isDeleting };
+  const deleteItems = async (ids: string[]) => {
+    if (!activeOrganizationId) {
+      throw new Error('No organization selected');
+    }
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await assertItemsCanBeDeleted(ids);
+
+      const { error } = await supabase
+        .from('CatalogItems')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('organization_id', activeOrganizationId)
+        .in('id', ids);
+
+      if (error) {
+        throw new Error(formatSupabaseError(error) || 'Failed to delete selected items');
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return { deleteItem, deleteItems, isDeleting };
 }
 
 // Hook to fetch a single CatalogItem by ID

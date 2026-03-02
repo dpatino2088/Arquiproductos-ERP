@@ -252,6 +252,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       depends_on_role: comp.depends_on_role || null,
       cut_axis: comp.cut_axis || null,
       cut_delta_mm: comp.cut_delta_mm || 0,
+      qty_spacing_mm: comp.qty_spacing_mm ?? null,
+      qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
       uom: comp.uom || 'ea',
       sort_order: comp.sort_order || 0,
       sequence_order: comp.sort_order || 0,
@@ -357,12 +359,16 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       component_item_id: formData.component_item_id,
       component_role: role,
       qty_type: finalQty,
-      qty_value: finalQty === 'fixed' ? (formData.qty_value || 1) : 1,
+      qty_value: finalQty === 'fixed' ? (formData.qty_value || 1)
+        : finalQty === 'per_spacing' ? 1
+        : (formData.qty_value || 1),
       qty_delta_mm: 0,
       waste_pct: 0,
       depends_on_role: null,
       cut_axis: null,
       cut_delta_mm: 0,
+      qty_spacing_mm: finalQty === 'per_spacing' ? (formData.qty_spacing_mm ?? 500) : null,
+      qty_min: finalQty === 'per_spacing' ? formData.qty_min : null,
       uom: finalUom,
       sort_order: formData.sequence_order ?? 0,
       sequence_order: formData.sequence_order ?? 0,
@@ -398,7 +404,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         component_item_id: formData.component_item_id,
         component_role: normalized,
         qty_type: finalQty,
-        qty_value: formData.qty_value || 1,
+        qty_value: finalQty === 'per_spacing' ? 1 : (formData.qty_value || 1),
+        qty_spacing_mm: finalQty === 'per_spacing' ? (formData.qty_spacing_mm ?? 500) : null,
+        qty_min: finalQty === 'per_spacing' ? formData.qty_min : null,
         uom: finalUom,
         sort_order: formData.sequence_order ?? 0,
         sequence_order: formData.sequence_order ?? 0,
@@ -438,7 +446,11 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       component_item_id: itemId,
       component_role: component.component_role || '',
       qty_type: (component.qty_type || 'fixed') as BOMQtyType,
-      qty_value: component.qty_type === 'fixed' ? (component.qty_value || 1) : null,
+      qty_value: component.qty_type === 'fixed' ? (component.qty_value || 1)
+        : component.qty_type === 'per_spacing' ? null
+        : (component.qty_value || 1),
+      qty_spacing_mm: component.qty_spacing_mm ?? null,
+      qty_min: component.qty_min ?? null,
       uom: uomNorm,
       sequence_order: component.sort_order || component.sequence_order || 0,
       is_required: component.is_required ?? true,
@@ -461,6 +473,10 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       cut_axis: axis as any,
       cut_delta_mm: comp.cut_delta_mm || null,
       cut_delta_scope: (comp.cut_delta_scope as any) || 'none',
+      engineering_delta_source: (comp.engineering_delta_source === 'derived' ? 'derived' : 'fixed') as 'fixed' | 'derived',
+      engineering_attr_key: comp.engineering_attr_key || '',
+      engineering_scope: (comp.engineering_scope === 'per_side' ? 'per_side' : 'total') as 'total' | 'per_side',
+      engineering_source_role: comp.engineering_source_role || '',
     });
     setShowEngineeringModal(true);
   }, [components]);
@@ -476,6 +492,10 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         cut_axis: engineeringData.cut_axis === 'none' ? null : engineeringData.cut_axis,
         cut_delta_mm: engineeringData.cut_delta_mm || 0,
         cut_delta_scope: engineeringData.cut_delta_scope === 'none' ? null : engineeringData.cut_delta_scope,
+        engineering_delta_source: engineeringData.engineering_delta_source || 'fixed',
+        engineering_attr_key: engineeringData.engineering_attr_key || null,
+        engineering_scope: engineeringData.engineering_scope || 'total',
+        engineering_source_role: engineeringData.engineering_source_role || null,
       };
     }));
     setShowEngineeringModal(false);
@@ -520,18 +540,21 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const uom = normalizeUom(childFormData.uom) || 'ea';
     const sortOrder = childComponents.find(c => c.id === editingChildId)?.sort_order ?? childComponents.length;
 
+    const childQtyType = childFormData.qty_type || 'fixed';
     const childPayload: BOMComponentDraft = {
       id: editingChildId || `temp-${crypto.randomUUID()}`,
       parent_component_id: editingParentComponentId,
       component_item_id: childFormData.child_item_id,
       component_role: normalizedChildRole,
-      qty_type: 'fixed',
-      qty_value: childFormData.qty || 1,
+      qty_type: childQtyType,
+      qty_value: childQtyType === 'per_spacing' ? 1 : (childFormData.qty || 1),
       qty_delta_mm: 0,
       waste_pct: 0,
       depends_on_role: null,
       cut_axis: null,
       cut_delta_mm: 0,
+      qty_spacing_mm: childQtyType === 'per_spacing' ? (childFormData.qty_spacing_mm ?? 500) : null,
+      qty_min: childQtyType === 'per_spacing' ? childFormData.qty_min : null,
       uom,
       sort_order: sortOrder,
       sequence_order: sortOrder,
@@ -615,11 +638,32 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           depends_on_role: c.depends_on_role || null,
           cut_axis: c.cut_axis || null,
           cut_delta_mm: c.cut_delta_mm || 0,
+          qty_spacing_mm: c.qty_spacing_mm ?? null,
+          qty_min: c.qty_min ?? null,
           uom: isFabric ? 'm' : (c.uom || 'ea'),
           sort_order: c.sort_order || c.sequence_order || 0,
           is_required: c.is_required !== false,
+          engineering_delta_source: c.engineering_delta_source || 'fixed',
+          engineering_attr_key: c.engineering_attr_key || null,
+          engineering_scope: c.engineering_scope || 'total',
+          engineering_source_role: c.engineering_source_role || null,
         };
       });
+
+      for (const c of components) {
+        if (c.engineering_delta_source === 'derived' && c.engineering_source_role) {
+          const sourceExists = components.some(
+            (other) => other.id !== c.id && other.component_role === c.engineering_source_role,
+          );
+          if (!sourceExists) {
+            useUIStore.getState().addNotification({
+              type: 'warning',
+              title: 'Derived delta warning',
+              message: `Component "${c.component_role ?? c.id}" references role "${c.engineering_source_role}" for derived delta, but no component with that role exists in this template.`,
+            });
+          }
+        }
+      }
 
       const deleteIds = componentsToDelete.filter(id => !id.startsWith('temp-'));
 
@@ -647,6 +691,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           depends_on_role: comp.depends_on_role || null,
           cut_axis: comp.cut_axis || null,
           cut_delta_mm: comp.cut_delta_mm || 0,
+          qty_spacing_mm: comp.qty_spacing_mm ?? null,
+          qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
           uom: comp.uom || 'ea',
           sort_order: comp.sort_order || 0,
           sequence_order: comp.sort_order || 0,
@@ -714,6 +760,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     // Children
     showChildrenModal,
     editingParentComponentId,
+    editingParentComponentRole: editingParentComponentId
+      ? (components.find((c) => c.id === editingParentComponentId)?.component_role ?? null)
+      : null,
     childComponents, setChildComponents,
     showAddChildForm, setShowAddChildForm,
     editingChildId, setEditingChildId,

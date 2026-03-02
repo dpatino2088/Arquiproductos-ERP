@@ -96,14 +96,22 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Material', href: '/manufacturing/material' },
   ],
   '/financials': [
+    { label: 'Accounts', href: '/financials/accounts' },
     { label: 'Invoices', href: '/financials/invoices' },
     { label: 'Payments', href: '/financials/payments' },
   ],
   '/financials/invoices': [
+    { label: 'Accounts', href: '/financials/accounts' },
     { label: 'Invoices', href: '/financials/invoices' },
     { label: 'Payments', href: '/financials/payments' },
   ],
   '/financials/payments': [
+    { label: 'Accounts', href: '/financials/accounts' },
+    { label: 'Invoices', href: '/financials/invoices' },
+    { label: 'Payments', href: '/financials/payments' },
+  ],
+  '/financials/accounts': [
+    { label: 'Accounts', href: '/financials/accounts' },
     { label: 'Invoices', href: '/financials/invoices' },
     { label: 'Payments', href: '/financials/payments' },
   ],

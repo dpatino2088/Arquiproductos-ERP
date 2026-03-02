@@ -1,7 +1,7 @@
 import { normalizeRole } from '../../../lib/bom/roles';
 
-export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area';
-export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area'] as const;
+export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'per_spacing';
+export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area', 'per_spacing'] as const;
 
 export type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | 'CATEGORY_FIRST_MATCH' | string;
 export type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
@@ -20,6 +20,12 @@ export interface BOMComponentDraft {
   cut_axis: string | null;
   cut_delta_mm: number;
   cut_delta_scope?: string | null;
+  engineering_delta_source?: string | null;
+  engineering_attr_key?: string | null;
+  engineering_scope?: string | null;
+  engineering_source_role?: string | null;
+  qty_spacing_mm?: number | null;
+  qty_min?: number | null;
   uom: string;
   sort_order: number;
   sequence_order: number;
@@ -38,6 +44,8 @@ export interface ComponentFormData {
   component_role: string;
   qty_type: BOMQtyType;
   qty_value: number | null;
+  qty_spacing_mm: number | null;
+  qty_min: number | null;
   uom: string;
   sequence_order: number;
   is_required: boolean;
@@ -48,12 +56,19 @@ export interface EngineeringData {
   cut_axis: 'length' | 'width' | 'height' | 'none';
   cut_delta_mm: number | null;
   cut_delta_scope: 'per_side' | 'per_item' | 'none';
+  engineering_delta_source: 'fixed' | 'derived';
+  engineering_attr_key: string;
+  engineering_scope: 'total' | 'per_side';
+  engineering_source_role: string;
 }
 
 export interface ChildFormData {
   child_item_id: string;
   child_role: string;
+  qty_type: BOMQtyType;
   qty: number;
+  qty_spacing_mm: number | null;
+  qty_min: number | null;
   uom: string;
   required: boolean;
   notes: string;
@@ -80,6 +95,8 @@ export const INITIAL_FORM_DATA: ComponentFormData = {
   component_role: '',
   qty_type: 'fixed',
   qty_value: null,
+  qty_spacing_mm: null,
+  qty_min: null,
   uom: 'ea',
   sequence_order: 0,
   is_required: true,
@@ -90,12 +107,19 @@ export const INITIAL_ENGINEERING_DATA: EngineeringData = {
   cut_axis: 'none',
   cut_delta_mm: null,
   cut_delta_scope: 'none',
+  engineering_delta_source: 'fixed',
+  engineering_attr_key: '',
+  engineering_scope: 'total',
+  engineering_source_role: '',
 };
 
 export const INITIAL_CHILD_FORM_DATA: ChildFormData = {
   child_item_id: '',
   child_role: '',
+  qty_type: 'fixed',
   qty: 1,
+  qty_spacing_mm: null,
+  qty_min: null,
   uom: 'ea',
   required: true,
   notes: '',

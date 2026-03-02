@@ -9,9 +9,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
-import { VALID_CHILD_ROLES, getRoleLabel } from '../../../lib/bom/roles';
-import { INITIAL_CHILD_FORM_DATA } from './types';
-import type { BOMComponentDraft, ChildFormData } from './types';
+import { getRoleLabel, getChildRoleOptions } from '../../../lib/bom/roles';
+import { BOM_QTY_TYPES, INITIAL_CHILD_FORM_DATA } from './types';
+import type { BOMComponentDraft, BOMQtyType, ChildFormData } from './types';
+
+const QTY_TYPE_LABELS: Record<string, string> = {
+  fixed: 'Fixed',
+  per_width: 'Per Width',
+  per_height: 'Per Height',
+  per_area: 'Per Area',
+  per_spacing: 'Per Spacing',
+};
 
 export interface BOMChildrenModalProps {
   showChildrenModal: boolean;
@@ -30,6 +38,7 @@ export interface BOMChildrenModalProps {
   setShowChildDropdown: (v: boolean) => void;
   catalogItems: any[];
   categories: any[];
+  parentComponentRole?: string | null;
   onClose: () => void;
   onAddChild: () => void;
   onDeleteChild: (childId: string) => void;
@@ -51,6 +60,7 @@ export default function BOMChildrenModal({
   setShowChildDropdown,
   catalogItems,
   categories,
+  parentComponentRole,
   onClose,
   onAddChild,
   onDeleteChild,
@@ -97,7 +107,10 @@ export default function BOMChildrenModal({
       setChildFormData({
         child_item_id: child.component_item_id || '',
         child_role: child.component_role || '',
+        qty_type: (child.qty_type || 'fixed') as BOMQtyType,
         qty: child.qty_value || 1,
+        qty_spacing_mm: child.qty_spacing_mm ?? null,
+        qty_min: child.qty_min ?? null,
         uom: child.uom || 'ea',
         required: child.is_required !== false,
         notes: '',
@@ -192,45 +205,118 @@ export default function BOMChildrenModal({
                   )}
                 </div>
               </div>
-              <div>
-                <Label>Role</Label>
-                <SelectShadcn
-                  value={childFormData.child_role || 'none'}
-                  onValueChange={(v) =>
-                    setChildFormData((prev) => ({
-                      ...prev,
-                      child_role: v === 'none' ? '' : v,
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— None —</SelectItem>
-                    {VALID_CHILD_ROLES.map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {getRoleLabel(role)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </SelectShadcn>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Role</Label>
+                  <SelectShadcn
+                    value={childFormData.child_role || 'none'}
+                    onValueChange={(v) =>
+                      setChildFormData((prev) => ({
+                        ...prev,
+                        child_role: v === 'none' ? '' : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— None —</SelectItem>
+                      {getChildRoleOptions(parentComponentRole).map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                </div>
+                <div>
+                  <Label>Consumption</Label>
+                  <SelectShadcn
+                    value={childFormData.qty_type || 'fixed'}
+                    onValueChange={(v) =>
+                      setChildFormData((prev) => ({
+                        ...prev,
+                        qty_type: v as BOMQtyType,
+                        qty:
+                          Number.isFinite(prev.qty) && prev.qty > 0
+                            ? prev.qty
+                            : 1,
+                        qty_spacing_mm: v === 'per_spacing' ? (prev.qty_spacing_mm ?? 500) : null,
+                        qty_min: v === 'per_spacing' ? prev.qty_min : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BOM_QTY_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {QTY_TYPE_LABELS[t] || t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                </div>
               </div>
-              <div>
-                <Label>Quantity</Label>
-                <Input
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={childFormData.qty}
-                  onChange={(e) =>
-                    setChildFormData((prev) => ({
-                      ...prev,
-                      qty: parseFloat(e.target.value) || 1,
-                    }))
-                  }
-                />
-              </div>
+              {childFormData.qty_type === 'per_spacing' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Spacing (mm)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={childFormData.qty_spacing_mm ?? 500}
+                      onChange={(e) =>
+                        setChildFormData((prev) => ({
+                          ...prev,
+                          qty_spacing_mm: parseInt(e.target.value, 10) || 500,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Min Qty</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={childFormData.qty_min ?? ''}
+                      placeholder="No min"
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setChildFormData((prev) => ({
+                          ...prev,
+                          qty_min: v === '' ? null : parseInt(v, 10),
+                        }));
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Label>
+                    {childFormData.qty_type === 'fixed' ? 'Quantity' : 'Multiplier'}
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={Number.isFinite(childFormData.qty) ? childFormData.qty : ''}
+                    onChange={(e) =>
+                      setChildFormData((prev) => ({
+                        ...prev,
+                        qty:
+                          e.target.value === ''
+                            ? Number.NaN
+                            : parseFloat(e.target.value),
+                      }))
+                    }
+                  />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -273,13 +359,18 @@ export default function BOMChildrenModal({
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-3 py-2 font-medium">SKU / Name</th>
                   <th className="text-left px-3 py-2 font-medium">Role</th>
-                  <th className="text-left px-3 py-2 font-medium">Qty</th>
+                  <th className="text-left px-3 py-2 font-medium">Consumption</th>
                   <th className="text-right px-3 py-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {childComponents.map((child) => {
                   const { sku, name } = getItemDisplay(child);
+                  const consumptionDisplay = child.qty_type === 'per_spacing'
+                    ? `Every ${child.qty_spacing_mm ?? 500}mm${child.qty_min != null ? ` (min ${child.qty_min})` : ''}`
+                    : child.qty_type === 'fixed'
+                      ? String(child.qty_value ?? 1)
+                      : `${QTY_TYPE_LABELS[child.qty_type || 'fixed'] || child.qty_type}${child.qty_value != null && child.qty_value !== 1 ? ` x${child.qty_value}` : ''}`;
                   return (
                     <tr key={child.id} className="border-t border-gray-100 hover:bg-gray-50/50">
                       <td className="px-3 py-2">
@@ -287,7 +378,7 @@ export default function BOMChildrenModal({
                         <span className="text-gray-500 ml-1">{name}</span>
                       </td>
                       <td className="px-3 py-2">{getRoleLabel(child.component_role)}</td>
-                      <td className="px-3 py-2">{child.qty_value ?? '—'}</td>
+                      <td className="px-3 py-2">{consumptionDisplay}</td>
                       <td className="px-3 py-2 text-right">
                         <button
                           type="button"

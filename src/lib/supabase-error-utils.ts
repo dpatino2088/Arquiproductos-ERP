@@ -72,6 +72,39 @@ export function getSupabaseErrorMessage(error: unknown): string {
 }
 
 /**
+ * Extract a richer message from Supabase errors, including details/hint.
+ * Useful for diagnostics in internal tools where plain String(error) would render [object Object].
+ */
+export function getSupabaseErrorMessageDetailed(error: unknown): string {
+  if (!error) return 'Unknown error';
+
+  if (typeof error === 'object') {
+    const maybe = error as {
+      code?: string;
+      message?: string;
+      details?: string;
+      hint?: string;
+    };
+    const message = (maybe.message ?? '').trim();
+    const details = (maybe.details ?? '').trim();
+    const hint = (maybe.hint ?? '').trim();
+    const code = (maybe.code ?? '').trim();
+
+    if (message || details || hint || code) {
+      const parts: string[] = [];
+      if (message) parts.push(message);
+      if (details && details !== message) parts.push(details);
+      if (hint && hint !== details && hint !== message) parts.push(`Hint: ${hint}`);
+      if (code) parts.push(`Code: ${code}`);
+      return parts.join(' | ');
+    }
+  }
+
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+/**
  * Check if an error is an RLS (Row Level Security) error
  */
 export function isRLSError(error: unknown): boolean {
