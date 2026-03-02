@@ -230,7 +230,7 @@ export default function BOMTemplates() {
     const confirmed = await showConfirm({
       title: 'Duplicate BOM Template',
       message: `Are you sure you want to duplicate "${template.name || template.template_name || 'this template'}"?`,
-      variant: 'default',
+      variant: 'info',
       confirmText: 'Duplicate',
     });
     if (!confirmed) return;

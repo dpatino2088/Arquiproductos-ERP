@@ -739,9 +739,6 @@ export default function CatalogItemNew() {
               if (!formValues.category_id && dbValues.category_id) {
                 formValues.category_id = dbValues.category_id;
               }
-              if (!formValues.manufacturer_id && dbValues.manufacturer_id) {
-                formValues.manufacturer_id = dbValues.manufacturer_id;
-              }
 
               const isRollItem = !!(formValues.is_roll || dbValues.is_roll);
               if (isRollItem) {
