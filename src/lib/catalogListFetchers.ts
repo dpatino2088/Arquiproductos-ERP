@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CatalogItem } from '../types/catalog';
 
-const MSRP_BATCH = 100;
+const MSRP_BATCH = 1000;
 const MAX_LIST_SIZE = 2500;
 
 type MsrpRow = { dealer_price: number; msrp: number; total_cost: number; shipping_cost: number; import_tax_cost: number };

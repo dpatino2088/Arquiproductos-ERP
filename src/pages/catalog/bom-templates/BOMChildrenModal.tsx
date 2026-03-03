@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { X, Plus, Edit, Trash2, Search } from 'lucide-react';
+import { X, Plus, Trash2, Search } from 'lucide-react';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import {
@@ -360,7 +360,7 @@ export default function BOMChildrenModal({
                   <th className="text-left px-3 py-2 font-medium">SKU / Name</th>
                   <th className="text-left px-3 py-2 font-medium">Role</th>
                   <th className="text-left px-3 py-2 font-medium">Consumption</th>
-                  <th className="text-right px-3 py-2 font-medium">Actions</th>
+                  <th className="text-right px-3 py-2 font-medium w-20">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -372,25 +372,23 @@ export default function BOMChildrenModal({
                       ? String(child.qty_value ?? 1)
                       : `${QTY_TYPE_LABELS[child.qty_type || 'fixed'] || child.qty_type}${child.qty_value != null && child.qty_value !== 1 ? ` x${child.qty_value}` : ''}`;
                   return (
-                    <tr key={child.id} className="border-t border-gray-100 hover:bg-gray-50/50">
+                    <tr
+                      key={child.id}
+                      className="border-t border-gray-100 hover:bg-gray-50/50 cursor-pointer"
+                      onClick={() => handleEditChild(child)}
+                    >
                       <td className="px-3 py-2">
                         <span className="font-mono">{sku}</span>
                         <span className="text-gray-500 ml-1">{name}</span>
                       </td>
                       <td className="px-3 py-2">{getRoleLabel(child.component_role)}</td>
                       <td className="px-3 py-2">{consumptionDisplay}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleEditChild(child)}
-                          className="p-1 rounded hover:bg-gray-200 text-gray-600"
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                        </button>
+                      <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           onClick={() => onDeleteChild(child.id)}
-                          className="p-1 rounded hover:bg-red-50 text-red-600 ml-1"
+                          className="p-1 rounded hover:bg-red-50 text-red-600"
+                          aria-label="Delete"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

@@ -142,10 +142,10 @@ export function useCatalogItems(
           }
         }
 
-        // ✅ Cargar 500 items + sus MSRP antes del primer render; luego el resto en background
-        const INITIAL_LOAD_SIZE = 500;
-        const BATCH_SIZE = 100;
-        const MSRP_BATCH = 100;
+        // ✅ Cargar en bloques grandes para reducir cantidad de requests
+        const INITIAL_LOAD_SIZE = 1000;
+        const BATCH_SIZE = 1000;
+        const MSRP_BATCH = 1000;
         
         let allData: any[] = [];
         let queryError: any = null;
@@ -218,7 +218,7 @@ export function useCatalogItems(
           } as CatalogItem;
         });
         
-        // PASO 1: Cargar primeros 500 items
+        // PASO 1: Cargar primeros 1000 items (o el máximo permitido por backend)
         const { data: initialData, error: initialError } = await buildQuery(0, INITIAL_LOAD_SIZE - 1);
         if (initialError) {
           queryError = initialError;
@@ -228,7 +228,19 @@ export function useCatalogItems(
           if (import.meta.env.DEV) console.log(`✅ Initial load: ${initialData.length} items`);
         }
         
-        // Cargar MSRP de los primeros 500 ANTES de renderizar
+        // Detect backend row cap (e.g. PostgREST max rows = 100)
+        const effectiveChunkSize =
+          (initialData?.length ?? 0) > 0
+            ? Math.min(BATCH_SIZE, initialData!.length)
+            : BATCH_SIZE;
+        if (import.meta.env.DEV && (initialData?.length ?? 0) > 0 && (initialData!.length ?? 0) < BATCH_SIZE) {
+          console.warn(
+            `⚠️ useCatalogItems: Backend row cap detected (~${initialData!.length} rows/request). ` +
+              `Frontend requests ${BATCH_SIZE}, but backend is limiting response size.`
+          );
+        }
+
+        // Cargar MSRP de los primeros items ANTES de renderizar
         const msrpMap = new Map<string, MsrpRow>();
         const initialIds = allData?.map((i: any) => i.id).filter(Boolean) || [];
         if (initialIds.length > 0 && activeOrganizationId) {
@@ -251,7 +263,8 @@ export function useCatalogItems(
         
         // PASO 2: Resto en background (items + MSRP por batch)
         if (!queryError) {
-          let currentOffset = INITIAL_LOAD_SIZE;
+          // Use real loaded size as offset to support backend caps (e.g. 100 rows/request).
+          let currentOffset = allData.length;
           while (isMounted) {
             const { data: batchData, error: batchError } = await buildQuery(currentOffset, currentOffset + BATCH_SIZE - 1);
             if (batchError) break;
@@ -265,7 +278,8 @@ export function useCatalogItems(
             const valid = enrichItems(allData, msrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
             if (isMounted) setItems(valid);
             currentOffset += batchData.length;
-            if (batchData.length < BATCH_SIZE) break;
+            // Stop when received batch is smaller than the effective server chunk size.
+            if (batchData.length < effectiveChunkSize) break;
           }
           if (isMounted) setLoadingMore(false);
         }

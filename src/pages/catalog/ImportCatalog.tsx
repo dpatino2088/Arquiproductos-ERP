@@ -696,7 +696,7 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
         const lookups = await loadImportLookups();
         const existingSkuSet = new Set<string>();
         const skuList = Array.from(new Set(parsedData.map((r) => String(r.sku ?? '').trim()).filter(Boolean)));
-        const chunkSize = 100;
+        const chunkSize = 1000;
         for (let i = 0; i < skuList.length; i += chunkSize) {
           const chunk = skuList.slice(i, i + chunkSize);
           const { data, error } = await supabase

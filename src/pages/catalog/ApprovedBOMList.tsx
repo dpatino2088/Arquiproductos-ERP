@@ -272,6 +272,8 @@ export default function ApprovedBOMList() {
                 console.log('null resolved_part_id lines', bomLines.filter((l: any) => !l.resolved_part_id).length);
               }
 
+              const CHUNK_SIZE = 1000;
+
               // STEP 3: Build unique set of resolved_part_id and fetch CatalogItems
               // Normalize UUIDs to avoid 22P02 from hidden/invalid characters.
               const catalogItemIds = [...new Set(
@@ -286,10 +288,10 @@ export default function ApprovedBOMList() {
                   console.log('🔍 ApprovedBOMList: Step 3 - Fetching CatalogItems for', catalogItemIds.length, 'valid UUIDs');
                 }
                 
-                // Chunk queries to avoid URL length issues on large .in() lists.
+                // Chunk queries to balance URL length and number of requests.
                 const chunks = [];
-                for (let i = 0; i < catalogItemIds.length; i += 100) {
-                  chunks.push(catalogItemIds.slice(i, i + 100));
+                for (let i = 0; i < catalogItemIds.length; i += CHUNK_SIZE) {
+                  chunks.push(catalogItemIds.slice(i, i + CHUNK_SIZE));
                 }
                 
                 let allCatalogItems: any[] = [];
@@ -356,8 +358,8 @@ export default function ApprovedBOMList() {
                 }
                 
                 const chunks = [];
-                for (let i = 0; i < quoteLineIds.length; i += 100) {
-                  chunks.push(quoteLineIds.slice(i, i + 100));
+                for (let i = 0; i < quoteLineIds.length; i += CHUNK_SIZE) {
+                  chunks.push(quoteLineIds.slice(i, i + CHUNK_SIZE));
                 }
 
                 let allQuoteLines: any[] = [];
