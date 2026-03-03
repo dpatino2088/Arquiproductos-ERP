@@ -269,7 +269,7 @@ async function priceFromBOMInstance(opts: {
     // 2a) Fetch MSRP from CatalogItemsMSRP - ✅ TABLA PRINCIPAL DE PRECIOS
     const { data: msrpRows, error: msrpErr } = await supabase
       .from("CatalogItemsMSRP")
-      .select("catalog_item_id, msrp_sale_out, msrp_sale_in, cost_exw")
+      .select("catalog_item_id, msrp, dealer_price")
       .in("catalog_item_id", partIds);
 
     if (msrpErr) {
@@ -279,11 +279,11 @@ async function priceFromBOMInstance(opts: {
     }
 
     (msrpRows ?? []).forEach((r: any) => {
-      msrpMap.set(r.catalog_item_id, Number(r.msrp_sale_out ?? 0));
+      msrpMap.set(r.catalog_item_id, Number(r.msrp ?? 0));
       msrpDetails.push({
         catalog_item_id: r.catalog_item_id,
-        msrp_sale_out: r.msrp_sale_out,
-        source: 'CatalogItemsMSRP', // ✅ TABLA DE PRECIOS
+        msrp: r.msrp,
+        source: 'CatalogItemsMSRP',
       });
     });
 
@@ -341,7 +341,7 @@ async function priceFromBOMInstance(opts: {
       unitMsrp,
       unitCost,
       lineTotal,
-      msrpSource: msrpMap.has(partId) ? 'CatalogItemsMSRP.msrp_sale_out' : 'MISSING',
+      msrpSource: msrpMap.has(partId) ? 'CatalogItemsMSRP.msrp' : 'MISSING',
     });
   }
 
@@ -352,11 +352,11 @@ async function priceFromBOMInstance(opts: {
     console.log('❌ Missing Parts (sin resolved_part_id):', missing.length);
     console.log('✅ Priced Items:', pricedCount);
     console.log('📋 Pricing Breakdown:', pricingBreakdown);
-    console.log('💵 Total MSRP (CatalogItemsMSRP.msrp_sale_out):', total);
+    console.log('💵 Total MSRP (CatalogItemsMSRP.msrp):', total);
     console.log('💵 Total Cost (CatalogItems.cost_exw):', totalCost);
     console.log('📊 MSRP Details:', msrpDetails);
     console.log('📊 MSRP Source Table: CatalogItemsMSRP');
-    console.log('📊 MSRP Source Column: msrp_sale_out');
+    console.log('📊 MSRP Source Column: msrp');
     console.groupEnd();
   }
 
@@ -1404,12 +1404,12 @@ export default function QuoteNew() {
         // Obtener MSRP desde CatalogItemsMSRP
         const { data: msrpCache } = await supabase
           .from('CatalogItemsMSRP')
-          .select('msrp_sale_out')
+          .select('msrp')
           .eq('catalog_item_id', rollItemId)
           .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
           .maybeSingle();
-        
-        msrpSaleOut = msrpCache?.msrp_sale_out || null;
+
+        msrpSaleOut = msrpCache?.msrp || null;
       }
 
       // Get product type ID - CRITICAL: Always try to find product_type_id
@@ -2329,12 +2329,12 @@ export default function QuoteNew() {
                   if (savedFabricItemId) {
                     const { data: msrpCache } = await supabase
                       .from('CatalogItemsMSRP')
-                      .select('msrp_sale_out')
+                      .select('msrp')
                       .eq('catalog_item_id', savedFabricItemId)
                       .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
                       .maybeSingle();
-                    
-                    savedMsrpSaleOut = msrpCache?.msrp_sale_out || null;
+
+                    savedMsrpSaleOut = msrpCache?.msrp || null;
                   }
                 }
 
@@ -2350,13 +2350,13 @@ export default function QuoteNew() {
                 if (accessoryIds.length > 0) {
                   const { data: accessoriesMsrp } = await supabase
                     .from('CatalogItemsMSRP')
-                    .select('catalog_item_id, msrp_sale_out')
+                    .select('catalog_item_id, msrp')
                     .in('catalog_item_id', accessoryIds)
                     .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`);
 
                   const msrpMap = new Map<string, number>();
                   (accessoriesMsrp || []).forEach((r: any) => {
-                    msrpMap.set(r.catalog_item_id, Number(r.msrp_sale_out ?? 0));
+                    msrpMap.set(r.catalog_item_id, Number(r.msrp ?? 0));
                   });
 
                   accessories.forEach((acc: any) => {
@@ -2366,8 +2366,8 @@ export default function QuoteNew() {
                   });
                 }
 
-                // ✅ FABRIC PRICE: Fabric MSRP sale_out (W del Roll total × H) × quantity
-                // Fórmula: width_m × height_m × CatalogItemsMSRP.msrp_sale_out × quantity
+                // ✅ FABRIC PRICE: Fabric MSRP (W del Roll total × H) × quantity
+                // Fórmula: width_m × height_m × CatalogItemsMSRP.msrp × quantity
                 // ====================================================
                 // DEBUG: Fabric Pricing
                 // ====================================================
@@ -2389,9 +2389,9 @@ export default function QuoteNew() {
                   });
                   console.log('💰 MSRP Source:', {
                     msrpSaleOut: savedMsrpSaleOut,
-                    source: 'CatalogItemsMSRP.msrp_sale_out',
+                    source: 'CatalogItemsMSRP.msrp',
                     table: 'CatalogItemsMSRP',
-                    column: 'msrp_sale_out',
+                    column: 'msrp',
                   });
                 }
                 
@@ -2403,7 +2403,7 @@ export default function QuoteNew() {
                   
                   if (import.meta.env.DEV) {
                     console.log('🧮 Calculation:', {
-                      formula: 'width_m × height_m × msrp_sale_out × quantity',
+                      formula: 'width_m × height_m × msrp × quantity',
                       calculation: `${savedWidth_m} × ${savedHeight_m} × ${savedMsrpSaleOut} × ${savedQuantity}`,
                       result: fabricMsrpTotal,
                     });
@@ -2510,14 +2510,14 @@ export default function QuoteNew() {
                   console.group('💵 DEBUG: Final Pricing Summary');
                   console.log('🧵 Fabric MSRP:', {
                     total: fabricMsrpTotal,
-                    source: 'CatalogItemsMSRP.msrp_sale_out',
+                    source: 'CatalogItemsMSRP.msrp',
                     calculation: savedFabricItemId && savedCatalogItem && savedMsrpSaleOut && savedWidth_m && savedHeight_m
                       ? `${savedWidth_m} × ${savedHeight_m} × ${savedMsrpSaleOut} × ${savedQuantity} = ${fabricMsrpTotal}`
                       : 'N/A (missing data)',
                   });
                   console.log('🔧 BOM Pricing:', {
                     baseTotal: pricing.total,
-                    source: 'CatalogItemsMSRP.msrp_sale_out (for each BOM component)',
+                    source: 'CatalogItemsMSRP.msrp (for each BOM component)',
                   });
                   console.log('💰 Fabric + BOM (before labor):', {
                     fabric: fabricMsrpTotal,
@@ -2532,7 +2532,7 @@ export default function QuoteNew() {
                   console.log('🎁 Accessories MSRP:', {
                     total: accessoriesMsrpTotal,
                     count: accessories.length,
-                    source: 'CatalogItemsMSRP.msrp_sale_out',
+                    source: 'CatalogItemsMSRP.msrp',
                     items: accessories.map((acc: any) => ({
                       id: acc.catalog_item_id,
                       qty: acc.qty,
@@ -2553,17 +2553,17 @@ export default function QuoteNew() {
                     },
                   });
                   console.log('📊 MSRP Sources:', {
-                    fabric: 'CatalogItemsMSRP.msrp_sale_out',
-                    bomComponents: 'CatalogItemsMSRP.msrp_sale_out',
-                    accessories: 'CatalogItemsMSRP.msrp_sale_out',
-                    note: 'Todos los precios de venta vienen de CatalogItemsMSRP.msrp_sale_out',
+                    fabric: 'CatalogItemsMSRP.msrp',
+                    bomComponents: 'CatalogItemsMSRP.msrp',
+                    accessories: 'CatalogItemsMSRP.msrp',
+                    note: 'Todos los precios de venta vienen de CatalogItemsMSRP.msrp',
                   });
                   console.groupEnd();
                 }
 
                 // (C3) IMPORTANT: actualiza QuoteLine con verificación
                 // ✅ FÓRMULA: Precio Final = Fabric + (BOM × labor_pct)
-                // ✅ Fabric = width_m × height_m × CatalogItemsMSRP.msrp_sale_out × quantity
+                // ✅ Fabric = width_m × height_m × CatalogItemsMSRP.msrp × quantity
                 // ✅ BOM con labor = BOM total × (1 + labor_pct / 100)
                 // ✅ msrp = precio final de venta al cliente (Fabric + BOM con labor)
                 // ✅ NUEVO: Si viene de ConfiguredProduct, usar sus totals (ya calculados)
@@ -2615,11 +2615,11 @@ export default function QuoteNew() {
                     msrp: totalMSRP, // ✅ Precio final de venta al cliente
                     totalCost: totalCostValue, // ✅ Costo base (NO precio de venta)
                     quantity: savedQuantity,
-                    fabricMsrpTotal, // ✅ Fabric = width_m × height_m × msrp_sale_out × quantity
-                    bomMsrpBase: pricing.total, // ✅ BOM MSRP base (de CatalogItemsMSRP.msrp_sale_out)
+                    fabricMsrpTotal, // ✅ Fabric = width_m × height_m × msrp × quantity
+                    bomMsrpBase: pricing.total, // ✅ BOM MSRP base (de CatalogItemsMSRP.msrp)
                     fabricPlusBom: fabricPlusBom, // ✅ Fabric + BOM (antes de labor)
                     fabricPlusBomWithLabor, // ✅ (Fabric + BOM) × (1 + labor_pct)
-                    accessoriesMsrpTotal, // ✅ Accessories MSRP (de CatalogItemsMSRP.msrp_sale_out)
+                    accessoriesMsrpTotal, // ✅ Accessories MSRP (de CatalogItemsMSRP.msrp)
                     laborPct, // ✅ Porcentaje de labor aplicado
                     bomCostTotal: pricing.totalCost, // ✅ BOM Cost (de CatalogItems.cost_exw)
                     pricedCount: pricing.pricedCount,
