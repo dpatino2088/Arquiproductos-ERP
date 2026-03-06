@@ -471,7 +471,9 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             .select('id, width_m, height_m')
             .in('id', solIds);
           if (solRows) {
-            const solMap = new Map(solRows.map((s: any) => [s.id, s]));
+            const solMap = new Map<string, { width_m?: number; height_m?: number }>(
+              solRows.map((s: { id: string; width_m?: number; height_m?: number }) => [s.id, s])
+            );
             for (const bi of bomInstances) {
               const sol = (bi as any).sales_order_line_id ? solMap.get((bi as any).sales_order_line_id) : null;
               biDimsMap.set(bi.id, {

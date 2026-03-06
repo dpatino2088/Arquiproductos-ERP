@@ -148,12 +148,13 @@ function DroppableDay({
   );
 }
 
-const STATUS_FILTER_OPTIONS = [
+type StatusFilterOpt = { key: string; label: string; statuses?: readonly string[]; virtual?: boolean };
+const STATUS_FILTER_OPTIONS: StatusFilterOpt[] = [
   { key: 'planned', label: 'Planned', statuses: ['draft', 'planned'] },
   { key: 'in_production', label: 'In Production', statuses: ['in_production', 'quality_check', 'ready_for_pickup'] },
   { key: 'completed', label: 'Completed', statuses: ['delivered', 'completed'] },
   { key: 'late', label: 'Late', virtual: true },
-] as const;
+];
 
 export default function ProductionCalendar() {
   const addNotification = useUIStore((s) => s.addNotification);
@@ -228,7 +229,7 @@ export default function ProductionCalendar() {
           if (isLate) return true;
           continue;
         }
-        if (opt.statuses.includes(mo.status)) return true;
+        if (opt.statuses?.includes(mo.status)) return true;
       }
       return false;
     });
@@ -264,7 +265,7 @@ export default function ProductionCalendar() {
     }
     supabase
       .rpc('get_mo_material_readiness_batch', { p_mo_ids: moIdsInMonth })
-      .then(({ data, error: err }) => {
+      .then(({ data, error: err }: { data: unknown; error: unknown }) => {
         if (err || !Array.isArray(data)) {
           setMaterialReadinessMap({});
           return;
@@ -287,7 +288,7 @@ export default function ProductionCalendar() {
       .select('manufacturing_order_id, work_center_id')
       .in('manufacturing_order_id', moIdsInMonth)
       .eq('deleted', false)
-      .then(({ data, error: err }) => {
+      .then(({ data, error: err }: { data: unknown; error: unknown }) => {
         if (err || !Array.isArray(data)) {
           setWcToMoIds({});
           return;
@@ -397,12 +398,13 @@ export default function ProductionCalendar() {
   }, [manufacturingOrders, monthStart, updateManufacturingOrder, refetch, addNotification]);
 
   const renderBlock = (mo: ManufacturingOrder, day: Date) => {
-    const isLate =
+    const isLate = !!(
       mo.planned_end_at &&
       new Date(mo.planned_end_at) < today &&
-      !['delivered', 'completed'].includes(mo.status);
+      !['delivered', 'completed'].includes(mo.status)
+    );
     const readiness = materialReadinessMap[mo.id];
-    const materialIncomplete = readiness?.status === 'incomplete' || readiness?.has_shortage;
+    const materialIncomplete = Boolean(readiness?.status === 'incomplete' || readiness?.has_shortage);
     const variant = getBlockVariant(mo, isLate, materialIncomplete);
     const expectedDelivery = mo.SalesOrders?.expected_delivery_date ? new Date(mo.SalesOrders.expected_delivery_date) : null;
     const showDeadline = expectedDelivery && isSameDay(day, expectedDelivery);

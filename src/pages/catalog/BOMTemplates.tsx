@@ -22,6 +22,12 @@ interface BOMTemplateRow {
   hardware_color?: string;
   panel_count_min?: number;
   panel_count_max?: number;
+  manufacturer?: string;
+  product_line?: string;
+  drive_type?: string;
+  drive_side?: string;
+  opening_direction?: string;
+  installation_location?: string;
   metadata?: any;
   is_active?: boolean;
   sort_order?: number;

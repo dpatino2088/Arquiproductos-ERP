@@ -94,7 +94,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     });
   }, [queryReturnTo]);
 
-  useEffect(() => { registerSubmodules('Manufacturing', MFG_SUBMODULES); }, [registerSubmodules]);
+  useEffect(() => { registerSubmodules('Manufacturing', [...MFG_SUBMODULES]); }, [registerSubmodules]);
 
   useEffect(() => {
     if (!moId) {

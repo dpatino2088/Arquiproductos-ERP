@@ -117,6 +117,7 @@ export default function MaterialDemand() {
         roll_length_value: number | null;
         roll_length_uom: string | null;
         unit_of_measure: string | null;
+        measure_basis: string;
       }>();
 
       const resolveItemMinQty = (item: Record<string, unknown>): number => {

@@ -71,7 +71,7 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
 
       if (cancelled) return;
 
-      const mfrMap = new Map((mfrData || []).map((m: any) => [m.name, m.logo_url]));
+      const mfrMap = new Map<string, string | null>((mfrData || []).map((m: { name: string; logo_url: string | null }) => [m.name, m.logo_url ?? null]));
       const result: Manufacturer[] = uniqueNames.map((name) => ({
         name,
         logo_url: mfrMap.get(name) || null,

@@ -311,8 +311,8 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       ? (moLabelMap?.get(l.allocation_mo_id) ?? l.allocation_mo_id.slice(0, 8))
       : null,
     purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_unit?: string } | null)?.purchase_unit ?? null,
-    purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems?.is_roll ? 'roll' : ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_direct' : 'unit_packaged')) ?? null,
-    stock_basis_snapshot: l.stock_basis_snapshot ?? ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_m' : 'ea') ?? null,
+    purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems?.is_roll ? 'roll' : ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_direct' : 'unit_packaged')),
+    stock_basis_snapshot: l.stock_basis_snapshot ?? ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_m' : 'ea'),
     purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_unit?: string } | null)?.purchase_unit ?? l.CatalogItems?.unit_of_measure ?? null,
     units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
     unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,

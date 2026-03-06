@@ -236,7 +236,7 @@ export default function ManufacturingOrders() {
       return;
     }
     const moIds = paginated.map((mo) => mo.id);
-    supabase.rpc('get_mo_material_readiness_batch', { p_mo_ids: moIds }).then(({ data, error: err }) => {
+    supabase.rpc('get_mo_material_readiness_batch', { p_mo_ids: moIds }).then(({ data, error: err }: { data: unknown; error: unknown }) => {
       if (err || !Array.isArray(data)) {
         setMaterialReadinessMap({});
         return;

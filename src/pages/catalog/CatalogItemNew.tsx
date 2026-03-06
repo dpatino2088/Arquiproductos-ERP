@@ -1216,7 +1216,7 @@ export default function CatalogItemNew() {
         }
       } else {
         // Create — always send full payload
-        const newItem = await createItem(fullPayload);
+        const newItem = await createItem(fullPayload as Omit<CatalogItem, 'id' | 'deleted' | 'created_at' | 'organization_id' | 'archived' | 'updated_at'>);
         if (newItem?.id) {
           finalItemId = newItem.id;
         } else {

@@ -47,15 +47,16 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
       query = query.or(`manufacturer.eq.${manufacturer},manufacturer.is.null`);
     }
 
-    query.then(({ data, error }) => {
+    query.then(({ data, error }: { data: unknown; error: { message: string } | null }) => {
       if (cancelled) return;
       if (error) {
         console.warn('ProductLineStep: Error fetching product lines', error.message);
         setProductLines([]);
       } else {
-        const unique = Array.from(
-          new Set((data || []).map((r: any) => (r.product_line as string)?.trim()).filter(Boolean))
-        ).sort();
+        const rows = Array.isArray(data) ? data : [];
+        const unique = (Array.from(
+          new Set(rows.map((r: { product_line?: string }) => (r.product_line ?? '')?.trim()).filter(Boolean))
+        ).sort() as string[]);
         setProductLines(unique);
         if (unique.length === 1 && !selected) {
           onUpdate({ productLine: unique[0] });
