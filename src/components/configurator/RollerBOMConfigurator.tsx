@@ -78,6 +78,7 @@ export default function RollerBOMConfigurator({
     motor_item_id: initialConfig?.motor_item_id || null,
     drive_item_id: initialConfig?.drive_item_id || null,
     tube_item_id: initialConfig?.tube_item_id || null,
+    fabric_item_id: initialConfig?.fabric_item_id || null,
   });
 
   const [isGenerating, setIsGenerating] = useState(false);

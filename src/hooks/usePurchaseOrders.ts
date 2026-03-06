@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
@@ -63,9 +63,8 @@ export interface PurchaseOrderLine {
     unit_of_measure?: string | null;
     measure_basis?: 'unit' | 'linear' | 'area' | null;
     is_roll?: boolean | null;
-    purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
-    stock_basis?: 'ea' | 'linear_m' | null;
-    purchase_uom?: string | null;
+    purchase_unit?: string | null;
+    units_per_purchase_unit?: number | null;
   } | null;
 }
 
@@ -176,7 +175,7 @@ export function usePurchaseOrderDetail(poId: string | null) {
       if (!poId) return [];
       const { data, error } = await supabase
         .from('PurchaseOrderLines')
-        .select('*, CatalogItems(sku, name, cost_exw, unit_of_measure, measure_basis, is_roll, purchase_mode, stock_basis, purchase_uom, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom), allocation_type, allocation_mo_id, allocation_notes')
+        .select('*, CatalogItems(sku, name, cost_exw, unit_of_measure, measure_basis, is_roll, purchase_unit, units_per_purchase_unit, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom)')
         .eq('purchase_order_id', poId)
         .order('created_at', { ascending: true });
       if (error) throw error;
@@ -185,9 +184,30 @@ export function usePurchaseOrderDetail(poId: string | null) {
     enabled: !!poId && !!activeOrganizationId,
   });
 
+  const stableLines = useMemo(() => lines ?? [], [lines]);
+
+  const { data: linkedMOs } = useQuery({
+    queryKey: [...purchaseOrderDetailKey(scopeKey, poId ?? ''), 'linked-mos'],
+    queryFn: async () => {
+      if (!poId) return [];
+      const { data, error } = await supabase
+        .from('PurchaseOrderManufacturingOrders')
+        .select('manufacturing_order_id, ManufacturingOrders(manufacturing_order_no)')
+        .eq('purchase_order_id', poId)
+        .eq('deleted', false);
+      if (error) return [];
+      return (data ?? []).map((r: any) => ({
+        id: r.manufacturing_order_id as string,
+        manufacturing_order_no: (r.ManufacturingOrders?.manufacturing_order_no ?? r.manufacturing_order_id.slice(0, 8)) as string,
+      }));
+    },
+    enabled: !!poId && !!activeOrganizationId,
+  });
+
   return {
     purchaseOrder: po ?? null,
-    lines: lines ?? [],
+    lines: stableLines,
+    linkedMOs: linkedMOs ?? [],
     loading: loadingPo || loadingLines,
     refetch: () => { refetchPo(); refetchLines(); },
   };
@@ -231,6 +251,7 @@ export function useCreatePurchaseOrder() {
     notes?: string | null;
     currency?: string;
     lines?: CreatePOLineInput[];
+    manufacturing_order_ids?: string[];
   }) => {
     if (!activeOrganizationId) throw new Error('No organization selected');
     setIsCreating(true);
@@ -262,7 +283,40 @@ export function useCreatePurchaseOrder() {
       if (poError) throw poError;
 
       if (params.lines && params.lines.length > 0) {
-        const lineRows = params.lines.map(l => ({
+        const needsSnapshot = params.lines.some(
+          l => l.catalog_item_id && (l.purchase_mode_snapshot == null && l.stock_basis_snapshot == null && l.purchase_uom_snapshot == null)
+        );
+        let linesToInsert = params.lines;
+        if (needsSnapshot) {
+          const catalogIds = [...new Set(params.lines.map(l => l.catalog_item_id).filter((id): id is string => !!id))];
+          const { data: catalogRows } = await supabase
+            .from('CatalogItems')
+            .select('id, sku, name, unit_of_measure, measure_basis, is_roll, purchase_unit, units_per_purchase_unit')
+            .in('id', catalogIds);
+          const catalogMap = new Map((catalogRows ?? []).map((r: Record<string, unknown>) => [r.id as string, r]));
+          linesToInsert = params.lines.map(l => {
+            if (!l.catalog_item_id || (l.sku_snapshot != null && l.item_name_snapshot != null))
+              return l;
+            const ci = catalogMap.get(l.catalog_item_id) as Record<string, unknown> | undefined;
+            if (!ci) return l;
+            const isRoll = Boolean(ci.is_roll);
+            const measureBasis = ci.measure_basis as string | null;
+            const derivedMode: 'unit_packaged' | 'linear_direct' | 'roll' = isRoll ? 'roll' : (measureBasis === 'linear' ? 'linear_direct' : 'unit_packaged');
+            const derivedBasis: 'ea' | 'linear_m' = measureBasis === 'linear' ? 'linear_m' : 'ea';
+            return {
+              ...l,
+              sku_snapshot: (l.sku_snapshot ?? ci.sku ?? null) as string | null,
+              item_name_snapshot: (l.item_name_snapshot ?? ci.name ?? null) as string | null,
+              purchase_mode_snapshot: (l.purchase_mode_snapshot ?? derivedMode) as 'unit_packaged' | 'linear_direct' | 'roll' | null,
+              stock_basis_snapshot: (l.stock_basis_snapshot ?? derivedBasis) as 'ea' | 'linear_m' | null,
+              purchase_uom_snapshot: (l.purchase_uom_snapshot ?? ci.purchase_unit ?? ci.unit_of_measure ?? null) as string | null,
+              purchase_unit_snapshot: (l.purchase_unit_snapshot ?? ci.purchase_unit ?? null) as string | null,
+              unit_of_measure_snapshot: (l.unit_of_measure_snapshot ?? ci.unit_of_measure ?? null) as string | null,
+              is_roll_snapshot: (l.is_roll_snapshot ?? ci.is_roll ?? null) as boolean | null,
+            };
+          });
+        }
+        const lineRows = linesToInsert.map(l => ({
           purchase_order_id: po.id,
           catalog_item_id: l.catalog_item_id ?? null,
           ordered_qty: l.ordered_qty || 0,
@@ -290,9 +344,36 @@ export function useCreatePurchaseOrder() {
         }));
         const { error: linesError } = await supabase.from('PurchaseOrderLines').insert(lineRows);
         if (linesError) {
-          await supabase.from('PurchaseOrders').delete().eq('id', po.id);
-          throw linesError;
+          const msg = String(linesError.message ?? '').toLowerCase();
+          if (msg.includes('snapshot') && msg.includes('schema cache')) {
+            const coreRows = lineRows.map((r: Record<string, unknown>) => {
+              const core: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(r)) {
+                if (!k.endsWith('_snapshot')) core[k] = v;
+              }
+              return core;
+            });
+            const { error: retryErr } = await supabase.from('PurchaseOrderLines').insert(coreRows);
+            if (retryErr) {
+              await supabase.from('PurchaseOrders').delete().eq('id', po.id);
+              throw retryErr;
+            }
+          } else {
+            await supabase.from('PurchaseOrders').delete().eq('id', po.id);
+            throw linesError;
+          }
         }
+      }
+
+      if (params.manufacturing_order_ids && params.manufacturing_order_ids.length > 0) {
+        const pivotRows = [...new Set(params.manufacturing_order_ids)].map(moId => ({
+          organization_id: activeOrganizationId,
+          purchase_order_id: po.id,
+          manufacturing_order_id: moId,
+        }));
+        await supabase
+          .from('PurchaseOrderManufacturingOrders')
+          .upsert(pivotRows, { onConflict: 'purchase_order_id,manufacturing_order_id' });
       }
 
       queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId) });
@@ -536,7 +617,7 @@ export interface CatalogItemCostInfo {
 export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogItemCostInfo> {
   const { data, error } = await supabase
     .from('CatalogItems')
-    .select('cost_exw, purchase_unit, purchase_uom, purchase_mode, stock_basis, units_per_purchase_unit, unit_of_measure')
+    .select('cost_exw, purchase_unit, units_per_purchase_unit, unit_of_measure, measure_basis, is_roll')
     .eq('id', itemId)
     .single();
   if (error || !data) {
@@ -550,12 +631,16 @@ export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogI
       unit_of_measure: 'ea',
     };
   }
+  const isRoll = Boolean(data.is_roll);
+  const measureBasis = data.measure_basis as string | null;
+  const purchaseMode: 'unit_packaged' | 'linear_direct' | 'roll' = isRoll ? 'roll' : (measureBasis === 'linear' ? 'linear_direct' : 'unit_packaged');
+  const stockBasis: 'ea' | 'linear_m' = measureBasis === 'linear' ? 'linear_m' : 'ea';
   return {
     cost_exw: Number(data.cost_exw ?? 0),
     purchase_unit: data.purchase_unit ?? 'each',
-    purchase_uom: data.purchase_uom ?? data.purchase_unit ?? 'each',
-    purchase_mode: (data.purchase_mode as 'unit_packaged' | 'linear_direct' | 'roll' | null) ?? 'unit_packaged',
-    stock_basis: (data.stock_basis as 'ea' | 'linear_m' | null) ?? 'ea',
+    purchase_uom: data.purchase_unit ?? data.unit_of_measure ?? 'each',
+    purchase_mode: purchaseMode,
+    stock_basis: stockBasis,
     units_per_purchase_unit: Number(data.units_per_purchase_unit ?? 1),
     unit_of_measure: data.unit_of_measure ?? 'ea',
   };

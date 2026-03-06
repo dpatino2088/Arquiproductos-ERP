@@ -1,12 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useBOMCRUD } from '../../../hooks/useBOM';
-import { useUIStore } from '../../../stores/ui-store';
-import { getRoleLabel } from '../../../lib/bom/roles';
-import { Settings, Search, ChevronRight, LayoutTemplate } from 'lucide-react';
-import BOMEngineeringModal from './BOMEngineeringModal';
-import type { EngineeringData } from './types';
+import { Search, ChevronRight, LayoutTemplate, Save } from 'lucide-react';
+import EngineeringCutBreakdown from './EngineeringCutBreakdown';
+import type { CutBreakdownHandle } from './EngineeringCutBreakdown';
 
 export interface EngineeringTemplateSummary {
   id: string;
@@ -21,33 +19,27 @@ export interface EngineeringRow {
   id: string;
   bom_template_id: string;
   component_item_id: string | null;
+  parent_component_id: string | null;
   component_role: string | null;
   cut_axis: string | null;
   cut_delta_mm: number | null;
   cut_delta_scope: string | null;
   depends_on_role: string | null;
+  affects_role: string | null;
   engineering_delta_source: string | null;
   engineering_attr_key: string | null;
   engineering_scope: string | null;
   engineering_source_role: string | null;
+  uom: string;
+  qty_value: number;
+  measure_basis: string | null;
+  delta_x_mm: number | null;
+  delta_y_mm: number | null;
   template_name?: string;
   product_type_name?: string;
   component_sku?: string;
   component_name?: string;
 }
-
-const CUT_AXIS_LABELS: Record<string, string> = {
-  none: '—',
-  length: 'Length',
-  width: 'Width',
-  height: 'Height',
-};
-
-const SCOPE_LABELS: Record<string, string> = {
-  none: '—',
-  per_item: 'Per item',
-  per_side: 'Per side',
-};
 
 export default function BOMEngineeringTab() {
   const { activeOrganizationId } = useOrganizationContext();
@@ -56,27 +48,39 @@ export default function BOMEngineeringTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState('');
-  const [componentSearch, setComponentSearch] = useState('');
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [engineeringData, setEngineeringData] = useState<EngineeringData>({
-    depends_on_role: '',
-    cut_axis: 'none',
-    cut_delta_mm: null,
-    cut_delta_scope: 'none',
-    engineering_delta_source: 'fixed',
-    engineering_attr_key: '',
-    engineering_scope: 'total',
-    engineering_source_role: '',
+  const breakdownRef = useRef<CutBreakdownHandle>(null);
+  const [breakdownState, setBreakdownState] = useState({ hasChanges: false, saving: false });
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(() => {
+    try { return sessionStorage.getItem('bom:eng:templateId') || null; } catch { return null; }
   });
 
-  const fetchComponents = useCallback(async () => {
+  useEffect(() => {
+    try {
+      if (selectedTemplateId) sessionStorage.setItem('bom:eng:templateId', selectedTemplateId);
+      else sessionStorage.removeItem('bom:eng:templateId');
+    } catch { /* ignore */ }
+  }, [selectedTemplateId]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const templateId = (e as CustomEvent<string>).detail;
+      if (templateId) setSelectedTemplateId(templateId);
+    };
+    window.addEventListener('bom:selectTemplate', handler);
+    return () => window.removeEventListener('bom:selectTemplate', handler);
+  }, []);
+
+  const handlePendingChange = useCallback((hasChanges: boolean, saving: boolean) => {
+    setBreakdownState((prev) => (prev.hasChanges !== hasChanges || prev.saving !== saving ? { hasChanges, saving } : prev));
+  }, []);
+
+  const fetchComponents = useCallback(async (showSpinner = true) => {
     if (!activeOrganizationId) {
       setRows([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (showSpinner) setLoading(true);
     setError(null);
     try {
       const { data: compData, error: compErr } = await supabase
@@ -84,21 +88,24 @@ export default function BOMEngineeringTab() {
         .select(`
           id,
           bom_template_id,
+          parent_component_id,
           component_item_id,
           component_role,
           cut_axis,
           cut_delta_mm,
           cut_delta_scope,
           depends_on_role,
+          affects_role,
+          uom,
+          qty_value,
           engineering_delta_source,
           engineering_attr_key,
           engineering_scope,
           engineering_source_role,
           BOMTemplate:bom_template_id (name, product_type_id),
-          component_item:component_item_id (sku, name)
+          component_item:component_item_id (sku, name, measure_basis, delta_x_mm, delta_y_mm)
         `)
         .eq('organization_id', activeOrganizationId)
-        .is('parent_component_id', null)
         .eq('deleted', false)
         .eq('archived', false)
         .order('bom_template_id')
@@ -116,18 +123,25 @@ export default function BOMEngineeringTab() {
         }, {});
       }
 
-      const list: EngineeringRow[] = (compData ?? []).map((c: any) => {
+      const allRows: EngineeringRow[] = (compData ?? []).map((c: any) => {
         const template = c.BOMTemplate;
         const item = c.component_item;
         return {
           id: c.id,
           bom_template_id: c.bom_template_id,
+          parent_component_id: c.parent_component_id ?? null,
           component_item_id: c.component_item_id,
           component_role: c.component_role,
           cut_axis: c.cut_axis ?? null,
           cut_delta_mm: c.cut_delta_mm ?? null,
           cut_delta_scope: c.cut_delta_scope ?? null,
           depends_on_role: c.depends_on_role ?? null,
+          affects_role: c.affects_role ?? null,
+          uom: c.uom ?? 'ea',
+          qty_value: c.qty_value ?? 1,
+          measure_basis: item?.measure_basis ?? null,
+          delta_x_mm: item?.delta_x_mm != null ? Number(item.delta_x_mm) : null,
+          delta_y_mm: item?.delta_y_mm != null ? Number(item.delta_y_mm) : null,
           engineering_delta_source: c.engineering_delta_source ?? 'fixed',
           engineering_attr_key: c.engineering_attr_key ?? null,
           engineering_scope: c.engineering_scope ?? 'total',
@@ -139,7 +153,7 @@ export default function BOMEngineeringTab() {
         };
       });
 
-      setRows(list);
+      setRows(allRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error loading components');
       setRows([]);
@@ -152,9 +166,22 @@ export default function BOMEngineeringTab() {
     fetchComponents();
   }, [fetchComponents]);
 
+  const parentRows = useMemo(() => rows.filter((r) => !r.parent_component_id), [rows]);
+
+  const childrenByParent = useMemo(() => {
+    const map: Record<string, EngineeringRow[]> = {};
+    for (const r of rows) {
+      if (r.parent_component_id) {
+        if (!map[r.parent_component_id]) map[r.parent_component_id] = [];
+        map[r.parent_component_id].push(r);
+      }
+    }
+    return map;
+  }, [rows]);
+
   const templateList = useMemo(() => {
     const byId = new Map<string, EngineeringTemplateSummary>();
-    for (const r of rows) {
+    for (const r of parentRows) {
       const id = r.bom_template_id;
       if (!byId.has(id)) {
         byId.set(id, {
@@ -170,7 +197,7 @@ export default function BOMEngineeringTab() {
       t.parent_count += 1;
     }
     return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows]);
+  }, [parentRows]);
 
   const filteredTemplateList = useMemo(() => {
     if (!templateSearch.trim()) return templateList;
@@ -190,62 +217,18 @@ export default function BOMEngineeringTab() {
 
   const componentsForSelected = useMemo(() => {
     if (!selectedTemplateId) return [];
-    return rows.filter((r) => r.bom_template_id === selectedTemplateId);
-  }, [rows, selectedTemplateId]);
+    return parentRows.filter((r) => r.bom_template_id === selectedTemplateId);
+  }, [parentRows, selectedTemplateId]);
 
-  const filteredRows = useMemo(() => {
-    if (!componentSearch.trim()) return componentsForSelected;
-    const q = componentSearch.toLowerCase();
-    return componentsForSelected.filter(
-      (r) =>
-        (r.component_sku ?? '').toLowerCase().includes(q) ||
-        (r.component_name ?? '').toLowerCase().includes(q) ||
-        getRoleLabel(r.component_role ?? '').toLowerCase().includes(q),
-    );
-  }, [componentsForSelected, componentSearch]);
-
-  const handleOpenEdit = useCallback((row: EngineeringRow) => {
-    setEngineeringData({
-      depends_on_role: row.depends_on_role ?? '',
-      cut_axis: (row.cut_axis === 'length' || row.cut_axis === 'width' || row.cut_axis === 'height' ? row.cut_axis : 'none') as 'length' | 'width' | 'height' | 'none',
-      cut_delta_mm: row.cut_delta_mm,
-      cut_delta_scope: (row.cut_delta_scope === 'per_side' || row.cut_delta_scope === 'per_item' ? row.cut_delta_scope : 'none') as 'per_side' | 'per_item' | 'none',
-      engineering_delta_source: (row.engineering_delta_source === 'derived' ? 'derived' : 'fixed') as 'fixed' | 'derived',
-      engineering_attr_key: row.engineering_attr_key ?? '',
-      engineering_scope: (row.engineering_scope === 'per_side' ? 'per_side' : 'total') as 'total' | 'per_side',
-      engineering_source_role: row.engineering_source_role ?? '',
-    });
-    setEditingId(row.id);
-  }, []);
-
-  const handleSaveEngineering = useCallback(async () => {
-    if (!editingId) return;
-    try {
-      await updateComponent(editingId, {
-        cut_axis: engineeringData.cut_axis === 'none' ? null : engineeringData.cut_axis,
-        cut_delta_mm: engineeringData.cut_delta_mm ?? 0,
-        cut_delta_scope: engineeringData.cut_delta_scope === 'none' ? null : engineeringData.cut_delta_scope,
-        depends_on_role: engineeringData.cut_axis === 'none' ? null : (engineeringData.depends_on_role || null),
-        engineering_delta_source: engineeringData.engineering_delta_source || 'fixed',
-        engineering_attr_key: engineeringData.engineering_attr_key || null,
-        engineering_scope: engineeringData.engineering_scope || 'total',
-        engineering_source_role: engineeringData.engineering_source_role || null,
-      });
-      useUIStore.getState().addNotification({ type: 'success', title: 'Saved', message: 'Engineering rules updated' });
-      setEditingId(null);
-      fetchComponents();
-    } catch (err) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Error',
-        message: err instanceof Error ? err.message : 'Failed to save',
-      });
-    }
-  }, [editingId, engineeringData, updateComponent, fetchComponents]);
-
-  const handleCloseModal = useCallback(() => {
-    setEditingId(null);
-  }, []);
+  const handleSaveAllAffects = useCallback(
+    async (changes: Array<{ componentId: string; role: string | null }>) => {
+      await Promise.all(
+        changes.map((c) => updateComponent(c.componentId, { affects_role: c.role || null })),
+      );
+      await fetchComponents(false);
+    },
+    [updateComponent, fetchComponents],
+  );
 
   if (loading) {
     return (
@@ -266,8 +249,8 @@ export default function BOMEngineeringTab() {
 
   return (
     <div className="flex gap-4 h-[calc(100vh-11rem)] min-h-[420px] overflow-hidden">
-      {/* Left: unique template list */}
-      <div className="w-80 flex-shrink-0 flex flex-col bg-white border border-gray-200 rounded-lg overflow-hidden min-h-0">
+      {/* Left: template list */}
+      <div className="w-96 flex-shrink-0 flex flex-col bg-white border border-gray-200 rounded-lg overflow-hidden min-h-0">
         <div className="p-3 border-b border-gray-200 flex-shrink-0">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -319,7 +302,7 @@ export default function BOMEngineeringTab() {
         </div>
       </div>
 
-      {/* Right: components for selected template */}
+      {/* Right: cut breakdown for selected template */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white border border-gray-200 rounded-lg overflow-hidden">
         {!selectedTemplateId ? (
           <div className="flex-1 flex items-center justify-center p-12 text-gray-500 min-h-0">
@@ -331,97 +314,40 @@ export default function BOMEngineeringTab() {
           </div>
         ) : (
           <>
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 flex-wrap flex-shrink-0">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 flex-shrink-0">
               <h3 className="text-sm font-semibold text-gray-900 truncate" title={selectedTemplate?.name}>
                 {selectedTemplate?.name || 'Template'}
               </h3>
               {selectedTemplate?.product_type_name && (
                 <span className="text-xs text-gray-500">{selectedTemplate.product_type_name}</span>
               )}
-              <div className="flex-1 min-w-[180px] relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search components..."
-                  value={componentSearch}
-                  onChange={(e) => setComponentSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-              <span className="text-xs text-gray-500">
-                {filteredRows.length} component{filteredRows.length !== 1 ? 's' : ''}
+              <span className="text-xs text-gray-500 ml-auto">
+                {componentsForSelected.length} component{componentsForSelected.length !== 1 ? 's' : ''}
               </span>
+              {breakdownState.hasChanges && (
+                <>
+                  <button type="button" onClick={() => breakdownRef.current?.discard()} disabled={breakdownState.saving} className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40">
+                    Discard
+                  </button>
+                  <button type="button" onClick={() => breakdownRef.current?.save()} disabled={breakdownState.saving} className="inline-flex items-center gap-1 text-xs font-medium text-white bg-primary rounded px-2.5 py-1 disabled:opacity-40">
+                    <Save className="h-3 w-3" />
+                    {breakdownState.saving ? 'Saving…' : 'Save'}
+                  </button>
+                </>
+              )}
             </div>
-            <div className="flex-1 overflow-y-auto overflow-x-auto min-h-0">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-gray-50 z-10">
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Component</th>
-                    <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase">Role</th>
-                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500 uppercase">Cut Axis</th>
-                    <th className="text-left px-2 py-2.5 text-xs font-semibold text-gray-500 uppercase">Depends on</th>
-                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500 uppercase">Delta (mm)</th>
-                    <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500 uppercase">Scope</th>
-                    <th className="text-left px-2 py-2.5 text-xs font-semibold text-gray-500 uppercase">Source</th>
-                    <th className="w-14 px-2 py-2.5"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-gray-500">
-                        No components in this template or no match for search.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredRows.map((row) => (
-                      <tr key={row.id} className="hover:bg-gray-50/50">
-                        <td className="px-4 py-2.5">
-                          <span className="font-mono text-gray-700">{row.component_sku || '—'}</span>
-                          {row.component_name && (
-                            <span className="text-gray-500 ml-1">{row.component_name}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2.5 text-gray-600">{getRoleLabel(row.component_role ?? '') || '—'}</td>
-                        <td className="px-2 py-2.5 text-center">
-                          <span className="text-xs text-gray-600">{CUT_AXIS_LABELS[row.cut_axis ?? 'none'] ?? row.cut_axis ?? '—'}</span>
-                        </td>
-                        <td className="px-2 py-2.5 text-xs text-gray-600">{row.depends_on_role ? getRoleLabel(row.depends_on_role) : '—'}</td>
-                        <td className="px-2 py-2.5 text-center text-gray-600">{row.cut_delta_mm != null ? row.cut_delta_mm : '—'}</td>
-                        <td className="px-2 py-2.5 text-center text-xs text-gray-600">{SCOPE_LABELS[row.cut_delta_scope ?? 'none'] ?? '—'}</td>
-                        <td className="px-2 py-2.5 text-xs text-gray-600">
-                          {row.engineering_delta_source === 'derived'
-                            ? <span className="text-amber-600">{getRoleLabel(row.engineering_source_role ?? '')}.{row.engineering_attr_key ?? '?'}</span>
-                            : <span className="text-gray-400">Fixed</span>
-                          }
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(row)}
-                            className="p-1.5 rounded hover:bg-primary/10 text-gray-500 hover:text-primary"
-                            title="Edit engineering rules"
-                          >
-                            <Settings className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="flex-1 min-h-0">
+              <EngineeringCutBreakdown
+                ref={breakdownRef}
+                parentRows={componentsForSelected}
+                childrenByParent={childrenByParent}
+                onSaveAll={handleSaveAllAffects}
+                onPendingChange={handlePendingChange}
+              />
             </div>
           </>
         )}
       </div>
-
-      <BOMEngineeringModal
-        showEngineeringModal={!!editingId}
-        engineeringData={engineeringData}
-        setEngineeringData={setEngineeringData}
-        onSave={handleSaveEngineering}
-        onClose={handleCloseModal}
-      />
     </div>
   );
 }

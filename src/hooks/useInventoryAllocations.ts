@@ -100,6 +100,102 @@ export function useReleaseAllocation() {
   return { release, isReleasing };
 }
 
+export interface MOAllocationRow {
+  id: string;
+  catalog_item_id: string;
+  sku: string | null;
+  item_name: string | null;
+  allocated_qty: number;
+  status: string;
+  allocated_at: string;
+}
+
+export function useMOAllocations(manufacturingOrderId: string | null) {
+  const { activeOrganizationId } = useOrganizationContext();
+
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: [ALLOCATIONS_KEY, 'mo', manufacturingOrderId],
+    queryFn: async (): Promise<MOAllocationRow[]> => {
+      if (!manufacturingOrderId) return [];
+      const { data: rows, error } = await supabase
+        .from('InventoryAllocations')
+        .select('id, catalog_item_id, allocated_qty, status, allocated_at, CatalogItems:catalog_item_id(sku, name)')
+        .eq('manufacturing_order_id', manufacturingOrderId)
+        .eq('status', 'reserved')
+        .order('allocated_at', { ascending: true });
+      if (error) throw error;
+      return (rows ?? []).map((r: any) => ({
+        id: r.id,
+        catalog_item_id: r.catalog_item_id,
+        sku: r.CatalogItems?.sku ?? null,
+        item_name: r.CatalogItems?.name ?? null,
+        allocated_qty: Number(r.allocated_qty),
+        status: r.status,
+        allocated_at: r.allocated_at,
+      }));
+    },
+    enabled: !!manufacturingOrderId && !!activeOrganizationId,
+  });
+
+  return { allocations: data ?? [], loading: isLoading, refetch };
+}
+
+export function useAllocateToMO() {
+  const [isAllocating, setIsAllocating] = useState(false);
+  const queryClient = useQueryClient();
+
+  const allocate = useCallback(async (
+    orgId: string,
+    warehouseId: string,
+    manufacturingOrderId: string,
+    items: { catalog_item_id: string; qty: number }[]
+  ) => {
+    setIsAllocating(true);
+    try {
+      const { data, error } = await supabase.rpc('allocate_inventory_to_mo', {
+        p_org_id: orgId,
+        p_warehouse_id: warehouseId,
+        p_manufacturing_order_id: manufacturingOrderId,
+        p_items: items,
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: [ALLOCATIONS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [FULFILLMENT_KEY] });
+      return data as { ok: boolean; results: any[] };
+    } finally {
+      setIsAllocating(false);
+    }
+  }, [queryClient]);
+
+  return { allocate, isAllocating };
+}
+
+export function useReleaseMOAllocation() {
+  const [isReleasing, setIsReleasing] = useState(false);
+  const queryClient = useQueryClient();
+
+  const release = useCallback(async (
+    manufacturingOrderId: string,
+    catalogItemId?: string
+  ) => {
+    setIsReleasing(true);
+    try {
+      const { data, error } = await supabase.rpc('release_mo_allocation', {
+        p_manufacturing_order_id: manufacturingOrderId,
+        p_catalog_item_id: catalogItemId ?? null,
+      });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: [ALLOCATIONS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [FULFILLMENT_KEY] });
+      return data as { ok: boolean; released_count: number };
+    } finally {
+      setIsReleasing(false);
+    }
+  }, [queryClient]);
+
+  return { release, isReleasing };
+}
+
 export function useSOFulfillmentSummary(salesOrderId: string | null) {
   const { fulfillment, loading } = useSOFulfillment(salesOrderId);
 

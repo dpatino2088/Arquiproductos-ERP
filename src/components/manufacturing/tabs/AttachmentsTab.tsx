@@ -120,7 +120,7 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div>
         <div className="animate-pulse space-y-3">
           <div className="h-8 bg-gray-200 rounded w-1/3" />
           <div className="h-24 bg-gray-100 rounded" />
@@ -131,7 +131,7 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
   }
 
   return (
-    <div className="p-6">
+    <div>
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Attachments</h3>
         <div className="flex items-center gap-2">

@@ -12,6 +12,7 @@ import {
   Pencil,
   Check,
   X,
+  Plus,
 } from 'lucide-react';
 
 const ROLE_TYPE_LABELS: Record<RoleType, string> = {
@@ -21,9 +22,9 @@ const ROLE_TYPE_LABELS: Record<RoleType, string> = {
 };
 
 const ROLE_TYPE_COLORS: Record<RoleType, string> = {
-  parent_only: 'bg-blue-100 text-blue-700',
-  child_only: 'bg-amber-100 text-amber-700',
-  both: 'bg-gray-100 text-gray-600',
+  parent_only: 'bg-gray-100 text-gray-600',
+  child_only: 'bg-gray-100 text-gray-600',
+  both: 'bg-gray-100 text-gray-500',
 };
 
 type PageMode = 'overview' | 'edit';
@@ -36,6 +37,7 @@ export default function BOMRolesTab() {
     productTypes,
     loading,
     error,
+    createRole,
     updateRoleType,
     toggleRoleActive,
     renameRole,
@@ -51,6 +53,13 @@ export default function BOMRolesTab() {
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<RoleType | 'all'>('all');
   const [showInactive, setShowInactive] = useState(false);
+
+  // Create role state
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newRoleCode, setNewRoleCode] = useState('');
+  const [newRoleLabel, setNewRoleLabel] = useState('');
+  const [newRoleType, setNewRoleType] = useState<RoleType>('both');
+  const [isCreating, setIsCreating] = useState(false);
 
   // Inline rename state
   const [renamingRole, setRenamingRole] = useState<string | null>(null);
@@ -178,6 +187,28 @@ export default function BOMRolesTab() {
   const cancelRename = useCallback(() => {
     setRenamingRole(null);
   }, []);
+
+  const handleCreateRole = useCallback(async () => {
+    if (!newRoleLabel.trim()) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Validation', message: 'Label is required' });
+      return;
+    }
+    const code = newRoleCode.trim() || newRoleLabel.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    setIsCreating(true);
+    try {
+      const created = await createRole(code, newRoleLabel.trim(), newRoleType);
+      useUIStore.getState().addNotification({ type: 'success', title: 'Created', message: `Role "${created.label}" created` });
+      setShowCreateForm(false);
+      setNewRoleCode('');
+      setNewRoleLabel('');
+      setNewRoleType('both');
+      setSelectedRole(created.role_code);
+    } catch (err) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err instanceof Error ? err.message : 'Failed to create role' });
+    } finally {
+      setIsCreating(false);
+    }
+  }, [newRoleCode, newRoleLabel, newRoleType, createRole]);
 
   const handleDeleteRole = useCallback(async (roleCode: string, label: string) => {
     if (!window.confirm(`Delete role "${label}" (${roleCode})? This will also remove all its dependencies.`)) return;
@@ -329,23 +360,88 @@ export default function BOMRolesTab() {
             {roles.filter((r) => r.active).length} active roles &middot;{' '}
             {dependencies.length} dependencies
           </p>
-          <button
-            onClick={() => setPageMode('edit')}
-            className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded border border-primary text-primary hover:bg-primary/5 transition-colors"
-          >
-            <Edit className="w-3.5 h-3.5" /> Edit Roles
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> New Role
+            </button>
+            <button
+              onClick={() => setPageMode('edit')}
+              className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded border border-primary text-primary hover:bg-primary/5 transition-colors"
+            >
+              <Edit className="w-3.5 h-3.5" /> Edit Roles
+            </button>
+          </div>
         </div>
+
+        {/* Create role inline form */}
+        {showCreateForm && (
+          <div className="mb-4 bg-white border border-blue-200 rounded-lg p-4">
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">Create New Role</h4>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="flex-1 min-w-[160px]">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Label *</label>
+                <input
+                  type="text"
+                  value={newRoleLabel}
+                  onChange={(e) => setNewRoleLabel(e.target.value)}
+                  placeholder="e.g. Sub Bracket"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateRole(); }}
+                />
+              </div>
+              <div className="min-w-[160px]">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Code (auto-generated if empty)</label>
+                <input
+                  type="text"
+                  value={newRoleCode}
+                  onChange={(e) => setNewRoleCode(e.target.value)}
+                  placeholder="e.g. sub_bracket"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                />
+              </div>
+              <div className="min-w-[120px]">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                <select
+                  value={newRoleType}
+                  onChange={(e) => setNewRoleType(e.target.value as RoleType)}
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                >
+                  <option value="parent_only">Parent</option>
+                  <option value="child_only">Child</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCreateRole}
+                  disabled={isCreating || !newRoleLabel.trim()}
+                  className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isCreating ? 'Creating...' : 'Create'}
+                </button>
+                <button
+                  onClick={() => { setShowCreateForm(false); setNewRoleCode(''); setNewRoleLabel(''); setNewRoleType('both'); }}
+                  className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Two tables side by side — fixed height, both scroll */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-[calc(100vh-340px)] min-h-[360px]">
           {/* ── Left: Parent Roles ── */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-gray-200 bg-blue-50/60 flex items-center gap-2 shrink-0">
-              <Users className="w-4 h-4 text-blue-600" />
-              <h3 className="text-sm font-semibold text-blue-800">
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center gap-2 shrink-0">
+              <Users className="w-4 h-4 text-gray-500" />
+              <h3 className="text-sm font-semibold text-gray-900">
                 Parent Roles
-                <span className="font-normal text-blue-500 ml-1">({parentRolesList.length})</span>
+                <span className="font-normal text-gray-400 ml-1">({parentRolesList.length})</span>
               </h3>
             </div>
             <div className="flex-1 overflow-y-auto pr-5 pb-5">
@@ -365,7 +461,7 @@ export default function BOMRolesTab() {
                     const names = childrenOfRole(role.role_code);
                     const isRenaming = renamingRole === role.role_code;
                     return (
-                      <tr key={role.role_code} className="hover:bg-blue-50/30 group">
+                      <tr key={role.role_code} className="hover:bg-gray-50 group">
                         <td className="px-4 py-2.5">
                           {isRenaming ? (
                             <div className="flex items-center gap-1.5">
@@ -392,13 +488,13 @@ export default function BOMRolesTab() {
                           </span>
                         </td>
                         <td className="px-2 py-2.5 text-center">
-                          <span className={`text-xs font-semibold ${count > 0 ? 'text-blue-600' : 'text-gray-300'}`}>{count}</span>
+                          <span className={`text-xs font-semibold ${count > 0 ? 'text-gray-700' : 'text-gray-300'}`}>{count}</span>
                         </td>
                         <td className="px-3 py-2.5">
                           {names.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
                               {names.map((n) => (
-                                <span key={n} className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">{n}</span>
+                                <span key={n} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{n}</span>
                               ))}
                             </div>
                           ) : (
@@ -408,7 +504,7 @@ export default function BOMRolesTab() {
                         <td className="px-2 py-2.5">
                           {!isRenaming && (
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={(e) => { e.stopPropagation(); startRename(role.role_code, role.label); }} className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600" title="Rename">
+                              <button onClick={(e) => { e.stopPropagation(); startRename(role.role_code, role.label); }} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600" title="Rename">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               <button onClick={(e) => { e.stopPropagation(); handleDeleteRole(role.role_code, role.label); }} className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-500" title="Delete">
@@ -427,11 +523,11 @@ export default function BOMRolesTab() {
 
           {/* ── Right: Child Roles ── */}
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-gray-200 bg-amber-50/60 flex items-center gap-2 shrink-0">
-              <Layers className="w-4 h-4 text-amber-600" />
-              <h3 className="text-sm font-semibold text-amber-800">
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center gap-2 shrink-0">
+              <Layers className="w-4 h-4 text-gray-500" />
+              <h3 className="text-sm font-semibold text-gray-900">
                 Child Roles
-                <span className="font-normal text-amber-500 ml-1">({childRolesList.length})</span>
+                <span className="font-normal text-gray-400 ml-1">({childRolesList.length})</span>
               </h3>
             </div>
             <div className="flex-1 overflow-y-auto pr-5 pb-5">
@@ -451,7 +547,7 @@ export default function BOMRolesTab() {
                     const names = parentsOfRole(role.role_code);
                     const isRenaming = renamingRole === role.role_code;
                     return (
-                      <tr key={role.role_code} className="hover:bg-amber-50/30 group">
+                      <tr key={role.role_code} className="hover:bg-gray-50 group">
                         <td className="px-4 py-2.5">
                           {isRenaming ? (
                             <div className="flex items-center gap-1.5">
@@ -478,13 +574,13 @@ export default function BOMRolesTab() {
                           </span>
                         </td>
                         <td className="px-2 py-2.5 text-center">
-                          <span className={`text-xs font-semibold ${count > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{count}</span>
+                          <span className={`text-xs font-semibold ${count > 0 ? 'text-gray-700' : 'text-gray-300'}`}>{count}</span>
                         </td>
                         <td className="px-3 py-2.5">
                           {names.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
                               {names.map((n) => (
-                                <span key={n} className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{n}</span>
+                                <span key={n} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{n}</span>
                               ))}
                             </div>
                           ) : (
@@ -494,7 +590,7 @@ export default function BOMRolesTab() {
                         <td className="px-2 py-2.5">
                           {!isRenaming && (
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={(e) => { e.stopPropagation(); startRename(role.role_code, role.label); }} className="p-1 rounded hover:bg-amber-100 text-gray-400 hover:text-amber-600" title="Rename">
+                              <button onClick={(e) => { e.stopPropagation(); startRename(role.role_code, role.label); }} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600" title="Rename">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               <button onClick={(e) => { e.stopPropagation(); handleDeleteRole(role.role_code, role.label); }} className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-500" title="Delete">
@@ -577,7 +673,51 @@ export default function BOMRolesTab() {
               Roles{' '}
               <span className="font-normal text-gray-400">({filteredRoles.length})</span>
             </h3>
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              <Plus className="w-3 h-3" /> New
+            </button>
           </div>
+          {showCreateForm && (
+            <div className="px-4 py-3 border-b border-blue-100 bg-blue-50/50">
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={newRoleLabel}
+                  onChange={(e) => setNewRoleLabel(e.target.value)}
+                  placeholder="Label (e.g. Sub Bracket)"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateRole(); }}
+                />
+                <input
+                  type="text"
+                  value={newRoleCode}
+                  onChange={(e) => setNewRoleCode(e.target.value)}
+                  placeholder="Code (auto if empty)"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded"
+                />
+                <select
+                  value={newRoleType}
+                  onChange={(e) => setNewRoleType(e.target.value as RoleType)}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded"
+                >
+                  <option value="parent_only">Parent</option>
+                  <option value="child_only">Child</option>
+                  <option value="both">Both</option>
+                </select>
+                <div className="flex gap-2">
+                  <button onClick={handleCreateRole} disabled={isCreating || !newRoleLabel.trim()} className="flex-1 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50">
+                    {isCreating ? 'Creating...' : 'Create'}
+                  </button>
+                  <button onClick={() => { setShowCreateForm(false); setNewRoleCode(''); setNewRoleLabel(''); setNewRoleType('both'); }} className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100 pr-5 pb-5">
             {filteredRoles.length === 0 ? (
               <div className="py-10 text-center text-sm text-gray-500">No roles match</div>

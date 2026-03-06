@@ -51,6 +51,9 @@ export interface RollerBOMConfigState {
   motor_item_id: string | null; // Only if operating_system='motor'
   drive_item_id: string | null; // Only if operating_system='manual'
   tube_item_id: string | null; // Optional, can be set by template
+
+  // Step 5: Fabric
+  fabric_item_id: string | null;
 }
 
 /**
@@ -100,5 +103,6 @@ export interface BOMInstanceMetadata {
     side_channel_item_id?: string | null;
     bottom_channel_item_id?: string | null;
     tube_item_id?: string | null;
+    fabric_item_id?: string | null;
   };
 }

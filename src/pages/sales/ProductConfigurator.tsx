@@ -6,7 +6,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { X } from 'lucide-react';
 import { ProductType, ProductConfig } from './product-config/types';
-import { canProceedToNext } from './product-config/product-registry';
+import { canProceedToNext, getProductDefinition } from './product-config/product-registry';
 import ProductStep from './curtain-config/ProductStep';
 import { useBOMTemplateQuestions } from '../../hooks/useBOMTemplateQuestions';
 import { UnifiedProductConfig, normalizeConfig } from './product-config/config-contract';
@@ -128,7 +128,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     'headbox_item_id', 'headbox_sku', 'side_channel_item_id', 'side_channel_sku',
     'bottom_channel_item_id', 'bottom_channel_sku', 'tube_item_id', 'tube_sku',
     'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'operation_type', 'drive_type',
-    '_hardware_filtered_templates',
+    '_manufacturer_filtered_templates', '_hardware_filtered_templates',
     'measurements', 'panels',
   ] as const;
 
@@ -430,14 +430,28 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   const steps = useMemo(() => {
     if (!productType) return [];
 
-    const dynamicSteps: Array<{ id: string; label: string; component: any }> = [];
-
-    // Accessories as product type: only ACCESSORIES step then REVIEW (no measurements/variants/hardware)
+    // Accessories as product type: only ACCESSORIES step then REVIEW
     if (productType === 'accessories') {
-      dynamicSteps.push({ id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent });
-      dynamicSteps.push({ id: 'review', label: 'REVIEW', component: ReviewStepComponent });
-      return dynamicSteps;
+      return [
+        { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
+        { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
+      ];
     }
+
+    // Check registry for product-specific steps (e.g. drapery has its own flow)
+    const registeredDef = getProductDefinition(productType);
+    if (registeredDef && registeredDef.steps.length > 0) {
+      if (import.meta.env.DEV) {
+        console.log('[ProductConfigurator] Using REGISTERED steps for', productType, {
+          stepsCount: registeredDef.steps.length,
+          stepIds: registeredDef.steps.map((s) => s.id),
+        });
+      }
+      return registeredDef.steps.map((s) => ({ id: s.id, label: s.label, component: s.component }));
+    }
+
+    // Fallback: generic flow (roller-shade, dual-shade, triple-shade, etc.)
+    const dynamicSteps: Array<{ id: string; label: string; component: any }> = [];
 
     dynamicSteps.push({ id: 'measurements', label: 'MEASUREMENTS', component: MeasurementsStepComponent });
     dynamicSteps.push({ id: 'variants', label: 'VARIANTS', component: VariantsStepComponent });
@@ -452,7 +466,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     dynamicSteps.push({ id: 'review', label: 'REVIEW', component: ReviewStepComponent });
 
     if (import.meta.env.DEV) {
-      console.log('[ProductConfigurator] Steps built (policy filtering)', {
+      console.log('[ProductConfigurator] Steps built (generic flow)', {
         stepsCount: dynamicSteps.length,
         stepIds: dynamicSteps.map((s) => s.id),
         policy: policy ? { allow_hardware: policy.allow_hardware, allow_operating_system: policy.allow_operating_system, allow_accessories_only: policy.allow_accessories_only } : null,
@@ -652,6 +666,12 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   // Clear selections from steps ahead when navigating backward
   const getClearUpdatesForStepId = (stepId: string): Partial<ProductConfig> => {
     switch (stepId) {
+      case 'manufacturer':
+        return {
+          manufacturer: undefined,
+          _manufacturer_filtered_templates: undefined,
+          _hardware_filtered_templates: undefined,
+        } as any;
       case 'measurements':
         return {
           panels: undefined,
@@ -663,6 +683,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           position: undefined,
           installationType: undefined,
           installationLocation: undefined,
+          openingDirection: undefined,
+          driveSide: undefined,
         } as any;
       case 'variants':
         return {
@@ -1013,7 +1035,10 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
             installationType: configAny.installationType ?? configAny.installation_type ?? null,
             installationLocation: configAny.installationLocation ?? configAny.installation_location ?? null,
-            // ✅ Accesorios: incluir en snapshot para ConfiguredProduct.config_snapshot y cálculo de accessories_total
+            manufacturer: configAny.manufacturer || null,
+            product_line: configAny.productLine || configAny.product_line || null,
+            style_code: configAny.styleCode || configAny.style_code || null,
+            force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
             accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
           };
 
@@ -1183,16 +1208,22 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     // For other steps, use validation
     if (!productType || !currentStep) return false;
     
-    // Custom validation for measurements step
+    // Try product-specific validation from registry first
+    const registryResult = canProceedToNext(currentStep.id, productType, config as ProductConfig);
+    // If registry has a definition with validateStep, trust it
+    const registeredDef = getProductDefinition(productType);
+    if (registeredDef?.validateStep) {
+      return !!registryResult;
+    }
+
+    // Fallback: custom validation for measurements step (generic products)
     if (currentStep.id === 'measurements') {
       const width_m = (config as any).width_m || ((config as any).width_mm ? (config as any).width_mm / 1000 : null);
       const height_m = (config as any).height_m || ((config as any).height_mm ? (config as any).height_mm / 1000 : null);
       return !!(width_m && width_m > 0 && height_m && height_m > 0);
     }
 
-    // Use existing per-step validation
-    const result = canProceedToNext(currentStep.id, productType, config as ProductConfig);
-    return !!result; // Ensure boolean return
+    return !!registryResult;
   };
 
   // CRITICAL: Memoize the onUpdate callback to prevent unnecessary re-renders
@@ -1259,16 +1290,22 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       });
     }
     
-    // Pass quoteId to ReviewStep if it's that component
-    // ✅ RE-ARQUITECTURA: Pasar candidateTemplateIds a HardwareStep y OperatingSystemStep
     const stepProps: any = {
       config: config as any,
       onUpdate: handleUpdate,
     };
     
-    // If this is the review step, pass quoteId
     if (step.id === 'review') {
       stepProps.quoteId = quoteId;
+    }
+
+    // Pass manufacturer-filtered templates to HardwareStep so it only shows
+    // components from templates belonging to the selected manufacturer.
+    if (step.id === 'hardware') {
+      const mfrFiltered = (config as any)._manufacturer_filtered_templates;
+      if (Array.isArray(mfrFiltered) && mfrFiltered.length > 0) {
+        stepProps.filteredTemplateIds = mfrFiltered;
+      }
     }
 
     return <StepComponent {...stepProps} />;

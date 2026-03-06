@@ -4,6 +4,7 @@
  */
 
 import { ProductConfig, RollerShadeConfig, DualShadeConfig, TripleShadeConfig, DraperyConfig, AwningConfig, WindowFilmConfig } from '../types';
+import { supabase } from '../../../../lib/supabase/client';
 
 export interface BOMItem {
   catalog_item_id: string;
@@ -84,20 +85,58 @@ export async function buildTripleShadeBOM(
 }
 
 /**
- * Build BOM for Drapery
+ * Build BOM for Drapery — calls compute_drapery_consumption() DB function
+ * and maps the result rows to BOMItem[].
  */
 export async function buildDraperyBOM(
   config: DraperyConfig,
   organizationId: string
 ): Promise<BOMResult> {
-  const items: BOMItem[] = [];
-  
-  // TODO: Implement drapery specific logic
-  // - Track system components
-  // - Fabric with fullness calculation
-  // - Confection hardware (pleats, hooks, etc.)
-  // - Mounting hardware
-  
+  const styleCode = config.styleCode;
+  const productTypeId = config.productTypeId;
+  const widthCm = config.width_mm ? config.width_mm / 10 : undefined;
+  const heightCm = config.height_mm ? config.height_mm / 10 : undefined;
+
+  if (!styleCode || !productTypeId || !widthCm || !heightCm) {
+    return { items: [], subtotal: 0, total: 0 };
+  }
+
+  const rollWidthCm = config.fabric?.rollWidthCm ?? 140;
+
+  const { data, error } = await supabase.rpc('compute_drapery_consumption', {
+    p_org_id: organizationId,
+    p_product_type_id: productTypeId,
+    p_style_code: styleCode,
+    p_width_cm: widthCm,
+    p_height_cm: heightCm,
+    p_roll_width_cm: rollWidthCm,
+  });
+
+  if (error) {
+    console.error('[buildDraperyBOM] RPC error:', error);
+    return { items: [], subtotal: 0, total: 0 };
+  }
+
+  if (!data || !Array.isArray(data)) {
+    return { items: [], subtotal: 0, total: 0 };
+  }
+
+  const items: BOMItem[] = data.map((row: {
+    item_type: string;
+    qty: number;
+    uom: string;
+    panels: number | null;
+    cut_height_cm: number | null;
+    details: Record<string, unknown> | null;
+  }) => ({
+    catalog_item_id: '',
+    qty: Number(row.qty),
+    uom: row.uom,
+    unit_price: 0,
+    extended_price: 0,
+    source: row.item_type,
+  }));
+
   return {
     items,
     subtotal: 0,

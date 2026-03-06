@@ -42,7 +42,7 @@ export default function NotesTab({ moId }: NotesTabProps) {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div>
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded"></div>
           <div className="h-32 bg-gray-200 rounded"></div>
@@ -53,14 +53,14 @@ export default function NotesTab({ moId }: NotesTabProps) {
 
   if (!manufacturingOrder) {
     return (
-      <div className="p-6">
+      <div>
         <div className="text-center text-gray-500">Manufacturing order not found</div>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
+    <div>
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Notes</h3>
         <button

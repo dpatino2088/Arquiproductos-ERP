@@ -398,12 +398,21 @@ export default function OperatingSystemStep({
     { value: 'motor', label: 'Motor' },
   ];
 
+  const productType = (config as any).productType;
+  const isDrapery = productType === 'drapery';
+
   // ✅ Track image load errors
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
-  const [imageSources, setImageSources] = useState<Record<string, string>>({
-    manual: '/images/drive-manual.png',
-    motor: '/images/drive-motor.png',
-  });
+  const defaultImageSources = useMemo(() => ({
+    manual: isDrapery ? '/images/DR-Manual.png' : '/images/drive-manual.png',
+    motor: isDrapery ? '/images/DR-Motor.png' : '/images/drive-motor.png',
+  }), [isDrapery]);
+  const [imageSources, setImageSources] = useState<Record<string, string>>(defaultImageSources);
+
+  useEffect(() => {
+    setImageSources(defaultImageSources);
+    setImageErrors({});
+  }, [defaultImageSources]);
 
   const handleImageError = (optionValue: string, currentSrc: string) => {
     const formats = ['png', 'jpg', 'jpeg', 'webp'];
@@ -632,6 +641,44 @@ export default function OperatingSystemStep({
             Select the operating system type and choose the specific components.
           </p>
         </div>
+
+        {/* Drive Side (Left/Right) — hidden for drapery since it's in MeasurementsStep */}
+        {(() => {
+          const pt = (config as any).productType || '';
+          const isDrapery = pt === 'drapery';
+          if (isDrapery) return null;
+          const currentDriveSide = (config as any).driveSide || (config as any).drive_side || null;
+          return (
+            <div>
+              <Label className="text-sm font-medium mb-3 block">DRIVE SIDE</Label>
+              <p className="text-xs text-gray-500 mb-3">Select where the motor or chain drive will be positioned (facing the window from inside)</p>
+              <div className="grid grid-cols-2 gap-4 max-w-xs">
+                {([
+                  { value: 'left', label: 'Left' },
+                  { value: 'right', label: 'Right' },
+                ] as const).map((side) => {
+                  const isSelected = currentDriveSide === side.value;
+                  return (
+                    <div
+                      key={side.value}
+                      onClick={() => onUpdate({ driveSide: side.value } as any)}
+                      className={`relative bg-white border rounded-lg p-4 transition-all cursor-pointer text-center ${
+                        isSelected
+                          ? 'border-2 border-gray-900 shadow-md'
+                          : 'border-gray-200 hover:shadow-md hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="text-2xl mb-1">{side.value === 'left' ? '◀' : '▶'}</div>
+                      <p className={`text-sm font-semibold ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>
+                        {side.label}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Operating System Type (Manual/Motor) */}
         {showDriveType && (

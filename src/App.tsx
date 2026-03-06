@@ -63,6 +63,10 @@ const BOMTemplates = lazy(() => import('./pages/catalog/BOMTemplates'));
 
 const ManufacturingOrders = lazy(() => import('./pages/manufacturing/ManufacturingOrders'));
 const ManufacturingOrderDetail = lazy(() => import('./pages/manufacturing/ManufacturingOrderDetail'));
+const WorkstationView = lazy(() => import('./pages/manufacturing/WorkstationView'));
+const WorkOrdersList = lazy(() => import('./pages/manufacturing/WorkOrdersList'));
+const WorkOrderDetail = lazy(() => import('./pages/manufacturing/WorkOrderDetail'));
+const ProductionCalendar = lazy(() => import('./pages/manufacturing/ProductionCalendar'));
 
 // Variants component removed - use CollectionsCatalog instead
 
@@ -743,7 +747,58 @@ function App() {
     });
     router.addRoute('/manufacturing/material', () => {
       if (isAuthenticated) {
-        setCurrentPage('material');
+        router.navigate('/manufacturing/manufacturing-orders', false);
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/work-orders', () => {
+      if (isAuthenticated) {
+        setCurrentPage('work-orders-list');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/work-orders/:id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/manufacturing\/work-orders\/([^/]+)/);
+        const moId = match ? match[1] : null;
+        if (moId) {
+          sessionStorage.setItem('currentWorkOrderMoId', moId);
+          setCurrentPage('work-order-detail');
+        } else {
+          setCurrentPage('work-orders-list');
+        }
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/workstations', () => {
+      if (isAuthenticated) {
+        setCurrentPage('workstations');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/workstations/:id', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/manufacturing\/workstations\/([^/]+)/);
+        const wcId = match ? match[1] : null;
+        if (wcId) {
+          setCurrentPage('workstation-detail');
+          sessionStorage.setItem('currentWorkCenterId', wcId);
+        } else {
+          setCurrentPage('workstations');
+        }
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/calendar', () => {
+      if (isAuthenticated) {
+        setCurrentPage('production-calendar');
       } else {
         setCurrentPage('login');
       }
@@ -751,7 +806,7 @@ function App() {
     // Legacy route redirect
     router.addRoute('/manufacturing/bill-of-materials', () => {
       if (isAuthenticated) {
-        router.navigate('/manufacturing/material', false);
+        router.navigate('/manufacturing/manufacturing-orders', false);
       } else {
         setCurrentPage('login');
       }
@@ -951,6 +1006,20 @@ function App() {
       }
     });
     router.addRoute('/settings/cost-engine', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/work-centers', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/settings/fabric-rules', () => {
       if (isAuthenticated) {
         setCurrentPage('company-settings');
       } else {
@@ -1180,6 +1249,20 @@ function App() {
       case 'manufacturing-order-detail': {
         const moId = sessionStorage.getItem('currentManufacturingOrderId');
         return <RequireModule module="manufacturing">{moId ? <ManufacturingOrderDetail moId={moId} /> : <ManufacturingOrders />}</RequireModule>;
+      }
+      case 'work-orders-list':
+        return <RequireModule module="manufacturing"><WorkOrdersList /></RequireModule>;
+      case 'work-order-detail': {
+        const woMoId = sessionStorage.getItem('currentWorkOrderMoId');
+        return <RequireModule module="manufacturing">{woMoId ? <WorkOrderDetail moId={woMoId} /> : <WorkOrdersList />}</RequireModule>;
+      }
+      case 'workstations':
+        return <RequireModule module="manufacturing"><WorkstationView /></RequireModule>;
+      case 'production-calendar':
+        return <RequireModule module="manufacturing"><ProductionCalendar /></RequireModule>;
+      case 'workstation-detail': {
+        const wcId = sessionStorage.getItem('currentWorkCenterId');
+        return <RequireModule module="manufacturing"><WorkstationView workCenterId={wcId ?? undefined} /></RequireModule>;
       }
       case 'material':
         return <RequireModule module="manufacturing"><ApprovedBOMList /></RequireModule>;

@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils';
 
 export interface StatusBadgeProps {
   status: string;
-  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority';
+  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder';
   size?: 'sm' | 'md';
 }
 
@@ -87,6 +87,9 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     paid: 'green',
     void: 'red',
     overdue: 'orange',
+    not_invoiced: 'gray',
+    partially_invoiced: 'amber',
+    fully_invoiced: 'green',
   },
   manufacturing: {
     draft: 'gray',
@@ -122,6 +125,11 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     urgent: 'red',
     rush: 'red',
   },
+  workOrder: {
+    pending: 'gray',
+    in_progress: 'indigo',
+    completed: 'green',
+  },
 };
 
 const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<string, string>>> = {
@@ -129,11 +137,19 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
     approved_unpaid: 'Approved',
     approved_paid: 'Approved',
   },
+  invoice: {
+    not_invoiced: 'Not Invoiced',
+    partially_invoiced: 'Partially Invoiced',
+    fully_invoiced: 'Fully Invoiced',
+    partial: 'Partially Paid',
+    paid: 'Paid',
+  },
   payment: {
     pending: 'Unpaid',
-    paid: 'Completed',
+    partial: 'Partially Paid',
+    paid: 'Paid',
     collection_unpaid: 'Unpaid',
-    collection_partial: 'Partial',
+    collection_partial: 'Partially Paid',
     collection_paid: 'Paid',
     collection_overpaid: 'Overpaid',
     billing_not_invoiced: 'Not Invoiced',

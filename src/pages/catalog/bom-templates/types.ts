@@ -1,7 +1,7 @@
 import { normalizeRole } from '../../../lib/bom/roles';
 
-export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'per_spacing';
-export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area', 'per_spacing'] as const;
+export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'per_spacing' | 'per_joint';
+export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area', 'per_spacing', 'per_joint'] as const;
 
 export type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | 'CATEGORY_FIRST_MATCH' | string;
 export type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
@@ -17,6 +17,7 @@ export interface BOMComponentDraft {
   qty_delta_mm: number;
   waste_pct: number;
   depends_on_role: string | null;
+  affects_role: string | null;
   cut_axis: string | null;
   cut_delta_mm: number;
   cut_delta_scope?: string | null;
@@ -31,11 +32,16 @@ export interface BOMComponentDraft {
   sequence_order: number;
   is_required: boolean;
   auto_select: boolean;
+  condition_key?: string | null;
+  condition_value?: string | null;
   component_mode?: string;
   catalog_item?: {
     id: string;
     sku: string;
     name: string | null;
+    delta_x_mm?: number | null;
+    delta_y_mm?: number | null;
+    measure_basis?: string | null;
   } | null;
 }
 
@@ -49,10 +55,13 @@ export interface ComponentFormData {
   uom: string;
   sequence_order: number;
   is_required: boolean;
+  condition_key: string;
+  condition_value: string;
 }
 
 export interface EngineeringData {
   depends_on_role: string;
+  affects_role: string;
   cut_axis: 'length' | 'width' | 'height' | 'none';
   cut_delta_mm: number | null;
   cut_delta_scope: 'per_side' | 'per_item' | 'none';
@@ -81,6 +90,11 @@ export interface BOMTemplateFormState {
   templateDescription: string;
   templateHardwareColor: string;
   templatePanelCount: 1 | 2 | 3;
+  templateDriveType: 'manual' | 'motor' | null;
+  templateDriveSide: 'left' | 'right' | 'both' | null;
+  templateOpeningDirection: 'left' | 'right' | 'center' | null;
+  templateManufacturer: string | null;
+  templateProductLine: string | null;
 }
 
 export interface ComponentGroupedByCategory {
@@ -89,6 +103,16 @@ export interface ComponentGroupedByCategory {
   category_code: string | null;
   components: BOMComponentDraft[];
 }
+
+export const CONDITION_KEY_OPTIONS = [
+  { value: '', label: '— None —' },
+  { value: 'installation_type', label: 'Installation Type (wall / ceiling)' },
+  { value: 'side_channel', label: 'Side Channel (true / false)' },
+  { value: 'bottom_channel', label: 'Bottom Channel (true / false)' },
+  { value: 'cassette', label: 'Cassette (true / false)' },
+  { value: 'drive_type', label: 'Drive Type (manual / motor)' },
+  { value: 'opening_direction', label: 'Opening Direction (left / right / center)' },
+] as const;
 
 export const INITIAL_FORM_DATA: ComponentFormData = {
   component_item_id: '',
@@ -100,10 +124,13 @@ export const INITIAL_FORM_DATA: ComponentFormData = {
   uom: 'ea',
   sequence_order: 0,
   is_required: true,
+  condition_key: '',
+  condition_value: '',
 };
 
 export const INITIAL_ENGINEERING_DATA: EngineeringData = {
   depends_on_role: '',
+  affects_role: '',
   cut_axis: 'none',
   cut_delta_mm: null,
   cut_delta_scope: 'none',

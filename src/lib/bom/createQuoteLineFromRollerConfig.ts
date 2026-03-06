@@ -345,6 +345,18 @@ export async function createQuoteLineFromRollerConfig(
       });
     }
 
+    if (config.fabric_catalog_item_id) {
+      selections.push({
+        organization_id: organizationId,
+        quote_line_id: finalLineId,
+        kind: 'selection',
+        component_role: 'fabric',
+        catalog_item_id: config.fabric_catalog_item_id,
+        source: 'configured_component',
+        deleted: false,
+      });
+    }
+
     if (selections.length > 0) {
       const { error: selectionsError } = await supabase
         .from('QuoteLineComponents')

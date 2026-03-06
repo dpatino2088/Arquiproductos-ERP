@@ -5,19 +5,19 @@
 
 import { ProductType, RollerShadeConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
+import ManufacturerStepComponent from '../../../curtain-config/ManufacturerStep';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
 import HardwareStepComponent from '../../../curtain-config/HardwareStep';
-import AccessoriesStepComponent from '../../../curtain-config/AccessoriesStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
 
 const ROLLER_SHADE_STEPS: ProductStep[] = [
+  { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
   { id: 'measurements', label: 'MEASUREMENTS', component: MeasurementsStepComponent, isRequired: true },
   { id: 'variants', label: 'VARIANTS', component: VariantsStepComponent },
   { id: 'hardware', label: 'HARDWARE', component: HardwareStepComponent },
   { id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent },
-  { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
   { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
 ];
 
@@ -26,6 +26,9 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
   const rollerConfig = config as RollerShadeConfig;
 
   switch (stepId) {
+    case 'manufacturer':
+      return !!(rollerConfig as any).manufacturer;
+
     case 'measurements':
       return !!(rollerConfig.width_mm && rollerConfig.height_mm);
 
@@ -82,7 +85,8 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       );
 
       const hasSpecificSelection = isManual ? hasManualDrive : isMotorized ? hasMotor : false;
-      return hasOperatingSystem && hasTube && hasSpecificSelection;
+      const hasDriveSide = !!((rollerConfig as any).driveSide || (rollerConfig as any).drive_side);
+      return hasOperatingSystem && hasTube && hasSpecificSelection && hasDriveSide;
 
     default:
       return true;

@@ -1,0 +1,237 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '../lib/supabase/client';
+
+export interface WorkOrderTaskLine {
+  id: string;
+  task_id: string;
+  bom_instance_line_id: string | null;
+  catalog_item_id: string | null;
+  sku: string | null;
+  item_name: string | null;
+  component_role: string | null;
+  qty: number;
+  uom: string;
+  cut_length_mm: number | null;
+  cut_width_mm: number | null;
+  completed: boolean;
+  completed_at: string | null;
+}
+
+export interface WorkOrderTask {
+  id: string;
+  organization_id: string;
+  manufacturing_order_id: string;
+  work_center_id: string;
+  sequence: number;
+  status: 'pending' | 'in_progress' | 'completed';
+  assigned_to: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  estimated_duration_hours: number;
+  planned_start_at: string | null;
+  planned_end_at: string | null;
+  depends_on_task_ids: string[];
+  dependency_type: 'finish_to_start' | 'start_to_start';
+  work_center?: { id: string; code: string; name: string; sequence: number } | null;
+  lines: WorkOrderTaskLine[];
+}
+
+export function useWorkOrderTasks(moId: string | null | undefined) {
+  const [tasks, setTasks] = useState<WorkOrderTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const initialLoadDone = useRef(false);
+
+  const fetchAll = useCallback(async () => {
+    if (!moId) { setTasks([]); return; }
+    if (!initialLoadDone.current) setLoading(true);
+    setError(null);
+    try {
+      const { data: taskData, error: tErr } = await supabase
+        .from('WorkOrderTasks')
+        .select(`
+          id, organization_id, manufacturing_order_id, work_center_id,
+          sequence, status, assigned_to, started_at, completed_at,
+          estimated_duration_hours, planned_start_at, planned_end_at,
+          depends_on_task_ids, dependency_type,
+          WorkCenters:work_center_id (id, code, name, sequence)
+        `)
+        .eq('manufacturing_order_id', moId)
+        .eq('deleted', false)
+        .order('sequence');
+
+      if (tErr) throw new Error(tErr.message);
+      if (!taskData || taskData.length === 0) { setTasks([]); setLoading(false); initialLoadDone.current = true; return; }
+
+      const taskIds = taskData.map((t: any) => t.id);
+      const { data: lineData, error: lErr } = await supabase
+        .from('WorkOrderTaskLines')
+        .select('*')
+        .in('task_id', taskIds)
+        .order('created_at');
+
+      if (lErr) throw new Error(lErr.message);
+
+      const linesByTask: Record<string, WorkOrderTaskLine[]> = {};
+      for (const l of (lineData ?? [])) {
+        if (!linesByTask[l.task_id]) linesByTask[l.task_id] = [];
+        linesByTask[l.task_id].push(l);
+      }
+
+      const result: WorkOrderTask[] = taskData.map((t: any) => ({
+        id: t.id,
+        organization_id: t.organization_id,
+        manufacturing_order_id: t.manufacturing_order_id,
+        work_center_id: t.work_center_id,
+        sequence: t.sequence,
+        status: t.status,
+        assigned_to: t.assigned_to,
+        started_at: t.started_at,
+        completed_at: t.completed_at,
+        estimated_duration_hours: t.estimated_duration_hours ?? 8,
+        planned_start_at: t.planned_start_at ?? null,
+        planned_end_at: t.planned_end_at ?? null,
+        depends_on_task_ids: t.depends_on_task_ids ?? [],
+        dependency_type: t.dependency_type ?? 'finish_to_start',
+        work_center: t.WorkCenters ?? null,
+        lines: linesByTask[t.id] ?? [],
+      }));
+
+      setTasks(result);
+      initialLoadDone.current = true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error loading work order tasks');
+    } finally {
+      setLoading(false);
+    }
+  }, [moId]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const patchTask = useCallback((taskId: string, patch: Partial<WorkOrderTask>) => {
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...patch } : t));
+  }, []);
+
+  const patchLine = useCallback((lineId: string, patch: Partial<WorkOrderTaskLine>) => {
+    setTasks((prev) => prev.map((t) => ({
+      ...t,
+      lines: t.lines.map((l) => l.id === lineId ? { ...l, ...patch } : l),
+    })));
+  }, []);
+
+  const toggleLineCompleted = useCallback(async (lineId: string, completed: boolean) => {
+    const now = new Date().toISOString();
+    patchLine(lineId, { completed, completed_at: completed ? now : null });
+
+    const { error: err } = await supabase
+      .from('WorkOrderTaskLines')
+      .update({ completed, completed_at: completed ? now : null })
+      .eq('id', lineId);
+    if (err) {
+      patchLine(lineId, { completed: !completed, completed_at: null });
+      throw new Error(err.message);
+    }
+  }, [patchLine]);
+
+  const updateTaskStatus = useCallback(async (taskId: string, status: 'pending' | 'in_progress' | 'completed') => {
+    const now = new Date().toISOString();
+    const task = tasks.find((t) => t.id === taskId);
+    const prevStatus = task?.status;
+    const prevStarted = task?.started_at;
+    const prevCompleted = task?.completed_at;
+
+    const optimistic: Partial<WorkOrderTask> = { status };
+    const dbUpdates: Record<string, unknown> = { status, updated_at: now };
+
+    if (status === 'in_progress' && !task?.started_at) {
+      optimistic.started_at = now;
+      dbUpdates.started_at = now;
+    }
+    if (status === 'completed') {
+      optimistic.completed_at = now;
+      dbUpdates.completed_at = now;
+    }
+
+    patchTask(taskId, optimistic);
+
+    const { error: err } = await supabase
+      .from('WorkOrderTasks')
+      .update(dbUpdates)
+      .eq('id', taskId);
+    if (err) {
+      patchTask(taskId, { status: prevStatus, started_at: prevStarted, completed_at: prevCompleted });
+      throw new Error(err.message);
+    }
+  }, [tasks, patchTask]);
+
+  const updateTaskScheduling = useCallback(async (
+    taskId: string,
+    updates: {
+      estimated_duration_hours?: number;
+      depends_on_task_ids?: string[];
+      dependency_type?: 'finish_to_start' | 'start_to_start';
+      planned_start_at?: string | null;
+      planned_end_at?: string | null;
+    }
+  ) => {
+    const task = tasks.find((t) => t.id === taskId);
+    const prev = task ? { ...task } : null;
+
+    patchTask(taskId, updates as Partial<WorkOrderTask>);
+
+    const { error: err } = await supabase
+      .from('WorkOrderTasks')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', taskId);
+    if (err) {
+      if (prev) patchTask(taskId, prev);
+      throw new Error(err.message);
+    }
+  }, [tasks, patchTask]);
+
+  const bulkUpdatePlannedDates = useCallback(async (
+    updates: { id: string; planned_start_at: string; planned_end_at: string }[]
+  ) => {
+    const prevTasks = [...tasks];
+
+    for (const u of updates) {
+      patchTask(u.id, { planned_start_at: u.planned_start_at, planned_end_at: u.planned_end_at });
+    }
+
+    try {
+      for (const u of updates) {
+        const { error: err } = await supabase
+          .from('WorkOrderTasks')
+          .update({
+            planned_start_at: u.planned_start_at,
+            planned_end_at: u.planned_end_at,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', u.id);
+        if (err) throw new Error(err.message);
+      }
+    } catch (e) {
+      setTasks(prevTasks);
+      throw e;
+    }
+  }, [tasks, patchTask]);
+
+  const generateWorkOrders = useCallback(async (regenerate = false) => {
+    if (!moId) return;
+    const { data, error: err } = await supabase.rpc('generate_work_orders_for_mo', {
+      p_mo_id: moId,
+      p_regenerate: regenerate,
+    });
+    if (err) throw new Error(err.message);
+    const result = data as { ok?: boolean; error?: string } | null;
+    if (result?.ok === false && result?.error) throw new Error(result.error);
+    await fetchAll();
+    return data;
+  }, [moId, fetchAll]);
+
+  return {
+    tasks, loading, error, refetch: fetchAll,
+    toggleLineCompleted, updateTaskStatus, updateTaskScheduling,
+    bulkUpdatePlannedDates, generateWorkOrders,
+  };
+}

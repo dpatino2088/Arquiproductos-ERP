@@ -215,7 +215,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
   const { warehouses, defaultWarehouse } = useWarehouses(activeOrganizationId);
   const addNotification = useUIStore((s) => s.addNotification);
 
-  const { purchaseOrder, lines, loading, refetch } = usePurchaseOrderDetail(poId);
+  const { purchaseOrder, lines, linkedMOs, loading, refetch } = usePurchaseOrderDetail(poId);
   const { createPurchaseOrder, isCreating } = useCreatePurchaseOrder();
   const { updatePurchaseOrder, isUpdating } = useUpdatePurchaseOrder();
   const { deletePurchaseOrder, isDeleting } = useDeletePurchaseOrder();
@@ -293,83 +293,69 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     if (defaultWarehouse && !warehouseId && isCreateMode) setWarehouseId(defaultWarehouse.id);
   }, [defaultWarehouse, warehouseId, isCreateMode]);
 
+  const mapLineToDraft = useCallback((l: PurchaseOrderLine, moLabelMap?: Map<string, string>): DraftLine => ({
+    tempId: l.id,
+    catalog_item_id: l.catalog_item_id,
+    sku: l.sku_snapshot ?? l.CatalogItems?.sku ?? '',
+    name: l.item_name_snapshot ?? l.CatalogItems?.name ?? '',
+    ordered_qty: l.ordered_qty,
+    received_qty: l.received_qty ?? 0,
+    unit_cost: Number(l.unit_cost ?? 0),
+    unit: l.unit ?? l.CatalogItems?.unit_of_measure ?? 'ea',
+    description: l.description ?? '',
+    is_one_off: l.is_one_off ?? false,
+    notes: l.notes ?? '',
+    allocation_type: l.allocation_type ?? 'stock',
+    allocation_mo_id: l.allocation_mo_id ?? null,
+    allocation_mo_label: l.allocation_mo_id
+      ? (moLabelMap?.get(l.allocation_mo_id) ?? l.allocation_mo_id.slice(0, 8))
+      : null,
+    purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_unit?: string } | null)?.purchase_unit ?? null,
+    purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems?.is_roll ? 'roll' : ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_direct' : 'unit_packaged')) ?? null,
+    stock_basis_snapshot: l.stock_basis_snapshot ?? ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_m' : 'ea') ?? null,
+    purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_unit?: string } | null)?.purchase_unit ?? l.CatalogItems?.unit_of_measure ?? null,
+    units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
+    unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,
+    is_roll_snapshot: Boolean(l.is_roll_snapshot),
+    roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : (l.CatalogItems as { roll_width_value?: number } | null)?.roll_width_value ?? null,
+    roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? (l.CatalogItems as { roll_width_uom?: string } | null)?.roll_width_uom ?? null,
+    roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : (l.CatalogItems as { roll_length_value?: number } | null)?.roll_length_value ?? null,
+    roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? (l.CatalogItems as { roll_length_uom?: string } | null)?.roll_length_uom ?? null,
+  }), []);
+
   useEffect(() => {
-    if (purchaseOrder && !isCreateMode) {
-      setWarehouseId(purchaseOrder.warehouse_id);
-      setVendorId(purchaseOrder.vendor_id ?? '');
-      setExpectedDate(purchaseOrder.expected_date ?? '');
-      setCurrency(purchaseOrder.currency ?? 'USD');
-      setPoNotes(purchaseOrder.notes ?? '');
+    if (!purchaseOrder || isCreateMode || lines.length === 0) return;
 
-      const moIds = [...new Set(lines.filter(l => l.allocation_mo_id).map(l => l.allocation_mo_id!))];
+    setWarehouseId(purchaseOrder.warehouse_id);
+    setVendorId(purchaseOrder.vendor_id ?? '');
+    setExpectedDate(purchaseOrder.expected_date ?? '');
+    setCurrency(purchaseOrder.currency ?? 'USD');
+    setPoNotes(purchaseOrder.notes ?? '');
 
-      if (moIds.length > 0) {
-        (async () => {
+    const moIds = [...new Set(lines.filter(l => l.allocation_mo_id).map(l => l.allocation_mo_id!))];
+
+    if (moIds.length > 0) {
+      let cancelled = false;
+      (async () => {
+        try {
           const { data } = await supabase
             .from('ManufacturingOrders')
             .select('id, manufacturing_order_no')
             .in('id', moIds);
+          if (cancelled) return;
           const moLabelMap = new Map<string, string>((data ?? []).map((r: any) => [r.id, r.manufacturing_order_no ?? r.id.slice(0, 8)]));
-
-          setDraftLines(lines.map(l => ({
-            tempId: l.id,
-            catalog_item_id: l.catalog_item_id,
-            sku: l.sku_snapshot ?? l.CatalogItems?.sku ?? '',
-            name: l.item_name_snapshot ?? l.CatalogItems?.name ?? '',
-            ordered_qty: l.ordered_qty,
-            received_qty: l.received_qty ?? 0,
-            unit_cost: Number(l.unit_cost ?? 0),
-            unit: l.unit ?? l.CatalogItems?.unit_of_measure ?? 'ea',
-            description: l.description ?? '',
-            is_one_off: l.is_one_off ?? false,
-            notes: l.notes ?? '',
-            allocation_type: l.allocation_type ?? 'stock',
-            allocation_mo_id: l.allocation_mo_id ?? null,
-            allocation_mo_label: l.allocation_mo_id ? (moLabelMap.get(l.allocation_mo_id) ?? l.allocation_mo_id.slice(0, 8)) : null,
-            purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? null,
-            purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems as { purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' } | null)?.purchase_mode ?? null,
-            stock_basis_snapshot: l.stock_basis_snapshot ?? (l.CatalogItems as { stock_basis?: 'ea' | 'linear_m' } | null)?.stock_basis ?? null,
-            purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? (l.CatalogItems as { unit_of_measure?: string } | null)?.unit_of_measure ?? null,
-            units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
-            unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,
-            is_roll_snapshot: Boolean(l.is_roll_snapshot),
-            roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : (l.CatalogItems as { roll_width_value?: number } | null)?.roll_width_value ?? null,
-            roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? (l.CatalogItems as { roll_width_uom?: string } | null)?.roll_width_uom ?? null,
-            roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : (l.CatalogItems as { roll_length_value?: number } | null)?.roll_length_value ?? null,
-            roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? (l.CatalogItems as { roll_length_uom?: string } | null)?.roll_length_uom ?? null,
-          })));
-        })();
-      } else {
-        setDraftLines(lines.map(l => ({
-          tempId: l.id,
-          catalog_item_id: l.catalog_item_id,
-          sku: l.sku_snapshot ?? l.CatalogItems?.sku ?? '',
-          name: l.item_name_snapshot ?? l.CatalogItems?.name ?? '',
-          ordered_qty: l.ordered_qty,
-          received_qty: l.received_qty ?? 0,
-          unit_cost: Number(l.unit_cost ?? 0),
-          unit: l.unit ?? l.CatalogItems?.unit_of_measure ?? 'ea',
-          description: l.description ?? '',
-          is_one_off: l.is_one_off ?? false,
-          notes: l.notes ?? '',
-          allocation_type: l.allocation_type ?? 'stock',
-          allocation_mo_id: l.allocation_mo_id ?? null,
-          allocation_mo_label: null,
-          purchase_unit_snapshot: l.purchase_unit_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? null,
-          purchase_mode_snapshot: l.purchase_mode_snapshot ?? (l.CatalogItems as { purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' } | null)?.purchase_mode ?? null,
-          stock_basis_snapshot: l.stock_basis_snapshot ?? (l.CatalogItems as { stock_basis?: 'ea' | 'linear_m' } | null)?.stock_basis ?? null,
-          purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_uom?: string } | null)?.purchase_uom ?? (l.CatalogItems as { unit_of_measure?: string } | null)?.unit_of_measure ?? null,
-          units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
-          unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,
-          is_roll_snapshot: Boolean(l.is_roll_snapshot),
-          roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : (l.CatalogItems as { roll_width_value?: number } | null)?.roll_width_value ?? null,
-          roll_width_uom_snapshot: l.roll_width_uom_snapshot ?? (l.CatalogItems as { roll_width_uom?: string } | null)?.roll_width_uom ?? null,
-          roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : (l.CatalogItems as { roll_length_value?: number } | null)?.roll_length_value ?? null,
-          roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? (l.CatalogItems as { roll_length_uom?: string } | null)?.roll_length_uom ?? null,
-        })));
-      }
+          setDraftLines(lines.map(l => mapLineToDraft(l, moLabelMap)));
+        } catch (err) {
+          if (cancelled) return;
+          console.error('Failed to load MO labels for PO lines:', err);
+          setDraftLines(lines.map(l => mapLineToDraft(l)));
+        }
+      })();
+      return () => { cancelled = true; };
+    } else {
+      setDraftLines(lines.map(l => mapLineToDraft(l)));
     }
-  }, [purchaseOrder, lines, isCreateMode]);
+  }, [purchaseOrder, lines, isCreateMode, mapLineToDraft]);
 
   // Pre-populate from Material Demand (sessionStorage)
   useEffect(() => {
@@ -387,7 +373,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
               const itemIds = prefillItems.map(p => p.catalog_item_id);
               const { data: costData } = await supabase
                 .from('CatalogItems')
-                .select('id, cost_exw, purchase_unit, units_per_purchase_unit, is_roll, unit_of_measure, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom, purchase_mode, stock_basis, purchase_uom')
+                .select('id, cost_exw, purchase_unit, units_per_purchase_unit, is_roll, unit_of_measure, measure_basis, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom')
                 .in('id', itemIds);
               type CostRow = {
                 id: string;
@@ -396,13 +382,11 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 units_per_purchase_unit: number | null;
                 is_roll: boolean;
                 unit_of_measure: string | null;
+                measure_basis: string | null;
                 roll_width_value: number | null;
                 roll_width_uom: string | null;
                 roll_length_value: number | null;
                 roll_length_uom: string | null;
-                purchase_mode?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
-                stock_basis?: 'ea' | 'linear_m' | null;
-                purchase_uom?: string | null;
               };
               const costMap = new Map<string, CostRow>((costData ?? []).map((c: any) => [c.id, c as CostRow]));
 
@@ -427,9 +411,10 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 } else {
                   unitCost = costExw;
                 }
-                const purchaseMode = (ci?.purchase_mode as 'unit_packaged' | 'linear_direct' | 'roll') ?? 'unit_packaged';
-                const stockBasis = (ci?.stock_basis as 'ea' | 'linear_m') ?? 'ea';
-                const purchaseUomSnap = ci?.purchase_uom ?? purchaseUom;
+                const measureBasis = ci?.measure_basis as string | null;
+                const purchaseMode: 'unit_packaged' | 'linear_direct' | 'roll' = isRoll ? 'roll' : (measureBasis === 'linear' ? 'linear_direct' : 'unit_packaged');
+                const stockBasis: 'ea' | 'linear_m' = measureBasis === 'linear' ? 'linear_m' : 'ea';
+                const purchaseUomSnap = purchaseUom;
                 return {
                   tempId: crypto.randomUUID(),
                   catalog_item_id: p.catalog_item_id,
@@ -590,10 +575,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     let unitCost: number;
     const lineUnit: string = pUnit || (isRoll ? 'roll' : 'each');
 
-    if (isRoll) {
-      // Roll: cost_exw is price per UOM (e.g. per m2 or per linear m).
-      // Purchase unit for rolls is typically 'roll'. Show cost_exw as-is;
-      // user edits total roll cost manually since roll length varies.
+    if (isRoll && lineUnit === 'roll' && rollLengthValue > 0) {
+      unitCost = costExw * rollLengthValue;
+    } else if (isRoll) {
       unitCost = costExw;
     } else if (pUnit !== 'each' && unitsPerPU > 1) {
       // Pack/box/case: cost per pack = cost_per_ea x units_per_pack
@@ -827,11 +811,16 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
         else moGroups.set(l.allocation_mo_id, { label: l.allocation_mo_label ?? l.allocation_mo_id.slice(0, 8), count: 1 });
       }
     }
+    for (const mo of linkedMOs) {
+      if (!moGroups.has(mo.id)) {
+        moGroups.set(mo.id, { label: mo.manufacturing_order_no, count: 0 });
+      }
+    }
     const parts: string[] = [];
     if (stockCount > 0) parts.push(`Stock (${stockCount})`);
-    for (const [, v] of moGroups) parts.push(`${v.label} (${v.count})`);
+    for (const [, v] of moGroups) parts.push(v.count > 0 ? `${v.label} (${v.count})` : v.label);
     return parts.join(', ');
-  }, [draftLines]);
+  }, [draftLines, linkedMOs]);
 
   const loadOrganizationLogoOptions = useCallback(async () => {
     const tryLogo = async (path: string): Promise<string | undefined> => {
@@ -1373,9 +1362,15 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                       <div className="flex items-center gap-1 justify-center">
                         <button
                           type="button"
-                          onClick={() => setShowSearch(true)}
-                          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-white hover:bg-primary/90 transition-colors"
-                          title="Add catalog item"
+                          onClick={() => {
+                            if (!vendorId) {
+                              addNotification({ type: 'warning', title: 'Select Vendor', message: 'Please select a vendor before adding items.' });
+                              return;
+                            }
+                            setShowSearch(true);
+                          }}
+                          className={`inline-flex items-center justify-center w-6 h-6 rounded-full transition-colors ${vendorId ? 'bg-primary text-white hover:bg-primary/90' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                          title={vendorId ? 'Add catalog item' : 'Select a vendor first'}
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
@@ -1429,7 +1424,13 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                         </div>
                         <button
                           type="button"
-                          onClick={addOneOffItem}
+                          onClick={() => {
+                            if (!vendorId) {
+                              addNotification({ type: 'warning', title: 'Select Vendor', message: 'Please select a vendor before adding items.' });
+                              return;
+                            }
+                            addOneOffItem();
+                          }}
                           className="px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 whitespace-nowrap"
                         >
                           + One-Off Item
@@ -1449,7 +1450,11 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 {displayLines.length === 0 ? (
                   <tr>
                     <td colSpan={canEdit ? (isCreateMode ? 10 : 11) : (isCreateMode ? 9 : 10)} className="px-4 py-8 text-center text-gray-500">
-                      No lines. {canEdit ? 'Click "+" to add items.' : ''}
+                      {canEdit && !vendorId
+                        ? 'Select a vendor first, then click "+" to add items.'
+                        : canEdit
+                          ? 'No lines. Click "+" to add items.'
+                          : 'No lines.'}
                     </td>
                   </tr>
                 ) : displayLines.map((line, idx) => {
@@ -1510,9 +1515,36 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                         )}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-                          {line.unit || 'ea'}
-                        </span>
+                        {canEdit && line.is_roll_snapshot && line.unit_of_measure_snapshot ? (
+                          <select
+                            value={line.unit}
+                            onChange={e => {
+                              const newUnit = e.target.value;
+                              const rlv = line.roll_length_value_snapshot ?? 0;
+                              const costExw = rlv > 0 && line.unit === 'roll'
+                                ? line.unit_cost / rlv
+                                : line.unit !== 'roll'
+                                  ? line.unit_cost
+                                  : line.unit_cost;
+                              const newCost = newUnit === 'roll' && rlv > 0
+                                ? costExw * rlv
+                                : costExw;
+                              setDraftLines(prev => prev.map(dl =>
+                                dl.tempId === line.tempId
+                                  ? { ...dl, unit: newUnit, unit_cost: newCost }
+                                  : dl
+                              ));
+                            }}
+                            className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border-0 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                          >
+                            <option value="roll">roll</option>
+                            <option value={line.unit_of_measure_snapshot}>{line.unit_of_measure_snapshot}</option>
+                          </select>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                            {line.unit || 'ea'}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         {canEdit ? (

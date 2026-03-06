@@ -1,0 +1,51 @@
+# Manufacturing Scheduling Convention
+
+## Core Principle: Bottom-Up Scheduling
+
+Dates flow **upward** from Work Orders to Manufacturing Orders, never the reverse.
+
+## Rules
+
+1. **WO defines duration**: Each `WorkOrderTask` has `estimated_duration_hours` (default 8h = 1 working day)
+2. **MO defines start**: The user sets only `ManufacturingOrders.planned_start_at`
+3. **MO end is calculated**: `planned_end_at` is computed from the WO dependency graph using `src/lib/scheduling.ts`
+4. **Never set MO end manually**: The Schedule Tab calculates it from WO durations + dependencies
+
+## Dependencies
+
+- `WorkOrderTasks.depends_on_task_ids`: array of task IDs that must finish/start first
+- `WorkOrderTasks.dependency_type`:
+  - `finish_to_start` (default): cannot start until all dependencies complete
+  - `start_to_start`: can start when dependencies start (parallel)
+- Tasks with no dependencies start immediately at MO start
+
+## Example
+
+```
+MO start: March 10
+├── Cut Profiles (8h, no deps) → Mar 10 08:00 – Mar 10 17:00
+├── Cut Fabric (4h, no deps)   → Mar 10 08:00 – Mar 10 12:00
+├── Pick Hardware (4h, no deps) → Mar 10 08:00 – Mar 10 12:00
+└── Assembly (16h, depends on all above, finish_to_start)
+    → Mar 11 08:00 – Mar 12 17:00
+MO end (calculated): March 12
+```
+
+## Release Check
+
+An MO cannot be scheduled (`planned_start_at` set) unless:
+- Work Orders are generated (tasks.length > 0)
+- All WOs have estimated durations > 0
+- All WOs have a Work Center assigned
+
+## Working Hours
+
+- 8 hours/day (08:00–17:00)
+- Weekdays only (Mon–Fri)
+- `src/lib/scheduling.ts` → `computeSchedule()` handles this
+
+## Milestones
+
+- `WorkOrderTasks.started_at` → actual start (set when status → in_progress)
+- `WorkOrderTasks.completed_at` → actual end (set when status → completed)
+- These are displayed as vertical markers on the Gantt in the Schedule Tab

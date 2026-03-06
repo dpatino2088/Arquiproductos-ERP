@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
 import ApprovedBOMList from '../catalog/ApprovedBOMList';
 
 export default function BillOfMaterials() {
@@ -8,10 +9,7 @@ export default function BillOfMaterials() {
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
-      registerSubmodules('Manufacturing', [
-        { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'material', label: 'Material', href: '/manufacturing/material' },
-      ]);
+      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
     }
     
     return () => {

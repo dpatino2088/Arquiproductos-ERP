@@ -12,7 +12,7 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div>
         <div className="animate-pulse space-y-4">
           <div className="h-4 bg-gray-200 rounded w-1/4" />
           <div className="h-4 bg-gray-200 rounded w-1/2" />
@@ -22,7 +22,7 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
   }
 
   if (!mo) {
-    return <div className="p-6 text-center text-gray-500">Manufacturing order not found</div>;
+    return <div className="text-center text-gray-500">Manufacturing order not found</div>;
   }
 
   const bomTotals = {
@@ -35,7 +35,7 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
   const so = mo.SalesOrders;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       {/* Status & Priority */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <h3 className="text-sm font-semibold text-gray-900 mb-4">Manufacturing Order Status</h3>

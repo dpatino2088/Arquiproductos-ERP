@@ -106,6 +106,10 @@ export function isValidChildRole(role: string | null | undefined): boolean {
   if (!role) return false;
   const normalized = normalizeSubRole(role);
   if (!normalized) return false;
+  const cached = getCachedRoles();
+  if (cached) {
+    return cached.some(r => r.active && r.role_type !== 'parent_only' && r.role_code === normalized);
+  }
   return (VALID_CHILD_ROLES as readonly string[]).includes(normalized);
 }
 
@@ -156,13 +160,19 @@ export function normalizeSubRole(subRole: string | null | undefined): string | n
 }
 
 /**
- * Check if a role is valid (canonical)
+ * Check if a role is valid. Uses DB cache (CatalogItemRoles) as source of truth.
+ * Falls back to hardcoded list only if cache hasn't loaded yet.
  */
 export function isValidRole(role: string | null | undefined): boolean {
-  if (!role) return true; // null/empty is valid
+  if (!role) return true;
   const normalized = normalizeRole(role);
   if (!normalized) return true;
-  return (CANONICAL_COMPONENT_ROLES as readonly string[]).includes(normalized);
+  const cached = getCachedRoles();
+  if (cached) {
+    return cached.some(r => r.active && r.role_code === normalized);
+  }
+  if ((CANONICAL_COMPONENT_ROLES as readonly string[]).includes(normalized)) return true;
+  return true;
 }
 
 /**
@@ -237,6 +247,11 @@ let _cachedRoles: DBRole[] | null = null;
 let _cachedDeps: DBDependency[] | null = null;
 let _fetchPromise: Promise<void> | null = null;
 
+export function getCachedRoles(): DBRole[] | null {
+  ensureRolesLoaded();
+  return _cachedRoles;
+}
+
 async function ensureRolesLoaded(): Promise<void> {
   if (_cachedRoles) return;
   if (_fetchPromise) return _fetchPromise;
@@ -266,6 +281,8 @@ async function ensureRolesLoaded(): Promise<void> {
 export function invalidateRolesCache(): void {
   _cachedRoles = null;
   _cachedDeps = null;
+  _fetchPromise = null;
+  ensureRolesLoaded();
 }
 
 /**

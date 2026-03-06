@@ -99,7 +99,8 @@ export default function InvoiceNew() {
   const { settings: costSettings } = useCostSettings();
   const defaultTaxPct = costSettings?.tax_pct ?? 0.07;
   const [taxExempt, setTaxExempt] = useState(false);
-  const appliedTaxPct = taxExempt ? 0 : defaultTaxPct;
+  const [soTaxPct, setSoTaxPct] = useState<number | null>(null);
+  const appliedTaxPct = taxExempt ? 0 : (soTaxPct ?? defaultTaxPct);
 
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [dealers, setDealers] = useState<DealerOption[]>([]);
@@ -133,6 +134,7 @@ export default function InvoiceNew() {
     source: SoPrefillSource;
     targetAmount: number;
     billableRemaining: number;
+    soTaxPct: number;
   } | null>(null);
   const listPath = '/financials/invoices';
   const queryReturnTo = getReturnToFromCurrentQuery();
@@ -173,7 +175,7 @@ export default function InvoiceNew() {
       const [soRes, linesRes, summaryRes] = await Promise.all([
         supabase
           .from('SalesOrders')
-          .select('id, sales_order_no, dealer_id, total_amount, subtotal, tax_amount')
+          .select('id, sales_order_no, dealer_id, total_amount, subtotal, tax_amount, exempt_tax')
           .eq('id', soId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
@@ -197,18 +199,30 @@ export default function InvoiceNew() {
       setSalesOrderNo(so.sales_order_no);
       setSelectedDealerId(so.dealer_id);
 
-      const soTotalAmount = Math.max(0, safeNumber(so.total_amount, 0));
+      const isExempt = Boolean((so as any).exempt_tax);
+      setTaxExempt(isExempt);
+
+      const soTotal = Math.max(0, safeNumber(so.total_amount, safeNumber(so.subtotal, 0)));
+      const soSubtotal = Math.max(0, safeNumber(so.subtotal, 0));
+      const soTaxAmount = Math.max(0, safeNumber(so.tax_amount, 0));
+
+      const effectiveSoTaxPct = isExempt ? 0 : (soSubtotal > 0 ? soTaxAmount / soSubtotal : 0);
+      setSoTaxPct(effectiveSoTaxPct);
+
       const summaryTotalInvoiced = summaryRes.data
         ? Math.max(0, safeNumber((summaryRes.data as { total_invoiced?: number | null }).total_invoiced, 0))
         : 0;
-      const billableRemaining = Math.max(0, Number((soTotalAmount - summaryTotalInvoiced).toFixed(2)));
-      // For SO-based invoicing, use billable remaining to avoid over-invoicing.
-      const targetInvoiceAmount = summaryRes.data ? billableRemaining : Math.max(0, soTotalAmount);
+      const billableRemainingTotal = Math.max(0, Number((soTotal - summaryTotalInvoiced).toFixed(2)));
+      const billableRemainingSubtotal = effectiveSoTaxPct > 0
+        ? Math.max(0, Number((billableRemainingTotal / (1 + effectiveSoTaxPct)).toFixed(2)))
+        : billableRemainingTotal;
+      const targetInvoiceAmount = summaryRes.data ? billableRemainingSubtotal : Math.max(0, soSubtotal);
       const prefillSource: SoPrefillSource = summaryRes.data ? 'billable_remaining' : 'so_total_fallback';
       setPrefillInfo({
         source: prefillSource,
         targetAmount: targetInvoiceAmount,
-        billableRemaining,
+        billableRemaining: billableRemainingTotal,
+        soTaxPct: effectiveSoTaxPct,
       });
       const roundToCents = (value: number) => Number(value.toFixed(2));
 
@@ -391,6 +405,7 @@ export default function InvoiceNew() {
       setSalesOrderId(null);
       setSalesOrderNo(null);
       setPrefillInfo(null);
+      setSoTaxPct(null);
       setLines([createCustomLine()]);
       return;
     }
@@ -451,16 +466,23 @@ export default function InvoiceNew() {
       addNotification({ type: 'error', title: 'Validation', message: 'Add at least one line with a description.' });
       return;
     }
-    if (salesOrderId && prefillInfo && total > prefillInfo.billableRemaining + 0.005) {
+    const preSaveTaxRate = taxExempt ? 0 : (prefillInfo?.soTaxPct ?? soTaxPct ?? defaultTaxPct);
+    const preSaveTotal = Number((subtotal + subtotal * preSaveTaxRate).toFixed(2));
+    if (salesOrderId && prefillInfo && preSaveTotal > Number((prefillInfo.billableRemaining + 0.02).toFixed(2))) {
       addNotification({
         type: 'error',
         title: 'Validation',
-        message: `Invoice total exceeds SO billable remaining (${fmt(prefillInfo.billableRemaining)}).`,
+        message: `Invoice total (${fmt(preSaveTotal)}) exceeds SO uninvoiced amount (${fmt(prefillInfo.billableRemaining)}).`,
       });
       return;
     }
     setSaving(true);
     try {
+      const taxRate = taxExempt ? 0 : (prefillInfo?.soTaxPct ?? soTaxPct ?? defaultTaxPct);
+      const finalSubtotal = Number(subtotal.toFixed(2));
+      const finalTax = Number((finalSubtotal * taxRate).toFixed(2));
+      const finalTotal = Number((finalSubtotal + finalTax).toFixed(2));
+
       const { data: inv, error: invErr } = await supabase
         .from('DealerInvoices')
         .insert({
@@ -472,9 +494,9 @@ export default function InvoiceNew() {
           issue_date: issueDate,
           due_date: dueDate || null,
           currency_code: currency,
-          subtotal,
-          tax_total: taxTotal,
-          total,
+          subtotal: finalSubtotal,
+          tax_total: finalTax,
+          total: finalTotal,
           notes: notes.trim() || null,
           deleted: false,
         })
@@ -484,17 +506,21 @@ export default function InvoiceNew() {
 
       const validLines = lines.filter((l) => l.description.trim());
       if (validLines.length > 0) {
-        const lineRows = validLines.map((l, i) => ({
-          invoice_id: inv.id,
-          sort_order: i + 1,
-          description: l.description.trim(),
-          qty: l.qty,
-          unit_price: l.unit_price,
-          tax_pct: 0,
-          line_subtotal: l.qty * l.unit_price,
-          line_tax: 0,
-          line_total: l.qty * l.unit_price,
-        }));
+        const lineRows = validLines.map((l, i) => {
+          const lineSub = Number((l.qty * l.unit_price).toFixed(2));
+          const lineTax = Number((lineSub * taxRate).toFixed(2));
+          return {
+            invoice_id: inv.id,
+            sort_order: i + 1,
+            description: l.description.trim(),
+            qty: l.qty,
+            unit_price: l.unit_price,
+            tax_pct: Number(taxRate.toFixed(6)),
+            line_subtotal: lineSub,
+            line_tax: lineTax,
+            line_total: lineSub + lineTax,
+          };
+        });
         const { error: linesErr } = await supabase.from('DealerInvoiceLines').insert(lineRows);
         if (linesErr) throw linesErr;
       }
@@ -669,7 +695,7 @@ export default function InvoiceNew() {
                         Prefill source:{' '}
                         {prefillInfo.source === 'billable_remaining'
                           ? 'SO billable remaining'
-                          : 'SO total amount fallback'}
+                          : 'SO subtotal (pre-tax) fallback'}
                         {' '}({fmt(prefillInfo.targetAmount)}). Billable remaining: {fmt(prefillInfo.billableRemaining)}.
                       </p>
                     )}
@@ -778,7 +804,7 @@ export default function InvoiceNew() {
           <div className="space-y-4">
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
             <div className="px-4 py-2 border-b border-gray-200 bg-gray-50 text-xs text-gray-600">
-              Tax global: {taxExempt ? 'Exempt (0.00%)' : `Fixed from Cost Settings (${(defaultTaxPct * 100).toFixed(2)}%)`}
+              Tax: {taxExempt ? 'Exempt (0.00%)' : soTaxPct != null ? `Inherited from SO (${(soTaxPct * 100).toFixed(2)}%)` : `From Cost Settings (${(defaultTaxPct * 100).toFixed(2)}%)`}
             </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">

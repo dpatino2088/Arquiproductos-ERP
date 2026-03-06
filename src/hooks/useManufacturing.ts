@@ -31,8 +31,6 @@ export interface ManufacturingOrder {
   released_at?: string | null;
   planned_start_at?: string | null;
   planned_end_at?: string | null;
-  scheduled_start_date?: string | null;
-  scheduled_end_date?: string | null;
   production_started_at?: string | null;
   completed_at?: string | null;
   delivered_at?: string | null;
@@ -47,6 +45,7 @@ export interface ManufacturingOrder {
     customer_id: string;
     total_amount?: number;
     dealer_id?: string;
+    expected_delivery_date?: string | null;
     DirectoryCustomers?: {
       id: string;
       customer_name: string;
@@ -73,6 +72,8 @@ export interface ManufacturingMaterial {
   cut_width_mm?: number | null;
   cut_height_mm?: number | null;
   calc_notes?: string | null;
+  product_width_mm?: number | null;
+  product_height_mm?: number | null;
 }
 
 export interface CutJob {
@@ -115,7 +116,7 @@ export interface BomInstanceTotals {
  * Hook para obtener ManufacturingOrders
  * Filtra por organization_id Y dealer_id (vía SalesOrders -> Quotes)
  *
- * @param dealerId - Opcional: filtra solo por ese dealer_id
+ * @param dealerId - Opcional: filtra por ese dealer_id; null = todos los dealers; undefined = usar activeDealerId
  */
 export function useManufacturingOrders(dealerId?: string | null) {
   const [manufacturingOrders, setManufacturingOrders] = useState<ManufacturingOrder[]>([]);
@@ -125,7 +126,7 @@ export function useManufacturingOrders(dealerId?: string | null) {
   const { activeOrganizationId } = useOrganizationContext();
   const { activeDealerId } = useActiveDealer();
 
-  const effectiveDealerId = dealerId ?? activeDealerId;
+  const effectiveDealerId = dealerId === undefined ? activeDealerId : dealerId;
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -218,6 +219,7 @@ export function useManufacturingOrders(dealerId?: string | null) {
               sales_order_no,
               customer_id,
               total_amount,
+              expected_delivery_date,
               DirectoryCustomers:customer_id (
                 id,
                 customer_name
@@ -394,7 +396,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
 
         const { data: bomInstances, error: bomError } = await supabase
           .from('BOMInstances')
-          .select('id, organization_id, quote_line_id')
+          .select('id, organization_id, quote_line_id, sales_order_line_id')
           .eq('manufacturing_order_id', safeManufacturingOrderId)
           .eq('deleted', false);
 
@@ -436,6 +438,8 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             uom,
             unit_cost_exw,
             total_cost_exw,
+            unit_msrp,
+            total_msrp,
             cut_length_mm,
             cut_width_mm,
             cut_height_mm,
@@ -454,7 +458,30 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           console.log('📊 useManufacturingMaterials: Found', bomLinesCount, 'BOMInstanceLines');
         }
 
-        // Obtener CatalogItems para resolved_part_id
+        // Fetch product dimensions from SaleOrderLines via BOMInstances
+        const solIds = [...new Set(
+          bomInstances
+            .map((bi: any) => bi.sales_order_line_id)
+            .filter(Boolean)
+        )];
+        const biDimsMap = new Map<string, { width_mm: number | null; height_mm: number | null }>();
+        if (solIds.length > 0) {
+          const { data: solRows } = await supabase
+            .from('SaleOrderLines')
+            .select('id, width_m, height_m')
+            .in('id', solIds);
+          if (solRows) {
+            const solMap = new Map(solRows.map((s: any) => [s.id, s]));
+            for (const bi of bomInstances) {
+              const sol = (bi as any).sales_order_line_id ? solMap.get((bi as any).sales_order_line_id) : null;
+              biDimsMap.set(bi.id, {
+                width_mm: sol?.width_m != null ? Math.round(sol.width_m * 1000) : null,
+                height_mm: sol?.height_m != null ? Math.round(sol.height_m * 1000) : null,
+              });
+            }
+          }
+        }
+
         const catalogItemIds = [...new Set(
           bomLines
             ?.map((line: any) => line.resolved_part_id)
@@ -476,7 +503,8 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
 
         const materialsList: ManufacturingMaterial[] = bomLines?.map((line: any) => {
           const catalogItem = line.resolved_part_id ? catalogItemsMap.get(line.resolved_part_id) : null;
-          
+          const dims = biDimsMap.get(line.bom_instance_id);
+
           return {
             bom_instance_line_id: line.id,
             bom_instance_id: line.bom_instance_id,
@@ -490,24 +518,26 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             total_qty: Number(line.qty) || 0,
             unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
             total_cost_exw: Number(line.total_cost_exw) || 0,
-            unit_msrp: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
-            total_msrp: undefined, // No existe en BOMInstanceLines, se puede calcular desde CatalogItems si es necesario
+            unit_msrp: line.unit_msrp ? Number(line.unit_msrp) : undefined,
+            total_msrp: line.total_msrp ? Number(line.total_msrp) : undefined,
             cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
             cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
             cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,
-            calc_notes: null, // No existe en BOMInstanceLines
+            calc_notes: null,
+            product_width_mm: dims?.width_mm ?? null,
+            product_height_mm: dims?.height_mm ?? null,
           };
         }) || [];
 
-        // Calcular totales desde las líneas
         const totalCost = materialsList.reduce((sum, m) => sum + (m.total_cost_exw || 0), 0);
+        const totalMSRP = materialsList.reduce((sum, m) => sum + (m.total_msrp || 0), 0);
 
         setMaterials(materialsList);
-        
+
         setBomTotals({
-          totalLaborCost: 0, // No existe en BOMInstances, se puede calcular desde otra fuente si es necesario
-          totalCostWithLabor: totalCost, // Usar total de líneas
-          totalMSRPWithLabor: 0, // No existe en BOMInstances, se puede calcular desde CatalogItems si es necesario
+          totalLaborCost: 0,
+          totalCostWithLabor: totalCost,
+          totalMSRPWithLabor: totalMSRP,
         });
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Error loading materials';
@@ -568,8 +598,6 @@ export function useCreateManufacturingOrder() {
     sales_order_id: string;
     planned_start_at?: string;
     planned_end_at?: string;
-    scheduled_start_date?: string;
-    scheduled_end_date?: string;
     priority?: ManufacturingOrderPriority;
     notes?: string;
   }) => {
@@ -634,8 +662,8 @@ export function useCreateManufacturingOrder() {
         manufacturing_order_no: moNumber,
         status: 'draft',
         priority: moData.priority || 'normal',
-        scheduled_start_date: moData.planned_start_at ?? moData.scheduled_start_date ?? null,
-        scheduled_end_date: moData.planned_end_at ?? moData.scheduled_end_date ?? null,
+        planned_start_at: moData.planned_start_at ?? null,
+        planned_end_at: moData.planned_end_at ?? null,
         notes: moData.notes || null,
         deleted: false,
         archived: false,
@@ -675,8 +703,6 @@ export function useUpdateManufacturingOrder() {
       internal_notes?: string | null;
       planned_start_at?: string | null;
       planned_end_at?: string | null;
-      scheduled_start_date?: string | null;
-      scheduled_end_date?: string | null;
     }
   ) => {
     if (!activeOrganizationId) {
@@ -685,63 +711,89 @@ export function useUpdateManufacturingOrder() {
 
     setIsUpdating(true);
     try {
-      const basePayload = {
-        ...updates,
-        updated_at: new Date().toISOString(),
-      };
+      const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (updates.status !== undefined) payload.status = updates.status;
+      if (updates.priority !== undefined) payload.priority = updates.priority;
+      if (updates.notes !== undefined) payload.notes = updates.notes;
+      if (updates.internal_notes !== undefined) payload.internal_notes = updates.internal_notes;
+      if (updates.planned_start_at !== undefined) payload.planned_start_at = updates.planned_start_at;
+      if (updates.planned_end_at !== undefined) payload.planned_end_at = updates.planned_end_at;
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('ManufacturingOrders')
-        .update(basePayload)
+        .update(payload)
         .eq('id', moId)
-        .eq('organization_id', activeOrganizationId)
-        .select()
-        .single();
+        .eq('organization_id', activeOrganizationId);
 
-      if (!error) {
-        return data;
-      }
-
-      // Backward compatibility: some databases still use scheduled_* fields.
-      const message = String((error as { message?: string })?.message ?? '').toLowerCase();
-      const hasPlannedKeys = Object.prototype.hasOwnProperty.call(updates, 'planned_start_at')
-        || Object.prototype.hasOwnProperty.call(updates, 'planned_end_at');
-      const missingPlannedColumns = message.includes('planned_start_at') || message.includes('planned_end_at');
-      if (!hasPlannedKeys || !missingPlannedColumns) {
+      if (error) {
         throw error;
       }
 
-      const fallbackPayload = {
-        ...basePayload,
-        scheduled_start_date: updates.planned_start_at ?? null,
-        scheduled_end_date: updates.planned_end_at ?? null,
-      };
-      delete (fallbackPayload as Record<string, unknown>).planned_start_at;
-      delete (fallbackPayload as Record<string, unknown>).planned_end_at;
-
-      const { data: fallbackData, error: fallbackError } = await supabase
-        .from('ManufacturingOrders')
-        .update(fallbackPayload)
-        .eq('id', moId)
-        .eq('organization_id', activeOrganizationId)
-        .select()
-        .single();
-
-      if (fallbackError) {
-        const fallbackMessage = String((fallbackError as { message?: string })?.message ?? '').toLowerCase();
-        const missingScheduledColumns = fallbackMessage.includes('scheduled_start_date') || fallbackMessage.includes('scheduled_end_date');
-        if (missingScheduledColumns) {
-          throw new Error('Could not save schedule. Missing schedule columns in ManufacturingOrders; run schedule migration.');
-        }
-        throw fallbackError;
-      }
-      return fallbackData;
+      return { id: moId, ...updates };
     } finally {
       setIsUpdating(false);
     }
   };
 
   return { updateManufacturingOrder, isUpdating };
+}
+
+// ============================================================================
+// HOOK: useMoMaterialReadiness
+// ============================================================================
+
+export type MoMaterialReadinessStatus = 'complete' | 'incomplete';
+
+export interface MoMaterialReadiness {
+  status: MoMaterialReadinessStatus;
+  hasShortage: boolean;
+}
+
+export function useMoMaterialReadiness(moId: string | null): {
+  readiness: MoMaterialReadiness | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+} {
+  const [readiness, setReadiness] = useState<MoMaterialReadiness | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchReadiness = useCallback(async () => {
+    const safeMoId = normalizeUUID(moId);
+    if (!safeMoId) {
+      setReadiness(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: err } = await supabase.rpc('get_mo_material_readiness', { p_mo_id: safeMoId });
+      if (err) throw err;
+      const payload = data as { ok?: boolean; status?: string; has_shortage?: boolean } | null;
+      if (payload?.ok && payload.status) {
+        setReadiness({
+          status: payload.status as MoMaterialReadinessStatus,
+          hasShortage: Boolean(payload.has_shortage),
+        });
+      } else {
+        setReadiness({ status: 'incomplete', hasShortage: true });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error loading material readiness');
+      setReadiness(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [moId]);
+
+  useEffect(() => {
+    fetchReadiness();
+  }, [fetchReadiness]);
+
+  return { readiness, loading, error, refetch: fetchReadiness };
 }
 
 // ============================================================================
@@ -762,6 +814,8 @@ export function useTransitionMOStatus() {
           p_user_name: userName ?? null,
         });
         if (error) throw error;
+        const result = data as { ok?: boolean; error?: string; from?: string; to?: string };
+        if (result?.ok === false && result?.error) throw new Error(result.error);
         return data as { ok: boolean; from: string; to: string };
       } finally {
         setIsTransitioning(false);

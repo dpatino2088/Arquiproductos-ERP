@@ -1106,6 +1106,104 @@ export default function Items() {
     }
   };
 
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const handleDuplicateItem = async (item: Item, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeOrganizationId) return;
+    setIsDuplicating(true);
+    try {
+      const { data: original, error: fetchErr } = await supabase
+        .from('CatalogItems')
+        .select('*')
+        .eq('id', item.id)
+        .eq('organization_id', activeOrganizationId)
+        .single();
+      if (fetchErr || !original) throw fetchErr || new Error('Item not found');
+
+      const { id, created_at, updated_at, ...rest } = original;
+      const newSku = `${original.sku}-Copy`;
+      const newName = original.name ? `${original.name} (Copy)` : newSku;
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('CatalogItems')
+        .insert({ ...rest, sku: newSku, name: newName })
+        .select('id')
+        .single();
+      if (insertErr) {
+        if (insertErr.code === '23505') throw new Error(`SKU "${newSku}" already exists.`);
+        throw insertErr;
+      }
+
+      if (inserted) {
+        // Copy supply info
+        const { data: supplyData } = await supabase
+          .from('CatalogItemSupply')
+          .select('*')
+          .eq('catalog_item_id', id)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+        if (supplyData) {
+          const { created_at: _sca, updated_at: _sua, ...supplyRest } = supplyData;
+          await supabase.from('CatalogItemSupply').upsert({
+            ...supplyRest,
+            catalog_item_id: inserted.id,
+          });
+        }
+
+        // Copy product type associations
+        const { data: ptRows } = await supabase
+          .from('CatalogItemProductTypes')
+          .select('product_type_id')
+          .eq('catalog_item_id', id)
+          .eq('organization_id', activeOrganizationId);
+        if (ptRows && ptRows.length > 0) {
+          const ptInserts = ptRows.map((row: any) => ({
+            organization_id: activeOrganizationId,
+            catalog_item_id: inserted.id,
+            product_type_id: row.product_type_id,
+            catalog_item_sku: newSku,
+            catalog_item_name: newName,
+          }));
+          await supabase.from('CatalogItemProductTypes').insert(ptInserts);
+        }
+
+        // Compute MSRP for the new item
+        try {
+          await supabase.rpc('msrp_compute_for_item', { p_item_id: inserted.id });
+        } catch {
+          // Non-blocking
+        }
+
+        // Clear any stale session for the new item
+        try {
+          window.sessionStorage.removeItem(`catalogItemEdit:${inserted.id}`);
+        } catch {
+          // no-op
+        }
+      }
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Item duplicado',
+        message: `Se creó "${newSku}" correctamente.`,
+      });
+      refetch();
+
+      if (inserted) {
+        const returnTo = getReturnToFromCurrentQuery() ?? '/catalog/items';
+        router.navigate(withReturnTo(`/catalog/items/edit/${inserted.id}`, returnTo));
+      }
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error al duplicar',
+        message: err?.message || 'No se pudo duplicar el item.',
+      });
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
   const handleBulkDeleteItems = async () => {
     if (selectedItemIds.length === 0) return;
 
@@ -1814,6 +1912,15 @@ export default function Items() {
                             title={`Edit ${item.itemName}`}
                           >
                             <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => handleDuplicateItem(item, e)}
+                            disabled={isDuplicating}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                            aria-label={`Duplicate ${item.itemName}`}
+                            title={`Duplicate ${item.itemName}`}
+                          >
+                            <Copy className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={(e) => handleArchiveItem(item, e)}

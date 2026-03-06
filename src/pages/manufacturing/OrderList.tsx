@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
 import { useManufacturingOrders } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -107,11 +108,7 @@ export default function OrderList() {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
       // Always register submodules to ensure tabs are visible
-      registerSubmodules('Manufacturing', [
-        { id: 'order-list', label: 'Order List', href: '/manufacturing/order-list' },
-        { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'material', label: 'Material', href: '/manufacturing/material' },
-      ]);
+      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
     }
     
     return () => {

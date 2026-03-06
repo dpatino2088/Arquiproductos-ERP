@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase/client';
+import { supabase, initSessionContext } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { useUIStore } from '../stores/ui-store';
 import { getAppUsersDisplayNames } from '../lib/appUsersDisplayNames';
@@ -18,8 +18,6 @@ export interface Payment {
   notes: string | null;
   recorded_by: string | null;
   created_at: string;
-  bank_name?: string | null;
-  description?: string | null;
   recorded_by_name?: string | null;
   recorded_by_display_name?: string;
   invoice_refs?: PaymentInvoiceRef[];
@@ -37,10 +35,12 @@ export function usePayments(salesOrderId: string | null) {
     }
     setLoading(true);
     try {
+      await initSessionContext();
+
       // 1) Payments directly linked to this SO
       const { data: directData, error: directError } = await supabase
         .from('Payments')
-        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at, bank_name, description')
+        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at')
         .eq('organization_id', activeOrganizationId)
         .eq('sales_order_id', salesOrderId)
         .eq('deleted', false)
@@ -75,7 +75,7 @@ export function usePayments(salesOrderId: string | null) {
           if (relatedPaymentIds.length > 0) {
             const { data: relatedData, error: relatedError } = await supabase
               .from('Payments')
-              .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at, bank_name, description')
+              .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at')
               .eq('organization_id', activeOrganizationId)
               .in('id', relatedPaymentIds)
               .eq('deleted', false)
@@ -230,7 +230,6 @@ export interface RecordPaymentForSOParams {
   method: string;
   reference: string;
   paymentDate: string;
-  bankName?: string | null;
   description?: string | null;
   userId: string | null;
   userName?: string | null;
@@ -263,8 +262,7 @@ export function useRecordPaymentForSO() {
             payment_method: params.method,
             reference_number: params.reference.trim() || null,
             payment_date: params.paymentDate,
-            bank_name: params.bankName?.trim() || null,
-            description: params.description?.trim() || null,
+            notes: params.description?.trim() || null,
             recorded_by: params.userId,
             recorded_by_name: params.userName ?? null,
             deleted: false,

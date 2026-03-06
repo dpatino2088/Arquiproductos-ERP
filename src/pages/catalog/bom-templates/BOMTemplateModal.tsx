@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, Edit, Trash2, Search, Wrench, Settings, Package, X, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Wrench, Ruler, Package, X, ChevronRight, ChevronDown, ExternalLink } from 'lucide-react';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import {
@@ -11,9 +11,9 @@ import {
 } from '../../../components/ui/SelectShadcn';
 import { Tooltip, TooltipProvider } from '../../../components/ui/Tooltip';
 import { getRoleLabel, getAllRoleOptions } from '../../../lib/bom/roles';
-import { BOM_QTY_TYPES } from './types';
+import { useManufacturers } from '../../../hooks/useCatalog';
+import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS } from './types';
 import { useBOMTemplateForm } from './useBOMTemplateForm';
-import BOMEngineeringModal from './BOMEngineeringModal';
 import BOMChildrenModal from './BOMChildrenModal';
 import type { BOMComponentDraft } from './types';
 
@@ -30,6 +30,7 @@ const QTY_TYPE_LABELS: Record<string, string> = {
   per_height: 'Per Height',
   per_area: 'Per Area',
   per_spacing: 'Per Spacing',
+  per_joint: 'Per Joint',
 };
 
 export interface BOMTemplateModalProps {
@@ -37,6 +38,7 @@ export interface BOMTemplateModalProps {
   editingTemplateId: string | null;
   onClose: () => void;
   onSave: () => void;
+  onGoToEngineering?: (templateId: string) => void;
 }
 
 export default function BOMTemplateModal({
@@ -44,8 +46,10 @@ export default function BOMTemplateModal({
   editingTemplateId,
   onClose,
   onSave,
+  onGoToEngineering,
 }: BOMTemplateModalProps) {
   const form = useBOMTemplateForm(editingTemplateId);
+  const { manufacturers } = useManufacturers();
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
@@ -117,6 +121,10 @@ export default function BOMTemplateModal({
       const min = comp.qty_min;
       return `Every ${sp}mm${min != null ? ` (min ${min})` : ''}`;
     }
+    if (comp.qty_type === 'per_joint') {
+      const sp = comp.qty_spacing_mm ?? 4000;
+      return `Joint every ${sp}mm (segments−1)`;
+    }
     const label = QTY_TYPE_LABELS[comp.qty_type || 'fixed'] || comp.qty_type || '—';
     const mult = comp.qty_value != null && comp.qty_value !== 1 ? ` x${comp.qty_value}` : '';
     return `${label}${mult}`;
@@ -158,7 +166,7 @@ export default function BOMTemplateModal({
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
             {/* Product Type */}
             <div>
-              <Label htmlFor="product-type">Product Type</Label>
+              <Label htmlFor="product-type">Product Type *</Label>
               <SelectShadcn
                 value={form.productTypeId}
                 onValueChange={form.setProductTypeId}
@@ -178,7 +186,7 @@ export default function BOMTemplateModal({
 
             {/* Code */}
             <div>
-              <Label htmlFor="template-code">Code</Label>
+              <Label htmlFor="template-code">Code *</Label>
               <Input
                 id="template-code"
                 value={form.templateCode}
@@ -190,7 +198,7 @@ export default function BOMTemplateModal({
             {/* Name + Description */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="template-name">Name</Label>
+                <Label htmlFor="template-name">Name *</Label>
                 <Input
                   id="template-name"
                   value={form.templateName}
@@ -253,6 +261,195 @@ export default function BOMTemplateModal({
                   </SelectContent>
                 </SelectShadcn>
               </div>
+            </div>
+
+            {/* Manufacturer + Product Line */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Manufacturer *</Label>
+                <SelectShadcn
+                  value={form.templateManufacturer || ''}
+                  onValueChange={(v) => form.setTemplateManufacturer(v || null)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select manufacturer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {manufacturers.map((m) => (
+                      <SelectItem key={m.id} value={m.name}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+              {(() => {
+                const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
+                const isDrapery = selectedPt && (selectedPt.code === 'drapery' || selectedPt.name?.toLowerCase().includes('drapery'));
+                if (!isDrapery) return <div />;
+                return (
+                  <div>
+                    <Label>Product Line *</Label>
+                    <Input
+                      value={form.templateProductLine || ''}
+                      onChange={(e) => form.setTemplateProductLine(e.target.value || null)}
+                      placeholder="e.g. Ripple Fold, Wave, Pinch Pleat"
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Drive Type + Opening Direction (Drapery only) + Drive Side — unified toggle */}
+            {(() => {
+              const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
+              const isDrapery = selectedPt && (selectedPt.code === 'drapery' || selectedPt.name?.toLowerCase().includes('drapery'));
+              const hasDriveType = !!form.templateDriveType;
+              const openDir = form.templateOpeningDirection;
+
+              const driveSideToggle = (
+                <div>
+                  <Label>Drive Side *</Label>
+                  {!hasDriveType ? (
+                    <div className="mt-1 text-xs text-gray-500 py-1.5">Select drive type first</div>
+                  ) : isDrapery && openDir && openDir !== 'center' ? (
+                    <div className="flex gap-1 mt-1">
+                      {(['left' as const, 'right' as const]).map((side) => (
+                        <div
+                          key={side}
+                          className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border text-center ${
+                            side === openDir
+                              ? 'border-gray-900 bg-gray-900 text-white'
+                              : 'border-gray-200 text-gray-300'
+                          }`}
+                        >
+                          {side === 'left' ? 'Left' : 'Right'}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex gap-1 mt-1">
+                      {(['left' as const, 'right' as const]).map((side) => {
+                        const cur = form.templateDriveSide;
+                        const isOn = cur === 'both' || cur === side;
+                        return (
+                          <button
+                            key={side}
+                            type="button"
+                            onClick={() => {
+                              const otherSide = side === 'left' ? 'right' : 'left';
+                              const otherOn = cur === 'both' || cur === otherSide;
+                              if (isOn) {
+                                form.setTemplateDriveSide(otherOn ? otherSide : null);
+                              } else {
+                                form.setTemplateDriveSide(otherOn ? 'both' : side);
+                              }
+                            }}
+                            className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
+                              isOn
+                                ? 'border-gray-900 bg-gray-900 text-white'
+                                : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {side === 'left' ? 'Left' : 'Right'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+
+              return (
+                <div className={`grid gap-4 ${isDrapery ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  <div>
+                    <Label>Drive Type *</Label>
+                    <div className="flex gap-1 mt-1">
+                      {([
+                        { value: 'manual' as const, label: 'Manual' },
+                        { value: 'motor' as const, label: 'Motor' },
+                      ]).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            form.setTemplateDriveType(opt.value);
+                            if (isDrapery && openDir) {
+                              form.setTemplateDriveSide(openDir === 'center' ? 'both' : openDir);
+                            }
+                          }}
+                          className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
+                            form.templateDriveType === opt.value
+                              ? 'border-gray-900 bg-gray-900 text-white'
+                              : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {isDrapery && (
+                    <div>
+                      <Label>Opening Direction *</Label>
+                      <div className="flex gap-1 mt-1">
+                        {([
+                          { value: 'left' as const, label: 'Left' },
+                          { value: 'center' as const, label: 'Center' },
+                          { value: 'right' as const, label: 'Right' },
+                        ]).map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              form.setTemplateOpeningDirection(opt.value);
+                              if (opt.value === 'center') {
+                                form.setTemplateDriveSide('both');
+                              } else {
+                                form.setTemplateDriveSide(opt.value);
+                              }
+                            }}
+                            className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
+                              form.templateOpeningDirection === opt.value
+                                ? 'border-gray-900 bg-gray-900 text-white'
+                                : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {driveSideToggle}
+                </div>
+              );
+            })()}
+
+            {/* Installation Location — optional, only needed for specific models (e.g. Lutron ceiling vs wall) */}
+            <div>
+              <Label>Installation Location</Label>
+              <div className="flex gap-1 mt-1">
+                {([
+                  { value: null, label: 'Both (any)' },
+                  { value: 'ceiling' as const, label: 'Ceiling' },
+                  { value: 'wall' as const, label: 'Wall' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.value ?? 'any'}
+                    type="button"
+                    onClick={() => form.setTemplateInstallationLocation(opt.value)}
+                    className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
+                      form.templateInstallationLocation === opt.value
+                        ? 'border-gray-900 bg-gray-900 text-white'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">Only set when model has ceiling/wall variants</p>
             </div>
 
             {/* Components section */}
@@ -395,10 +592,13 @@ export default function BOMTemplateModal({
                             qty_type: v as any,
                             qty_value:
                               v === 'fixed' ? (prev.qty_value ?? 1)
-                              : v === 'per_spacing' ? null
+                              : (v === 'per_spacing' || v === 'per_joint') ? null
                               : (prev.qty_value ?? 1),
-                            qty_spacing_mm: v === 'per_spacing' ? (prev.qty_spacing_mm ?? 500) : null,
-                            qty_min: v === 'per_spacing' ? prev.qty_min : null,
+                            qty_spacing_mm:
+                              v === 'per_spacing' ? (prev.qty_spacing_mm ?? 500)
+                              : v === 'per_joint' ? (prev.qty_spacing_mm ?? 4000)
+                              : null,
+                            qty_min: (v === 'per_spacing' || v === 'per_joint') ? prev.qty_min : null,
                           }))
                         }
                       >
@@ -421,13 +621,13 @@ export default function BOMTemplateModal({
                         <Label>Qty Value</Label>
                         <Input
                           type="number"
-                          min={0.01}
-                          step={0.01}
+                          min={form.formData.qty_type === 'fixed' ? 1 : 0.01}
+                          step={form.formData.qty_type === 'fixed' ? 1 : 0.01}
                           value={form.formData.qty_value ?? ''}
                           onChange={(e) => {
                             const v = e.target.value;
-                            const n =
-                              v === '' ? null : parseFloat(v);
+                            const isFixed = form.formData.qty_type === 'fixed';
+                            const n = v === '' ? null : isFixed ? parseInt(v, 10) : parseFloat(v);
                             form.setFormData((prev) => ({
                               ...prev,
                               qty_value: n,
@@ -474,17 +674,17 @@ export default function BOMTemplateModal({
                       </div>
                     </div>
                   )}
-                  {form.formData.qty_type === 'per_spacing' && (
+                  {(form.formData.qty_type === 'per_spacing' || form.formData.qty_type === 'per_joint') && (
                     <div className="grid grid-cols-3 gap-4">
                       <div>
-                        <Label>Spacing (mm)</Label>
+                        <Label>{form.formData.qty_type === 'per_joint' ? 'Max Segment (mm)' : 'Spacing (mm)'}</Label>
                         <Input
                           type="number"
                           min={1}
                           step={1}
-                          value={form.formData.qty_spacing_mm ?? 500}
+                          value={form.formData.qty_spacing_mm ?? (form.formData.qty_type === 'per_joint' ? 4000 : 500)}
                           onChange={(e) => {
-                            const n = parseInt(e.target.value, 10) || 500;
+                            const n = parseInt(e.target.value, 10) || (form.formData.qty_type === 'per_joint' ? 4000 : 500);
                             form.setFormData((prev) => ({
                               ...prev,
                               qty_spacing_mm: n,
@@ -557,6 +757,32 @@ export default function BOMTemplateModal({
                       />
                     </div>
                   </div>
+                  {/* Condition (optional) */}
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <Label>Condition</Label>
+                      <select
+                        value={form.formData.condition_key || ''}
+                        onChange={(e) => form.setFormData((prev) => ({ ...prev, condition_key: e.target.value, condition_value: e.target.value ? prev.condition_value : '' }))}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                      >
+                        {CONDITION_KEY_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {form.formData.condition_key ? (
+                      <div className="w-40">
+                        <Label>Value</Label>
+                        <Input
+                          value={form.formData.condition_value || ''}
+                          onChange={(e) => form.setFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
+                          placeholder="e.g. wall, true"
+                          className="text-sm"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -591,6 +817,8 @@ export default function BOMTemplateModal({
                       </th>
                       <th className="text-left px-3 py-2 font-medium">Qty</th>
                       <th className="text-left px-3 py-2 font-medium">UOM</th>
+                      <th className="text-center px-2 py-2 font-medium">ΔX</th>
+                      <th className="text-center px-2 py-2 font-medium">ΔY</th>
                       <th className="text-left px-3 py-2 font-medium">Role</th>
                       <th className="text-left px-3 py-2 font-medium">
                         Children
@@ -598,6 +826,7 @@ export default function BOMTemplateModal({
                       <th className="text-left px-3 py-2 font-medium">Eng.</th>
                       <th className="text-left px-3 py-2 font-medium">Order</th>
                       <th className="text-left px-3 py-2 font-medium">Req.</th>
+                      <th className="text-left px-3 py-2 font-medium">Condition</th>
                       <th className="text-right px-3 py-2 font-medium">
                         Actions
                       </th>
@@ -611,7 +840,7 @@ export default function BOMTemplateModal({
                           className="bg-gray-100 font-medium text-gray-700"
                         >
                           <td
-                            colSpan={10}
+                            colSpan={12}
                             className="px-3 py-1.5"
                           >
                             {group.category_name}
@@ -656,6 +885,28 @@ export default function BOMTemplateModal({
                                   {getQtyDisplay(comp)}
                                 </td>
                                 <td className="px-3 py-2">{comp.uom || 'ea'}</td>
+                                <td className="px-2 py-2 text-center">
+                                  {comp.uom === 'ea' ? (
+                                    comp.catalog_item?.delta_x_mm != null ? (
+                                      <span className="text-xs text-gray-700">{comp.catalog_item.delta_x_mm}</span>
+                                    ) : (
+                                      <a href={`/catalog/items/edit/${comp.component_item_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-500 hover:text-amber-700" title="Set in catalog">
+                                        <ExternalLink className="h-3 w-3 inline" />
+                                      </a>
+                                    )
+                                  ) : <span className="text-xs text-gray-300">—</span>}
+                                </td>
+                                <td className="px-2 py-2 text-center">
+                                  {comp.uom === 'ea' ? (
+                                    comp.catalog_item?.delta_y_mm != null ? (
+                                      <span className="text-xs text-gray-700">{comp.catalog_item.delta_y_mm}</span>
+                                    ) : (
+                                      <a href={`/catalog/items/edit/${comp.component_item_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-500 hover:text-amber-700" title="Set in catalog">
+                                        <ExternalLink className="h-3 w-3 inline" />
+                                      </a>
+                                    )
+                                  ) : <span className="text-xs text-gray-300">—</span>}
+                                </td>
                                 <td className="px-3 py-2">
                                   {getRoleLabel(comp.component_role)}
                                 </td>
@@ -679,6 +930,11 @@ export default function BOMTemplateModal({
                                     'No'
                                   )}
                                 </td>
+                                <td className="px-3 py-2 text-xs text-gray-500">
+                                  {comp.condition_key ? (
+                                    <span>{comp.condition_key} = {comp.condition_value || '—'}</span>
+                                  ) : '—'}
+                                </td>
                                 <td className="px-3 py-2 text-right">
                                   <div className="flex items-center justify-end gap-1">
                                     <Tooltip content="Edit">
@@ -692,19 +948,17 @@ export default function BOMTemplateModal({
                                         <Edit className="h-3.5 w-3.5" />
                                       </button>
                                     </Tooltip>
-                                    <Tooltip content="Engineering">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          form.handleOpenEngineeringModal(
-                                            comp.id
-                                          )
-                                        }
-                                        className="p-1 rounded hover:bg-gray-200 text-gray-600"
-                                      >
-                                        <Settings className="h-3.5 w-3.5" />
-                                      </button>
-                                    </Tooltip>
+                                    {editingTemplateId && onGoToEngineering && (
+                                      <Tooltip content="Go to Engineering">
+                                        <button
+                                          type="button"
+                                          onClick={() => onGoToEngineering(editingTemplateId)}
+                                          className="p-1 rounded hover:bg-gray-200 text-gray-600"
+                                        >
+                                          <Ruler className="h-3.5 w-3.5" />
+                                        </button>
+                                      </Tooltip>
+                                    )}
                                     <Tooltip content="Children">
                                       <button
                                         type="button"
@@ -763,6 +1017,8 @@ export default function BOMTemplateModal({
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {child.uom || 'ea'}
                                       </td>
+                                      <td className="px-2 py-1.5 text-center text-gray-300">—</td>
+                                      <td className="px-2 py-1.5 text-center text-gray-300">—</td>
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {getRoleLabel(child.component_role)}
                                       </td>
@@ -775,6 +1031,9 @@ export default function BOMTemplateModal({
                                         {child.is_required !== false
                                           ? 'Yes'
                                           : 'No'}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-xs text-gray-400">
+                                        {child.condition_key ? `${child.condition_key} = ${child.condition_value || '—'}` : '—'}
                                       </td>
                                       <td className="px-3 py-1.5" />
                                     </tr>
@@ -815,13 +1074,6 @@ export default function BOMTemplateModal({
       </div>
 
       {/* Sub-modals */}
-      <BOMEngineeringModal
-        showEngineeringModal={form.showEngineeringModal}
-        engineeringData={form.engineeringData}
-        setEngineeringData={form.setEngineeringData}
-        onSave={form.handleSaveEngineeringRules}
-        onClose={form.handleCloseEngineeringModal}
-      />
       <BOMChildrenModal
         showChildrenModal={form.showChildrenModal}
         editingParentComponentId={form.editingParentComponentId}

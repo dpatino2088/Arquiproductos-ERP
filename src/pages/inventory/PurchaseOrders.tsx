@@ -39,7 +39,7 @@ export default function PurchaseOrders() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 25;
 
-  const { purchaseOrders, loading } = usePurchaseOrders({
+  const { purchaseOrders, loading, error } = usePurchaseOrders({
     status: statusFilter || undefined,
     warehouseId: warehouseFilter || undefined,
     search: searchTerm || undefined,
@@ -140,6 +140,12 @@ export default function PurchaseOrders() {
           </select>
         )}
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <strong>Error loading purchase orders:</strong> {error}
+        </div>
+      )}
 
       {loading ? (
         <div className="animate-pulse space-y-3">

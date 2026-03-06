@@ -1,0 +1,44 @@
+---
+description: UOM normalization rules — internal/production always metric, purchase units only for POs
+alwaysApply: true
+---
+
+# UOM Normalization Convention
+
+This ERP uses TWO UOM contexts. Never mix them.
+
+## Internal / Production (normalized metric)
+
+Used in: **BOM Templates, BOM Engineering, Quotes, Breakdowns, ConfiguredProducts, cost calculations**
+
+| measure_basis | Normalized UOM | Examples |
+|---|---|---|
+| `unit` | `ea` | brackets, drives, end caps, adapters |
+| `linear` | `m` | tubes, bars, channels, cassettes, chains |
+| `area` | `m2` | fabrics, screens |
+
+- `BOMComponents.uom` stores the normalized engineering UOM — **never** `ft`, `yd`, `set`, `pack`, `roll`
+- `isCuttable` logic must use `measure_basis IN ('linear','area')`, not `uom = 'm'`
+- Cut deltas are always in **mm** (millimeters)
+
+## Purchase / External
+
+Used in: **Purchase Orders, PurchaseOrderLines, supplier communication**
+
+| Field | Source |
+|---|---|
+| `CatalogItems.purchase_unit` | `each`, `set`, `pack`, `roll`, `m`, `ft`, `yd` |
+| `CatalogItems.unit_of_measure` | Display UOM in catalog context (may be `ft`) |
+| `PurchaseOrderLines.unit` | Copied from `purchase_unit` at PO creation |
+
+## Rules
+
+1. **Never** use `CatalogItems.unit_of_measure` or `purchase_unit` inside BOM/Engineering/Quote context
+2. **Never** write `ft`, `yd`, `set`, `pack`, `roll` into `BOMComponents.uom`
+3. When adding a component to a BOM, default UOM: `'m'` if `measure_basis = 'linear'`, `'m2'` if `'area'`, `'ea'` otherwise
+4. Conversion to purchase units happens **only** at PurchaseOrder creation time
+5. `BOMComponents.uom` is the source of truth for engineering — it is already computed and stored, do not recalculate from catalog
+
+## Auto-sync trigger
+
+`trg_catalog_measure_basis_sync_bom` on `CatalogItems` AFTER UPDATE: when `measure_basis` changes, all `BOMComponents` referencing that item are updated to the correct normalized UOM automatically. This keeps Engineering in sync with Catalog without manual intervention.

@@ -3,7 +3,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCreatePurchaseOrder, type CreatePOLineInput } from '../../hooks/usePurchaseOrders';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { router } from '../../lib/router';
@@ -11,6 +11,7 @@ import {
   Search, SortAsc, SortDesc, ShoppingCart, ChevronDown, Filter, X, ExternalLink, Loader2,
 } from 'lucide-react';
 import Input from '../../components/ui/Input';
+import { resolveInventoryUnitModel, convertInternalToPurchaseQty, type MeasureBasis } from '../../lib/inventoryUnitModel';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
@@ -38,6 +39,14 @@ interface DemandRow {
   cost_exw: number;
   item_min_qty: number;
   need_to_buy: number;
+  purchase_unit: string | null;
+  units_per_purchase_unit: number;
+  is_roll: boolean;
+  roll_length_m: number | null;
+  roll_length_value: number | null;
+  roll_length_uom: string | null;
+  unit_of_measure: string | null;
+  measure_basis: string;
 }
 
 interface CreatedPO {
@@ -53,6 +62,7 @@ export default function MaterialDemand() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const addNotification = useUIStore(s => s.addNotification);
+  const queryClient = useQueryClient();
   const { createPurchaseOrder, isCreating } = useCreatePurchaseOrder();
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
 
@@ -60,13 +70,11 @@ export default function MaterialDemand() {
   const [createdPOs, setCreatedPOs] = useState<CreatedPO[] | null>(null);
   const [sortBy, setSortBy] = useState<SortCol>('sku');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [currentPage, setCurrentPage] = useState(1);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [filterMoId, setFilterMoId] = useState<string | null>(null);
-  const [needToBuyOnly, setNeedToBuyOnly] = useState(false);
+  const [needToBuyOnly, setNeedToBuyOnly] = useState(true);
   const [showMODropdown, setShowMODropdown] = useState(false);
   const [moFilterSearch, setMoFilterSearch] = useState('');
-  const itemsPerPage = 25;
 
   useEffect(() => {
     registerSubmodules('Inventory', INVENTORY_SUBMODULES);
@@ -102,6 +110,13 @@ export default function MaterialDemand() {
         vendor_name: string | null;
         cost_exw: number;
         item_min_qty: number;
+        purchase_unit: string | null;
+        units_per_purchase_unit: number;
+        is_roll: boolean;
+        roll_length_m: number | null;
+        roll_length_value: number | null;
+        roll_length_uom: string | null;
+        unit_of_measure: string | null;
       }>();
 
       const resolveItemMinQty = (item: Record<string, unknown>): number => {
@@ -168,8 +183,33 @@ export default function MaterialDemand() {
             vendor_name: vendor?.name ?? null,
             cost_exw: Number(c.cost_exw ?? 0),
             item_min_qty: resolveItemMinQty(c as Record<string, unknown>),
+            purchase_unit: c.purchase_unit ?? null,
+            units_per_purchase_unit: Number(c.units_per_purchase_unit ?? 1) || 1,
+            is_roll: Boolean(c.is_roll),
+            roll_length_m: c.roll_length_m != null ? Number(c.roll_length_m) : null,
+            roll_length_value: c.roll_length_value != null ? Number(c.roll_length_value) : null,
+            roll_length_uom: c.roll_length_uom ?? null,
+            unit_of_measure: c.unit_of_measure ?? null,
+            measure_basis: (c.measure_basis ?? 'unit') as string,
           });
         });
+      }
+
+      // Aggregate total required per catalog_item across ALL MOs
+      const totalRequiredPerItem = new Map<string, number>();
+      for (const d of demand) {
+        const itemId = (d as any).catalog_item_id as string;
+        totalRequiredPerItem.set(itemId, (totalRequiredPerItem.get(itemId) ?? 0) + Number((d as any).required_qty ?? 0));
+      }
+
+      // Compute item-level need_to_buy (aggregate deficit, not per-MO)
+      const itemNeedToBuyMap = new Map<string, number>();
+      for (const [itemId, totalReq] of totalRequiredPerItem) {
+        const v = vendorMap.get(itemId);
+        const onHand = onHandMap.get(itemId) ?? 0;
+        const onOrder = onOrderMap.get(itemId) ?? 0;
+        const minQty = Number(v?.item_min_qty ?? 0);
+        itemNeedToBuyMap.set(itemId, Math.round(Math.max(0, totalReq + minQty - onHand - onOrder) * 100) / 100);
       }
 
       return demand.map((d: any) => {
@@ -183,10 +223,15 @@ export default function MaterialDemand() {
           vendor_name: v?.vendor_name ?? null,
           cost_exw: v?.cost_exw ?? 0,
           item_min_qty: Number(v?.item_min_qty ?? 0),
-          need_to_buy: Math.max(
-            0,
-            Number(d.required_qty ?? 0) + Number(v?.item_min_qty ?? 0) - (onHandMap.get(d.catalog_item_id) ?? 0) - (onOrderMap.get(d.catalog_item_id) ?? 0)
-          ),
+          purchase_unit: v?.purchase_unit ?? null,
+          units_per_purchase_unit: v?.units_per_purchase_unit ?? 1,
+          is_roll: v?.is_roll ?? false,
+          roll_length_m: v?.roll_length_m ?? null,
+          roll_length_value: v?.roll_length_value ?? null,
+          roll_length_uom: v?.roll_length_uom ?? null,
+          unit_of_measure: v?.unit_of_measure ?? null,
+          measure_basis: (v?.measure_basis ?? 'unit') as string,
+          need_to_buy: itemNeedToBuyMap.get(d.catalog_item_id) ?? 0,
         };
       });
     },
@@ -241,9 +286,6 @@ export default function MaterialDemand() {
     return rows;
   }, [demandRows, filterMoId, needToBuyOnly, searchTerm, sortBy, sortOrder]);
 
-  const totalPages = Math.ceil(filteredDemand.length / itemsPerPage);
-  const paginatedDemand = filteredDemand.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
   const handleSort = (col: SortCol) => {
     if (sortBy === col) setSortOrder(o => o === 'asc' ? 'desc' : 'asc');
     else { setSortBy(col); setSortOrder('asc'); }
@@ -256,22 +298,24 @@ export default function MaterialDemand() {
 
   const rowKey = (r: DemandRow) => `${r.manufacturing_order_id}:${r.catalog_item_id}`;
 
-  const allVisibleSelected = useMemo(() => {
-    if (paginatedDemand.length === 0) return false;
-    return paginatedDemand.every(r => selectedRows.has(rowKey(r)));
-  }, [paginatedDemand, selectedRows]);
+  const buyableRows = useMemo(() => filteredDemand.filter(r => r.need_to_buy > 0), [filteredDemand]);
+
+  const allFilteredSelected = useMemo(() => {
+    if (buyableRows.length === 0) return false;
+    return buyableRows.every(r => selectedRows.has(rowKey(r)));
+  }, [buyableRows, selectedRows]);
 
   const toggleSelectAll = useCallback(() => {
     setSelectedRows(prev => {
       const next = new Set(prev);
-      if (allVisibleSelected) {
-        paginatedDemand.forEach(r => next.delete(rowKey(r)));
+      if (allFilteredSelected) {
+        buyableRows.forEach(r => next.delete(rowKey(r)));
       } else {
-        paginatedDemand.forEach(r => next.add(rowKey(r)));
+        buyableRows.forEach(r => next.add(rowKey(r)));
       }
       return next;
     });
-  }, [allVisibleSelected, paginatedDemand]);
+  }, [allFilteredSelected, buyableRows]);
 
   const toggleSelectRow = useCallback((key: string) => {
     setSelectedRows(prev => {
@@ -310,45 +354,71 @@ export default function MaterialDemand() {
     const results: CreatedPO[] = [];
     for (const [, group] of groups) {
       const lines: CreatePOLineInput[] = [];
+
+      // De-duplicate by catalog_item_id: only one PO line per item
+      const itemLineMap = new Map<string, DemandRow>();
       for (const r of group.rows) {
-        const needToBuy = Math.max(0, Number(r.need_to_buy ?? 0));
-        if (needToBuy <= 0) continue;
-        const missingForMO = Math.max(0, Number(r.required_qty ?? 0) - Number(r.on_hand ?? 0) - Number(r.on_order ?? 0));
-        const moQty = Math.min(needToBuy, missingForMO);
-        const stockQty = Math.max(0, needToBuy - moQty);
-
-        if (moQty > 0) {
-          lines.push({
-            catalog_item_id: r.catalog_item_id,
-            ordered_qty: moQty,
-            unit_cost: Number(r.cost_exw) || 0,
-            unit: r.uom || 'ea',
-            description: r.item_name ?? null,
-            is_one_off: false,
-            allocation_type: 'manufacturing_order' as const,
-            allocation_mo_id: r.manufacturing_order_id,
-          });
-        }
-
-        if (stockQty > 0) {
-          lines.push({
-            catalog_item_id: r.catalog_item_id,
-            ordered_qty: stockQty,
-            unit_cost: Number(r.cost_exw) || 0,
-            unit: r.uom || 'ea',
-            description: `${r.item_name ?? 'Item'} (Stock replenishment)`,
-            is_one_off: false,
-            allocation_type: 'stock' as const,
-            allocation_mo_id: null,
-          });
+        if (r.need_to_buy <= 0) continue;
+        if (!itemLineMap.has(r.catalog_item_id)) {
+          itemLineMap.set(r.catalog_item_id, r);
         }
       }
+
+      for (const [, r] of itemLineMap) {
+        const needToBuy = r.need_to_buy;
+        const costExw = Number(r.cost_exw) || 0;
+
+        const model = resolveInventoryUnitModel({
+          isRoll: r.is_roll,
+          measureBasis: (r.measure_basis || 'unit') as MeasureBasis,
+          purchaseUnit: r.purchase_unit,
+        });
+
+        const conversion = convertInternalToPurchaseQty({
+          internalQty: needToBuy,
+          purchaseMode: model.purchaseMode,
+          purchaseUnit: r.purchase_unit || 'ea',
+          unitsPerPurchaseUnit: r.units_per_purchase_unit,
+          rollLengthValue: r.roll_length_value,
+          rollLengthUom: r.roll_length_uom,
+        });
+
+        const orderQty = conversion.orderQty;
+        const lineUnit = conversion.lineUnit;
+        const unitCost = conversion.unitCost(costExw);
+
+        const moIds = group.rows
+          .filter(row => row.catalog_item_id === r.catalog_item_id)
+          .map(row => row.manufacturing_order_id);
+
+        lines.push({
+          catalog_item_id: r.catalog_item_id,
+          ordered_qty: orderQty,
+          unit_cost: unitCost,
+          unit: lineUnit,
+          description: r.item_name ?? null,
+          is_one_off: false,
+          allocation_type: 'manufacturing_order' as const,
+          allocation_mo_id: moIds[0],
+          sku_snapshot: r.sku ?? null,
+          item_name_snapshot: r.item_name ?? null,
+          purchase_unit_snapshot: r.purchase_unit ?? null,
+          units_per_purchase_unit_snapshot: r.units_per_purchase_unit ?? 1,
+          is_roll_snapshot: r.is_roll,
+          roll_length_value_snapshot: r.roll_length_value ?? null,
+          roll_length_uom_snapshot: r.roll_length_uom ?? null,
+          unit_of_measure_snapshot: r.unit_of_measure ?? null,
+        });
+      }
+
+      const allMoIds = [...new Set(group.rows.map(r => r.manufacturing_order_id))];
 
       try {
         const po = await createPurchaseOrder({
           warehouse_id: defaultWarehouse.id,
           vendor_id: group.vendor_id,
           lines,
+          manufacturing_order_ids: allMoIds,
         });
         results.push({
           id: po.id,
@@ -365,8 +435,9 @@ export default function MaterialDemand() {
       setCreatedPOs(results);
       setSelectedRows(new Set());
       addNotification({ type: 'success', title: 'Purchase Orders Created', message: `${results.length} PO(s) created successfully.` });
+      await queryClient.invalidateQueries({ queryKey: ['material-demand', activeOrganizationId] });
     }
-  }, [demandRows, selectedRows, defaultWarehouse, createPurchaseOrder, addNotification]);
+  }, [demandRows, selectedRows, defaultWarehouse, createPurchaseOrder, addNotification, queryClient, activeOrganizationId]);
 
   return (
     <div className="py-6 px-6">
@@ -409,7 +480,7 @@ export default function MaterialDemand() {
                 </span>
               </span>
               {filterMoId ? (
-                <button type="button" onClick={e => { e.stopPropagation(); setFilterMoId(null); setCurrentPage(1); }} className="p-0.5 hover:bg-gray-100 rounded">
+                <button type="button" onClick={e => { e.stopPropagation(); setFilterMoId(null); }} className="p-0.5 hover:bg-gray-100 rounded">
                   <X className="w-3.5 h-3.5 text-gray-400" />
                 </button>
               ) : (
@@ -431,7 +502,7 @@ export default function MaterialDemand() {
                 <div className="max-h-48 overflow-y-auto">
                   <button
                     type="button"
-                    onClick={() => { setFilterMoId(null); setShowMODropdown(false); setMoFilterSearch(''); setCurrentPage(1); }}
+                    onClick={() => { setFilterMoId(null); setShowMODropdown(false); setMoFilterSearch(''); }}
                     className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${!filterMoId ? 'bg-primary/5 font-medium' : ''}`}
                   >
                     All MOs
@@ -442,7 +513,7 @@ export default function MaterialDemand() {
                     <button
                       key={mo.id}
                       type="button"
-                      onClick={() => { setFilterMoId(mo.id); setShowMODropdown(false); setMoFilterSearch(''); setCurrentPage(1); }}
+                      onClick={() => { setFilterMoId(mo.id); setShowMODropdown(false); setMoFilterSearch(''); }}
                       className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${filterMoId === mo.id ? 'bg-primary/5 font-medium' : ''}`}
                     >
                       {mo.manufacturing_order_no}
@@ -459,7 +530,7 @@ export default function MaterialDemand() {
             type="text"
             placeholder="Search SKU, item name..."
             value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+            onChange={e => setSearchTerm(e.target.value)}
             className="pl-10"
           />
         </div>
@@ -468,7 +539,7 @@ export default function MaterialDemand() {
           <input
             type="checkbox"
             checked={needToBuyOnly}
-            onChange={e => { setNeedToBuyOnly(e.target.checked); setCurrentPage(1); }}
+            onChange={e => setNeedToBuyOnly(e.target.checked)}
             className="rounded border-gray-300 text-primary focus:ring-primary/20"
           />
           Need to Buy
@@ -517,14 +588,14 @@ export default function MaterialDemand() {
         </div>
       ) : (
         /* MO Demand Table */
-        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+        <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 <th className="px-4 py-3 text-center w-10">
                   <input
                     type="checkbox"
-                    checked={allVisibleSelected && paginatedDemand.length > 0}
+                    checked={allFilteredSelected && filteredDemand.length > 0}
                     onChange={toggleSelectAll}
                     className="rounded border-gray-300 text-primary focus:ring-primary/20"
                   />
@@ -542,14 +613,18 @@ export default function MaterialDemand() {
                 <th className="px-4 py-3 text-right font-medium text-gray-700 w-28">On Hand</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700 w-28">On Order</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer w-32" onClick={() => handleSort('need_to_buy')}>
-                  Need to Buy <SortIcon col="need_to_buy" />
+                  Status <SortIcon col="need_to_buy" />
                 </th>
               </tr>
             </thead>
             <tbody>
-              {paginatedDemand.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">No material demand found</td></tr>
-              ) : paginatedDemand.map((r, i) => {
+              {filteredDemand.length === 0 ? (
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">
+                  {needToBuyOnly && (demandRows ?? []).length > 0
+                    ? 'All materials are covered (on hand + on order). Uncheck "Need to Buy" to see all items.'
+                    : 'No material demand found'}
+                </td></tr>
+              ) : filteredDemand.map((r, i) => {
                 const needToBuy = r.need_to_buy;
                 const key = rowKey(r);
                 return (
@@ -559,7 +634,8 @@ export default function MaterialDemand() {
                         type="checkbox"
                         checked={selectedRows.has(key)}
                         onChange={() => toggleSelectRow(key)}
-                        className="rounded border-gray-300 text-primary focus:ring-primary/20"
+                        disabled={needToBuy <= 0}
+                        className="rounded border-gray-300 text-primary focus:ring-primary/20 disabled:opacity-30 disabled:cursor-not-allowed"
                       />
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-900">{r.manufacturing_order_no}</td>
@@ -578,8 +654,16 @@ export default function MaterialDemand() {
                     <td className="px-4 py-3 text-right tabular-nums font-medium">{Number(r.required_qty).toFixed(2)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-600">{Number(r.on_hand).toFixed(2)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-600">{r.on_order > 0 ? Number(r.on_order).toFixed(2) : '—'}</td>
-                    <td className={`px-4 py-3 text-right tabular-nums font-medium ${needToBuy > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {needToBuy > 0 ? needToBuy.toFixed(2) : 'OK'}
+                    <td className="px-4 py-3 text-right">
+                      {needToBuy > 0 ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
+                          -{needToBuy.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700">
+                          In Stock
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -589,16 +673,11 @@ export default function MaterialDemand() {
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
-          <span>Page {currentPage} of {totalPages}</span>
-          <div className="flex gap-2">
-            <button disabled={currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1 border rounded disabled:opacity-50">Prev</button>
-            <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1 border rounded disabled:opacity-50">Next</button>
-          </div>
-        </div>
-      )}
+      {/* Row count */}
+      <div className="mt-3 text-xs text-gray-500">
+        {filteredDemand.length} item{filteredDemand.length === 1 ? '' : 's'}
+        {selectedRows.size > 0 && ` · ${selectedRows.size} selected`}
+      </div>
     </div>
   );
 }

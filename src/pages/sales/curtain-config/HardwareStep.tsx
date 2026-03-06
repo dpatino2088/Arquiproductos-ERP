@@ -63,13 +63,16 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   const showCassette = true;
   const showSideChannel = isRollerShade;
   
-  // ✅ Helper: Cargar templates base para un color específico
+  const mfrFilteredTemplates: string[] | null = Array.isArray((config as any)._manufacturer_filtered_templates)
+    ? (config as any)._manufacturer_filtered_templates
+    : null;
+
   const loadTemplatesForColor = async (color: string): Promise<string[]> => {
     if (!activeOrganizationId || !productTypeId) return [];
     
     const normalizedColor = color.trim().charAt(0).toUpperCase() + color.trim().slice(1).toLowerCase();
     
-    const { data: templates, error } = await supabase
+    let query = supabase
       .from('BOMTemplates')
       .select('id')
       .eq('organization_id', activeOrganizationId)
@@ -77,6 +80,12 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
       .eq('hardware_color', normalizedColor)
       .eq('is_active', true)
       .eq('archived', false);
+
+    if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) {
+      query = query.in('id', mfrFilteredTemplates);
+    }
+    
+    const { data: templates, error } = await query;
     
     if (error) {
       console.error('[HardwareStep] Error loading templates for color:', error);
@@ -84,8 +93,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     }
     
     if (!templates || templates.length === 0) {
-      // Fallback: templates sin color (NULL)
-      const { data: nullTemplates } = await supabase
+      let fallbackQuery = supabase
         .from('BOMTemplates')
         .select('id')
         .eq('organization_id', activeOrganizationId)
@@ -93,7 +101,12 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         .is('hardware_color', null)
         .eq('is_active', true)
         .eq('archived', false);
-      
+
+      if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) {
+        fallbackQuery = fallbackQuery.in('id', mfrFilteredTemplates);
+      }
+
+      const { data: nullTemplates } = await fallbackQuery;
       return (nullTemplates || []).map((t: { id: string }) => t.id);
     }
     

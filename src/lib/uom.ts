@@ -5,6 +5,15 @@
  * It ensures consistency between frontend validation and database storage.
  */
 
+// Canonical UOM per measure basis (always normalized)
+export const CANONICAL_UOM: Record<string, string> = {
+  unit: 'ea',
+  linear: 'm',
+  linear_m: 'm',
+  area: 'm2',
+  fabric: 'm',
+};
+
 // Valid UOM options by measure basis (for non-fabric items)
 export const UOM_OPTIONS_BY_MEASURE_BASIS = {
   linear_m: ['m', 'ft', 'yd'],
@@ -104,9 +113,27 @@ export function validateAndNormalizeUom(
   return normalized;
 }
 
+/**
+ * Returns the canonical (normalized) UOM for a catalog item.
+ * Maps legacy values (set, pcs, pair, ft, yd, etc.) to their canonical form.
+ * Falls back to measure_basis derivation, then 'ea'.
+ */
+export function canonicalUom(
+  uom?: string | null,
+  measureBasis?: string | null,
+): string {
+  const raw = (uom || '').trim().toLowerCase();
+  const UNIT_ALIASES = new Set(['ea', 'pcs', 'set', 'pair', 'pack', 'unit', 'each']);
+  const LINEAR_ALIASES = new Set(['m', 'ft', 'yd', 'cm', 'mm']);
 
+  if (UNIT_ALIASES.has(raw)) return 'ea';
+  if (LINEAR_ALIASES.has(raw)) return 'm';
+  if (raw === 'm2' || raw === 'ft2' || raw === 'yd2') return 'm2';
+  if (raw === 'roll') return 'm';
 
-
+  const mb = (measureBasis || '').trim().toLowerCase();
+  return CANONICAL_UOM[mb] || 'ea';
+}
 
 
 

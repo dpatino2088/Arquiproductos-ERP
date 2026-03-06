@@ -4,6 +4,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { usePermissions } from '../../hooks/usePermissions';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
 
 export default function Manufacturing() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
@@ -16,10 +17,7 @@ export default function Manufacturing() {
     if (currentPath.startsWith('/manufacturing')) {
       // Register submodules without clearing first (let individual components handle it)
       // This ensures tabs are visible when navigating directly to sub-routes
-      registerSubmodules('Manufacturing', [
-        { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'material', label: 'Material', href: '/manufacturing/material' },
-      ]);
+      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
       
       if (currentPath === '/manufacturing' || currentPath === '/manufacturing/') {
         router.navigate('/manufacturing/manufacturing-orders');

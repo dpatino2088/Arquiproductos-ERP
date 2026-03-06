@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
 import { useManufacturingOrders, ManufacturingOrderStatus } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
@@ -73,10 +74,11 @@ export default function ManufacturingOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
-  const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'scheduled_start_date' | 'priority'>('manufacturing_order_no');
+  const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'planned_start_at' | 'priority'>('manufacturing_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [statusTab, setStatusTab] = useState('all');
+  const [materialReadinessMap, setMaterialReadinessMap] = useState<Record<string, { status: string; has_shortage: boolean }>>({});
 
   const nonArchivedOrders = useMemo(
     () => manufacturingOrders.filter((mo) => !mo.archived),
@@ -119,10 +121,7 @@ export default function ManufacturingOrders() {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
       // Always register submodules to ensure tabs are visible
-      registerSubmodules('Manufacturing', [
-        { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'material', label: 'Material', href: '/manufacturing/material' },
-      ]);
+      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
     }
     
     return () => {
@@ -200,7 +199,7 @@ export default function ManufacturingOrders() {
       let aVal: any = sortBy === 'sale_order_no' ? a.saleOrderNo : sortBy === 'manufacturing_order_no' ? a.manufacturingOrderNo : (a as unknown as Record<string, unknown>)[sortBy];
       let bVal: any = sortBy === 'sale_order_no' ? b.saleOrderNo : sortBy === 'manufacturing_order_no' ? b.manufacturingOrderNo : (b as unknown as Record<string, unknown>)[sortBy];
 
-      if (sortBy === 'scheduled_start_date') {
+      if (sortBy === 'planned_start_at') {
         aVal = aVal ? new Date(aVal).getTime() : 0;
         bVal = bVal ? new Date(bVal).getTime() : 0;
       }
@@ -227,6 +226,28 @@ export default function ManufacturingOrders() {
   }, [filteredAndSorted, currentPage, itemsPerPage]);
 
   const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
+
+  const paginatedIds = useMemo(() => paginated.map((mo) => mo.id).join(','), [paginated]);
+
+  // Fetch material readiness for current page (batch)
+  useEffect(() => {
+    if (!activeOrganizationId || paginated.length === 0) {
+      setMaterialReadinessMap({});
+      return;
+    }
+    const moIds = paginated.map((mo) => mo.id);
+    supabase.rpc('get_mo_material_readiness_batch', { p_mo_ids: moIds }).then(({ data, error: err }) => {
+      if (err || !Array.isArray(data)) {
+        setMaterialReadinessMap({});
+        return;
+      }
+      const map: Record<string, { status: string; has_shortage: boolean }> = {};
+      for (const row of data as { mo_id: string; status: string; has_shortage: boolean }[]) {
+        if (row?.mo_id) map[row.mo_id] = { status: row.status ?? 'incomplete', has_shortage: Boolean(row.has_shortage) };
+      }
+      setMaterialReadinessMap(map);
+    });
+  }, [activeOrganizationId, paginatedIds, paginated.length]);
 
   // Handlers
   const handleView = (id: string) => {
@@ -468,15 +489,16 @@ export default function ManufacturingOrders() {
                       )}
                     </button>
                   </th>
+                  <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Materials</th>
                   <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Sale Order</th>
                   <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Customer</th>
                   <th className="py-3 px-6 text-left">
                     <button
-                      onClick={() => handleSort('scheduled_start_date')}
+                      onClick={() => handleSort('planned_start_at')}
                       className="flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900"
                     >
                       Scheduled Start
-                      {sortBy === 'scheduled_start_date' && (
+                      {sortBy === 'planned_start_at' && (
                         sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />
                       )}
                     </button>
@@ -507,6 +529,17 @@ export default function ManufacturingOrders() {
                     </td>
                     <td className="py-4 px-6">
                       <StatusBadge status={(mo.status || 'draft').toString()} type="manufacturing" size="sm" />
+                    </td>
+                    <td className="py-4 px-6">
+                      {materialReadinessMap[mo.id] ? (
+                        materialReadinessMap[mo.id].has_shortage ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-800" title="Material demand not fully covered">Incomplete</span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">OK</span>
+                        )
+                      ) : (
+                        <span className="text-gray-400 text-xs">—</span>
+                      )}
                     </td>
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.saleOrderNo}</td>
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.customerName}</td>

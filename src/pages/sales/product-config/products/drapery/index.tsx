@@ -1,34 +1,43 @@
 /**
  * Drapery Product Module
- * Complete configuration flow for Drapery (Wave/Ripple Fold) products
+ * Complete configuration flow for Drapery (Wave/Ripple Fold/Pinch Pleat) products
  */
 
 import { ProductType, DraperyConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
+import ManufacturerStepComponent from '../../../curtain-config/ManufacturerStep';
+import ProductLineStepComponent from './ProductLineStep';
+import DraperyStyleStepComponent from './DraperyStyleStep';
 import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
-import AccessoriesStepComponent from '../../../curtain-config/AccessoriesStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
 
 const DRAPERY_STEPS: ProductStep[] = [
+  { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
+  { id: 'product-line', label: 'PRODUCT LINE', component: ProductLineStepComponent, isRequired: true },
+  { id: 'drapery-style', label: 'STYLE VARIANT', component: DraperyStyleStepComponent, isRequired: true },
   { id: 'measurements', label: 'MEASUREMENTS', component: MeasurementsStepComponent, isRequired: true },
-  { id: 'variants', label: 'VARIANTS', component: VariantsStepComponent },
+  { id: 'variants', label: 'FABRIC', component: VariantsStepComponent },
   { id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent },
-  { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
   { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
 ];
 
 function validateStep(stepId: string, config: ProductConfig): boolean {
   if (config.productType !== 'drapery') return false;
-  const draperyConfig = config as DraperyConfig;
+  const cfg = config as any;
   switch (stepId) {
+    case 'manufacturer':
+      return !!cfg.manufacturer;
+    case 'product-line':
+      return !!cfg.productLine;
+    case 'drapery-style':
+      return !!(cfg.styleCode);
     case 'measurements':
-      return !!(draperyConfig.width_mm && draperyConfig.height_mm);
+      return !!(cfg.width_mm && cfg.height_mm && cfg.openingDirection && cfg.driveSide);
     case 'variants':
-      return !!(draperyConfig.fabric?.collectionId && draperyConfig.fabric?.variantId);
+      return !!(cfg.variantId || cfg.fabric_catalog_item_id);
     case 'operating-system':
-      // Drapery doesn't have operating system in the same way - it's optional
       return true;
     default:
       return true;

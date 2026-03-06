@@ -27,6 +27,8 @@ export interface BaseProductConfig {
   area?: string;
   position: number | string;
   quantity?: number;
+  manufacturer?: string;
+  productLine?: string;
   // Operating system selections (shared)
   manual_drive?: string;
   remote_control?: string;
@@ -180,20 +182,26 @@ export interface TripleShadeConfig extends BaseProductConfig {
 // Drapery Configuration
 export interface DraperyConfig extends BaseProductConfig {
   productType: 'drapery';
-  // Track System
+  // Drapery style — drives FabricRules + SystemRules lookup
+  styleCode?: 'wave_2.3' | 'wave_2.8' | 'pinch_pleat';
+  // Legacy fields (kept for backward compatibility)
   trackSystem?: 'wave' | 'ripple-fold' | 'pleated';
   trackType?: string;
   // Measurements
   width_mm?: number;
   height_mm?: number;
-  fullness?: number; // Percentage of fullness (e.g., 200% = double width)
+  fullness?: number; // Display-only — read from FabricRules, not user input
+  // Opening & Drive Side — filters BOMTemplates
+  openingDirection?: 'left' | 'right' | 'center';
+  driveSide?: 'left' | 'right';
   // Fabric
   fabric?: {
     manufacturer?: 'coulisse' | 'vertilux';
     collectionId?: string;
     variantId?: string;
+    rollWidthCm?: number;
   };
-  // Confection Type
+  // Legacy confection type
   confectionType?: 'standard' | 'pinch-pleat' | 'goblet' | 'euro-pleat';
   // Mounting
   mountingType?: 'ceiling' | 'wall' | 'inside-recess';

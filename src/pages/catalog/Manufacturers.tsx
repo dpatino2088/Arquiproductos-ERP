@@ -23,6 +23,9 @@ import {
   Package,
   FolderTree,
   Book,
+  Upload,
+  X,
+  ImageIcon,
 } from 'lucide-react';
 
 interface ManufacturersProps {
@@ -55,7 +58,9 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', notes: '' });
+  const [formData, setFormData] = useState({ name: '', code: '', notes: '', logo_url: '' });
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   // Filter and sort (sobre manufacturersToShow, ya sin los de "cero que mostrar")
   const filteredManufacturers = useMemo(() => {
@@ -104,7 +109,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
       router.navigate('/partners/manufacturers');
       return;
     }
-    setFormData({ name: '', code: '', notes: '' });
+    setFormData({ name: '', code: '', notes: '', logo_url: '' });
     setEditingId(null);
     setShowNewModal(true);
   };
@@ -120,9 +125,29 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
       name: manufacturer.name,
       code: manufacturer.code || '',
       notes: manufacturer.notes || '',
+      logo_url: manufacturer.logo_url || '',
     });
     setEditingId(manufacturer.id);
     setShowNewModal(true);
+  };
+
+  const handleLogoUpload = async (file: File) => {
+    if (!activeOrganizationId) return;
+    setUploadingLogo(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+      const path = `${activeOrganizationId}/manufacturers/${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('catalog-images')
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (uploadErr) throw uploadErr;
+      const { data: urlData } = supabase.storage.from('catalog-images').getPublicUrl(path);
+      setFormData(prev => ({ ...prev, logo_url: urlData.publicUrl }));
+    } catch (err) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Upload Error', message: err instanceof Error ? err.message : 'Failed to upload logo' });
+    } finally {
+      setUploadingLogo(false);
+    }
   };
 
   const handleSave = async () => {
@@ -143,7 +168,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
         });
       }
       setShowNewModal(false);
-      setFormData({ name: '', code: '', notes: '' });
+      setFormData({ name: '', code: '', notes: '', logo_url: '' });
       setEditingId(null);
     } catch (error) {
       useUIStore.getState().addNotification({
@@ -233,6 +258,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
             <table className="table-fit">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
+                  <th className="text-center py-3 px-3 font-medium text-gray-900 text-xs w-14">Logo</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">
                     <button
                       onClick={() => handleSort('name')}
@@ -258,7 +284,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
               <tbody className="divide-y divide-gray-200">
                 {filteredManufacturers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-12 px-6 text-center">
+                    <td colSpan={5} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <Building2 className="w-12 h-12 text-gray-400 mb-4" />
                         <p className="text-gray-600 mb-2">No manufacturers found</p>
@@ -276,6 +302,13 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                       key={manufacturer.id} 
                       className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
                     >
+                      <td className="py-2 px-3 text-center">
+                        {manufacturer.logo_url ? (
+                          <img src={manufacturer.logo_url} alt="" className="h-8 w-10 object-contain mx-auto" />
+                        ) : (
+                          <Building2 className="w-5 h-5 text-gray-300 mx-auto" />
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-gray-900 text-xs font-medium">
                         {manufacturer.name}
                       </td>
@@ -368,7 +401,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
             <button
               onClick={() => {
                 setShowNewModal(false);
-                setFormData({ name: '', code: '', notes: '' });
+                setFormData({ name: '', code: '', notes: '', logo_url: '' });
                 setEditingId(null);
               }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
@@ -381,6 +414,57 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
             </h2>
 
             <div className="space-y-4">
+              {/* Logo Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Brand Logo</label>
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 overflow-hidden flex-shrink-0">
+                    {formData.logo_url ? (
+                      <img src={formData.logo_url} alt="Logo" className="w-full h-full object-contain p-1" />
+                    ) : (
+                      <ImageIcon className="w-8 h-8 text-gray-300" />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleLogoUpload(file);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {uploadingLogo ? (
+                        <div className="animate-spin h-3 w-3 border border-gray-400 border-t-transparent rounded-full" />
+                      ) : (
+                        <Upload className="w-3 h-3" />
+                      )}
+                      {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
+                    </button>
+                    {formData.logo_url && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, logo_url: '' }))}
+                        className="inline-flex items-center gap-1 px-3 py-1 text-xs text-red-600 hover:text-red-700"
+                      >
+                        <X className="w-3 h-3" />
+                        Remove
+                      </button>
+                    )}
+                    <p className="text-[10px] text-gray-400">PNG, JPG, SVG or WebP. Max 2MB.</p>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Name <span className="text-red-500">*</span>
@@ -425,7 +509,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
               <button
                 onClick={() => {
                   setShowNewModal(false);
-                  setFormData({ name: '', code: '', notes: '' });
+                  setFormData({ name: '', code: '', notes: '', logo_url: '' });
                   setEditingId(null);
                 }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
@@ -434,7 +518,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
               </button>
               <button
                 onClick={handleSave}
-                disabled={!formData.name.trim() || isCreating}
+                disabled={!formData.name.trim() || isCreating || uploadingLogo}
                 className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isCreating ? 'Saving...' : editingId ? 'Update' : 'Create'}

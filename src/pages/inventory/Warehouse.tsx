@@ -40,6 +40,17 @@ function toMeters(value: number | null | undefined, uom: string | null | undefin
   return null;
 }
 
+/** Convert internal meters back to a display UOM. */
+function fromMeters(meters: number, uom: string): number {
+  const u = uom.toLowerCase();
+  if (u === 'yd' || u === 'yard' || u === 'yards') return meters / 0.9144;
+  if (u === 'ft' || u === 'foot' || u === 'feet') return meters / 0.3048;
+  if (u === 'in' || u === 'inch' || u === 'inches') return meters / 0.0254;
+  if (u === 'cm') return meters * 100;
+  if (u === 'mm') return meters * 1000;
+  return meters;
+}
+
 interface StockRow {
   id: string;
   catalogItemId: string;
@@ -48,6 +59,10 @@ interface StockRow {
   uom: string;
   category: string | null;
   onHand: number;
+  /** On hand in the manufacturer's UOM (e.g. yd) for linear/roll items, null for ea items. */
+  onHandDisplay: number | null;
+  /** The manufacturer's unit label (e.g. 'yd'). */
+  displayUom: string | null;
   warehouseName: string;
   onOrder: number;
   assigned: number;
@@ -62,6 +77,7 @@ interface StockRow {
   m2Reference: number | null;
 }
 
+/** Balance color: green if covered, orange if close, red if deficit. */
 const getBalanceBadgeColor = (balance: number, required: number) => {
   if (balance >= 0) return 'bg-green-50 text-green-700';
   const threshold = Math.abs(Number(required) || 0) * 0.1;
@@ -143,14 +159,21 @@ export default function Warehouse() {
           .select('catalog_item_id, required_qty')
           .eq('organization_id', activeOrganizationId)
           .in('catalog_item_id', catalogIds)
-          .in('mo_status', ['draft', 'planned', 'quality_check']);
+          .in('mo_status', ['draft', 'planned', 'in_production', 'quality_check']);
         if (demandError) throw demandError;
 
         (demandRows ?? []).forEach((r: any) => {
           const qty = Number(r.required_qty ?? 0);
           requiredMap.set(r.catalog_item_id, (requiredMap.get(r.catalog_item_id) || 0) + qty);
-          // Soft reservation model: assigned is planning allocation and can be reassigned.
-          assignedMap.set(r.catalog_item_id, (assignedMap.get(r.catalog_item_id) || 0) + qty);
+        });
+
+        const { data: allocRows } = await supabase
+          .from('inventory_allocated')
+          .select('catalog_item_id, allocated_qty')
+          .eq('organization_id', activeOrganizationId)
+          .in('catalog_item_id', catalogIds);
+        (allocRows ?? []).forEach((r: any) => {
+          assignedMap.set(r.catalog_item_id, (assignedMap.get(r.catalog_item_id) || 0) + Number(r.allocated_qty || 0));
         });
       }
 
@@ -171,6 +194,10 @@ export default function Warehouse() {
             : null;
         const m2Reference =
           isLinearStock && widthM != null && widthM > 0 ? onHand * widthM : null;
+        const rawUom = (b.CatalogItems?.unit_of_measure ?? 'ea').toLowerCase();
+        const needsConversion = isLinearStock && rawUom !== 'm';
+        const onHandDisplay = needsConversion ? fromMeters(onHand, rawUom) : null;
+        const displayUom = needsConversion ? rawUom : null;
         return {
           id: b.catalog_item_id + ':' + b.warehouse_id,
           catalogItemId: b.catalog_item_id,
@@ -179,12 +206,14 @@ export default function Warehouse() {
           uom: b.CatalogItems?.is_roll ? 'm' : (b.CatalogItems?.unit_of_measure ?? 'ea'),
           category: b.CatalogItems?.CatalogCategories?.name ?? null,
           onHand,
+          onHandDisplay,
+          displayUom,
           warehouseName: b.Warehouses?.name ?? '—',
           onOrder: onOrderMap.get(b.catalog_item_id) ?? 0,
           assigned: assignedMap.get(b.catalog_item_id) ?? 0,
           required: requiredMap.get(b.catalog_item_id) ?? 0,
-          available: onHand - (assignedMap.get(b.catalog_item_id) ?? 0),
-          balance: onHand + (onOrderMap.get(b.catalog_item_id) ?? 0) - (requiredMap.get(b.catalog_item_id) ?? 0),
+          available: Math.round(Math.max(0, onHand - (assignedMap.get(b.catalog_item_id) ?? 0)) * 100) / 100,
+          balance: Math.round((onHand + (onOrderMap.get(b.catalog_item_id) ?? 0) - (requiredMap.get(b.catalog_item_id) ?? 0)) * 100) / 100,
           onHandM,
           estimatedRolls,
           m2Reference,
@@ -282,9 +311,9 @@ export default function Warehouse() {
           <div className="h-10 bg-gray-100 rounded" />
         </div>
       ) : (
-        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white shadow-sm">
+        <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-auto max-h-[calc(100vh-220px)]">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b sticky top-0 z-10">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('sku')}>
                   SKU <SortIcon col="sku" />
@@ -294,15 +323,15 @@ export default function Warehouse() {
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Category</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Warehouse</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('onHand')}>
+                <th className="px-4 py-3 text-right font-medium text-gray-700 whitespace-nowrap cursor-pointer min-w-[90px]" onClick={() => handleSort('onHand')}>
                   On Hand <SortIcon col="onHand" />
                 </th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700" title="Linear items: quantity in meters">m</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700" title="Rolls: estimated count">Rolls</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700" title="Reference area (m²)">m² ref</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">On Order</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Assigned</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Required</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700 w-16" title="Normalized quantity in meters">m</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700 w-14" title="Estimated roll count">Rolls</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700 w-16" title="Reference area (m²)">m² ref</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700 whitespace-nowrap">On Order</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700">Required</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700">Assigned</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('available')}>
                   Available <SortIcon col="available" />
                 </th>
@@ -338,13 +367,19 @@ export default function Warehouse() {
                   <td className="px-4 py-3 text-gray-700">{row.itemName}</td>
                   <td className="px-4 py-3 text-gray-600">{row.category ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{row.warehouseName}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{Number(row.onHand).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                    {row.onHandDisplay != null ? (
+                      <>{Number(row.onHandDisplay).toFixed(2)}<span className="text-[10px] text-gray-400 ml-0.5">{row.displayUom}</span></>
+                    ) : (
+                      <>{Number(row.onHand).toFixed(2)}<span className="text-[10px] text-gray-400 ml-0.5">{row.uom === 'm' ? 'm' : 'ea'}</span></>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onHandM != null ? Number(row.onHandM).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.estimatedRolls != null ? Number(row.estimatedRolls).toFixed(1) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.m2Reference != null ? Number(row.m2Reference).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onOrder > 0 ? Number(row.onOrder).toFixed(2) : '—'}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.assigned > 0 ? Number(row.assigned).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.required > 0 ? Number(row.required).toFixed(2) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.assigned > 0 ? Number(row.assigned).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{Number(row.available).toFixed(2)}</td>
                   <td className="px-4 py-3 text-right">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getBalanceBadgeColor(row.balance, row.required)}`}>

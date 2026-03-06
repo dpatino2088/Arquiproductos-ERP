@@ -117,7 +117,10 @@ export function useBOMComponents(bomTemplateId: string | null) {
             component_item:component_item_id (
               id,
               sku,
-              name
+              name,
+              delta_x_mm,
+              delta_y_mm,
+              measure_basis
             )
           `)
           .eq('bom_template_id', bomTemplateId)

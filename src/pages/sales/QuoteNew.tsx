@@ -211,6 +211,12 @@ function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string
     fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
     installationType: configAny.installationType ?? configAny.installation_type ?? null,
     installationLocation: configAny.installationLocation ?? configAny.installation_location ?? null,
+    drive_side: configAny.driveSide || configAny.drive_side || null,
+    opening_direction: configAny.openingDirection || configAny.opening_direction || null,
+    manufacturer: configAny.manufacturer || null,
+    product_line: configAny.productLine || configAny.product_line || null,
+    style_code: configAny.styleCode || configAny.style_code || null,
+    force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
     accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
   };
 }
@@ -830,12 +836,19 @@ export default function QuoteNew() {
             }
           }
         }
-      } catch (err) {
-        console.error('Error loading quote:', err);
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error ? err.message
+            : typeof err === 'object' && err !== null && 'message' in err
+              ? String((err as { message?: unknown }).message)
+              : 'Unknown error';
+        console.error('Error loading quote:', msg);
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Error',
-          message: 'Failed to load quote data',
+          message: msg.includes('Failed to fetch')
+            ? 'Failed to load quote data. Check your network connection and Supabase status.'
+            : msg || 'Failed to load quote data',
         });
       }
     };
@@ -957,12 +970,6 @@ export default function QuoteNew() {
       
       // Only generate for new quotes
       if (!activeOrganizationId) return;
-      
-      // Check if quote_no already has a value (from form state)
-      const currentQuoteNo = watch('quote_no');
-      if (currentQuoteNo && currentQuoteNo.trim() !== '') {
-        return; // Already has a value, don't overwrite
-      }
 
       try {
         // Per-dealer sequence: QT-0100, QT-0101... (each dealer has independent QT sequence)
@@ -3496,6 +3503,24 @@ export default function QuoteNew() {
   const handleSaveAndClose = async (data: QuoteFormValues) => {
     await onSubmit(data, true); // Pass true to navigate after saving
   };
+
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const handleDeleteDraftQuote = async () => {
+    if (!quoteId || !activeOrganizationId) return;
+    setIsDeleting(true);
+    try {
+      const { error } = await supabase.rpc('soft_delete_quotes', { p_quote_ids: [quoteId] });
+      if (error) throw error;
+      useUIStore.getState().addNotification({ type: 'success', title: 'Eliminado', message: 'Cotización eliminada correctamente.' });
+      router.navigate('/sales/quotes');
+    } catch (err: any) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'No se pudo eliminar la cotización.' });
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmOpen(false);
+    }
+  };
   const handleCloseApproveConfirm = () => {
     if (isSaving || isUpdating) return;
     setApproveConfirmOpen(false);
@@ -3537,6 +3562,17 @@ export default function QuoteNew() {
             >
               <Eye className="w-4 h-4" />
               PDF Dealer
+            </button>
+          )}
+          {quoteId && quoteData?.status === 'draft' && (
+            <button
+              type="button"
+              onClick={() => setDeleteConfirmOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-red-300 bg-white text-red-600 transition-colors text-sm hover:bg-red-50"
+              title="Eliminar cotización"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
             </button>
           )}
           <button
@@ -3830,11 +3866,11 @@ export default function QuoteNew() {
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" style={{ width: '2%' }} title="Drag to reorder"> </th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">#</th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>Area</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '6%' }}>Position</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[120px]" style={{ width: '10%' }}>Product type</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '20%' }}>Description</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '6%' }}>Position</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[120px]" style={{ width: '10%' }}>Product type</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '20%' }}>Description</th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>System Drive</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>Measurements</th>
+                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>Measurements</th>
                     <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Qty</th>
                     <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
                     <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>Total</th>
@@ -3896,20 +3932,20 @@ export default function QuoteNew() {
                         <td className="py-4 px-4 text-gray-700 text-sm whitespace-nowrap text-left">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
-                        <td className="py-4 px-4 text-gray-700 text-sm text-left whitespace-nowrap">
+                        <td className="py-4 px-4 text-gray-700 text-sm text-center whitespace-nowrap">
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap text-left">
+                        <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap text-center">
                           {productTypeName}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm min-w-0 overflow-hidden text-ellipsis text-left" title={collectionDisplay}>
+                        <td className="py-4 px-6 text-gray-700 text-sm min-w-0 overflow-hidden text-ellipsis text-center" title={collectionDisplay}>
                           <span className="block truncate">{collectionDisplay}</span>
                         </td>
                         <td className="py-4 px-6 text-gray-700 text-sm text-left whitespace-nowrap">
                           {driveDisplay}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-left whitespace-nowrap min-w-[100px]">
-                          <div className="w-fit">
+                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-center whitespace-nowrap min-w-[100px]">
+                          <div className="w-fit mx-auto">
                             <DimensionsStackView
                               source={{
                                 width_m: line.width_m,
@@ -4209,6 +4245,17 @@ export default function QuoteNew() {
         cancelText="Cancel"
         variant="warning"
         isLoading={isSaving || isUpdating}
+      />
+      <ConfirmDialog
+        isOpen={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={handleDeleteDraftQuote}
+        title="Eliminar Cotización"
+        message={`¿Estás seguro de que deseas eliminar la cotización ${quoteData?.quote_no || ''}? Esta acción no se puede deshacer.`}
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        variant="danger"
+        isLoading={isDeleting}
       />
     </div>
   );

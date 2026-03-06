@@ -62,7 +62,17 @@ export default function BOMTemplates() {
   const [selectedProductTypes, setSelectedProductTypes] = useState<string[]>([]);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
   const [dragOverTemplateId, setDragOverTemplateId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<BOMInternalTab>('templates');
+  const [activeTab, setActiveTab] = useState<BOMInternalTab>(() => {
+    try {
+      const saved = sessionStorage.getItem('bom:activeTab');
+      if (saved === 'roles' || saved === 'engineering') return saved;
+    } catch { /* ignore */ }
+    return 'templates';
+  });
+
+  useEffect(() => {
+    try { sessionStorage.setItem('bom:activeTab', activeTab); } catch { /* ignore */ }
+  }, [activeTab]);
 
   const PERSISTENCE_KEY = 'bomTemplates:editState';
   const [showTemplateModal, setShowTemplateModal] = useState(() => {
@@ -480,7 +490,7 @@ export default function BOMTemplates() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredTemplates.map(template => {
+          {filteredTemplates.map((template, idx) => {
             const tc = components.get(template.id) || [];
             return (
               <div
@@ -498,13 +508,48 @@ export default function BOMTemplates() {
                       <GripVertical className="w-5 h-5" />
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-900">
+                      <div className="flex items-center gap-3 mb-1">
+                        <span className="text-xs font-medium text-gray-400 tabular-nums">{idx + 1}/{filteredTemplates.length}</span>
+                        <h3 className="text-base font-semibold text-gray-900">
                           {template.name || template.template_name || template.ProductType?.name || 'BOM Template'}
                         </h3>
                       </div>
-                      <p className="text-sm text-gray-600 mb-2">Product Type: {template.ProductType?.name || 'N/A'}</p>
-                      {template.description && <p className="text-sm text-gray-500">{template.description}</p>}
+                      <p className="text-xs text-gray-500 mb-2">Product Type: {template.ProductType?.name || 'N/A'}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                        {template.manufacturer && (
+                          <span><b className="text-gray-700">Manufacturer:</b> {template.manufacturer}</span>
+                        )}
+                        {template.product_line && (
+                          <span><b className="text-gray-700">Product Line:</b> {template.product_line}</span>
+                        )}
+                        {template.hardware_color && (
+                          <span><b className="text-gray-700">Color:</b> {template.hardware_color}</span>
+                        )}
+                        <span>
+                          <b className="text-gray-700">Drive Type:</b>{' '}
+                          {template.drive_type === 'motor' ? 'Motor' : template.drive_type === 'manual' ? 'Manual' : '—'}
+                        </span>
+                        <span>
+                          <b className="text-gray-700">Drive Side:</b>{' '}
+                          {template.drive_side === 'left' ? 'Left' : template.drive_side === 'right' ? 'Right' : 'L / R'}
+                        </span>
+                        {template.opening_direction && (
+                          <span>
+                            <b className="text-gray-700">Opening:</b>{' '}
+                            {template.opening_direction === 'center' ? 'Center' : template.opening_direction === 'left' ? 'Left' : 'Right'}
+                          </span>
+                        )}
+                        {template.installation_location && (
+                          <span>
+                            <b className="text-gray-700">Location:</b>{' '}
+                            {template.installation_location === 'ceiling' ? 'Ceiling' : 'Wall'}
+                          </span>
+                        )}
+                        {(template.panel_count_min ?? 1) > 1 && (
+                          <span><b className="text-gray-700">Panels:</b> {template.panel_count_min}–{template.panel_count_max}</span>
+                        )}
+                      </div>
+                      {template.description && <p className="text-xs text-gray-400 mt-1">{template.description}</p>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -541,6 +586,12 @@ export default function BOMTemplates() {
           editingTemplateId={editingTemplateId}
           onClose={handleCloseModal}
           onSave={handleSaveComplete}
+          onGoToEngineering={(templateId) => {
+            try { sessionStorage.setItem('bom:eng:templateId', templateId); } catch { /* ignore */ }
+            handleCloseModal();
+            setActiveTab('engineering');
+            window.dispatchEvent(new CustomEvent('bom:selectTemplate', { detail: templateId }));
+          }}
         />
       )}
 

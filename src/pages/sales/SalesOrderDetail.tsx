@@ -11,9 +11,10 @@ import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye } from 'lucide-react';
+import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2 } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
+import { usePayments } from '../../hooks/usePayments';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFData, InvoicePDFDealer, InvoicePDFLine, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 
@@ -184,9 +185,13 @@ export default function SalesOrderDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
+  const [creatingMOForLines, setCreatingMOForLines] = useState(false);
+  const [lineMoMap, setLineMoMap] = useState<Map<string, { mo_id: string; mo_no: string; status: string }>>(new Map());
 
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
+  const { payments: soPayments, refetch: refetchPayments } = usePayments(salesOrderId);
 
   useEffect(() => {
     registerSubmodules('Sales', SALES_SUBMODULES);
@@ -286,7 +291,33 @@ export default function SalesOrderDetail() {
       if (mosRes.error) {
         if (import.meta.env.DEV) console.warn('[SalesOrderDetail] ManufacturingOrders error:', mosRes.error);
       } else {
-        setMos((mosRes.data ?? []) as ManufacturingOrder[]);
+        const mosData = (mosRes.data ?? []) as ManufacturingOrder[];
+        setMos(mosData);
+        if (mosData.length > 0) {
+          const moIds = mosData.map(m => m.id);
+          const { data: molRows } = await supabase
+            .from('ManufacturingOrderLines')
+            .select('sales_order_line_id, manufacturing_order_id')
+            .in('manufacturing_order_id', moIds)
+            .eq('deleted', false);
+          const moMap = new Map(mosData.map(m => [m.id, m]));
+          const newLineMoMap = new Map<string, { mo_id: string; mo_no: string; status: string }>();
+          (molRows ?? []).forEach((r: any) => {
+            if (r.sales_order_line_id && !newLineMoMap.has(r.sales_order_line_id)) {
+              const mo = moMap.get(r.manufacturing_order_id);
+              if (mo && mo.status !== 'cancelled') {
+                newLineMoMap.set(r.sales_order_line_id, {
+                  mo_id: mo.id,
+                  mo_no: mo.manufacturing_order_no,
+                  status: mo.status,
+                });
+              }
+            }
+          });
+          setLineMoMap(newLineMoMap);
+        } else {
+          setLineMoMap(new Map());
+        }
       }
       if (timelineRes.error) {
         if (import.meta.env.DEV) console.warn('[SalesOrderDetail] Timeline error:', timelineRes.error);
@@ -300,6 +331,7 @@ export default function SalesOrderDetail() {
       } else {
         setLinkedInvoices((invoicesRes.data ?? []) as SOInvoice[]);
       }
+      refetchPayments();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load sales order';
       setError(msg);
@@ -307,7 +339,7 @@ export default function SalesOrderDetail() {
     } finally {
       setLoading(false);
     }
-  }, [salesOrderId, activeOrganizationId]);
+  }, [salesOrderId, activeOrganizationId, refetchPayments]);
 
   useEffect(() => {
     refetch();
@@ -351,6 +383,32 @@ export default function SalesOrderDetail() {
       // useSOActions already shows notification
     }
   }, [salesOrderId, user, createMO, refetch]);
+
+  const handleCreateMOForSelectedLines = useCallback(async () => {
+    if (!salesOrderId || !user?.id || selectedLineIds.size === 0) return;
+    setCreatingMOForLines(true);
+    const created: string[] = [];
+    const errors: string[] = [];
+    for (const lineId of selectedLineIds) {
+      if (lineMoMap.has(lineId)) continue;
+      try {
+        const result = await createMO(salesOrderId, user.id, lineId, user.name);
+        if (result?.mo_number) created.push(result.mo_number);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Error';
+        errors.push(msg);
+      }
+    }
+    setCreatingMOForLines(false);
+    setSelectedLineIds(new Set());
+    if (created.length > 0) {
+      addNotification({ type: 'success', title: 'MOs Created', message: `Created: ${created.join(', ')}` });
+    }
+    if (errors.length > 0) {
+      addNotification({ type: 'error', title: 'Some MOs failed', message: errors.join('; ') });
+    }
+    refetch();
+  }, [salesOrderId, user, selectedLineIds, lineMoMap, createMO, addNotification, refetch]);
 
 
   const actionButtons = useMemo(() => {
@@ -404,6 +462,64 @@ export default function SalesOrderDetail() {
         ? (totalPaid > orderTotal + 0.005 ? 'collection_overpaid' : 'collection_paid')
         : 'collection_partial';
   const canCreateInvoice = isInternal && billableRemaining > 0.005;
+
+  interface FinancialActivityEntry {
+    id: string;
+    type: 'invoice' | 'payment';
+    date: string;
+    reference: string;
+    description: string;
+    amount: number;
+    runningBalance: number;
+    linkTo?: string;
+    status?: string;
+    invoiceId?: string;
+  }
+
+  const financialActivity = useMemo<FinancialActivityEntry[]>(() => {
+    const entries: Omit<FinancialActivityEntry, 'runningBalance'>[] = [];
+
+    for (const inv of linkedInvoices) {
+      entries.push({
+        id: `inv-${inv.id}`,
+        type: 'invoice',
+        date: inv.issue_date,
+        reference: inv.invoice_number,
+        description: `Invoice issued`,
+        amount: inv.total,
+        linkTo: `/financials/invoices/${inv.id}`,
+        status: inv.status,
+        invoiceId: inv.id,
+      });
+    }
+
+    for (const pmt of soPayments) {
+      const methodLabel = (pmt.payment_method || 'Payment').replace(/_/g, ' ');
+      const parts: string[] = [];
+      if (pmt.reference_number) parts.push(`Ref: ${pmt.reference_number}`);
+      if (pmt.notes) parts.push(pmt.notes);
+      const invoiceRefs = (pmt.invoice_refs ?? []).map(r => r.invoice_number).join(', ');
+      if (invoiceRefs) parts.push(`Applied to ${invoiceRefs}`);
+
+      entries.push({
+        id: `pmt-${pmt.id}`,
+        type: 'payment',
+        date: pmt.payment_date,
+        reference: methodLabel,
+        description: parts.join(' · ') || '—',
+        amount: pmt.amount,
+      });
+    }
+
+    entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || (a.type === 'invoice' ? -1 : 1));
+
+    let balance = 0;
+    return entries.map(e => {
+      if (e.type === 'invoice') balance += e.amount;
+      else balance -= e.amount;
+      return { ...e, runningBalance: Math.round(balance * 100) / 100 };
+    });
+  }, [linkedInvoices, soPayments]);
 
   const loadOrganizationLogoOptions = useCallback(async (): Promise<GenerateInvoicePDFOptions> => {
     const tryLogo = async (path: string): Promise<string | undefined> => {
@@ -775,33 +891,39 @@ export default function SalesOrderDetail() {
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Financial Summary</h3>
-              <dl className="space-y-2 text-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Financial Summary</h3>
+              <dl className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-gray-500">Subtotal</dt>
-                  <dd className="font-mono">{formatCurrency(so.subtotal ?? 0, currency)}</dd>
+                  <dt className="text-gray-500">Order Total</dt>
+                  <dd className="font-semibold font-mono text-gray-900">{formatCurrency(orderTotal, currency)}</dd>
                 </div>
                 <div className="flex justify-between">
-                  <dt className="text-gray-500">Tax</dt>
-                  <dd className="font-mono">{formatCurrency(so.tax_amount ?? 0, currency)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Total</dt>
-                  <dd className="font-semibold">{formatCurrency(so.total_amount ?? 0, currency)}</dd>
-                </div>
-                <div className="flex justify-between border-t pt-2">
                   <dt className="text-gray-500">Invoiced</dt>
-                  <dd className="font-mono">{formatCurrency(financialSummary?.total_invoiced ?? 0, currency)}</dd>
+                  <dd className="font-mono text-gray-900">{formatCurrency(totalInvoiced, currency)}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Paid</dt>
-                  <dd className="font-mono text-green-600">{formatCurrency(totalPaid, currency)}</dd>
+                  <dd className={`font-mono ${totalPaid > 0.005 ? 'text-green-600 font-medium' : 'text-gray-400'}`}>{formatCurrency(totalPaid, currency)}</dd>
                 </div>
                 <div className="flex justify-between">
-                  <dt className="text-gray-500">Balance Due</dt>
-                  <dd className="font-mono font-semibold">{formatCurrency(receivableBalance, currency)}</dd>
+                  <dt className="text-gray-500">Outstanding</dt>
+                  <dd className={`font-mono font-semibold ${receivableBalance > 0.005 ? 'text-red-600' : 'text-green-600'}`}>{formatCurrency(receivableBalance, currency)}</dd>
                 </div>
               </dl>
+              {/* Compact payment progress */}
+              {orderTotal > 0 && (
+                <div className="mt-3">
+                  <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        totalPaid >= orderTotal - 0.005 ? 'bg-green-500' : totalPaid > 0.005 ? 'bg-primary' : 'bg-gray-200'
+                      }`}
+                      style={{ width: `${Math.min(100, (totalPaid / orderTotal) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 text-right">{Math.min(100, Math.round((totalPaid / orderTotal) * 100))}% paid</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -891,55 +1013,130 @@ export default function SalesOrderDetail() {
       )}
 
       {activeTab === 'lines' && (
-        <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.length === 0 ? (
+        <div className="space-y-3">
+          {/* Send to Production bar */}
+          {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-500">
+                Select lines to send to production individually, or use the global button in Manufacturing tab.
+              </p>
+              <button
+                type="button"
+                onClick={handleCreateMOForSelectedLines}
+                disabled={selectedLineIds.size === 0 || creatingMOForLines || isActing}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {creatingMOForLines ? <Loader2 className="w-4 h-4 animate-spin" /> : <Factory className="w-4 h-4" />}
+                Send to Production ({selectedLineIds.size})
+              </button>
+            </div>
+          )}
+          <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                    No lines
-                  </td>
+                  {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount && (
+                    <th className="px-3 py-3 text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={lines.length > 0 && lines.filter(l => !lineMoMap.has(l.id)).every(l => selectedLineIds.has(l.id)) && lines.some(l => !lineMoMap.has(l.id))}
+                        onChange={() => {
+                          const eligible = lines.filter(l => !lineMoMap.has(l.id));
+                          const allSelected = eligible.every(l => selectedLineIds.has(l.id));
+                          setSelectedLineIds(prev => {
+                            const next = new Set(prev);
+                            if (allSelected) {
+                              eligible.forEach(l => next.delete(l.id));
+                            } else {
+                              eligible.forEach(l => next.add(l.id));
+                            }
+                            return next;
+                          });
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                    </th>
+                  )}
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">MO</th>
                 </tr>
-              ) : (
-                lines.map((line, idx) => {
-                  const name =
-                    line.description ??
-                    (line.collection_name && line.variant_name
-                      ? `${line.collection_name} - ${line.variant_name}`
-                      : line.collection_name || line.variant_name || line.CatalogItems?.name) ??
-                    '—';
-                  const dims = [line.width_m, line.height_m].filter((v) => v != null);
-                  return (
-                    <tr key={line.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-4 text-gray-500 tabular-nums">{line.line_number ?? idx + 1}</td>
-                      <td className="px-4 py-4">
-                        <div className="text-gray-900">{name}</div>
-                        {line.CatalogItems?.sku && (
-                          <div className="text-xs text-gray-500">{line.CatalogItems.sku}</div>
+              </thead>
+              <tbody>
+                {lines.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                      No lines
+                    </td>
+                  </tr>
+                ) : (
+                  lines.map((line, idx) => {
+                    const name =
+                      line.description ??
+                      (line.collection_name && line.variant_name
+                        ? `${line.collection_name} - ${line.variant_name}`
+                        : line.collection_name || line.variant_name || line.CatalogItems?.name) ??
+                      '—';
+                    const dims = [line.width_m, line.height_m].filter((v) => v != null);
+                    const linkedMo = lineMoMap.get(line.id);
+                    const canSelect = !linkedMo && isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount;
+                    return (
+                      <tr key={line.id} className={`border-t hover:bg-gray-50 ${linkedMo ? 'bg-green-50/30' : ''}`}>
+                        {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount && (
+                          <td className="px-3 py-4 text-center">
+                            {canSelect ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedLineIds.has(line.id)}
+                                onChange={() => setSelectedLineIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(line.id)) next.delete(line.id); else next.add(line.id);
+                                  return next;
+                                })}
+                                className="rounded border-gray-300"
+                              />
+                            ) : (
+                              <CheckCircle2 className="w-4 h-4 text-green-500 mx-auto" />
+                            )}
+                          </td>
                         )}
-                      </td>
-                      <td className="px-4 py-4 text-gray-700">{line.product_type ?? '—'}</td>
-                      <td className="px-4 py-4 text-gray-700">{dims.length === 2 ? `${line.width_m} x ${line.height_m}` : '—'}</td>
-                      <td className="px-4 py-4 text-right text-gray-900 tabular-nums">{line.quantity}</td>
-                      <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(line.unit_price ?? 0, currency)}</td>
-                      <td className="px-4 py-4 text-right font-mono font-medium text-gray-900">{formatCurrency(line.line_total ?? 0, currency)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                        <td className="px-4 py-4 text-gray-500 tabular-nums">{line.line_number ?? idx + 1}</td>
+                        <td className="px-4 py-4">
+                          <div className="text-gray-900">{name}</div>
+                          {line.CatalogItems?.sku && (
+                            <div className="text-xs text-gray-500">{line.CatalogItems.sku}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 text-gray-700">{line.product_type ?? '—'}</td>
+                        <td className="px-4 py-4 text-gray-700">{dims.length === 2 ? `${line.width_m} x ${line.height_m}` : '—'}</td>
+                        <td className="px-4 py-4 text-right text-gray-900 tabular-nums">{line.quantity}</td>
+                        <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(line.unit_price ?? 0, currency)}</td>
+                        <td className="px-4 py-4 text-right font-mono font-medium text-gray-900">{formatCurrency(line.line_total ?? 0, currency)}</td>
+                        <td className="px-4 py-4 text-center">
+                          {linkedMo ? (
+                            <button
+                              type="button"
+                              onClick={() => router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${linkedMo.mo_id}`))}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                            >
+                              {linkedMo.mo_no}
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1005,22 +1202,38 @@ export default function SalesOrderDetail() {
                   <div className="py-2 text-gray-400 text-xs">No manufacturing orders yet</div>
                 )}
               </dl>
-              {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (
-                <div className="mt-4 pt-3 border-t border-gray-100">
-                  {!hasPaidAmount && (
-                    <p className="text-xs text-amber-600 mb-2">A payment must be recorded in Financials before creating a Manufacturing Order.</p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleCreateMO}
-                    disabled={isActing || !hasPaidAmount}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <Factory className="w-4 h-4" />
-                    Create Manufacturing Order
-                  </button>
-                </div>
-              )}
+              {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (() => {
+                const allLinesCovered = lines.length > 0 && lines.every(l => lineMoMap.has(l.id));
+                const eligibleLines = lines.filter(l => !lineMoMap.has(l.id));
+                return (
+                  <div className="mt-4 pt-3 border-t border-gray-100">
+                    {allLinesCovered ? (
+                      <p className="text-xs text-green-700 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        All lines are in production.
+                      </p>
+                    ) : (
+                      <>
+                        {!hasPaidAmount && (
+                          <p className="text-xs text-amber-600 mb-2">A payment must be recorded in Financials before creating a Manufacturing Order.</p>
+                        )}
+                        {eligibleLines.length < lines.length && eligibleLines.length > 0 && (
+                          <p className="text-xs text-gray-500 mb-2">{eligibleLines.length} of {lines.length} line(s) pending production. Use the Lines tab to select specific lines.</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleCreateMO}
+                          disabled={isActing || !hasPaidAmount}
+                          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <Factory className="w-4 h-4" />
+                          Create Manufacturing Order
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -1121,10 +1334,11 @@ export default function SalesOrderDetail() {
               </dl>
             </div>
 
-            {/* Financial Summary card */}
+            {/* Financial Summary card — industry layout */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Financial Summary</h3>
-              <dl className="space-y-2 text-sm">
+              {/* --- Order Summary --- */}
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">Order Summary</h3>
+              <dl className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Subtotal</dt>
                   <dd className="font-mono text-gray-900">{formatCurrency(so.subtotal ?? 0, currency)}</dd>
@@ -1139,35 +1353,96 @@ export default function SalesOrderDetail() {
                   <dt className="text-gray-500">Tax</dt>
                   <dd className="font-mono text-gray-900">{formatCurrency(so.tax_amount ?? 0, currency)}</dd>
                 </div>
-                <div className="flex justify-between border-t pt-2">
-                  <dt className="font-medium text-gray-700">Order Total</dt>
-                  <dd className="font-semibold font-mono text-gray-900">{formatCurrency(so.total_amount ?? 0, currency)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Total Invoiced</dt>
-                  <dd className="font-mono text-gray-900">{formatCurrency(financialSummary?.total_invoiced ?? 0, currency)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Total Paid</dt>
-                  <dd className={`font-mono font-medium ${totalPaid > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                    {formatCurrency(totalPaid, currency)}
-                  </dd>
-                </div>
-                <div className="flex justify-between border-t pt-2">
-                  <dt className="font-medium text-gray-700">Billable Remaining</dt>
-                  <dd className={`font-semibold font-mono ${billableRemaining > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {formatCurrency(billableRemaining, currency)}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="font-medium text-gray-700">Receivable Balance</dt>
-                  <dd className={`font-semibold font-mono ${receivableBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {formatCurrency(receivableBalance, currency)}
-                  </dd>
+                <div className="flex justify-between pt-1">
+                  <dt className="font-medium text-gray-900">Order Total</dt>
+                  <dd className="font-semibold font-mono text-gray-900">{formatCurrency(orderTotal, currency)}</dd>
                 </div>
               </dl>
+
+              {/* --- Invoicing --- */}
+              <div className="mt-4 pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Invoicing</h4>
+                  <StatusBadge
+                    status={billableRemaining <= 0.005 ? 'fully_invoiced' : totalInvoiced > 0.005 ? 'partially_invoiced' : 'not_invoiced'}
+                    type="invoice"
+                    size="sm"
+                  />
+                </div>
+                <dl className="space-y-1.5 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Invoiced</dt>
+                    <dd className="font-mono text-gray-900">{formatCurrency(totalInvoiced, currency)}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Uninvoiced</dt>
+                    <dd className={`font-mono ${billableRemaining > 0.005 ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                      {formatCurrency(billableRemaining, currency)}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* --- Payments --- */}
+              <div className="mt-4 pt-3 border-t border-gray-100">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Payments</h4>
+                <dl className="space-y-1.5 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Paid</dt>
+                    <dd className={`font-mono font-medium ${totalPaid > 0.005 ? 'text-green-600' : 'text-gray-400'}`}>
+                      {formatCurrency(totalPaid, currency)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Outstanding</dt>
+                    <dd className={`font-mono font-semibold ${receivableBalance > 0.005 ? 'text-red-600' : 'text-green-600'}`}>
+                      {formatCurrency(receivableBalance, currency)}
+                    </dd>
+                  </div>
+                </dl>
+                {/* Payment progress bar */}
+                {orderTotal > 0 && (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                      <span>Payment Progress</span>
+                      <span className="font-medium text-gray-700">{Math.min(100, Math.round((totalPaid / orderTotal) * 100))}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          totalPaid >= orderTotal - 0.005 ? 'bg-green-500' : totalPaid > 0.005 ? 'bg-primary' : 'bg-gray-200'
+                        }`}
+                        style={{ width: `${Math.min(100, (totalPaid / orderTotal) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* --- Action button --- */}
               <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
-                {canCreateInvoice ? (
+                {linkedInvoices.length > 0 ? (
+                  <>
+                    {canCreateInvoice && (
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(withReturnTo(`/financials/invoices/new?sales_order_id=${so.id}&prefill_amount=${billableRemaining.toFixed(2)}`))}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                      >
+                        <FileText className="w-4 h-4" />
+                        Invoice remaining {formatCurrency(billableRemaining, currency)}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => router.navigate(withReturnTo(`/financials/invoices/${linkedInvoices[0].id}`))}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      View Invoice{linkedInvoices.length > 1 ? 's' : ''}
+                    </button>
+                  </>
+                ) : canCreateInvoice ? (
                   <button
                     type="button"
                     onClick={() => router.navigate(withReturnTo(`/financials/invoices/new?sales_order_id=${so.id}`))}
@@ -1177,75 +1452,105 @@ export default function SalesOrderDetail() {
                     Create Invoice
                   </button>
                 ) : (
-                  <div className="w-full px-3 py-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg text-center">
-                    Fully invoiced / No billable remaining
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => linkedInvoices.length > 0 && router.navigate(withReturnTo(`/financials/invoices/${linkedInvoices[0].id}`))}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    View Invoice
+                  </button>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Invoices list */}
+          {/* Financial Activity — Statement of Account */}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
-            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-900">Invoice List</h3>
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Statement of Account</h3>
+              <span className="text-xs text-gray-500">{financialActivity.length} entries</span>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Invoice #</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Issue Date</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700">View</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs w-24">Date</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">Document</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs w-16">Status</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-gray-600 text-xs">Description</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs w-24">Debit</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs w-24">Credit</th>
+                  <th className="px-3 py-2.5 text-right font-medium text-gray-600 text-xs w-24">Balance</th>
                 </tr>
               </thead>
               <tbody>
-                {linkedInvoices.length === 0 ? (
+                {financialActivity.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">No invoices for this order</td>
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-xs">No financial activity for this order</td>
                   </tr>
                 ) : (
-                  linkedInvoices.map((inv) => (
-                    <tr key={inv.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-4">
-                        {isInternal ? (
-                          <button
-                            type="button"
-                            onClick={() => router.navigate(withReturnTo(`/financials/invoices/${inv.id}`))}
-                            className="text-primary hover:underline font-medium"
-                          >
-                            {inv.invoice_number}
-                          </button>
-                        ) : (
-                          <span className="font-medium text-gray-700">{inv.invoice_number}</span>
-                        )}
+                  financialActivity.map((entry) => (
+                    <tr key={entry.id} className={`border-t hover:bg-gray-50/50 ${entry.type === 'payment' ? 'bg-green-50/20' : ''}`}>
+                      <td className="px-3 py-2.5 text-gray-500 tabular-nums text-xs">{new Date(entry.date).toLocaleDateString()}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          {entry.type === 'invoice' ? (
+                            <FileText className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          ) : (
+                            <CreditCard className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                          )}
+                          {entry.type === 'invoice' && entry.linkTo && isInternal ? (
+                            <button
+                              type="button"
+                              onClick={() => router.navigate(withReturnTo(entry.linkTo!))}
+                              className="text-primary hover:underline font-medium text-xs"
+                            >
+                              {entry.reference}
+                            </button>
+                          ) : (
+                            <span className="font-medium text-gray-900 capitalize text-xs">{entry.reference}</span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-4 text-gray-700">{new Date(inv.issue_date).toLocaleDateString()}</td>
-                      <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(inv.total, inv.currency_code || currency)}</td>
-                      <td className="px-4 py-4 text-center">
-                        <StatusBadge status={inv.status} type="invoice" size="sm" />
+                      <td className="px-3 py-2.5">
+                        {entry.status && <StatusBadge status={entry.status} type="invoice" size="sm" />}
                       </td>
-                      <td className="px-4 py-4 text-center">
-                        {isInternal ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handlePreviewInvoicePdf(inv.id);
-                            }}
-                            className="inline-flex items-center justify-center p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                            title="View invoice PDF"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
+                      <td className="px-3 py-2.5 text-gray-500 text-xs max-w-[220px] truncate" title={entry.description}>
+                        {entry.description}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-xs">
+                        {entry.type === 'invoice' ? (
+                          <span className="text-gray-900 font-medium">{formatCurrency(entry.amount, currency)}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-xs">
+                        {entry.type === 'payment' ? (
+                          <span className="text-green-700 font-medium">{formatCurrency(entry.amount, currency)}</span>
+                        ) : null}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right font-mono tabular-nums text-xs font-semibold ${entry.runningBalance > 0.005 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(entry.runningBalance, currency)}
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
+              {financialActivity.length > 0 && (
+                <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                  <tr>
+                    <td colSpan={4} className="px-3 py-2.5 text-right text-xs font-semibold text-gray-700">Totals</td>
+                    <td className="px-3 py-2.5 text-right font-mono tabular-nums text-xs font-bold text-gray-900">
+                      {formatCurrency(financialActivity.filter(e => e.type === 'invoice').reduce((s, e) => s + e.amount, 0), currency)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono tabular-nums text-xs font-bold text-green-700">
+                      {formatCurrency(financialActivity.filter(e => e.type === 'payment').reduce((s, e) => s + e.amount, 0), currency)}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right font-mono tabular-nums text-xs font-bold ${(financialActivity[financialActivity.length - 1]?.runningBalance ?? 0) > 0.005 ? 'text-red-600' : 'text-green-600'}`}>
+                      {formatCurrency(financialActivity[financialActivity.length - 1]?.runningBalance ?? 0, currency)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
 

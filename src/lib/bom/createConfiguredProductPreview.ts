@@ -151,7 +151,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   })();
 
   // Load templates (be resilient to schema differences)
-  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null }> = [];
+  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null; drive_type?: string | null; drive_side?: string | null; manufacturer?: string | null; product_line?: string | null; installation_location?: string | null }> = [];
   {
     const candidateIdsRaw = config_snapshot?.candidate_template_ids;
     const candidateIds =
@@ -159,9 +159,8 @@ async function resolveBomTemplateIdFrontendStrict(args: {
 
     const base = supabase
       .from('BOMTemplates')
-      .select('id, archived, deleted, is_active, hardware_color')
+      .select('id, archived, deleted, is_active, hardware_color, drive_type, drive_side, manufacturer, product_line, installation_location')
       .eq('product_type_id', product_type_id)
-      // ✅ support global templates (organization_id NULL)
       .or(`organization_id.eq.${organization_id},organization_id.is.null`);
 
     const { data, error } = candidateIds.length > 0 ? await base.in('id', candidateIds) : await base;
@@ -232,10 +231,83 @@ async function resolveBomTemplateIdFrontendStrict(args: {
     }
   }
 
-  const templateIds = colorFilteredTemplates.map((t) => String(t.id)).filter(Boolean);
+  // Paso 3a: Filtrar por drive_type (NULL template = aplica a ambos, 'manual'/'motor' = específico)
+  const userDriveType = normalizeOperationType(
+    config_snapshot?.drive_type ?? config_snapshot?.operation_type ?? config_snapshot?.operating_type ?? null
+  );
+  let driveTypeFilteredTemplates = colorFilteredTemplates;
+  if (userDriveType) {
+    const dtMatches = colorFilteredTemplates.filter((t) =>
+      !(t as any).drive_type || (t as any).drive_type === userDriveType
+    );
+    if (dtMatches.length > 0) {
+      driveTypeFilteredTemplates = dtMatches;
+    } else if (import.meta.env.DEV) {
+      console.warn('[resolveBomTemplateIdFrontendStrict] No drive_type match, ignoring filter:', { userDriveType });
+    }
+  }
+
+  // Paso 3b: Filtrar por drive_side (NULL = aplica a ambos, 'left'/'right' = específico)
+  const userDriveSide = config_snapshot?.drive_side || config_snapshot?.driveSide || null;
+  let driveSideFilteredTemplates = driveTypeFilteredTemplates;
+  if (userDriveSide) {
+    driveSideFilteredTemplates = colorFilteredTemplates.filter((t) =>
+      !(t as any).drive_side || (t as any).drive_side === userDriveSide
+    );
+    if (driveSideFilteredTemplates.length === 0) {
+      driveSideFilteredTemplates = colorFilteredTemplates;
+      if (import.meta.env.DEV) {
+        console.warn('[resolveBomTemplateIdFrontendStrict] No drive_side match, ignoring filter:', { userDriveSide });
+      }
+    }
+  }
+
+  // Paso 4: Filtrar por manufacturer
+  const userManufacturer = config_snapshot?.manufacturer || null;
+  let manufacturerFilteredTemplates = driveSideFilteredTemplates;
+  if (userManufacturer) {
+    const mfrMatches = driveSideFilteredTemplates.filter((t) =>
+      !(t as any).manufacturer || String((t as any).manufacturer).toLowerCase() === String(userManufacturer).toLowerCase()
+    );
+    if (mfrMatches.length > 0) {
+      manufacturerFilteredTemplates = mfrMatches;
+    } else if (import.meta.env.DEV) {
+      console.warn('[resolveBomTemplateIdFrontendStrict] No manufacturer match, ignoring filter:', { userManufacturer });
+    }
+  }
+
+  // Paso 5: Filtrar por product_line
+  const userProductLine = config_snapshot?.product_line || config_snapshot?.productLine || null;
+  let productLineFilteredTemplates = manufacturerFilteredTemplates;
+  if (userProductLine) {
+    const plMatches = manufacturerFilteredTemplates.filter((t) =>
+      !(t as any).product_line || String((t as any).product_line).toLowerCase() === String(userProductLine).toLowerCase()
+    );
+    if (plMatches.length > 0) {
+      productLineFilteredTemplates = plMatches;
+    } else if (import.meta.env.DEV) {
+      console.warn('[resolveBomTemplateIdFrontendStrict] No product_line match, ignoring filter:', { userProductLine });
+    }
+  }
+
+  // Paso 6: Filtrar por installation_location (NULL template = ambos, 'ceiling'/'wall' = específico)
+  const userInstallLocation = config_snapshot?.installation_location ?? config_snapshot?.installationLocation ?? null;
+  let installLocationFilteredTemplates = productLineFilteredTemplates;
+  if (userInstallLocation) {
+    const ilMatches = productLineFilteredTemplates.filter((t) =>
+      !(t as any).installation_location || (t as any).installation_location === userInstallLocation
+    );
+    if (ilMatches.length > 0) {
+      installLocationFilteredTemplates = ilMatches;
+    } else if (import.meta.env.DEV) {
+      console.warn('[resolveBomTemplateIdFrontendStrict] No installation_location match, ignoring filter:', { userInstallLocation });
+    }
+  }
+
+  const templateIds = installLocationFilteredTemplates.map((t) => String(t.id)).filter(Boolean);
 
   if (templateIds.length === 0) {
-    throw new Error('No BOMTemplates found for this product type (after color filter)');
+    throw new Error('No BOMTemplates found for this product type (after color + drive_type + drive_side + manufacturer + product_line + installation_location filter)');
   }
 
   // Load parent components for templates

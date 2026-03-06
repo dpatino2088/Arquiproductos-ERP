@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CatalogItem } from '../types/catalog';
 
-const MSRP_BATCH = 1000;
+const MSRP_BATCH = 200; // .in() puts UUIDs in URL; 200 * 36 chars ≈ 7KB, safe for PostgREST
 const MAX_LIST_SIZE = 2500;
 
 type MsrpRow = { dealer_price: number; msrp: number; total_cost: number; shipping_cost: number; import_tax_cost: number };
@@ -25,7 +25,7 @@ function enrichItems(d: Record<string, unknown>[], msrpMap: Map<string, MsrpRow>
       item_name: (item.item_name ?? item.name) as string | null,
       description: (item.description as string) ?? null,
       manufacturer_id: (item.manufacturer_id as string) ?? null,
-      manufacturer: ((item.manufacturer as string) ?? (item.metadata as Record<string, unknown>)?.manufacturer as string) ?? null,
+      manufacturer: ((item.Manufacturers as Record<string, unknown>)?.name as string) ?? (item.manufacturer as string) ?? ((item.metadata as Record<string, unknown>)?.manufacturer as string) ?? null,
       category_id: (item.category_id as string) ?? null,
       item_category_id: (item.item_category_id as string) ?? null,
       measure_basis: normalizedMeasureBasis as CatalogItem['measure_basis'],
@@ -84,7 +84,7 @@ export async function fetchCatalogItemsList(
 
   let q = supabase
     .from('CatalogItems')
-    .select('*')
+    .select('*, Manufacturers(name)')
     .eq('organization_id', orgId)
     .eq('is_active', true)
     .order('sku', { ascending: true })
@@ -141,7 +141,7 @@ export async function fetchCatalogItemDetail(
   const { orgId, itemId } = params;
   const { data: row, error } = await supabase
     .from('CatalogItems')
-    .select('*')
+    .select('*, Manufacturers(name)')
     .eq('id', itemId)
     .eq('organization_id', orgId)
     .maybeSingle();

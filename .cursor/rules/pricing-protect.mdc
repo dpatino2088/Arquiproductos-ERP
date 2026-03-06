@@ -1,0 +1,39 @@
+---
+description: Protects verified pricing formulas, calculations, and data flow logic from accidental changes
+alwaysApply: true
+---
+
+# Pricing & Calculation Protection
+
+The pricing engine has been forensically audited (1,753 items, 0 errors). **Do NOT modify** pricing formulas, calculation logic, or data flow without explicit user approval.
+
+## Protected zones — READ FIRST, never edit without asking
+
+| File / Table | What's protected |
+|---|---|
+| `src/lib/pricing.ts` | `computeTotalUnitCost`, `computeMsrpFromMarginOnSale`, `calculateQuoteLinePrice`, `resolveMarginPct`, `getDealerTierDiscountPct` |
+| `CatalogItemsMSRP` (DB + triggers) | `total_cost = pricing_cost_exw * (1+shipping_pct) * (1+import_tax_pct)`, `dealer_price = total_cost / (1-min_margin)`, `msrp = dealer_price / (1-msrp_pct)`, generated columns `shipping_cost` / `import_tax_cost` |
+| `msrp_compute_for_item()` | Core MSRP recompute function — includes supply_origin local→tax=0 rule |
+| `trig_enforce_msrp_sources()` | BEFORE INSERT/UPDATE trigger enforcing rates from `msrp_get_effective_rates` + supply_origin override |
+| `trig_supply_origin_msrp_recompute()` | Trigger that recomputes MSRP when supply_origin changes |
+| `ConfiguredProducts` | `total_cost = unit_product_cost + unit_labor_cost`, `unit_product_cost = roll_total_cost + bom_total_cost + accessories_total_cost` |
+| `QuoteLines` snapshots | `unit_cost_total_snapshot`, `unit_msrp_total_snapshot`, `roll_cost_snapshot`, `bom_cost_snapshot` — must equal ConfiguredProduct values |
+| `SaleOrderLines.unit_price` | Must equal `QuoteLines.unit_dealer_price_snapshot`; `line_total = unit_price * qty` |
+| `PurchaseOrderLines.unit_cost` | Must equal `CatalogItems.cost_exw`; `line_total = unit_cost * ordered_qty` |
+| `ProposalLines` | `override_mode: 'inherit'` reads from QuoteLine via live join + snapshot |
+| `src/pages/catalog/CatalogItemNew.tsx` | `liveMsrp` useMemo calculation and import-tax-is-local-zero logic in Rates tab |
+
+## Verified rules (do not break)
+
+1. **Local items**: `supply_origin = 'local'` → `import_tax_pct = 0` (236 items verified)
+2. **Import items**: `supply_origin = 'import'` → `import_tax_pct > 0` (1,517 items verified)
+3. **Margin-on-sale**: `dealer_price = total_cost / (1 - margin)`, never markup
+4. **PO uses raw cost**: `PurchaseOrderLines.unit_cost = CatalogItems.cost_exw` (not total_cost)
+5. **Avg margin**: SaleOrderLines average 35% margin over unit cost
+
+## Before touching any protected zone
+
+1. **Read** the file/function first — understand what exists
+2. **Ask** the user: "This touches a verified pricing formula. Proceed?"
+3. If the change is purely cosmetic (labels, styling, layout) → proceed without asking
+4. If the change affects any number, formula, or data flow → **stop and confirm**

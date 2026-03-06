@@ -62,7 +62,7 @@ export default function ApprovedBOMList() {
       // Always register submodules to ensure tabs are visible
       registerSubmodules('Manufacturing', [
         { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'material', label: 'Material', href: '/manufacturing/material' },
+        { id: 'work-orders', label: 'Work Orders', href: '/manufacturing/work-orders' },
       ]);
     }
     
@@ -300,7 +300,7 @@ export default function ApprovedBOMList() {
                 for (const chunk of chunks) {
                   const { data: chunkItems, error: chunkError } = await supabase
                     .from('CatalogItems')
-                    .select('id, sku, name, description, item_type, measure_basis, collection_name, variant_name')
+                    .select('id, sku, name, description, measure_basis, is_roll, collection_name, variant_name')
                     .in('id', chunk)
                     .eq('organization_id', activeOrganizationId);
                   
@@ -370,8 +370,7 @@ export default function ApprovedBOMList() {
                     .from('QuoteLines')
                     .select('id, product_type_id')
                     .in('id', chunk)
-                    .eq('organization_id', activeOrganizationId)
-                    .eq('deleted', false);
+                    .eq('organization_id', activeOrganizationId);
 
                   if (chunkError) {
                     quoteLinesError = chunkError;
@@ -450,8 +449,8 @@ export default function ApprovedBOMList() {
                     // component_name: Fabric names come from collection + variant, not item_name
                     // Detect fabric using part_role first, then fallback to CatalogItems fields
                     const catalogItem = catalogItemById.get(bil.resolved_part_id);
-                    const isFabric = bil.part_role === 'fabric' || 
-                                   (catalogItem && ((catalogItem.item_type === 'fabric') || (catalogItem.measure_basis === 'fabric')));
+const isFabric = bil.part_role === 'fabric' ||
+                                   (catalogItem && ((catalogItem.is_roll === true) || (catalogItem.measure_basis === 'fabric')));
                     
                     const resolvedSku = catalogItem?.sku ?? bil.calc_notes ?? 'N/A';
                     const resolvedDesc = catalogItem?.description ?? bil.calc_notes ?? null;

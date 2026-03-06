@@ -46,6 +46,9 @@ export interface MatchConfig {
   bottom_channel_sku?: string | null;
   motor_sku?: string | null;
   drive_sku?: string | null;
+  manufacturer?: string | null;
+  drive_side?: 'left' | 'right' | null;
+  installation_location?: 'ceiling' | 'wall' | null;
   preFilteredTemplateIds?: string[] | null;
 }
 
@@ -101,6 +104,9 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     bottom_channel_sku,
     motor_sku,
     drive_sku,
+    manufacturer: configManufacturer,
+    drive_side: configDriveSide,
+    installation_location: configInstallLocation,
     preFilteredTemplateIds,
   } = config;
   const panel_count = Math.min(3, Math.max(1, configPanelCount ?? 1));
@@ -187,13 +193,17 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
   try {
     // PASO 1: Obtener templates base
     // Si hay templates pre-filtrados, usarlos; sino, buscar por product_type y color
-    let templates: Array<{ id: string; name: string | null; code: string; product_type_id: string; hardware_color: string | null }> = [];
+    type TemplateMeta = {
+      id: string; name: string | null; code: string; product_type_id: string;
+      hardware_color: string | null; manufacturer: string | null; drive_type: string | null;
+      drive_side: string | null; installation_location: string | null;
+    };
+    let templates: TemplateMeta[] = [];
 
     if (hasPreFiltered) {
-      // Usar templates pre-filtrados
       const { data: preFilteredTemplates, error: preFilteredError } = await supabase
         .from('BOMTemplates')
-        .select('id, name, code, product_type_id, hardware_color')
+        .select('id, name, code, product_type_id, hardware_color, manufacturer, drive_type, drive_side, installation_location')
         .in('id', uniquePreFiltered!)
         .eq('is_active', true)
         .eq('archived', false)
@@ -213,7 +223,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     if (templates.length === 0) {
       let templatesQuery = supabase
         .from('BOMTemplates')
-        .select('id, name, code, product_type_id, hardware_color')
+        .select('id, name, code, product_type_id, hardware_color, manufacturer, drive_type, drive_side, installation_location')
         .eq('organization_id', organization_id)
         .eq('product_type_id', product_type_id)
         .eq('is_active', true)
@@ -457,6 +467,45 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         }
       }
 
+      // Criterio 7: manufacturer (template-level, strong filter)
+      if (configManufacturer && template.manufacturer) {
+        if (template.manufacturer.toLowerCase() === configManufacturer.toLowerCase()) {
+          score += 5;
+          matchedCriteria.push(`manufacturer:${configManufacturer}`);
+        } else {
+          score -= 20;
+          unmatchedCriteria.push(`manufacturer expected:${configManufacturer} got:${template.manufacturer}`);
+        }
+      }
+
+      // Criterio 8: drive_side (template-level, null means both)
+      if (configDriveSide && template.drive_side) {
+        if (template.drive_side === configDriveSide) {
+          score += 3;
+          matchedCriteria.push(`drive_side:${configDriveSide}`);
+        } else {
+          score -= 15;
+          unmatchedCriteria.push(`drive_side expected:${configDriveSide} got:${template.drive_side}`);
+        }
+      } else if (configDriveSide && !template.drive_side) {
+        score += 1;
+        matchedCriteria.push(`drive_side:any(template=null)`);
+      }
+
+      // Criterio 9: installation_location (template-level, null means both)
+      if (configInstallLocation && template.installation_location) {
+        if (template.installation_location === configInstallLocation) {
+          score += 5;
+          matchedCriteria.push(`installation_location:${configInstallLocation}`);
+        } else {
+          score -= 20;
+          unmatchedCriteria.push(`installation_location expected:${configInstallLocation} got:${template.installation_location}`);
+        }
+      } else if (configInstallLocation && !template.installation_location) {
+        score += 1;
+        matchedCriteria.push(`installation_location:any(template=null)`);
+      }
+
       templateScores.push({
         id: template.id,
         name: template.name || template.code,
@@ -483,13 +532,14 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       })));
     }
 
-    // Calcular el score máximo esperado con los nuevos pesos
-    // bottom_bar (1) + tube (1) + operation_type (10) + motor/drive_sku (10) = 22 base
-    let maxExpectedScore = 1 + 1 + 10; // bottom_bar + tube + operation_type (obligatorios)
+    let maxExpectedScore = 1 + 1 + 10; // bottom_bar + tube + operation_type
     if (normalizedHeadboxSku) maxExpectedScore++;
     if (normalizedSideChannelSku) maxExpectedScore++;
     if (normalizedBottomChannelSku) maxExpectedScore++;
-    if (normalizedMotorSku || normalizedDriveSku) maxExpectedScore += 10; // SKU específico tiene peso 10
+    if (normalizedMotorSku || normalizedDriveSku) maxExpectedScore += 10;
+    if (configManufacturer) maxExpectedScore += 5;
+    if (configDriveSide) maxExpectedScore += 3;
+    if (configInstallLocation) maxExpectedScore += 5;
 
     const bestMatch = templateScores[0];
     

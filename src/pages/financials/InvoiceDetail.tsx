@@ -403,15 +403,6 @@ export default function InvoiceDetail() {
       });
       if (err) throw err;
 
-      // Auto-update invoice status
-      const newApplied = totalApplied + amount;
-      let newStatus = invoice!.status;
-      if (newApplied >= invoice!.total) newStatus = 'paid';
-      else if (newApplied > 0) newStatus = 'partial';
-      if (newStatus !== invoice!.status) {
-        await supabase.from('DealerInvoices').update({ status: newStatus }).eq('id', invoiceId);
-      }
-
       addNotification({ type: 'success', title: 'Payment Applied', message: `${fmt(amount, currency)} applied to invoice.` });
       setApplyFormOpen(false);
       setSelectedPaymentId('');
@@ -790,27 +781,29 @@ export default function InvoiceDetail() {
                 <dt className="text-gray-500">Tax</dt>
                 <dd className="font-mono text-gray-900">{fmt(invoice.tax_total, currency)}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Paid</dt>
-                <dd className={`font-mono ${totalApplied > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                  {fmt(totalApplied, currency)}
-                </dd>
+              <div className="flex justify-between border-t pt-2">
+                <dt className="text-sm font-semibold text-gray-700">Invoice Total</dt>
+                <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Credited</dt>
-                <dd className={`font-mono ${totalCredited > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
-                  {fmt(totalCredited, currency)}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Balance Due</dt>
-                <dd className={`font-mono font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {(totalApplied > 0 || totalCredited > 0) && (
+                <>
+                  <div className="flex justify-between pt-1">
+                    <dt className="text-gray-500">Paid</dt>
+                    <dd className="font-mono text-green-600">−{fmt(totalApplied, currency)}</dd>
+                  </div>
+                  {totalCredited > 0 && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Credited</dt>
+                      <dd className="font-mono text-amber-600">−{fmt(totalCredited, currency)}</dd>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="flex justify-between border-t pt-2">
+                <dt className="text-sm font-semibold text-gray-700">Balance Due</dt>
+                <dd className={`font-mono font-bold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {fmt(balanceDue, currency)}
                 </dd>
-              </div>
-              <div className="flex justify-between border-t pt-2">
-                <dt className="text-sm font-semibold text-gray-700">Total</dt>
-                <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
               </div>
             </dl>
           </div>
@@ -939,27 +932,29 @@ export default function InvoiceDetail() {
                   <dt className="text-gray-500">Tax</dt>
                   <dd className="font-mono text-gray-900">{fmt(invoice.tax_total, currency)}</dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Paid</dt>
-                  <dd className={`font-mono ${totalApplied > 0 ? 'text-green-600' : 'text-gray-500'}`}>
-                    {fmt(totalApplied, currency)}
-                  </dd>
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="text-sm font-semibold text-gray-700">Invoice Total</dt>
+                  <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Credited</dt>
-                  <dd className={`font-mono ${totalCredited > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
-                    {fmt(totalCredited, currency)}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Balance Due</dt>
-                  <dd className={`font-mono font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {(totalApplied > 0 || totalCredited > 0) && (
+                  <>
+                    <div className="flex justify-between pt-1">
+                      <dt className="text-gray-500">Paid</dt>
+                      <dd className="font-mono text-green-600">−{fmt(totalApplied, currency)}</dd>
+                    </div>
+                    {totalCredited > 0 && (
+                      <div className="flex justify-between">
+                        <dt className="text-gray-500">Credited</dt>
+                        <dd className="font-mono text-amber-600">−{fmt(totalCredited, currency)}</dd>
+                      </div>
+                    )}
+                  </>
+                )}
+                <div className="flex justify-between border-t pt-2">
+                  <dt className="text-sm font-semibold text-gray-700">Balance Due</dt>
+                  <dd className={`font-mono font-bold ${balanceDue > 0 ? 'text-red-600' : 'text-green-600'}`}>
                     {fmt(balanceDue, currency)}
                   </dd>
-                </div>
-                <div className="flex justify-between border-t pt-2">
-                  <dt className="text-sm font-semibold text-gray-700">Total</dt>
-                  <dd className="font-mono font-bold text-gray-900">{fmt(invoice.total, currency)}</dd>
                 </div>
               </dl>
             </div>

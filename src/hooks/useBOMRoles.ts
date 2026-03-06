@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { invalidateRolesCache } from '../lib/bom/roles';
 
 export type RoleType = 'parent_only' | 'child_only' | 'both';
 
@@ -99,6 +100,7 @@ export function useBOMRoles() {
         .update({ role_type: roleType })
         .eq('role_code', roleCode);
       if (err) throw new Error(err.message);
+      invalidateRolesCache();
       setRoles((prev) =>
         prev.map((r) => (r.role_code === roleCode ? { ...r, role_type: roleType } : r)),
       );
@@ -113,6 +115,7 @@ export function useBOMRoles() {
         .update({ active })
         .eq('role_code', roleCode);
       if (err) throw new Error(err.message);
+      invalidateRolesCache();
       setRoles((prev) =>
         prev.map((r) => (r.role_code === roleCode ? { ...r, active } : r)),
       );
@@ -126,6 +129,7 @@ export function useBOMRoles() {
         .from('RoleDependencies')
         .insert({ role_code: roleCode, parent_role_code: parentRoleCode });
       if (err) throw new Error(err.message);
+      invalidateRolesCache();
       setDependencies((prev) => [...prev, { role_code: roleCode, parent_role_code: parentRoleCode }]);
     },
     [],
@@ -139,6 +143,7 @@ export function useBOMRoles() {
         .eq('role_code', roleCode)
         .eq('parent_role_code', parentRoleCode);
       if (err) throw new Error(err.message);
+      invalidateRolesCache();
       setDependencies((prev) =>
         prev.filter((d) => !(d.role_code === roleCode && d.parent_role_code === parentRoleCode)),
       );
@@ -208,6 +213,7 @@ export function useBOMRoles() {
         .update({ label: trimmed })
         .eq('role_code', roleCode);
       if (err) throw new Error(err.message);
+      invalidateRolesCache();
       setRoles((prev) =>
         prev.map((r) => (r.role_code === roleCode ? { ...r, label: trimmed } : r)),
       );
@@ -215,9 +221,28 @@ export function useBOMRoles() {
     [],
   );
 
+  const createRole = useCallback(
+    async (roleCode: string, label: string, roleType: RoleType = 'both') => {
+      const code = roleCode.toLowerCase().trim().replace(/\s+/g, '_');
+      if (!code) throw new Error('Role code cannot be empty');
+      if (!/^[a-z0-9_]+$/.test(code)) throw new Error('Role code must be lowercase letters, numbers and underscores only');
+      const trimLabel = label.trim();
+      if (!trimLabel) throw new Error('Label cannot be empty');
+      const { data, error: err } = await supabase
+        .from('CatalogItemRoles')
+        .insert({ role_code: code, label: trimLabel, role_type: roleType, active: true, sort_order: 0, role_name: trimLabel })
+        .select('role_code, label, description, role_type, active, sort_order')
+        .single();
+      if (err) throw new Error(err.message);
+      invalidateRolesCache();
+      if (data) setRoles(prev => [...prev, data as CatalogRole].sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label)));
+      return data as CatalogRole;
+    },
+    [],
+  );
+
   const deleteRole = useCallback(
     async (roleCode: string) => {
-      // Remove dependencies first (both as parent and child)
       const { error: depErr } = await supabase
         .from('RoleDependencies')
         .delete()
@@ -230,6 +255,7 @@ export function useBOMRoles() {
         .eq('role_code', roleCode);
       if (err) throw new Error(err.message);
 
+      invalidateRolesCache();
       setRoles((prev) => prev.filter((r) => r.role_code !== roleCode));
       setDependencies((prev) =>
         prev.filter((d) => d.role_code !== roleCode && d.parent_role_code !== roleCode),
@@ -246,6 +272,7 @@ export function useBOMRoles() {
     loading,
     error,
     refetch: fetchAll,
+    createRole,
     updateRoleType,
     toggleRoleActive,
     renameRole,

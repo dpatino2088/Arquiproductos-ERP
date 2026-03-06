@@ -54,6 +54,19 @@ function toMeters(value: number, uom: string): number {
   }
 }
 
+function fromMeters(meters: number, targetUom: string): number {
+  switch ((targetUom || '').toLowerCase()) {
+    case 'm':
+      return meters;
+    case 'ft':
+      return meters / 0.3048;
+    case 'yd':
+      return meters / 0.9144;
+    default:
+      return meters;
+  }
+}
+
 export function resolveInventoryUnitModel(input: InventoryUnitModelInput): InventoryUnitModel {
   const purchaseUnit = (input.purchaseUnit ?? '').toLowerCase();
   if (input.isRoll) {
@@ -95,5 +108,65 @@ export function convertPurchaseQtyToInternal(input: ConversionToInternalInput): 
 
   const unitsPerPurchase = Math.max(1, Number(input.unitsPerPurchaseUnit ?? 1));
   return qty * unitsPerPurchase;
+}
+
+export interface ConversionToExternalInput {
+  internalQty: number;
+  purchaseMode: PurchaseMode;
+  purchaseUnit: string;
+  unitsPerPurchaseUnit?: number | null;
+  rollLengthValue?: number | null;
+  rollLengthUom?: string | null;
+}
+
+/**
+ * Converts an internal stock quantity (ea or linear meters) into the vendor-facing
+ * purchase quantity & unit. Always rounds up so we never order less than needed.
+ */
+export function convertInternalToPurchaseQty(input: ConversionToExternalInput): {
+  orderQty: number;
+  lineUnit: string;
+  unitCost: (costPerBaseUnit: number) => number;
+} {
+  const qty = Number(input.internalQty ?? 0);
+  if (!(qty > 0)) return { orderQty: 0, lineUnit: input.purchaseUnit || 'ea', unitCost: () => 0 };
+
+  if (input.purchaseMode === 'roll') {
+    const lengthPerRoll = Number(input.rollLengthValue ?? 0);
+    if (!(lengthPerRoll > 0)) return { orderQty: qty, lineUnit: 'roll', unitCost: (c) => c };
+    const rollLengthM = toMeters(lengthPerRoll, input.rollLengthUom ?? 'm');
+    const orderQty = Math.ceil(qty / rollLengthM);
+    return {
+      orderQty,
+      lineUnit: 'roll',
+      unitCost: (costPerUnit) => costPerUnit * lengthPerRoll,
+    };
+  }
+
+  if (input.purchaseMode === 'linear_direct') {
+    const converted = fromMeters(qty, input.purchaseUnit);
+    const orderQty = Math.ceil(converted * 100) / 100;
+    return {
+      orderQty,
+      lineUnit: input.purchaseUnit || 'm',
+      unitCost: (costPerUnit) => costPerUnit,
+    };
+  }
+
+  const unitsPerPurchase = Math.max(1, Number(input.unitsPerPurchaseUnit ?? 1));
+  if (unitsPerPurchase > 1 && qty >= unitsPerPurchase) {
+    const orderQty = Math.ceil(qty / unitsPerPurchase);
+    return {
+      orderQty,
+      lineUnit: input.purchaseUnit || 'set',
+      unitCost: (costPerUnit) => costPerUnit * unitsPerPurchase,
+    };
+  }
+
+  return {
+    orderQty: Math.ceil(qty),
+    lineUnit: 'each',
+    unitCost: (costPerUnit) => costPerUnit,
+  };
 }
 

@@ -145,7 +145,7 @@ export function useCatalogItems(
         // ✅ Cargar en bloques grandes para reducir cantidad de requests
         const INITIAL_LOAD_SIZE = 1000;
         const BATCH_SIZE = 1000;
-        const MSRP_BATCH = 1000;
+        const MSRP_BATCH = 200; // .in() puts UUIDs in URL; 200 * 36 chars ≈ 7KB, safe for PostgREST
         
         let allData: any[] = [];
         let queryError: any = null;
@@ -246,16 +246,19 @@ export function useCatalogItems(
         if (initialIds.length > 0 && activeOrganizationId) {
           for (let i = 0; i < initialIds.length; i += MSRP_BATCH) {
             const batch = initialIds.slice(i, i + MSRP_BATCH);
-            const { data: msrpData } = await supabase
+            const { data: msrpData, error: msrpError } = await supabase
               .from('CatalogItemsMSRP')
               .select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost')
               .eq('organization_id', activeOrganizationId)
               .in('catalog_item_id', batch);
+            if (msrpError) {
+              console.error('❌ MSRP fetch error:', msrpError.message, msrpError);
+            }
             (msrpData || []).forEach((row: any) => {
               if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { dealer_price: Number(row.dealer_price ?? 0), msrp: Number(row.msrp ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) });
             });
           }
-          if (import.meta.env.DEV) console.log(`✅ MSRP loaded for first ${msrpMap.size} items (before first render)`);
+          if (import.meta.env.DEV) console.log(`✅ MSRP loaded for first ${msrpMap.size} items (batch requested: ${initialIds.length}, org: ${activeOrganizationId})`);
         }
         
         const validItemsInitial = enrichItems(allData, msrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
@@ -272,8 +275,12 @@ export function useCatalogItems(
             allData = [...allData, ...batchData];
             const batchIds = batchData.map((i: any) => i.id).filter(Boolean);
             if (batchIds.length > 0 && activeOrganizationId) {
-              const { data: mb } = await supabase.from('CatalogItemsMSRP').select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost').eq('organization_id', activeOrganizationId).in('catalog_item_id', batchIds);
-              (mb || []).forEach((row: any) => { if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { dealer_price: Number(row.dealer_price ?? 0), msrp: Number(row.msrp ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) }); });
+              for (let mi = 0; mi < batchIds.length; mi += MSRP_BATCH) {
+                const msrpChunk = batchIds.slice(mi, mi + MSRP_BATCH);
+                const { data: mb, error: mbErr } = await supabase.from('CatalogItemsMSRP').select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost').eq('organization_id', activeOrganizationId).in('catalog_item_id', msrpChunk);
+                if (mbErr) console.error('❌ MSRP background batch error:', mbErr.message, mbErr);
+                (mb || []).forEach((row: any) => { if (row?.catalog_item_id) msrpMap.set(row.catalog_item_id, { dealer_price: Number(row.dealer_price ?? 0), msrp: Number(row.msrp ?? 0), total_cost: Number(row.total_cost ?? 0), shipping_cost: Number(row.shipping_cost ?? 0), import_tax_cost: Number(row.import_tax_cost ?? 0) }); });
+              }
             }
             const valid = enrichItems(allData, msrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
             if (isMounted) setItems(valid);
@@ -1151,6 +1158,7 @@ export interface Manufacturer {
   name: string;
   code?: string | null;
   notes?: string | null;
+  logo_url?: string | null;
   deleted: boolean;
   archived: boolean;
   created_at: string;

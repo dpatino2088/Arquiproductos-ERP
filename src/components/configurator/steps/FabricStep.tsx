@@ -64,6 +64,7 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
       collection_id: collection.id,
       variant_id: undefined,
       fabric_catalog_item_id: null,
+      fabric_item_id: null,
     } as any);
     setSearchTerm(collection.collection_name);
     setShowDropdown(false);
@@ -75,6 +76,7 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
       variant_id: variant.id,
       variant_name: variant.variant_name,
       fabric_catalog_item_id: variant.id,
+      fabric_item_id: variant.id,
     } as any);
   };
 

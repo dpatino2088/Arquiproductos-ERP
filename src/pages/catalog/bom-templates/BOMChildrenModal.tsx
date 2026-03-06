@@ -302,17 +302,17 @@ export default function BOMChildrenModal({
                   </Label>
                   <Input
                     type="number"
-                    min={0.01}
-                    step={0.01}
+                    min={childFormData.qty_type === 'fixed' ? 1 : 0.01}
+                    step={childFormData.qty_type === 'fixed' ? 1 : 0.01}
                     value={Number.isFinite(childFormData.qty) ? childFormData.qty : ''}
                     onChange={(e) =>
-                      setChildFormData((prev) => ({
-                        ...prev,
-                        qty:
-                          e.target.value === ''
-                            ? Number.NaN
-                            : parseFloat(e.target.value),
-                      }))
+                      setChildFormData((prev) => {
+                        const isFixed = prev.qty_type === 'fixed';
+                        const val = e.target.value === ''
+                          ? Number.NaN
+                          : isFixed ? parseInt(e.target.value, 10) : parseFloat(e.target.value);
+                        return { ...prev, qty: val };
+                      })
                     }
                   />
                 </div>

@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
-import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus } from '../../hooks/useManufacturing';
+import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, useMoMaterialReadiness } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useModuleAccess } from '../../hooks/usePermissions';
@@ -16,6 +17,7 @@ import ProductionStepsTab from '../../components/manufacturing/tabs/ProductionSt
 import ScheduleTab from '../../components/manufacturing/tabs/ScheduleTab';
 import NotesTab from '../../components/manufacturing/tabs/NotesTab';
 import AttachmentsTab from '../../components/manufacturing/tabs/AttachmentsTab';
+import WorkOrdersTab from './WorkOrdersTab';
 import TimelineView from '../../components/shared/TimelineView';
 import { ChevronDown } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
@@ -50,16 +52,14 @@ interface MOLine {
   } | null;
 }
 
-const MFG_SUBMODULES = [
-  { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-  { id: 'material', label: 'Material', href: '/manufacturing/material' },
-];
+const MFG_SUBMODULES = MANUFACTURING_SUBMODULES;
 
 export default function ManufacturingOrderDetail({ moId: propMoId }: ManufacturingOrderDetailProps) {
   const normalizedPropMoId = propMoId ? normalizeUUID(propMoId) : null;
   const [moId, setMoId] = useState<string | null>(normalizedPropMoId);
   const { manufacturingOrder: mo, loading, error, refetch } = useManufacturingOrder(moId);
   const { materials } = useManufacturingMaterials(moId ?? '');
+  const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
   const { transitionStatus, isTransitioning } = useTransitionMOStatus();
   const { issueMaterials } = useIssueMaterials();
   const { defaultWarehouse } = useWarehouses(mo?.organization_id ?? null);
@@ -239,15 +239,27 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     { id: 'materials', label: 'Materials', count: materials.length },
     { id: 'schedule', label: 'Schedule' },
     { id: 'steps', label: 'Production Steps' },
+    { id: 'work-orders', label: 'Work Orders' },
     { id: 'notes', label: 'Notes' },
     { id: 'timeline', label: 'Timeline', count: timeline.length },
     { id: 'attachments', label: 'Attachments' },
   ];
 
-  const actionItems: { label: string; onClick: () => void; danger?: boolean }[] = [];
+  const materialsIncomplete = materialReadiness?.hasShortage === true;
+  const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
   if (isInternal && status !== 'cancelled' && status !== 'delivered') {
-    if (status === 'draft') actionItems.push({ label: 'Advance to Planned', onClick: () => handleTransition('planned') });
-    if (status === 'planned') actionItems.push({ label: 'Start Production', onClick: () => handleTransition('in_production') });
+    if (status === 'draft') actionItems.push({
+      label: 'Advance to Planned',
+      onClick: () => handleTransition('planned'),
+      disabled: materialsIncomplete,
+      title: materialsIncomplete ? 'Materials incomplete. Cover material demand before advancing.' : undefined,
+    });
+    if (status === 'planned') actionItems.push({
+      label: 'Start Production',
+      onClick: () => handleTransition('in_production'),
+      disabled: materialsIncomplete,
+      title: materialsIncomplete ? 'Materials incomplete. Cover material demand before starting production.' : undefined,
+    });
     if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     if (status === 'quality_check') actionItems.push({ label: 'Ready for Pickup', onClick: () => handleTransition('ready_for_pickup') });
     if (status === 'ready_for_pickup') actionItems.push({ label: 'Mark Delivered', onClick: () => handleTransition('delivered') });
@@ -294,10 +306,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
               {actionsOpen && (
                 <>
                   <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[180px] py-1">
+                    <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-40 min-w-[180px] py-1">
                     {actionItems.map((item, i) => (
-                      <button key={i} type="button" onClick={item.onClick}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${item.danger ? 'text-red-600' : 'text-gray-700'}`}>
+                      <button key={i} type="button" onClick={item.disabled ? undefined : item.onClick}
+                        title={item.title}
+                        disabled={item.disabled}
+                        className={`w-full text-left px-3 py-2 text-sm ${item.disabled ? 'opacity-50 cursor-not-allowed text-gray-500' : 'hover:bg-gray-50'} ${item.danger ? 'text-red-600' : 'text-gray-700'}`}>
                         {item.label}
                       </button>
                     ))}
@@ -338,6 +352,14 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       {status === 'cancelled' && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 mb-4">
           <p className="text-sm font-medium text-red-800">This manufacturing order has been cancelled.</p>
+        </div>
+      )}
+
+      {/* Materials incomplete — subtle inline notice */}
+      {materialsIncomplete && status !== 'cancelled' && ['draft', 'planned'].includes(status) && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-100 w-fit">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+          <span className="text-xs text-amber-700">Material shortage — cover demand before advancing.</span>
         </div>
       )}
 
@@ -402,16 +424,16 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                   <dd className="text-gray-900">{new Date(mo.released_at).toLocaleDateString()}</dd>
                 </div>
               )}
-              {(mo.planned_start_at || mo.scheduled_start_date) && (
+              {mo.planned_start_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Planned Start</dt>
-                  <dd className="text-gray-900">{new Date(mo.planned_start_at ?? mo.scheduled_start_date ?? '').toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{new Date(mo.planned_start_at).toLocaleDateString()}</dd>
                 </div>
               )}
-              {(mo.planned_end_at || mo.scheduled_end_date) && (
+              {mo.planned_end_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Planned End</dt>
-                  <dd className="text-gray-900">{new Date(mo.planned_end_at ?? mo.scheduled_end_date ?? '').toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{new Date(mo.planned_end_at).toLocaleDateString()}</dd>
                 </div>
               )}
               {mo.production_started_at && (
@@ -502,6 +524,16 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       {/* Production Steps tab */}
       {activeTab === 'steps' && (
         <ProductionStepsTab moId={moId} />
+      )}
+
+      {activeTab === 'work-orders' && moId && (
+        <WorkOrdersTab
+          moId={moId}
+          moNumber={mo.manufacturing_order_no}
+          customerName={customer}
+          productName={mo.product_name ?? ''}
+          salesOrderNo={so?.sales_order_no}
+        />
       )}
 
       {/* Notes tab */}

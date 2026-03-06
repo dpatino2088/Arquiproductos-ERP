@@ -6,7 +6,7 @@ import { useProductTypes } from '../../../hooks/useProductTypes';
 import { useCatalogItems, useItemCategories, useLeafItemCategories } from '../../../hooks/useCatalog';
 import { useBOMComponents } from '../../../hooks/useBOM';
 import { normalizeRole, isValidRole, CANONICAL_COMPONENT_ROLES, VALID_CHILD_ROLES } from '../../../lib/bom/roles';
-import { normalizeUom } from '../../../lib/uom';
+import { normalizeUom, canonicalUom } from '../../../lib/uom';
 import { useOnVisibilityChange } from '../../../lib/app-persistence';
 import type {
   BOMComponentDraft,
@@ -37,6 +37,12 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
   const [templateDescription, setTemplateDescription] = useState('');
   const [templateHardwareColor, setTemplateHardwareColor] = useState('');
   const [templatePanelCount, setTemplatePanelCount] = useState<1 | 2 | 3>(1);
+  const [templateDriveType, setTemplateDriveType] = useState<'manual' | 'motor' | null>(null);
+  const [templateDriveSide, setTemplateDriveSide] = useState<'left' | 'right' | 'both' | null>(null);
+  const [templateOpeningDirection, setTemplateOpeningDirection] = useState<'left' | 'right' | 'center' | null>(null);
+  const [templateInstallationLocation, setTemplateInstallationLocation] = useState<'ceiling' | 'wall' | null>(null);
+  const [templateManufacturer, setTemplateManufacturer] = useState<string | null>(null);
+  const [templateProductLine, setTemplateProductLine] = useState<string | null>(null);
 
   // --- Components ---
   const [components, setComponents] = useState<BOMComponentDraft[]>([]);
@@ -214,6 +220,12 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
             setTemplateHardwareColor(data.hardware_color || '');
             const pc = data.panel_count_min ?? data.panel_count_max ?? 1;
             setTemplatePanelCount(Math.min(3, Math.max(1, Number(pc) || 1)) as 1 | 2 | 3);
+            setTemplateDriveType(data.drive_type || null);
+            setTemplateDriveSide(data.drive_side === 'left' ? 'left' : data.drive_side === 'right' ? 'right' : data.drive_type ? 'both' : null);
+            setTemplateOpeningDirection(data.opening_direction || null);
+            setTemplateManufacturer(data.manufacturer || null);
+            setTemplateProductLine(data.product_line || null);
+            setTemplateInstallationLocation(data.installation_location || null);
           }
         });
     } else if (!editingTemplateId) {
@@ -223,6 +235,11 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       setTemplateDescription('');
       setTemplateHardwareColor('');
       setTemplatePanelCount(1);
+      setTemplateDriveType(null);
+      setTemplateDriveSide(null);
+      setTemplateOpeningDirection(null);
+      setTemplateManufacturer(null);
+      setTemplateProductLine(null);
       setComponents([]);
       setComponentsToDelete([]);
       initialComponentsRef.current = [];
@@ -240,32 +257,44 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
 
   useEffect(() => {
     if (!editingTemplateId || !existingComponents?.length) return;
-    const mapped: BOMComponentDraft[] = existingComponents.map((comp: any) => ({
-      id: comp.id,
-      parent_component_id: comp.parent_component_id || null,
-      component_item_id: comp.component_item_id || null,
-      component_role: comp.component_role || null,
-      qty_type: comp.qty_type || 'fixed',
-      qty_value: comp.qty_value || 1,
-      qty_delta_mm: comp.qty_delta_mm || 0,
-      waste_pct: comp.waste_pct || 0,
-      depends_on_role: comp.depends_on_role || null,
-      cut_axis: comp.cut_axis || null,
-      cut_delta_mm: comp.cut_delta_mm || 0,
-      qty_spacing_mm: comp.qty_spacing_mm ?? null,
-      qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
-      uom: comp.uom || 'ea',
-      sort_order: comp.sort_order || 0,
-      sequence_order: comp.sort_order || 0,
-      is_required: comp.is_required !== false,
-      auto_select: false,
-      catalog_item: comp.component_item || null,
-    }));
+    const mapped: BOMComponentDraft[] = existingComponents.map((comp: any) => {
+      const catItem = comp.component_item_id
+        ? catalogItems.find(i => i.id === comp.component_item_id)
+        : null;
+      const isFabric = comp.component_role === 'fabric';
+      const syncedUom = isFabric
+        ? 'm'
+        : canonicalUom(catItem?.unit_of_measure || catItem?.uom || comp.uom, catItem?.measure_basis);
+      return {
+        id: comp.id,
+        parent_component_id: comp.parent_component_id || null,
+        component_item_id: comp.component_item_id || null,
+        component_role: comp.component_role || null,
+        qty_type: comp.qty_type || 'fixed',
+        qty_value: comp.qty_value || 1,
+        qty_delta_mm: comp.qty_delta_mm || 0,
+        waste_pct: comp.waste_pct || 0,
+        depends_on_role: comp.depends_on_role || null,
+        affects_role: comp.affects_role || null,
+        cut_axis: comp.cut_axis || null,
+        cut_delta_mm: comp.cut_delta_mm || 0,
+        qty_spacing_mm: comp.qty_spacing_mm ?? null,
+        qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
+        uom: syncedUom,
+        sort_order: comp.sort_order || 0,
+        sequence_order: comp.sort_order || 0,
+        is_required: comp.is_required !== false,
+        auto_select: false,
+        condition_key: comp.condition_key || null,
+        condition_value: comp.condition_value || null,
+        catalog_item: comp.component_item || null,
+      };
+    });
     const unique = Array.from(new Map(mapped.map(c => [c.id, c])).values());
     setComponents(unique);
     setComponentsToDelete([]);
     initialComponentsRef.current = unique.map(c => ({ ...c }));
-  }, [editingTemplateId, existingComponents]);
+  }, [editingTemplateId, existingComponents, catalogItems]);
 
   // ========== DRAFT PERSISTENCE ==========
 
@@ -281,6 +310,12 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           if (p.templateDescription) setTemplateDescription(p.templateDescription);
           if (p.templateHardwareColor !== undefined) setTemplateHardwareColor(p.templateHardwareColor || '');
           if (p.templatePanelCount !== undefined) setTemplatePanelCount(Math.min(3, Math.max(1, Number(p.templatePanelCount) || 1)) as 1 | 2 | 3);
+          if (p.templateDriveType !== undefined) setTemplateDriveType(p.templateDriveType || null);
+          if (p.templateDriveSide !== undefined) setTemplateDriveSide(p.templateDriveSide || null);
+          if (p.templateOpeningDirection !== undefined) setTemplateOpeningDirection(p.templateOpeningDirection || null);
+          if (p.templateInstallationLocation !== undefined) setTemplateInstallationLocation(p.templateInstallationLocation || null);
+          if (p.templateManufacturer !== undefined) setTemplateManufacturer(p.templateManufacturer || null);
+          if (p.templateProductLine !== undefined) setTemplateProductLine(p.templateProductLine || null);
           if (p.components && (!editingTemplateId || p.components.length > 0)) setComponents(p.components);
         }
       } catch { /* ignore */ }
@@ -293,10 +328,11 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     try {
       sessionStorage.setItem(draftKey, JSON.stringify({
         productTypeId, templateCode, templateName, templateDescription,
-        templateHardwareColor, templatePanelCount, components,
+        templateHardwareColor, templatePanelCount, templateDriveType, templateDriveSide, templateOpeningDirection,
+        templateInstallationLocation, templateManufacturer, templateProductLine, components,
       }));
     } catch { /* ignore */ }
-  }, [draftKey, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, components]);
+  }, [draftKey, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, templateDriveType, templateDriveSide, templateOpeningDirection, templateInstallationLocation, templateManufacturer, templateProductLine, components]);
 
   useOnVisibilityChange(useCallback(() => {
     if (document.visibilityState !== 'visible') return;
@@ -310,6 +346,11 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         if (p.templateDescription) setTemplateDescription(p.templateDescription);
         if (p.templateHardwareColor !== undefined) setTemplateHardwareColor(p.templateHardwareColor || '');
         if (p.templatePanelCount !== undefined) setTemplatePanelCount(Math.min(3, Math.max(1, Number(p.templatePanelCount) || 1)) as 1 | 2 | 3);
+        if (p.templateDriveType !== undefined) setTemplateDriveType(p.templateDriveType || null);
+        if (p.templateDriveSide !== undefined) setTemplateDriveSide(p.templateDriveSide || null);
+        if (p.templateOpeningDirection !== undefined) setTemplateOpeningDirection(p.templateOpeningDirection || null);
+        if (p.templateManufacturer !== undefined) setTemplateManufacturer(p.templateManufacturer || null);
+        if (p.templateProductLine !== undefined) setTemplateProductLine(p.templateProductLine || null);
         if (p.components && (!editingTemplateId || p.components.length > 0)) setComponents(p.components);
       }
     } catch { /* ignore */ }
@@ -334,7 +375,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     if (!sel) return;
     const autoRole = normalizeRole(sel.item_role) || '';
     const isFabric = sel.is_fabric || autoRole === 'fabric';
-    const catalogUom = isFabric ? 'm' : (sel.unit_of_measure || sel.uom || 'ea');
+    const catalogUom = isFabric ? 'm' : canonicalUom(sel.unit_of_measure || sel.uom, sel.measure_basis);
     setFormData(prev => ({ ...prev, component_item_id: itemId, component_role: autoRole || prev.component_role, uom: catalogUom }));
     setComponentSearchTerm(`${sel.sku} - ${sel.name || sel.item_name || ''}`);
     setShowComponentDropdown(false);
@@ -349,9 +390,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
 
     const role = normalizeRole(formData.component_role) || formData.component_role;
     const isFabric = role === 'fabric';
-    const finalUom = isFabric ? 'm' : (normalizeUom(formData.uom) || 'ea');
-    const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
     const sel = catalogItems.find(i => i.id === formData.component_item_id);
+    const finalUom = isFabric ? 'm' : canonicalUom(formData.uom || sel?.unit_of_measure || sel?.uom, sel?.measure_basis);
+    const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
 
     const newComp: BOMComponentDraft = {
       id: `temp-${crypto.randomUUID()}`,
@@ -374,6 +415,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       sequence_order: formData.sequence_order ?? 0,
       is_required: formData.is_required ?? true,
       auto_select: false,
+      condition_key: formData.condition_key || null,
+      condition_value: formData.condition_value || null,
       catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : null,
     };
     setComponents(prev => [...prev, newComp]);
@@ -393,9 +436,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
 
     const normalized = normalizeRole(role) || role;
     const isFabric = normalized === 'fabric';
-    const finalUom = isFabric ? 'm' : (normalizeUom(formData.uom) || 'ea');
-    const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
     const sel = catalogItems.find(i => i.id === formData.component_item_id);
+    const finalUom = isFabric ? 'm' : canonicalUom(formData.uom || sel?.unit_of_measure || sel?.uom, sel?.measure_basis);
+    const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
 
     setComponents(prev => prev.map(c => {
       if (c.id !== editingComponentId) return c;
@@ -411,6 +454,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         sort_order: formData.sequence_order ?? 0,
         sequence_order: formData.sequence_order ?? 0,
         is_required: formData.is_required ?? true,
+        condition_key: formData.condition_key || null,
+        condition_value: formData.condition_value || null,
         catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : c.catalog_item,
       };
     }));
@@ -439,7 +484,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       ? `${item.sku || 'N/A'} - ${item.name || 'Unnamed'}`
       : component.catalog_item ? `${component.catalog_item.sku || 'N/A'} - ${component.catalog_item.name || 'Unnamed'}` : '';
     const isFabric = component.component_role === 'fabric';
-    const uomNorm = isFabric ? 'm' : (normalizeUom(component.uom) || 'ea');
+    const catalogItem = catalogItems.find(i => i.id === component.component_item_id);
+    const uomNorm = isFabric ? 'm' : canonicalUom(component.uom || catalogItem?.unit_of_measure, catalogItem?.measure_basis);
     setEditingComponentId(component.id);
     setComponentSearchTerm(display);
     setFormData({
@@ -454,6 +500,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       uom: uomNorm,
       sequence_order: component.sort_order || component.sequence_order || 0,
       is_required: component.is_required ?? true,
+      condition_key: component.condition_key || '',
+      condition_value: component.condition_value || '',
     });
     setShowAddComponentForm(true);
     setSelectedCategoryFilter('');
@@ -470,6 +518,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     setEditingEngineeringComponentId(componentId);
     setEngineeringData({
       depends_on_role: axis === 'none' ? '' : (comp.depends_on_role || ''),
+      affects_role: comp.affects_role || '',
       cut_axis: axis as any,
       cut_delta_mm: comp.cut_delta_mm || null,
       cut_delta_scope: (comp.cut_delta_scope as any) || 'none',
@@ -484,11 +533,13 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
   const handleSaveEngineeringRules = useCallback(() => {
     if (!editingEngineeringComponentId) return;
     const finalRole = engineeringData.cut_axis === 'none' ? null : normalizeRole(engineeringData.depends_on_role);
+    const finalAffectsRole = normalizeRole(engineeringData.affects_role) || null;
     setComponents(prev => prev.map(c => {
       if (c.id !== editingEngineeringComponentId) return c;
       return {
         ...c,
         depends_on_role: finalRole,
+        affects_role: finalAffectsRole,
         cut_axis: engineeringData.cut_axis === 'none' ? null : engineeringData.cut_axis,
         cut_delta_mm: engineeringData.cut_delta_mm || 0,
         cut_delta_scope: engineeringData.cut_delta_scope === 'none' ? null : engineeringData.cut_delta_scope,
@@ -537,7 +588,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
 
     const normalizedChildRole = normalizeRole(childFormData.child_role) || childFormData.child_role;
     const sel = catalogItems.find(i => i.id === childFormData.child_item_id);
-    const uom = normalizeUom(childFormData.uom) || 'ea';
+    const uom = canonicalUom(childFormData.uom || sel?.unit_of_measure || sel?.uom, sel?.measure_basis);
     const sortOrder = childComponents.find(c => c.id === editingChildId)?.sort_order ?? childComponents.length;
 
     const childQtyType = childFormData.qty_type || 'fixed';
@@ -598,7 +649,18 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     if (!activeOrganizationId) { useUIStore.getState().addNotification({ type: 'error', title: 'Organization Required', message: 'Please select an organization.' }); return false; }
     if (!productTypeId) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Please select a Product Type' }); return false; }
     if (!templateCode.trim()) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Template Code is required' }); return false; }
+    if (!templateName.trim()) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Template Name is required' }); return false; }
     if (!templateHardwareColor.trim()) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Hardware Color is required' }); return false; }
+    if (!templateManufacturer) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Manufacturer is required' }); return false; }
+    if (!templateDriveType) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Drive Type is required (Manual or Motor)' }); return false; }
+    if (!templateDriveSide) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Drive Side is required (select Left, Right, or both)' }); return false; }
+    {
+      const pts = (productTypes || []) as any[];
+      const selPt = pts.find((pt: any) => pt.id === productTypeId);
+      const isDrap = selPt && (selPt.code === 'drapery' || selPt.name?.toLowerCase().includes('drapery'));
+      if (isDrap && !templateOpeningDirection) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Opening Direction is required for Drapery' }); return false; }
+      if (isDrap && !templateProductLine?.trim()) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Product Line is required for Drapery' }); return false; }
+    }
 
     const invalidRoles = components.filter(c => c.component_role && !c.id.startsWith('temp-') ? false : (c.component_role ? !isValidRole(c.component_role) : false));
     if (invalidRoles.length) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: `Invalid roles found in ${invalidRoles.length} component(s).` }); return false; }
@@ -617,6 +679,20 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         hardware_color: normalizedColor,
         panel_count_min: templatePanelCount,
         panel_count_max: templatePanelCount,
+        drive_type: templateDriveType || null,
+        drive_side: (() => {
+          const pts = (productTypes || []) as any[];
+          const selPt = pts.find((pt: any) => pt.id === productTypeId);
+          const isDrap = selPt && (selPt.code === 'drapery' || selPt.name?.toLowerCase().includes('drapery'));
+          if (isDrap && templateOpeningDirection && templateOpeningDirection !== 'center') {
+            return templateOpeningDirection;
+          }
+          return templateDriveSide === 'both' ? null : (templateDriveSide || null);
+        })(),
+        opening_direction: templateOpeningDirection || null,
+        installation_location: templateInstallationLocation || null,
+        manufacturer: templateManufacturer || null,
+        product_line: templateProductLine || null,
         is_active: true,
       };
       if (editingTemplateId) templatePayload.id = editingTemplateId;
@@ -636,13 +712,16 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           qty_delta_mm: c.qty_delta_mm || 0,
           waste_pct: c.waste_pct || 0,
           depends_on_role: c.depends_on_role || null,
+          affects_role: c.affects_role || null,
           cut_axis: c.cut_axis || null,
           cut_delta_mm: c.cut_delta_mm || 0,
           qty_spacing_mm: c.qty_spacing_mm ?? null,
           qty_min: c.qty_min ?? null,
-          uom: isFabric ? 'm' : (c.uom || 'ea'),
+          uom: isFabric ? 'm' : canonicalUom(c.uom, null),
           sort_order: c.sort_order || c.sequence_order || 0,
           is_required: c.is_required !== false,
+          condition_key: c.condition_key || null,
+          condition_value: c.condition_value || null,
           engineering_delta_source: c.engineering_delta_source || 'fixed',
           engineering_attr_key: c.engineering_attr_key || null,
           engineering_scope: c.engineering_scope || 'total',
@@ -689,6 +768,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           qty_delta_mm: comp.qty_delta_mm || 0,
           waste_pct: comp.waste_pct || 0,
           depends_on_role: comp.depends_on_role || null,
+          affects_role: comp.affects_role || null,
           cut_axis: comp.cut_axis || null,
           cut_delta_mm: comp.cut_delta_mm || 0,
           qty_spacing_mm: comp.qty_spacing_mm ?? null,
@@ -698,6 +778,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           sequence_order: comp.sort_order || 0,
           is_required: comp.is_required !== false,
           auto_select: false,
+          condition_key: comp.condition_key || null,
+          condition_value: comp.condition_value || null,
         }));
         setComponents(refreshed);
         initialComponentsRef.current = refreshed.map(c => ({ ...c }));
@@ -713,7 +795,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     } finally {
       setIsSaving(false);
     }
-  }, [activeOrganizationId, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, editingTemplateId, components, componentsToDelete, clearDraft]);
+  }, [activeOrganizationId, productTypeId, templateCode, templateName, templateDescription, templateHardwareColor, templatePanelCount, templateDriveType, templateDriveSide, templateOpeningDirection, templateInstallationLocation, templateManufacturer, templateProductLine, editingTemplateId, components, componentsToDelete, clearDraft]);
 
   // ========== RETURN ==========
 
@@ -725,6 +807,12 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     templateDescription, setTemplateDescription,
     templateHardwareColor, setTemplateHardwareColor,
     templatePanelCount, setTemplatePanelCount,
+    templateDriveType, setTemplateDriveType,
+    templateDriveSide, setTemplateDriveSide,
+    templateOpeningDirection, setTemplateOpeningDirection,
+    templateInstallationLocation, setTemplateInstallationLocation,
+    templateManufacturer, setTemplateManufacturer,
+    templateProductLine, setTemplateProductLine,
     productTypes,
     catalogItems,
     categories,
@@ -752,6 +840,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     // Engineering
     showEngineeringModal,
     editingEngineeringComponentId,
+    editingEngineeringComponentUom: editingEngineeringComponentId
+      ? (components.find(c => c.id === editingEngineeringComponentId)?.uom ?? 'ea')
+      : 'ea',
     engineeringData, setEngineeringData,
     handleOpenEngineeringModal,
     handleSaveEngineeringRules,

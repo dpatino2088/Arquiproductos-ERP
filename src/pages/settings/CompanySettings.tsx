@@ -8,12 +8,16 @@ import {
   ChevronRight,
   X,
   Shield,
+  Factory,
+  Scissors,
 } from 'lucide-react';
 import OrganizationUser from './OrganizationUser';
 import OrganizationUserNew from './OrganizationUserNew';
 import OrganizationUserEdit from './OrganizationUserEdit';
 import CostEngineSettings from './CostEngineSettings';
 import DealerProfile from './DealerProfile';
+import WorkCentersSettings from './WorkCentersSettings';
+import FabricRulesSettings from './FabricRulesSettings';
 
 export default function CompanySettings() {
   const { isMember, loading: roleLoading } = useCurrentOrgRole();
@@ -67,6 +71,18 @@ export default function CompanySettings() {
     }
   }, [currentRoute, activeSection]);
 
+  useEffect(() => {
+    if (currentRoute.includes('/settings/work-centers') && activeSection !== 'work-centers') {
+      setActiveSection('work-centers');
+    }
+  }, [currentRoute, activeSection]);
+
+  useEffect(() => {
+    if (currentRoute.includes('/settings/fabric-rules') && activeSection !== 'fabric-rules') {
+      setActiveSection('fabric-rules');
+    }
+  }, [currentRoute, activeSection]);
+
   // When on /settings/roles we show Roles page (full page), so keep section in sync if user opens settings again
   useEffect(() => {
     if (currentRoute.includes('/settings/roles') && activeSection !== 'roles') {
@@ -92,6 +108,8 @@ export default function CompanySettings() {
     { id: 'organization', label: 'Organization', icon: Users },
     { id: 'dealer-profile', label: 'Dealer Profile', icon: Building },
     { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon },
+    { id: 'work-centers', label: 'Work Centers', icon: Factory },
+    { id: 'fabric-rules', label: 'Fabric & System Rules', icon: Scissors },
     { id: 'roles', label: 'Roles & Permissions', icon: Shield }
   ];
 
@@ -116,6 +134,10 @@ export default function CompanySettings() {
       router.navigate('/settings/dealer-profile');
     } else if (sectionId === 'cost-engine') {
       router.navigate('/settings/cost-engine');
+    } else if (sectionId === 'work-centers') {
+      router.navigate('/settings/work-centers');
+    } else if (sectionId === 'fabric-rules') {
+      router.navigate('/settings/fabric-rules');
     } else if (sectionId === 'roles') {
       router.navigate('/admin/roles');
     }
@@ -183,6 +205,14 @@ export default function CompanySettings() {
 
     if (activeSection === 'cost-engine') {
       return <CostEngineSettings />;
+    }
+
+    if (activeSection === 'work-centers') {
+      return <WorkCentersSettings />;
+    }
+
+    if (activeSection === 'fabric-rules') {
+      return <FabricRulesSettings />;
     }
 
     // Default content for other sections (shouldn't happen with current menu)

@@ -9,6 +9,7 @@ import { supabase } from '../supabase/client';
 import { BOMInstanceMetadata, RollerBOMConfigState } from './types';
 import { ResolvedBOMTemplate } from './resolveBomTemplate';
 import { normalizeRole } from './roles';
+import { calculateFabricLinearM } from './fabric-calculations';
 
 export interface GenerateBOMInstanceParams {
   organizationId: string;
@@ -54,6 +55,7 @@ export async function generateBomInstance(
       side_channel_item_id: configState.side_channel_item_id || null,
       bottom_channel_item_id: configState.bottom_channel_item_id || null,
       tube_item_id: configState.tube_item_id || null,
+      fabric_item_id: configState.fabric_item_id || null,
     },
   };
 
@@ -164,29 +166,57 @@ export async function generateBomInstance(
       }
     }
 
-    // Get item cost for calculations
+    const normalizedSlotRole = normalizeRole(slot.item_role) || slot.item_role;
+
+    // Get item details for cost and measure_basis
     const { data: catalogItem } = await supabase
       .from('CatalogItems')
-      .select('cost_exw')
+      .select('cost_exw, measure_basis, is_roll')
       .eq('id', finalCatalogItemId)
       .maybeSingle();
 
-    const unitCost = catalogItem?.cost_exw || null;
-    const totalCost = unitCost && slot.qty ? unitCost * slot.qty : null;
+    const isFabric = normalizedSlotRole === 'fabric' || catalogItem?.is_roll === true;
+    const isLinear = catalogItem?.measure_basis === 'linear' && !catalogItem?.is_roll;
 
-    // Calculate cut dimensions (if applicable)
-    // For now, we'll set these based on measurements if needed
-    const cutWidthMm = configState.width_mm || null;
-    const cutHeightMm = configState.height_mm || null;
-    const cutLengthMm = null; // Not used for roller shades typically
+    let lineUom = 'ea';
+    let lineQty = slot.qty;
+    let cutLengthMm: number | null = null;
+    let cutWidthMm: number | null = null;
+    let cutHeightMm: number | null = null;
+
+    if (isFabric && configState.width_mm && configState.height_mm) {
+      // Fabric: UOM = m, qty = calculated linear meters, cut_width = product width
+      lineUom = 'm';
+      const fabricM = calculateFabricLinearM({
+        width_m: configState.width_mm / 1000,
+        height_m: configState.height_mm / 1000,
+        roll_width_m: 2.8,
+      });
+      lineQty = Math.round(fabricM * 1000) / 1000;
+      cutWidthMm = configState.width_mm;
+      cutHeightMm = configState.height_mm;
+    } else if (isLinear && configState.width_mm) {
+      // Linear profiles (tube, headbox, etc.): UOM = m, cut_length = product width
+      lineUom = 'm';
+      cutLengthMm = configState.width_mm;
+      cutWidthMm = configState.width_mm;
+      cutHeightMm = configState.height_mm || null;
+    } else {
+      // Unit items (ea): use product dimensions as reference
+      cutWidthMm = configState.width_mm || null;
+      cutHeightMm = configState.height_mm || null;
+    }
+
+    const unitCost = catalogItem?.cost_exw || null;
+    const totalCost = unitCost && lineQty ? unitCost * lineQty : null;
 
     linesToInsert.push({
       bom_instance_id: instanceId,
-      bom_component_id: null, // BOMTemplateSlots doesn't link to BOMComponents
+      bom_component_id: null,
       resolved_part_id: finalCatalogItemId,
-      part_role: normalizeRole(slot.item_role) || slot.item_role,
-      qty: slot.qty,
-      uom: 'ea', // Default, can be enhanced later
+      part_role: normalizedSlotRole,
+      qty: lineQty,
+      uom: lineUom,
       cut_length_mm: cutLengthMm,
       cut_width_mm: cutWidthMm,
       cut_height_mm: cutHeightMm,
@@ -235,6 +265,7 @@ function getSelectionForRole(
     side_channel: 'side_channel_item_id',
     bottom_channel: 'bottom_channel_item_id',
     tube: 'tube_item_id',
+    fabric: 'fabric_item_id',
   };
 
   const selectionKey = roleMap[role];

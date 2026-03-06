@@ -56,7 +56,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div>
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded" />
           <div className="h-32 bg-gray-200 rounded" />
@@ -73,7 +73,7 @@ export default function ProductionStepsTab({ moId }: ProductionStepsTabProps) {
   const currentIdx = STATUS_STEPS.indexOf(currentStatus);
   const isCancelled = currentStatus === 'cancelled';
   return (
-    <div className="p-6">
+    <div>
       <h3 className="text-lg font-semibold text-gray-900 mb-6">Production Workflow</h3>
 
       {isCancelled ? (

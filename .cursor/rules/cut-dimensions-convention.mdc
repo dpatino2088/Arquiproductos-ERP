@@ -1,0 +1,42 @@
+# Cut Dimensions Convention
+
+This ERP uses TWO contexts for dimensions. Never mix them.
+
+## Product Context (Curtain / Window Opening)
+
+Used in: **Quotes, SaleOrderLines, ConfiguredProducts, BOM metadata**
+
+| Dimension | Meaning | Field examples |
+|---|---|---|
+| **Width** | Horizontal opening of the curtain/window | `width_m`, `width_mm` |
+| **Height** | Vertical opening of the curtain/window | `height_m`, `height_mm` |
+
+## Production Context (Cut Dimensions)
+
+Used in: **BOMInstanceLines, WorkOrderTaskLines, Work Orders, Cut Sheets, PDFs**
+
+| Dimension | Meaning | Derived from | Materials |
+|---|---|---|---|
+| **Length X** | Cut length along the Width axis | `width_mm + delta` | Tube, Bottom Bar, Headbox, Top Rail, Bottom Channel |
+| **Length Y** | Cut length along the Height axis | `height_mm + delta` | Side Channel, Brush, Belt, Chain |
+
+Both are **lengths of cut** — the operator always cuts a piece to a certain length.
+The X/Y suffix indicates which product axis the cut follows.
+
+## Column Mapping
+
+| Table | Column | Production label |
+|---|---|---|
+| `BOMInstanceLines.cut_length_mm` | Length X (width-based cut) |
+| `BOMInstanceLines.cut_height_mm` | Length Y (height-based cut) |
+| `WorkOrderTaskLines.cut_length_mm` | Length X |
+| `WorkOrderTaskLines.cut_width_mm` | Length Y |
+
+## Rules
+
+1. **Never** label production cut dimensions as "Width" or "Height" — use "Length X" / "Length Y"
+2. **Never** label product dimensions as "Length" — use "Width" / "Height"
+3. In Work Order UIs and PDFs, column headers must be **"Length X (mm)"** and **"Length Y (mm)"**
+4. `cut_delta_mm` from BOMComponents is always applied: `Length = axis_mm + cut_delta_mm`
+5. A material that runs horizontally (tube, bottom bar) gets Length X; vertically (side channel, brush) gets Length Y
+6. Fabric/rolls may have both Length X (cut width of fabric) and Length Y (linear meters to unroll)

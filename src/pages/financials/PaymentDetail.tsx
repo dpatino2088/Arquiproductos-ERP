@@ -388,20 +388,6 @@ export default function PaymentDetail() {
       });
       if (applyErr) throw applyErr;
 
-      const newAppliedForInvoice = selectedInvoice.applied_amount + amount;
-      let nextInvoiceStatus = selectedInvoice.status;
-      if (newAppliedForInvoice >= selectedInvoice.total - 0.0001) {
-        nextInvoiceStatus = 'paid';
-      } else if (newAppliedForInvoice > 0) {
-        nextInvoiceStatus = 'partial';
-      }
-      if (nextInvoiceStatus !== selectedInvoice.status) {
-        await supabase
-          .from('DealerInvoices')
-          .update({ status: nextInvoiceStatus })
-          .eq('id', selectedInvoiceId);
-      }
-
       addNotification({
         type: 'success',
         title: 'Payment Applied',
@@ -418,50 +404,6 @@ export default function PaymentDetail() {
     }
   };
 
-  const recalcInvoiceStatus = useCallback(async (invoiceId: string) => {
-    const [invoiceRes, appsRes, creditsRes] = await Promise.all([
-      supabase
-        .from('DealerInvoices')
-        .select('id, total, status')
-        .eq('id', invoiceId)
-        .maybeSingle(),
-      supabase
-        .from('PaymentApplications')
-        .select('applied_amount')
-        .eq('invoice_id', invoiceId),
-      supabase
-        .from('DealerCreditNotes')
-        .select('amount, status')
-        .eq('invoice_id', invoiceId)
-        .eq('deleted', false),
-    ]);
-    if (invoiceRes.error) throw invoiceRes.error;
-    if (appsRes.error) throw appsRes.error;
-    if (creditsRes.error) throw creditsRes.error;
-    if (!invoiceRes.data) return;
-
-    const invoiceTotal = Number((invoiceRes.data as { total?: number }).total ?? 0);
-    const applied = ((appsRes.data ?? []) as Array<{ applied_amount: number | null }>)
-      .reduce((sum, row) => sum + Number(row.applied_amount ?? 0), 0);
-    const credited = ((creditsRes.data ?? []) as Array<{ amount: number | null; status: string | null }>)
-      .filter((row) => row.status !== 'void')
-      .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
-    const covered = applied + credited;
-
-    let nextStatus = 'issued';
-    if (covered >= invoiceTotal - 0.0001) nextStatus = 'paid';
-    else if (covered > 0.0001) nextStatus = 'partial';
-
-    const currentStatus = String((invoiceRes.data as { status?: string }).status ?? 'issued');
-    if (currentStatus !== 'void' && currentStatus !== nextStatus) {
-      const { error: updateErr } = await supabase
-        .from('DealerInvoices')
-        .update({ status: nextStatus })
-        .eq('id', invoiceId);
-      if (updateErr) throw updateErr;
-    }
-  }, []);
-
   const handleUnapply = async (application: InvoiceApplication) => {
     try {
       const { error: delErr } = await supabase
@@ -469,7 +411,6 @@ export default function PaymentDetail() {
         .delete()
         .eq('id', application.id);
       if (delErr) throw delErr;
-      await recalcInvoiceStatus(application.invoice_id);
       addNotification({ type: 'success', title: 'Unapplied', message: 'Application removed successfully.' });
       await refetch();
     } catch (e: unknown) {
