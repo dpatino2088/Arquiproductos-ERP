@@ -1,35 +1,78 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Plus, Trash2, Edit, ChevronDown, ChevronRight, Save, X } from 'lucide-react';
+import { Plus, Trash2, Edit, ChevronDown, ChevronRight, Save } from 'lucide-react';
 import { useFabricRules, FabricRule, SystemRule } from '../../hooks/useFabricRules';
 import { useProductTypes } from '../../hooks/useProductTypes';
 import Label from '../../components/ui/Label';
 import Input from '../../components/ui/Input';
 
-const FORMULA_CODES = ['ROLLER_DROPS', 'AREA_BASED', 'DRAPERY_PANELS'] as const;
-const PRICING_UOMS = ['m', 'm2'] as const;
 const ORIENTATIONS = ['vertical', 'railroaded'] as const;
+const WIDTH_SOURCES = ['tube_width', 'bottom_bar_width', 'track_width', 'finished_width_x_fullness', 'finished_width'] as const;
+const WIDTH_SOURCE_LABELS: Record<string, string> = {
+  tube_width: 'Tube Width (from BOM)',
+  bottom_bar_width: 'Bottom Bar Width (from BOM)',
+  track_width: 'Track Width (from BOM)',
+  finished_width_x_fullness: 'Finished Width x Fullness',
+  finished_width: 'Finished Width',
+};
 
-function getEmptyRule(productTypeId: string): Partial<FabricRule> {
+const MECHANICAL_SOURCES = new Set(['tube_width', 'bottom_bar_width', 'track_width']);
+const isMechanical = (s: string | undefined) => MECHANICAL_SOURCES.has(s || '');
+const isDrapery = (s: string | undefined) => s === 'finished_width_x_fullness';
+
+function deriveFromSource(src: string): { formula_code: string; pricing_output_uom: string } {
+  if (MECHANICAL_SOURCES.has(src)) return { formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm' };
+  if (src === 'finished_width_x_fullness') return { formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2' };
+  return { formula_code: 'AREA_BASED', pricing_output_uom: 'm2' };
+}
+
+const FORMULA_LABELS: Record<string, string> = {
+  ROLLER_DROPS: 'Linear (drops)',
+  AREA_BASED: 'Area (m\u00B2)',
+  DRAPERY_PANELS: 'Panels (fullness)',
+};
+
+function inferDefaults(ptName: string): Partial<FabricRule> {
+  const n = ptName.toLowerCase();
+  if (n.includes('dual'))
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08 };
+  if (n.includes('triple'))
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08 };
+  if (n.includes('roller') || n.includes('zip'))
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08 };
+  if (n.includes('drapery') || n.includes('curtain') || n.includes('wave') || n.includes('ripple') || n.includes('pinch'))
+    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10 };
+  return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15 };
+}
+
+function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule> {
+  const defaults = inferDefaults(ptName);
   return {
     product_type_id: productTypeId,
     style_code: null,
     display_name: null,
     image_url: null,
     product_line: null,
-    formula_code: 'ROLLER_DROPS',
+    formula_code: defaults.formula_code ?? 'ROLLER_DROPS',
     height_multiplier: 1,
     width_multiplier: 1,
-    fullness_factor: 1,
+    fullness_factor: defaults.fullness_factor ?? 1,
     extra_height_m: 0,
     extra_width_m: 0,
-    pricing_output_uom: 'm',
-    waste_pct: 0.15,
-    round_to_increment: 0.01,
+    pricing_output_uom: defaults.pricing_output_uom ?? 'm',
+    waste_pct: defaults.waste_pct ?? 0.15,
+    round_to_increment: 0.1,
     min_qty: 0,
     top_hem_cm: 0,
     bottom_hem_cm: 0,
     side_hem_cm: 0,
     fabric_orientation: 'vertical',
+    fabric_width_source: defaults.fabric_width_source ?? 'finished_width',
+    tube_wrap_mm: defaults.tube_wrap_mm ?? 0,
+    bottom_wrap_mm: defaults.bottom_wrap_mm ?? 0,
+    safety_margin_mm: defaults.safety_margin_mm ?? 0,
+    panel_multiplier: defaults.panel_multiplier ?? 1,
+    heatseal_price_per_m: defaults.heatseal_price_per_m ?? 0,
+    bottom_bar_wrap_pct: defaults.bottom_bar_wrap_pct ?? 0,
     is_active: true,
   };
 }
@@ -130,82 +173,169 @@ export default function FabricRulesSettings() {
     ...Array.from(rulesByProductType.keys()),
   ]));
 
-  const renderRuleForm = (draft: Partial<FabricRule>, setDraft: (v: Partial<FabricRule>) => void) => (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-gray-50 border border-gray-200 rounded">
-      <div>
-        <Label className="text-xs">Style Code</Label>
-        <Input value={draft.style_code || ''} onChange={e => setDraft({ ...draft, style_code: e.target.value || null })} placeholder="e.g. wave_2.3" className="text-xs" />
+  const selectCls = "w-full text-xs border border-gray-300 rounded px-2 py-1.5 bg-white";
+
+  const renderRuleForm = (draft: Partial<FabricRule>, setDraft: (v: Partial<FabricRule>) => void) => {
+    const src = draft.fabric_width_source || 'finished_width';
+    const derived = deriveFromSource(src);
+    const mechanical = isMechanical(src);
+    const drapery = isDrapery(src);
+    const wasteDisplay = ((draft.waste_pct ?? 0.15) * 100).toFixed(0);
+
+    const handleSourceChange = (newSource: string) => {
+      const d = deriveFromSource(newSource);
+      setDraft({ ...draft, fabric_width_source: newSource, formula_code: d.formula_code, pricing_output_uom: d.pricing_output_uom });
+    };
+
+    return (
+      <div className="space-y-4 p-4 bg-gray-50 border border-gray-200 rounded">
+        {/* ── Row 1: Main config ── */}
+        <div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="md:col-span-2">
+              <Label className="text-xs">Fabric Width Source</Label>
+              <select value={src} onChange={e => handleSourceChange(e.target.value)} className={selectCls}>
+                {WIDTH_SOURCES.map(s => <option key={s} value={s}>{WIDTH_SOURCE_LABELS[s] || s}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label className="text-xs">Orientation</Label>
+              <select value={draft.fabric_orientation || 'vertical'} onChange={e => setDraft({ ...draft, fabric_orientation: e.target.value })} className={selectCls}>
+                {ORIENTATIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3 pt-5">
+              <span className="text-[10px] font-medium text-gray-400 bg-gray-100 rounded px-2 py-1">{FORMULA_LABELS[derived.formula_code] || derived.formula_code}</span>
+              <span className="text-[10px] font-medium text-gray-400 bg-gray-100 rounded px-2 py-1">UOM: {derived.pricing_output_uom}</span>
+              <label className="flex items-center gap-1.5 text-xs ml-auto">
+                <input type="checkbox" checked={draft.is_active !== false} onChange={e => setDraft({ ...draft, is_active: e.target.checked })} className="rounded border-gray-300" />
+                Active
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Conditional: Mechanical path ── */}
+        {mechanical && (
+          <div className="rounded border border-blue-100 bg-blue-50/40 p-3">
+            <div className="text-[11px] font-medium text-blue-600 mb-2">Height = H x Panels + Wraps + Safety</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <Label className="text-xs">Panel Multiplier</Label>
+                <Input type="number" step={1} min={1} value={draft.panel_multiplier ?? 1} onChange={e => setDraft({ ...draft, panel_multiplier: parseFloat(e.target.value) || 1 })} className="text-xs" />
+                <span className="text-[10px] text-gray-400">1=Roller, 2=Dual, 3=Triple</span>
+              </div>
+              <div>
+                <Label className="text-xs">Tube Wrap (mm)</Label>
+                <Input type="number" step={1} value={draft.tube_wrap_mm ?? 0} onChange={e => setDraft({ ...draft, tube_wrap_mm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Bottom Wrap (mm)</Label>
+                <Input type="number" step={1} value={draft.bottom_wrap_mm ?? 0} onChange={e => setDraft({ ...draft, bottom_wrap_mm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Safety Margin (mm)</Label>
+                <Input type="number" step={1} value={draft.safety_margin_mm ?? 0} onChange={e => setDraft({ ...draft, safety_margin_mm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-blue-100">
+              <div>
+                <Label className="text-xs">Heat Seal Price ($/m)</Label>
+                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? 0} onChange={e => setDraft({ ...draft, heatseal_price_per_m: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <span className="text-[10px] text-gray-400">Per linear meter of splice</span>
+              </div>
+              <div>
+                <Label className="text-xs">Bottom Bar Wrap (%)</Label>
+                <div className="relative">
+                  <Input
+                    type="number" step={1} min={0} max={100}
+                    value={((draft.bottom_bar_wrap_pct ?? 0) * 100).toFixed(0)}
+                    onChange={e => setDraft({ ...draft, bottom_bar_wrap_pct: (parseFloat(e.target.value) || 0) / 100 })}
+                    className="text-xs pr-6"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                </div>
+                <span className="text-[10px] text-gray-400">Surcharge when forrado</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Conditional: Drapery path ── */}
+        {drapery && (
+          <div className="rounded border border-purple-100 bg-purple-50/40 p-3">
+            <div className="text-[11px] font-medium text-purple-600 mb-2">Width = Finished x Fullness</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <Label className="text-xs">Fullness Factor</Label>
+                <Input type="number" step={0.1} min={1} value={draft.fullness_factor ?? 1} onChange={e => setDraft({ ...draft, fullness_factor: parseFloat(e.target.value) || 1 })} className="text-xs" />
+                <span className="text-[10px] text-gray-400">1.8x, 2.0x, 2.2x, 2.5x</span>
+              </div>
+              <div>
+                <Label className="text-xs">Top Hem (cm)</Label>
+                <Input type="number" step={0.5} value={draft.top_hem_cm ?? 0} onChange={e => setDraft({ ...draft, top_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Bottom Hem (cm)</Label>
+                <Input type="number" step={0.5} value={draft.bottom_hem_cm ?? 0} onChange={e => setDraft({ ...draft, bottom_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Side Hem (cm)</Label>
+                <Input type="number" step={0.5} value={draft.side_hem_cm ?? 0} onChange={e => setDraft({ ...draft, side_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Waste + Purchasing ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <Label className="text-xs">Waste (%)</Label>
+            <div className="relative">
+              <Input
+                type="number" step={1} min={0} max={100}
+                value={wasteDisplay}
+                onChange={e => setDraft({ ...draft, waste_pct: (parseFloat(e.target.value) || 0) / 100 })}
+                className="text-xs pr-6"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Min Order Qty</Label>
+            <Input type="number" step={0.01} value={draft.min_qty ?? 0} onChange={e => setDraft({ ...draft, min_qty: parseFloat(e.target.value) || 0 })} className="text-xs" />
+            <span className="text-[10px] text-gray-400">Minimum to order (e.g., 1m)</span>
+          </div>
+          <div>
+            <Label className="text-xs">Round Increment</Label>
+            <Input type="number" step={0.01} value={draft.round_to_increment ?? 0.01} onChange={e => setDraft({ ...draft, round_to_increment: parseFloat(e.target.value) || 0.01 })} className="text-xs" />
+            <span className="text-[10px] text-gray-400">Round to nearest (e.g., 0.1m)</span>
+          </div>
+        </div>
+
+        {/* ── Optional: Variant identification (collapsed) ── */}
+        <details className="group">
+          <summary className="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600">
+            Optional: Variant identification (for multiple rules per product type)
+          </summary>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
+            <div>
+              <Label className="text-xs text-gray-400">Style Code</Label>
+              <Input value={draft.style_code || ''} onChange={e => setDraft({ ...draft, style_code: e.target.value || null })} placeholder="e.g. wave_2.3" className="text-xs" />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-400">Display Name</Label>
+              <Input value={draft.display_name || ''} onChange={e => setDraft({ ...draft, display_name: e.target.value || null })} placeholder="e.g. Wave 2.3" className="text-xs" />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-400">Product Line</Label>
+              <Input value={draft.product_line || ''} onChange={e => setDraft({ ...draft, product_line: e.target.value || null })} placeholder="e.g. wave" className="text-xs" />
+            </div>
+          </div>
+        </details>
       </div>
-      <div>
-        <Label className="text-xs">Display Name</Label>
-        <Input value={draft.display_name || ''} onChange={e => setDraft({ ...draft, display_name: e.target.value || null })} placeholder="e.g. Wave 2.3" className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Product Line</Label>
-        <Input value={draft.product_line || ''} onChange={e => setDraft({ ...draft, product_line: e.target.value || null })} placeholder="e.g. wave" className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Formula Code</Label>
-        <select value={draft.formula_code || 'ROLLER_DROPS'} onChange={e => setDraft({ ...draft, formula_code: e.target.value })} className="w-full text-xs border border-gray-300 rounded px-2 py-1.5">
-          {FORMULA_CODES.map(f => <option key={f} value={f}>{f}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-xs">Fullness Factor</Label>
-        <Input type="number" step={0.1} value={draft.fullness_factor ?? 1} onChange={e => setDraft({ ...draft, fullness_factor: parseFloat(e.target.value) || 1 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Height Multiplier</Label>
-        <Input type="number" step={0.1} value={draft.height_multiplier ?? 1} onChange={e => setDraft({ ...draft, height_multiplier: parseFloat(e.target.value) || 1 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Width Multiplier</Label>
-        <Input type="number" step={0.1} value={draft.width_multiplier ?? 1} onChange={e => setDraft({ ...draft, width_multiplier: parseFloat(e.target.value) || 1 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Waste %</Label>
-        <Input type="number" step={0.01} value={draft.waste_pct ?? 0.15} onChange={e => setDraft({ ...draft, waste_pct: parseFloat(e.target.value) || 0 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Top Hem (cm)</Label>
-        <Input type="number" step={0.5} value={draft.top_hem_cm ?? 0} onChange={e => setDraft({ ...draft, top_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Bottom Hem (cm)</Label>
-        <Input type="number" step={0.5} value={draft.bottom_hem_cm ?? 0} onChange={e => setDraft({ ...draft, bottom_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Side Hem (cm)</Label>
-        <Input type="number" step={0.5} value={draft.side_hem_cm ?? 0} onChange={e => setDraft({ ...draft, side_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Pricing UOM</Label>
-        <select value={draft.pricing_output_uom || 'm'} onChange={e => setDraft({ ...draft, pricing_output_uom: e.target.value })} className="w-full text-xs border border-gray-300 rounded px-2 py-1.5">
-          {PRICING_UOMS.map(u => <option key={u} value={u}>{u}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-xs">Orientation</Label>
-        <select value={draft.fabric_orientation || 'vertical'} onChange={e => setDraft({ ...draft, fabric_orientation: e.target.value })} className="w-full text-xs border border-gray-300 rounded px-2 py-1.5">
-          {ORIENTATIONS.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
-      </div>
-      <div>
-        <Label className="text-xs">Min Qty</Label>
-        <Input type="number" step={0.01} value={draft.min_qty ?? 0} onChange={e => setDraft({ ...draft, min_qty: parseFloat(e.target.value) || 0 })} className="text-xs" />
-      </div>
-      <div>
-        <Label className="text-xs">Round To</Label>
-        <Input type="number" step={0.01} value={draft.round_to_increment ?? 0.01} onChange={e => setDraft({ ...draft, round_to_increment: parseFloat(e.target.value) || 0.01 })} className="text-xs" />
-      </div>
-      <div className="flex items-end gap-1">
-        <label className="flex items-center gap-1.5 text-xs">
-          <input type="checkbox" checked={draft.is_active !== false} onChange={e => setDraft({ ...draft, is_active: e.target.checked })} className="rounded border-gray-300" />
-          Active
-        </label>
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -270,11 +400,23 @@ export default function FabricRulesSettings() {
                                 {!rule.is_active && <span className="bg-red-50 text-red-600 rounded px-1.5 py-0.5">Inactive</span>}
                               </div>
                               <div className="text-gray-500 flex flex-wrap gap-x-4 gap-y-0.5">
-                                <span>Fullness: {rule.fullness_factor}x</span>
+                                <span>Width: {WIDTH_SOURCE_LABELS[rule.fabric_width_source] || rule.fabric_width_source}</span>
+                                {isMechanical(rule.fabric_width_source) && (
+                                  <>
+                                    <span>Panels: {rule.panel_multiplier}x</span>
+                                    <span>Wraps: {rule.tube_wrap_mm}/{rule.bottom_wrap_mm} mm</span>
+                                    {rule.safety_margin_mm > 0 && <span>Safety: {rule.safety_margin_mm}mm</span>}
+                                    {(rule.heatseal_price_per_m ?? 0) > 0 && <span>Heat Seal: ${rule.heatseal_price_per_m}/m</span>}
+                                    {(rule.bottom_bar_wrap_pct ?? 0) > 0 && <span>BB Wrap: {(rule.bottom_bar_wrap_pct * 100).toFixed(0)}%</span>}
+                                  </>
+                                )}
+                                {isDrapery(rule.fabric_width_source) && (
+                                  <>
+                                    <span>Fullness: {rule.fullness_factor}x</span>
+                                    <span>Hems T/B/S: {rule.top_hem_cm}/{rule.bottom_hem_cm}/{rule.side_hem_cm} cm</span>
+                                  </>
+                                )}
                                 <span>Waste: {(rule.waste_pct * 100).toFixed(0)}%</span>
-                                <span>H×: {rule.height_multiplier}</span>
-                                <span>W×: {rule.width_multiplier}</span>
-                                <span>Hem T/B/S: {rule.top_hem_cm}/{rule.bottom_hem_cm}/{rule.side_hem_cm} cm</span>
                                 <span>UOM: {rule.pricing_output_uom}</span>
                               </div>
                             </div>
@@ -342,7 +484,7 @@ export default function FabricRulesSettings() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => { setAddingForType(ptId); setNewDraft(getEmptyRule(ptId)); }}
+                      onClick={() => { setAddingForType(ptId); setNewDraft(getEmptyRule(ptId, ptName)); }}
                       className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900 px-2 py-1"
                     >
                       <Plus className="h-3.5 w-3.5" /> Add Rule

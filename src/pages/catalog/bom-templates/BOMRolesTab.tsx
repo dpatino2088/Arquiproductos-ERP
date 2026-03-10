@@ -42,6 +42,7 @@ export default function BOMRolesTab() {
     toggleRoleActive,
     renameRole,
     deleteRole,
+    countRoleUsage,
     addDependency,
     removeDependency,
     upsertProductTypeRule,
@@ -211,15 +212,28 @@ export default function BOMRolesTab() {
   }, [newRoleCode, newRoleLabel, newRoleType, createRole]);
 
   const handleDeleteRole = useCallback(async (roleCode: string, label: string) => {
-    if (!window.confirm(`Delete role "${label}" (${roleCode})? This will also remove all its dependencies.`)) return;
     try {
+      const usage = await countRoleUsage(roleCode);
+      const parts: string[] = [];
+      if (usage.catalogItems > 0) parts.push(`${usage.catalogItems} catalog item(s)`);
+      if (usage.bomComponents > 0) parts.push(`${usage.bomComponents} BOM component(s)`);
+      if (usage.categoryMaps > 0) parts.push(`${usage.categoryMaps} category mapping(s)`);
+
+      let msg = `Delete role "${label}" (${roleCode})?`;
+      if (parts.length > 0) {
+        msg += `\n\nThis role is referenced by:\n• ${parts.join('\n• ')}\n\nThese references will be unlinked (set to null / removed).`;
+      }
+      msg += '\n\nThis action cannot be undone.';
+
+      if (!window.confirm(msg)) return;
+
       await deleteRole(roleCode);
       if (selectedRole === roleCode) setSelectedRole(null);
       useUIStore.getState().addNotification({ type: 'success', title: 'Deleted', message: `Role "${label}" deleted` });
     } catch (err) {
       useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err instanceof Error ? err.message : 'Failed to delete role' });
     }
-  }, [deleteRole, selectedRole]);
+  }, [deleteRole, countRoleUsage, selectedRole]);
 
   // ── Mutations ──
 

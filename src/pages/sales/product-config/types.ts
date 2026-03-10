@@ -52,9 +52,10 @@ export interface RollerShadeConfig extends BaseProductConfig {
   variantManufacturer?: 'coulisse' | 'vertilux';
   collectionId?: string;
   variantId?: string;
-  // Fabric rotation and heatseal
+  // Fabric rotation, heatseal, and bottom bar wrap
   fabric_rotation?: boolean;
   fabric_heatseal?: boolean;
+  bottom_bar_wrapped?: boolean;
   // Operating System
   operatingSystem?: 'manual' | 'motorized';
   operatingSystemManufacturer?: 'motion' | 'lutron' | 'vertilux';
@@ -110,6 +111,7 @@ export interface DualShadeConfig extends BaseProductConfig {
   // BOM Component Options (Block-based system)
   drive_type?: 'manual' | 'motor';
   bottom_rail_type?: 'standard' | 'wrapped';
+  bottom_bar_wrapped?: boolean;
   cassette?: boolean;
   cassette_type?: 'standard' | 'recessed' | 'surface';
   side_channel?: boolean;
@@ -167,6 +169,7 @@ export interface TripleShadeConfig extends BaseProductConfig {
   // BOM Component Options (Block-based system)
   drive_type?: 'manual' | 'motor';
   bottom_rail_type?: 'standard' | 'wrapped';
+  bottom_bar_wrapped?: boolean;
   cassette?: boolean;
   side_channel?: boolean;
   hardware_color?: 'white' | 'black' | 'silver' | 'bronze';

@@ -810,6 +810,24 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                 No bottom bar options available for selected color.
               </div>
             )}
+
+            {/* Bottom Bar Wrapped (Forrado) checkbox */}
+            {(config as any).bottom_bar_item_id && (
+              <div className="mt-4 pt-3 border-t border-gray-200">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(config as any).bottom_bar_wrapped === true}
+                    onChange={(e) => onUpdate({ bottom_bar_wrapped: e.target.checked } as any)}
+                    className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                  />
+                  <span className="text-sm font-medium text-gray-900">Bottom Bar Wrapped (Forrado)</span>
+                </label>
+                <p className="text-xs text-gray-500 mt-1 ml-6">
+                  Wrap the bottom bar with fabric. Adds a surcharge to the fabric cost.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

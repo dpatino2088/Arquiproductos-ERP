@@ -24,6 +24,13 @@ export interface FabricRule {
   bottom_hem_cm: number;
   side_hem_cm: number;
   fabric_orientation: string;
+  fabric_width_source: string;
+  tube_wrap_mm: number;
+  bottom_wrap_mm: number;
+  safety_margin_mm: number;
+  panel_multiplier: number;
+  heatseal_price_per_m: number;
+  bottom_bar_wrap_pct: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;

@@ -1830,17 +1830,24 @@ export default function QuoteNew() {
             .maybeSingle();
           
           if (itemCheck?.is_roll) {
-            // Update QuoteLine metadata with roll rotation/heatseal if provided
-            const rollRotation = (productConfig as any).roll_rotation || (productConfig as any).fabric_rotation || false;
-            const rollHeatseal = (productConfig as any).roll_heatseal || (productConfig as any).fabric_heatseal || false;
+            const fabricRotation = (productConfig as any).fabric_rotation || (productConfig as any).roll_rotation || false;
+            const fabricHeatseal = (productConfig as any).fabric_heatseal || (productConfig as any).roll_heatseal || false;
             
-            if (rollRotation || rollHeatseal) {
+            if (fabricRotation || fabricHeatseal) {
+              const { data: existingLine } = await supabase
+                .from('QuoteLines')
+                .select('metadata')
+                .eq('id', finalLineId)
+                .eq('organization_id', activeOrganizationId)
+                .maybeSingle();
+
               await supabase
                 .from('QuoteLines')
                 .update({
                   metadata: {
-                    roll_rotation: rollRotation,
-                    roll_heatseal: rollHeatseal,
+                    ...(existingLine?.metadata || {}),
+                    fabric_rotation: fabricRotation,
+                    fabric_heatseal: fabricHeatseal,
                   }
                 })
                 .eq('id', finalLineId)

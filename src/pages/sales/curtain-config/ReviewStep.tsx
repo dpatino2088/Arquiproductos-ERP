@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { supabase } from '../../../lib/supabase/client';
@@ -650,17 +650,22 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     ((config as any).dealer_price_total_snapshot != null ? Number((config as any).dealer_price_total_snapshot) : null) ??
     null;
   const dealerLineTotal =
-    dealerLineTotalFromDataRaw != null && Number(dealerLineTotalFromDataRaw) > 0
-      ? Number(dealerLineTotalFromDataRaw)
-      : (computedUnitDealerPrice != null ? Number(computedUnitDealerPrice) * lineQuantity : null);
+    computedUnitDealerPrice != null
+      ? Number(computedUnitDealerPrice) * lineQuantity
+      : (dealerLineTotalFromDataRaw != null && Number(dealerLineTotalFromDataRaw) > 0
+          ? Number(dealerLineTotalFromDataRaw)
+          : null);
   const msrpLineTotalFromDataRaw =
     (t?.msrp_total != null ? Number(t.msrp_total) : null) ??
     ((config as any).msrp_total_snapshot != null ? Number((config as any).msrp_total_snapshot) : null) ??
     null;
+  const effectiveUnitMsrp = totalProductMsrpUnit || computedUnitMsrp;
   const msrpLineTotal =
-    msrpLineTotalFromDataRaw != null && Number(msrpLineTotalFromDataRaw) > 0
-      ? Number(msrpLineTotalFromDataRaw)
-      : (computedUnitMsrp != null ? Number(computedUnitMsrp) * lineQuantity : null);
+    effectiveUnitMsrp != null
+      ? Number(effectiveUnitMsrp) * lineQuantity
+      : (msrpLineTotalFromDataRaw != null && Number(msrpLineTotalFromDataRaw) > 0
+          ? Number(msrpLineTotalFromDataRaw)
+          : null);
 
   // Total quantity of components (sum of Qty column) for Breakdown summary
   const breakdownTotalQty = useMemo(() => {
@@ -769,20 +774,55 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                     </div>
                   )}
                 </div>
-                {isShadeProduct && rollWidthMm != null && hasRollData && (
-                  <div className="border-t border-gray-100 pt-2.5 flex items-center justify-between gap-6 text-sm">
-                    <div>
-                      <span className="text-gray-500">Max panel width:</span>{' '}
-                      <span className="tabular-nums text-gray-700 font-medium">{Math.round(rollWidthMm)} mm</span>
+                {isShadeProduct && rollWidthMm != null && hasRollData && (() => {
+                  const fc = snapshotTotals?.fabric_calc;
+                  const autoRotated = fc?.is_rotated === true;
+                  const hsSeams = fc?.heatseal_seams ?? 0;
+                  const hsCost = Number(fc?.heatseal_cost ?? 0);
+                  const bbWrapped = fc?.bottom_bar_wrapped === true;
+                  const bbWrapCost = Number(fc?.bottom_bar_wrap_cost ?? 0);
+                  return (
+                  <div className="border-t border-gray-100 pt-2.5 space-y-1.5 text-sm">
+                    <div className="flex items-center justify-between gap-6">
+                      <div>
+                        <span className="text-gray-500">Roll width:</span>{' '}
+                        <span className="tabular-nums text-gray-700 font-medium">{Math.round(rollWidthMm)} mm</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Fabric rotation:</span>{' '}
+                        <span className={`font-medium ${autoRotated ? 'text-amber-700' : 'text-gray-700'}`}>
+                          {autoRotated ? 'Yes (auto)' : 'No'}
+                        </span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-gray-500">Fabric rotation:</span>{' '}
-                      <span className="text-gray-700 font-medium">
-                        {((config as any).fabric_rotation ?? (config as any).roll_rotation) ? 'Yes' : 'No'}
-                      </span>
-                    </div>
+                    {autoRotated && hsSeams > 0 && (
+                      <div className="flex items-center justify-between gap-6 bg-amber-50 rounded px-2 py-1">
+                        <div>
+                          <span className="text-amber-700 font-medium">Heat Seal:</span>{' '}
+                          <span className="text-amber-800">{hsSeams} {hsSeams === 1 ? 'seam' : 'seams'}</span>
+                        </div>
+                        {hsCost > 0 && (
+                          <div className="text-amber-800 font-medium tabular-nums">
+                            +{'$'}{hsCost.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {bbWrapped && (
+                      <div className="flex items-center justify-between gap-6 bg-blue-50 rounded px-2 py-1">
+                        <div>
+                          <span className="text-blue-700 font-medium">Bottom Bar Wrapped (Forrado)</span>
+                        </div>
+                        {bbWrapCost > 0 && (
+                          <div className="text-blue-800 font-medium tabular-nums">
+                            +{'$'}{bbWrapCost.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                  );
+                })()}
               </div>
               );
             })()}
@@ -998,8 +1038,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {breakdownLines.map((line, idx) => (
+                        <React.Fragment key={idx}>
                         <tr 
-                          key={idx} 
                           className={
                             line.source === 'selected' 
                               ? 'bg-blue-50' 
@@ -1063,6 +1103,42 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                             {formatMoney(line.totalPrice)}
                           </td>
                         </tr>
+                        {line.kind === 'roll' && (() => {
+                          const fc = snapshotTotals?.fabric_calc;
+                          if (!fc || fc.source === 'none' || fc.source === 'legacy') return null;
+                          const hsSeams = fc.heatseal_seams ?? 0;
+                          const hsCost = Number(fc.heatseal_cost ?? 0);
+                          const bbWrapCost = Number(fc.bottom_bar_wrap_cost ?? 0);
+                          return (
+                            <tr key={`${idx}-fc`} className="bg-blue-50/30">
+                              <td colSpan={6} className="px-3 py-1.5 pl-7">
+                                <div className="text-[11px] text-gray-500 space-y-0.5">
+                                  <div>
+                                    <span className="font-medium text-gray-600">Consumption: </span>
+                                    Width: {Math.round(fc.fabric_cut_width_mm ?? 0)} mm
+                                    ({fc.fabric_width_source?.replace(/_/g, ' ') ?? 'n/a'})
+                                    {' · '}Height: {Math.round(fc.fabric_cut_height_mm ?? 0)} mm
+                                    {fc.waste_pct != null && <>{' · '}Waste: {(Number(fc.waste_pct) * 100).toFixed(0)}%</>}
+                                    {' · '}Qty: {Number(fc.consumption_qty ?? 0).toFixed(3)} {fc.consumption_uom ?? ''}
+                                    {fc.is_rotated === true && <span className="ml-1 text-amber-600 font-medium">[ROTATED]</span>}
+                                  </div>
+                                  {hsSeams > 0 && (
+                                    <div className="text-amber-600">
+                                      Heat Seal: {hsSeams} {hsSeams === 1 ? 'seam' : 'seams'}
+                                      {hsCost > 0 && <> · +{'$'}{hsCost.toFixed(2)}</>}
+                                    </div>
+                                  )}
+                                  {bbWrapCost > 0 && (
+                                    <div className="text-blue-600">
+                                      Bottom Bar Wrap: +{'$'}{bbWrapCost.toFixed(2)}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })()}
+                        </React.Fragment>
                       ))}
                       {/* Accessories are NOT part of ConfiguredProduct breakdown; they are separate QuoteLines. */}
                       {/* Labor as breakdown row when we have a labor amount (from snapshot or derived) */}
@@ -1070,7 +1146,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                         <tr className="bg-gray-50 border-t border-gray-200">
                           <td className="px-3 py-2 whitespace-nowrap">
                             <span className="font-medium text-gray-900">
-                              Labor ({effectiveTotals.labor_pct ?? 0}%)
+                              Labor MSRP ({effectiveTotals.labor_pct ?? 0}%)
                             </span>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-gray-500">—</td>
@@ -1126,7 +1202,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           Total MSRP (per unit)
                         </td>
                         <td className="px-3 py-2.5 text-right font-bold text-gray-900 tabular-nums">
-                          ${(computedUnitMsrp || totalProductMsrpUnit || 0).toFixed(2)}
+                          ${(totalProductMsrpUnit || computedUnitMsrp || 0).toFixed(2)}
                         </td>
                       </tr>
 

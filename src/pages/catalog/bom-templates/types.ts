@@ -1,7 +1,7 @@
 import { normalizeRole } from '../../../lib/bom/roles';
 
-export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'per_spacing' | 'per_joint';
-export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area', 'per_spacing', 'per_joint'] as const;
+export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'per_spacing' | 'per_joint' | 'per_fabric_width';
+export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area', 'per_spacing', 'per_joint', 'per_fabric_width'] as const;
 
 export type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | 'CATEGORY_FIRST_MATCH' | string;
 export type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
@@ -112,6 +112,7 @@ export const CONDITION_KEY_OPTIONS = [
   { value: 'cassette', label: 'Cassette (true / false)' },
   { value: 'drive_type', label: 'Drive Type (manual / motor)' },
   { value: 'opening_direction', label: 'Opening Direction (left / right / center)' },
+  { value: 'bottom_bar_wrapped', label: 'Bottom Bar Wrapped (true / false)' },
 ] as const;
 
 export const INITIAL_FORM_DATA: ComponentFormData = {

@@ -38,7 +38,6 @@ import {
   Search, 
   Filter,
   X,
-  ChevronUp,
   Plus,
   Upload,
   SortAsc,
@@ -1471,7 +1470,7 @@ export default function Items() {
                   ? 'bg-primary text-white border-primary'
                   : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
               }`}
-              title={showFilters ? 'Minimizar filtros' : 'Mostrar filtros'}
+              title={showFilters ? 'Hide filters' : 'Show filters'}
               aria-expanded={showFilters}
             >
               <Filter style={{ width: 14, height: 14 }} />
@@ -1500,19 +1499,6 @@ export default function Items() {
           {/* Filters Dropdown */}
           {showFilters && (
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium text-gray-700">Filtros por categoría, fabricante, etc.</span>
-                <button
-                  type="button"
-                  onClick={() => setShowFilters(false)}
-                  className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
-                  title="Minimizar para ver más la lista"
-                  aria-label="Minimizar filtros"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                  Minimizar
-                </button>
-              </div>
               <div className="grid grid-cols-3 gap-4 mb-4">
                 {/* Measure Basis Filter */}
                 <div>

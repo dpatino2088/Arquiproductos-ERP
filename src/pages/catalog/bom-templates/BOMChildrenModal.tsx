@@ -19,6 +19,8 @@ const QTY_TYPE_LABELS: Record<string, string> = {
   per_height: 'Per Height',
   per_area: 'Per Area',
   per_spacing: 'Per Spacing',
+  per_fabric_width: 'Per Fabric Width Used',
+  per_joint: 'Per Joint',
 };
 
 export interface BOMChildrenModalProps {

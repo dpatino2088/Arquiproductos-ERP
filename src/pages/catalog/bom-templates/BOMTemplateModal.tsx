@@ -31,6 +31,7 @@ const QTY_TYPE_LABELS: Record<string, string> = {
   per_area: 'Per Area',
   per_spacing: 'Per Spacing',
   per_joint: 'Per Joint',
+  per_fabric_width: 'Per Fabric Width Used',
 };
 
 export interface BOMTemplateModalProps {
@@ -313,49 +314,31 @@ export default function BOMTemplateModal({
                   {!hasDriveType ? (
                     <div className="mt-1 text-xs text-gray-500 py-1.5">Select drive type first</div>
                   ) : isDrapery && openDir && openDir !== 'center' ? (
-                    <div className="flex gap-1 mt-1">
-                      {(['left' as const, 'right' as const]).map((side) => (
-                        <div
-                          key={side}
-                          className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border text-center ${
-                            side === openDir
-                              ? 'border-gray-900 bg-gray-900 text-white'
-                              : 'border-gray-200 text-gray-300'
-                          }`}
-                        >
-                          {side === 'left' ? 'Left' : 'Right'}
-                        </div>
-                      ))}
+                    <div className="mt-1">
+                      <SelectShadcn value={openDir} disabled>
+                        <SelectTrigger className="text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="left">Left</SelectItem>
+                          <SelectItem value="right">Right</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
                     </div>
                   ) : (
-                    <div className="flex gap-1 mt-1">
-                      {(['left' as const, 'right' as const]).map((side) => {
-                        const cur = form.templateDriveSide;
-                        const isOn = cur === 'both' || cur === side;
-                        return (
-                          <button
-                            key={side}
-                            type="button"
-                            onClick={() => {
-                              const otherSide = side === 'left' ? 'right' : 'left';
-                              const otherOn = cur === 'both' || cur === otherSide;
-                              if (isOn) {
-                                form.setTemplateDriveSide(otherOn ? otherSide : null);
-                              } else {
-                                form.setTemplateDriveSide(otherOn ? 'both' : side);
-                              }
-                            }}
-                            className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
-                              isOn
-                                ? 'border-gray-900 bg-gray-900 text-white'
-                                : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-                            }`}
-                          >
-                            {side === 'left' ? 'Left' : 'Right'}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <SelectShadcn
+                      value={form.templateDriveSide ?? ''}
+                      onValueChange={(v) => form.setTemplateDriveSide(v as 'left' | 'right' | 'both')}
+                    >
+                      <SelectTrigger className="text-xs mt-1">
+                        <SelectValue placeholder="Select side" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="left">Left</SelectItem>
+                        <SelectItem value="right">Right</SelectItem>
+                        <SelectItem value="both">Left and Right</SelectItem>
+                      </SelectContent>
+                    </SelectShadcn>
                   )}
                 </div>
               );
@@ -364,61 +347,49 @@ export default function BOMTemplateModal({
                 <div className={`grid gap-4 ${isDrapery ? 'grid-cols-3' : 'grid-cols-2'}`}>
                   <div>
                     <Label>Drive Type *</Label>
-                    <div className="flex gap-1 mt-1">
-                      {([
-                        { value: 'manual' as const, label: 'Manual' },
-                        { value: 'motor' as const, label: 'Motor' },
-                      ]).map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => {
-                            form.setTemplateDriveType(opt.value);
-                            if (isDrapery && openDir) {
-                              form.setTemplateDriveSide(openDir === 'center' ? 'both' : openDir);
-                            }
-                          }}
-                          className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
-                            form.templateDriveType === opt.value
-                              ? 'border-gray-900 bg-gray-900 text-white'
-                              : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
+                    <SelectShadcn
+                      value={form.templateDriveType ?? ''}
+                      onValueChange={(v) => {
+                        const val = v as 'manual' | 'motor';
+                        form.setTemplateDriveType(val);
+                        if (isDrapery && openDir) {
+                          form.setTemplateDriveSide(openDir === 'center' ? 'both' : openDir);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="text-xs mt-1">
+                        <SelectValue placeholder="Select drive type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">Manual</SelectItem>
+                        <SelectItem value="motor">Motor</SelectItem>
+                      </SelectContent>
+                    </SelectShadcn>
                   </div>
                   {isDrapery && (
                     <div>
                       <Label>Opening Direction *</Label>
-                      <div className="flex gap-1 mt-1">
-                        {([
-                          { value: 'left' as const, label: 'Left' },
-                          { value: 'center' as const, label: 'Center' },
-                          { value: 'right' as const, label: 'Right' },
-                        ]).map((opt) => (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => {
-                              form.setTemplateOpeningDirection(opt.value);
-                              if (opt.value === 'center') {
-                                form.setTemplateDriveSide('both');
-                              } else {
-                                form.setTemplateDriveSide(opt.value);
-                              }
-                            }}
-                            className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
-                              form.templateOpeningDirection === opt.value
-                                ? 'border-gray-900 bg-gray-900 text-white'
-                                : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
+                      <SelectShadcn
+                        value={form.templateOpeningDirection ?? ''}
+                        onValueChange={(v) => {
+                          const val = v as 'left' | 'center' | 'right';
+                          form.setTemplateOpeningDirection(val);
+                          if (val === 'center') {
+                            form.setTemplateDriveSide('both');
+                          } else {
+                            form.setTemplateDriveSide(val);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="text-xs mt-1">
+                          <SelectValue placeholder="Select direction" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="left">Left</SelectItem>
+                          <SelectItem value="center">Center</SelectItem>
+                          <SelectItem value="right">Right</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
                     </div>
                   )}
                   {driveSideToggle}
@@ -426,29 +397,22 @@ export default function BOMTemplateModal({
               );
             })()}
 
-            {/* Installation Location — optional, only needed for specific models (e.g. Lutron ceiling vs wall) */}
+            {/* Installation Location */}
             <div>
               <Label>Installation Location</Label>
-              <div className="flex gap-1 mt-1">
-                {([
-                  { value: null, label: 'Both (any)' },
-                  { value: 'ceiling' as const, label: 'Ceiling' },
-                  { value: 'wall' as const, label: 'Wall' },
-                ]).map((opt) => (
-                  <button
-                    key={opt.value ?? 'any'}
-                    type="button"
-                    onClick={() => form.setTemplateInstallationLocation(opt.value)}
-                    className={`flex-1 text-xs font-medium px-2 py-1.5 rounded border transition-colors ${
-                      form.templateInstallationLocation === opt.value
-                        ? 'border-gray-900 bg-gray-900 text-white'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+              <SelectShadcn
+                value={form.templateInstallationLocation ?? 'any'}
+                onValueChange={(v) => form.setTemplateInstallationLocation(v === 'any' ? null : v as 'ceiling' | 'wall')}
+              >
+                <SelectTrigger className="text-xs mt-1">
+                  <SelectValue placeholder="Both (any)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Both (any)</SelectItem>
+                  <SelectItem value="ceiling">Ceiling</SelectItem>
+                  <SelectItem value="wall">Wall</SelectItem>
+                </SelectContent>
+              </SelectShadcn>
               <p className="text-[10px] text-gray-400 mt-0.5">Only set when model has ceiling/wall variants</p>
             </div>
 

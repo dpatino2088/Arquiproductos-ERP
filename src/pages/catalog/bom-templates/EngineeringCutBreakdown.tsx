@@ -93,13 +93,6 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
     return map;
   }, [effectiveRows]);
 
-  const unassigned = useMemo(
-    () =>
-      effectiveRows.filter(
-        (c) => !c.affects_role && !cuttableRoles.has(c.component_role ?? ''),
-      ),
-    [effectiveRows, cuttableRoles],
-  );
 
   const toggleTarget = useCallback((id: string) => {
     setCollapsedTargets((prev) => {
@@ -373,19 +366,6 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
           );
         })}
 
-        {/* Unassigned — minimal */}
-        {unassigned.length > 0 && (
-          <div className="px-1 pt-2">
-            <p className="text-xs text-gray-400 mb-1.5">Unassigned ({unassigned.length})</p>
-            <div className="flex flex-wrap gap-1.5">
-              {unassigned.map((c) => (
-                <span key={c.id} className="text-xs font-mono text-gray-500 bg-gray-50 border border-gray-200 rounded px-2 py-0.5">
-                  {c.component_sku}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

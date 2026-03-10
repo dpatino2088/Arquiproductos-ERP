@@ -241,14 +241,59 @@ export function useBOMRoles() {
     [],
   );
 
+  const countRoleUsage = useCallback(async (roleCode: string) => {
+    const [itemsRes, bomRes, catMapRes] = await Promise.all([
+      supabase.from('CatalogItems').select('id', { count: 'exact', head: true }).eq('item_role', roleCode),
+      supabase.from('BOMComponents').select('id', { count: 'exact', head: true }).eq('component_role', roleCode),
+      supabase.from('CatalogRoleCategoryMap').select('role_code', { count: 'exact', head: true }).eq('role_code', roleCode),
+    ]);
+    return {
+      catalogItems: itemsRes.count ?? 0,
+      bomComponents: bomRes.count ?? 0,
+      categoryMaps: catMapRes.count ?? 0,
+    };
+  }, []);
+
   const deleteRole = useCallback(
     async (roleCode: string) => {
+      // 1. Nullify CatalogItems referencing this role
+      const { error: itemsErr } = await supabase
+        .from('CatalogItems')
+        .update({ item_role: null })
+        .eq('item_role', roleCode);
+      if (itemsErr) throw new Error(`Failed to unlink catalog items: ${itemsErr.message}`);
+
+      // 2. Nullify BOMComponents referencing this role
+      const { error: bomErr } = await supabase
+        .from('BOMComponents')
+        .update({ component_role: null })
+        .eq('component_role', roleCode);
+      if (bomErr) throw new Error(`Failed to unlink BOM components: ${bomErr.message}`);
+
+      // 3. Delete CatalogRoleCategoryMap entries
+      const { error: catMapErr } = await supabase
+        .from('CatalogRoleCategoryMap')
+        .delete()
+        .eq('role_code', roleCode);
+      if (catMapErr) throw new Error(`Failed to delete category maps: ${catMapErr.message}`);
+
+      // 4. Delete ProductTypeRoleRules
+      if (activeOrganizationId) {
+        await supabase
+          .from('ProductTypeRoleRules')
+          .delete()
+          .eq('role_code', roleCode)
+          .eq('organization_id', activeOrganizationId);
+      }
+
+      // 5. Delete RoleDependencies (CASCADE would handle it, but be explicit)
       const { error: depErr } = await supabase
         .from('RoleDependencies')
         .delete()
         .or(`role_code.eq.${roleCode},parent_role_code.eq.${roleCode}`);
       if (depErr) throw new Error(depErr.message);
 
+      // 6. Finally delete the role itself
       const { error: err } = await supabase
         .from('CatalogItemRoles')
         .delete()
@@ -260,8 +305,9 @@ export function useBOMRoles() {
       setDependencies((prev) =>
         prev.filter((d) => d.role_code !== roleCode && d.parent_role_code !== roleCode),
       );
+      setProductTypeRules((prev) => prev.filter((r) => r.role_code !== roleCode));
     },
-    [],
+    [activeOrganizationId],
   );
 
   return {
@@ -277,6 +323,7 @@ export function useBOMRoles() {
     toggleRoleActive,
     renameRole,
     deleteRole,
+    countRoleUsage,
     addDependency,
     removeDependency,
     upsertProductTypeRule,

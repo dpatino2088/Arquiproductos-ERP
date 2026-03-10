@@ -311,9 +311,16 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                             />
                           </td>
                           <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{line.sku ?? '—'}</td>
-                          <td className={`px-4 py-2 ${line.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>{line.item_name ?? '—'}</td>
-                          <td className="px-4 py-2">{line.component_role && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{line.component_role}</span>}</td>
-                          <td className="px-4 py-2 text-right text-gray-700">{line.qty}</td>
+                          <td className={`px-4 py-2 ${line.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                            {line.item_name ?? '—'}
+                            {(line.component_role === 'fabric' || line.component_role === 'tape') && (line.cut_length_mm != null || line.cut_width_mm != null) && (
+                              <div className="text-[11px] text-blue-600 font-medium mt-0.5">
+                                CUT: {line.cut_length_mm != null ? `${Math.round(Number(line.cut_length_mm))} mm` : ''}{line.cut_length_mm != null && line.cut_width_mm != null ? ' × ' : ''}{line.cut_width_mm != null ? `${Math.round(Number(line.cut_width_mm))} mm` : ''}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2">{line.component_role && <span className={`text-xs px-1.5 py-0.5 rounded ${line.component_role === 'fabric' ? 'bg-blue-50 text-blue-700' : line.component_role === 'tape' ? 'bg-purple-50 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{line.component_role}</span>}</td>
+                          <td className="px-4 py-2 text-right text-gray-700">{Number(line.qty).toFixed(line.uom === 'ea' ? 0 : 3)}</td>
                           <td className="px-4 py-2 text-gray-500">{line.uom}</td>
                           <td className="px-4 py-2 text-right text-gray-600">{line.cut_length_mm != null ? Math.round(Number(line.cut_length_mm)) : '—'}</td>
                           <td className="px-4 py-2 text-right text-gray-600">{line.cut_width_mm != null ? Math.round(Number(line.cut_width_mm)) : '—'}</td>
