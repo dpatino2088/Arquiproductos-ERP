@@ -39,7 +39,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
   const [templatePanelCount, setTemplatePanelCount] = useState<1 | 2 | 3>(1);
   const [templateDriveType, setTemplateDriveType] = useState<'manual' | 'motor' | null>(null);
   const [templateDriveSide, setTemplateDriveSide] = useState<'left' | 'right' | 'both' | null>(null);
-  const [templateOpeningDirection, setTemplateOpeningDirection] = useState<'left' | 'right' | 'center' | null>(null);
+  const [templateOpeningDirection, setTemplateOpeningDirection] = useState<'left' | 'right' | 'center' | 'all' | null>(null);
   const [templateInstallationLocation, setTemplateInstallationLocation] = useState<'ceiling' | 'wall' | null>(null);
   const [templateManufacturer, setTemplateManufacturer] = useState<string | null>(null);
   const [templateProductLine, setTemplateProductLine] = useState<string | null>(null);
@@ -222,7 +222,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
             setTemplatePanelCount(Math.min(3, Math.max(1, Number(pc) || 1)) as 1 | 2 | 3);
             setTemplateDriveType(data.drive_type || null);
             setTemplateDriveSide(data.drive_side === 'left' ? 'left' : data.drive_side === 'right' ? 'right' : data.drive_type ? 'both' : null);
-            setTemplateOpeningDirection(data.opening_direction || null);
+            setTemplateOpeningDirection(data.opening_direction || (data.product_type_id ? 'all' : null));
             setTemplateManufacturer(data.manufacturer || null);
             setTemplateProductLine(data.product_line || null);
             setTemplateInstallationLocation(data.installation_location || null);
@@ -682,16 +682,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         panel_count_min: templatePanelCount,
         panel_count_max: templatePanelCount,
         drive_type: templateDriveType || null,
-        drive_side: (() => {
-          const pts = (productTypes || []) as any[];
-          const selPt = pts.find((pt: any) => pt.id === productTypeId);
-          const isDrap = selPt && (selPt.code === 'drapery' || selPt.name?.toLowerCase().includes('drapery'));
-          if (isDrap && templateOpeningDirection && templateOpeningDirection !== 'center') {
-            return templateOpeningDirection;
-          }
-          return templateDriveSide === 'both' ? null : (templateDriveSide || null);
-        })(),
-        opening_direction: templateOpeningDirection || null,
+        drive_side: templateDriveSide === 'both' ? null : (templateDriveSide || null),
+        opening_direction: templateOpeningDirection === 'all' ? null : (templateOpeningDirection || null),
         installation_location: templateInstallationLocation || null,
         manufacturer: templateManufacturer || null,
         product_line: templateProductLine || null,

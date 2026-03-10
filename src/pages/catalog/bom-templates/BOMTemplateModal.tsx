@@ -313,18 +313,6 @@ export default function BOMTemplateModal({
                   <Label>Drive Side *</Label>
                   {!hasDriveType ? (
                     <div className="mt-1 text-xs text-gray-500 py-1.5">Select drive type first</div>
-                  ) : isDrapery && openDir && openDir !== 'center' ? (
-                    <div className="mt-1">
-                      <SelectShadcn value={openDir} disabled>
-                        <SelectTrigger className="text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="left">Left</SelectItem>
-                          <SelectItem value="right">Right</SelectItem>
-                        </SelectContent>
-                      </SelectShadcn>
-                    </div>
                   ) : (
                     <SelectShadcn
                       value={form.templateDriveSide ?? ''}
@@ -350,11 +338,7 @@ export default function BOMTemplateModal({
                     <SelectShadcn
                       value={form.templateDriveType ?? ''}
                       onValueChange={(v) => {
-                        const val = v as 'manual' | 'motor';
-                        form.setTemplateDriveType(val);
-                        if (isDrapery && openDir) {
-                          form.setTemplateDriveSide(openDir === 'center' ? 'both' : openDir);
-                        }
+                        form.setTemplateDriveType(v as 'manual' | 'motor');
                       }}
                     >
                       <SelectTrigger className="text-xs mt-1">
@@ -372,13 +356,11 @@ export default function BOMTemplateModal({
                       <SelectShadcn
                         value={form.templateOpeningDirection ?? ''}
                         onValueChange={(v) => {
-                          const val = v as 'left' | 'center' | 'right';
+                          const val = v as 'left' | 'center' | 'right' | 'all';
                           form.setTemplateOpeningDirection(val);
-                          if (val === 'center') {
-                            form.setTemplateDriveSide('both');
-                          } else {
-                            form.setTemplateDriveSide(val);
-                          }
+                          if (val === 'left') form.setTemplateDriveSide('left');
+                          else if (val === 'right') form.setTemplateDriveSide('right');
+                          else form.setTemplateDriveSide('both');
                         }}
                       >
                         <SelectTrigger className="text-xs mt-1">
@@ -388,6 +370,7 @@ export default function BOMTemplateModal({
                           <SelectItem value="left">Left</SelectItem>
                           <SelectItem value="center">Center</SelectItem>
                           <SelectItem value="right">Right</SelectItem>
+                          <SelectItem value="all">Left and Right</SelectItem>
                         </SelectContent>
                       </SelectShadcn>
                     </div>
@@ -976,7 +959,7 @@ export default function BOMTemplateModal({
                                         </span>
                                       </td>
                                       <td className="px-3 py-1.5 text-gray-500">
-                                        {child.qty_value ?? 1}
+                                        {getQtyDisplay(child)}
                                       </td>
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {child.uom || 'ea'}
