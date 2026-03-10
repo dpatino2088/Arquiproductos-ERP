@@ -83,6 +83,20 @@ export default function BOMEngineeringTab() {
     if (showSpinner) setLoading(true);
     setError(null);
     try {
+      const { data: activeTemplateIds } = await supabase
+        .from('BOMTemplates')
+        .select('id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .eq('archived', false);
+
+      const tplIds = (activeTemplateIds ?? []).map((t: any) => t.id);
+      if (tplIds.length === 0) {
+        setRows([]);
+        setLoading(false);
+        return;
+      }
+
       const { data: compData, error: compErr } = await supabase
         .from('BOMComponents')
         .select(`
@@ -108,6 +122,7 @@ export default function BOMEngineeringTab() {
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .eq('archived', false)
+        .in('bom_template_id', tplIds)
         .order('bom_template_id')
         .order('sort_order');
 
