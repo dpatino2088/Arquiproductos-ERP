@@ -49,6 +49,8 @@ export interface MatchConfig {
   manufacturer?: string | null;
   drive_side?: 'left' | 'right' | null;
   installation_location?: 'ceiling' | 'wall' | null;
+  /** Whether the product uses a headbox/cassette. null = don't filter by headbox. */
+  with_headbox?: boolean | null;
   preFilteredTemplateIds?: string[] | null;
 }
 
@@ -107,9 +109,10 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     manufacturer: configManufacturer,
     drive_side: configDriveSide,
     installation_location: configInstallLocation,
+    with_headbox: configWithHeadbox,
     preFilteredTemplateIds,
   } = config;
-  const panel_count = Math.min(3, Math.max(1, configPanelCount ?? 1));
+  const panel_count = Math.min(99, Math.max(1, configPanelCount ?? 1));
 
   const uniquePreFiltered = preFilteredTemplateIds
     ? Array.from(new Set(preFilteredTemplateIds.filter(Boolean)))
@@ -196,14 +199,14 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     type TemplateMeta = {
       id: string; name: string | null; code: string; product_type_id: string;
       hardware_color: string | null; manufacturer: string | null; drive_type: string | null;
-      drive_side: string | null; installation_location: string | null;
+      drive_side: string | null; installation_location: string | null; headbox: boolean;
     };
     let templates: TemplateMeta[] = [];
 
     if (hasPreFiltered) {
       const { data: preFilteredTemplates, error: preFilteredError } = await supabase
         .from('BOMTemplates')
-        .select('id, name, code, product_type_id, hardware_color, manufacturer, drive_type, drive_side, installation_location')
+        .select('id, name, code, product_type_id, hardware_color, manufacturer, drive_type, drive_side, installation_location, headbox')
         .in('id', uniquePreFiltered!)
         .eq('is_active', true)
         .eq('archived', false)
@@ -223,7 +226,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     if (templates.length === 0) {
       let templatesQuery = supabase
         .from('BOMTemplates')
-        .select('id, name, code, product_type_id, hardware_color, manufacturer, drive_type, drive_side, installation_location')
+        .select('id, name, code, product_type_id, hardware_color, manufacturer, drive_type, drive_side, installation_location, headbox')
         .eq('organization_id', organization_id)
         .eq('product_type_id', product_type_id)
         .eq('is_active', true)
@@ -506,6 +509,18 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         matchedCriteria.push(`installation_location:any(template=null)`);
       }
 
+      // Criterio 10: headbox (template-level boolean, strong filter when provided)
+      if (configWithHeadbox != null) {
+        const templateHeadbox = template.headbox === true;
+        if (templateHeadbox === configWithHeadbox) {
+          score += 5;
+          matchedCriteria.push(`headbox:${configWithHeadbox}`);
+        } else {
+          score -= 30;
+          unmatchedCriteria.push(`headbox expected:${configWithHeadbox} got:${templateHeadbox}`);
+        }
+      }
+
       templateScores.push({
         id: template.id,
         name: template.name || template.code,
@@ -540,6 +555,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     if (configManufacturer) maxExpectedScore += 5;
     if (configDriveSide) maxExpectedScore += 3;
     if (configInstallLocation) maxExpectedScore += 5;
+    if (configWithHeadbox != null) maxExpectedScore += 5;
 
     const bestMatch = templateScores[0];
     

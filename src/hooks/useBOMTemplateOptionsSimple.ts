@@ -29,6 +29,7 @@ export interface RoleOption {
   color: string | null;
   cost_exw: number | null;
   category_id: string | null;
+  metadata?: Record<string, any> | null;
   /** IDs de templates que tienen este componente */
   templateIds?: string[];
   virtual?: boolean;
@@ -300,7 +301,7 @@ export function useProgressiveTemplateFilter(
       // Fetch CatalogItems
       const { data: catalogItems, error: itemsError } = await supabase
         .from('CatalogItems')
-        .select('id, sku, name, image_url, color, cost_exw, category_id')
+        .select('id, sku, name, image_url, color, cost_exw, category_id, metadata')
         .in('id', Array.from(componentItemIds))
         .eq('organization_id', activeOrganizationId)
         .eq('is_active', true);
@@ -321,12 +322,13 @@ export function useProgressiveTemplateFilter(
         if (!itemMap.has(key)) {
           itemMap.set(key, {
             id: item.id,
-            sku: item.sku, // SKU exacto sin normalizar
+            sku: item.sku,
             name: item.name || item.sku,
             image_url: item.image_url ?? null,
             color: item.color ?? null,
             cost_exw: item.cost_exw ?? null,
             category_id: item.category_id ?? null,
+            metadata: (item as any).metadata ?? null,
             templateIds,
             virtual: false,
           });
@@ -428,9 +430,39 @@ export function useBOMTemplateOptionsSimple(
         let templateIds: string[];
 
         if (filteredTemplateIds && filteredTemplateIds.length > 0) {
-          templateIds = filteredTemplateIds;
-          if (import.meta.env.DEV) {
-            console.debug('[BOM] Using pre-filtered templates:', templateIds.length);
+          // If the role requires color AND a color is selected, narrow the pre-filtered
+          // templates to those matching the selected color (e.g. from manufacturer templates
+          // only show White bottom bars when White is selected).
+          if (requiresColor && normalizedColor) {
+            const { data: colorTemplates } = await supabase
+              .from('BOMTemplates')
+              .select('id')
+              .in('id', filteredTemplateIds)
+              .eq('hardware_color', normalizedColor);
+
+            if (colorTemplates && colorTemplates.length > 0) {
+              templateIds = colorTemplates.map((t: { id: string }) => t.id);
+              if (import.meta.env.DEV) {
+                console.debug('[BOM] Pre-filtered + color narrowed:', { total: filteredTemplateIds.length, afterColor: templateIds.length, color: normalizedColor });
+              }
+            } else {
+              // Fallback: templates with null color within the filtered set
+              const { data: nullColorTemplates } = await supabase
+                .from('BOMTemplates')
+                .select('id')
+                .in('id', filteredTemplateIds)
+                .is('hardware_color', null);
+
+              templateIds = (nullColorTemplates || []).map((t: { id: string }) => t.id);
+              if (import.meta.env.DEV) {
+                console.debug('[BOM] Pre-filtered + null-color fallback:', { count: templateIds.length });
+              }
+            }
+          } else {
+            templateIds = filteredTemplateIds;
+            if (import.meta.env.DEV) {
+              console.debug('[BOM] Using pre-filtered templates:', templateIds.length);
+            }
           }
         } else {
           // Order: product_type_id -> panel_count -> color
@@ -545,7 +577,7 @@ export function useBOMTemplateOptionsSimple(
         // Fetch CatalogItems
         const { data: catalogItems, error: itemsError } = await supabase
           .from('CatalogItems')
-          .select('id, sku, name, image_url, color, cost_exw, category_id')
+          .select('id, sku, name, image_url, color, cost_exw, category_id, metadata')
           .in('id', Array.from(componentItemIds))
           .eq('organization_id', activeOrganizationId)
           .eq('is_active', true);
@@ -575,12 +607,13 @@ export function useBOMTemplateOptionsSimple(
           if (!itemMap.has(key)) {
             itemMap.set(key, {
               id: item.id,
-              sku: item.sku, // SKU exacto sin normalizar
+              sku: item.sku,
               name: item.name || item.sku,
               image_url: item.image_url ?? null,
               color: item.color ?? null,
               cost_exw: item.cost_exw ?? null,
               category_id: item.category_id ?? null,
+              metadata: (item as any).metadata ?? null,
               templateIds,
               virtual: false,
             });
@@ -767,7 +800,7 @@ export function useBOMTemplateAllRoleOptions(
         // Fetch all CatalogItems
         const { data: catalogItems, error: itemsError } = await supabase
           .from('CatalogItems')
-          .select('id, sku, name, image_url, color, cost_exw, category_id')
+          .select('id, sku, name, image_url, color, cost_exw, category_id, metadata')
           .in('id', Array.from(allComponentItemIds))
           .eq('organization_id', activeOrganizationId)
           .eq('is_active', true);
@@ -798,12 +831,13 @@ export function useBOMTemplateAllRoleOptions(
               if (!itemMap.has(itemId)) {
                 itemMap.set(itemId, {
                   id: item.id,
-                  sku: item.sku, // SKU exacto sin normalizar
+                  sku: item.sku,
                   name: item.name || item.sku,
                   image_url: item.image_url,
                   color: item.color,
                   cost_exw: item.cost_exw,
                   category_id: item.category_id,
+                  metadata: (item as any).metadata ?? null,
                   templateIds,
                 });
               } else {

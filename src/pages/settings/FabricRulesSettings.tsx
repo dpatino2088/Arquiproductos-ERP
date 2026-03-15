@@ -73,6 +73,7 @@ function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule
     panel_multiplier: defaults.panel_multiplier ?? 1,
     heatseal_price_per_m: defaults.heatseal_price_per_m ?? 0,
     bottom_bar_wrap_pct: defaults.bottom_bar_wrap_pct ?? 0,
+    confection_pct: 0,
     is_active: true,
   };
 }
@@ -175,12 +176,29 @@ export default function FabricRulesSettings() {
 
   const selectCls = "w-full text-xs border border-gray-300 rounded px-2 py-1.5 bg-white";
 
-  const renderRuleForm = (draft: Partial<FabricRule>, setDraft: (v: Partial<FabricRule>) => void) => {
+  const FABRIC_GROUP_OPTIONS = [
+    { value: 'wave', label: 'Wave (Wave Drapery & Ripple Fold)' },
+    { value: 'pinch_pleat', label: 'Pinch Pleat' },
+  ] as const;
+
+  const isProductTypeDrapery = (name: string) => {
+    const n = name.toLowerCase();
+    return n.includes('drapery') || n.includes('curtain') || n.includes('wave') || n.includes('ripple') || n.includes('pinch');
+  };
+
+  const isProductTypeMechanical = (name: string) => {
+    const n = name.toLowerCase();
+    return n.includes('roller') || n.includes('dual') || n.includes('triple') || n.includes('zip');
+  };
+
+  const renderRuleForm = (draft: Partial<FabricRule>, setDraft: (v: Partial<FabricRule>) => void, ptName: string) => {
     const src = draft.fabric_width_source || 'finished_width';
     const derived = deriveFromSource(src);
     const mechanical = isMechanical(src);
     const drapery = isDrapery(src);
     const wasteDisplay = ((draft.waste_pct ?? 0.15) * 100).toFixed(0);
+    const ptIsDrapery = isProductTypeDrapery(ptName);
+    const ptIsMechanical = isProductTypeMechanical(ptName);
 
     const handleSourceChange = (newSource: string) => {
       const d = deriveFromSource(newSource);
@@ -189,6 +207,36 @@ export default function FabricRulesSettings() {
 
     return (
       <div className="space-y-4 p-4 bg-gray-50 border border-gray-200 rounded">
+        {/* ── Drapery: Variant identification FIRST (required) ── */}
+        {ptIsDrapery && (
+          <div className="rounded border border-purple-100 bg-purple-50/40 p-3">
+            <div className="text-[11px] font-medium text-purple-600 mb-2">Style Variant</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div>
+                <Label className="text-xs">Style Code <span className="text-red-400">*</span></Label>
+                <Input value={draft.style_code || ''} onChange={e => setDraft({ ...draft, style_code: e.target.value || null })} placeholder="e.g. wave_2.3" className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Display Name <span className="text-red-400">*</span></Label>
+                <Input value={draft.display_name || ''} onChange={e => setDraft({ ...draft, display_name: e.target.value || null })} placeholder="e.g. Wave 2.3" className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Fabric Group <span className="text-red-400">*</span></Label>
+                <select
+                  value={(draft as any).fabric_group || ''}
+                  onChange={e => setDraft({ ...draft, fabric_group: e.target.value || null } as any)}
+                  className={selectCls}
+                >
+                  <option value="">Select fabric group</option>
+                  {FABRIC_GROUP_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Row 1: Main config ── */}
         <div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -287,7 +335,7 @@ export default function FabricRulesSettings() {
           </div>
         )}
 
-        {/* ── Waste + Purchasing ── */}
+        {/* ── Waste + Purchasing + Confection ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div>
             <Label className="text-xs">Waste (%)</Label>
@@ -302,6 +350,19 @@ export default function FabricRulesSettings() {
             </div>
           </div>
           <div>
+            <Label className="text-xs">Confection (%)</Label>
+            <div className="relative">
+              <Input
+                type="number" step={1} min={0} max={100}
+                value={((draft.confection_pct ?? 0) * 100).toFixed(0)}
+                onChange={e => setDraft({ ...draft, confection_pct: (parseFloat(e.target.value) || 0) / 100 })}
+                className="text-xs pr-6"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+            </div>
+            <span className="text-[10px] text-gray-400">Surcharge on fabric cost</span>
+          </div>
+          <div>
             <Label className="text-xs">Min Order Qty</Label>
             <Input type="number" step={0.01} value={draft.min_qty ?? 0} onChange={e => setDraft({ ...draft, min_qty: parseFloat(e.target.value) || 0 })} className="text-xs" />
             <span className="text-[10px] text-gray-400">Minimum to order (e.g., 1m)</span>
@@ -313,26 +374,28 @@ export default function FabricRulesSettings() {
           </div>
         </div>
 
-        {/* ── Optional: Variant identification (collapsed) ── */}
-        <details className="group">
-          <summary className="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600">
-            Optional: Variant identification (for multiple rules per product type)
-          </summary>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
-            <div>
-              <Label className="text-xs text-gray-400">Style Code</Label>
-              <Input value={draft.style_code || ''} onChange={e => setDraft({ ...draft, style_code: e.target.value || null })} placeholder="e.g. wave_2.3" className="text-xs" />
+        {/* ── Variant identification: only for non-drapery, non-mechanical types ── */}
+        {!ptIsDrapery && !ptIsMechanical && (
+          <details className="group">
+            <summary className="text-[11px] text-gray-400 cursor-pointer hover:text-gray-600">
+              Optional: Variant identification (for multiple rules per product type)
+            </summary>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2">
+              <div>
+                <Label className="text-xs text-gray-400">Style Code</Label>
+                <Input value={draft.style_code || ''} onChange={e => setDraft({ ...draft, style_code: e.target.value || null })} placeholder="e.g. wave_2.3" className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-400">Display Name</Label>
+                <Input value={draft.display_name || ''} onChange={e => setDraft({ ...draft, display_name: e.target.value || null })} placeholder="e.g. Wave 2.3" className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-400">Product Line</Label>
+                <Input value={draft.product_line || ''} onChange={e => setDraft({ ...draft, product_line: e.target.value || null })} placeholder="e.g. wave" className="text-xs" />
+              </div>
             </div>
-            <div>
-              <Label className="text-xs text-gray-400">Display Name</Label>
-              <Input value={draft.display_name || ''} onChange={e => setDraft({ ...draft, display_name: e.target.value || null })} placeholder="e.g. Wave 2.3" className="text-xs" />
-            </div>
-            <div>
-              <Label className="text-xs text-gray-400">Product Line</Label>
-              <Input value={draft.product_line || ''} onChange={e => setDraft({ ...draft, product_line: e.target.value || null })} placeholder="e.g. wave" className="text-xs" />
-            </div>
-          </div>
-        </details>
+          </details>
+        )}
       </div>
     );
   };
@@ -382,7 +445,7 @@ export default function FabricRulesSettings() {
                       <div key={rule.id} className="border border-gray-100 rounded p-3 space-y-2">
                         {isEditing ? (
                           <>
-                            {renderRuleForm(editDraft, setEditDraft)}
+                            {renderRuleForm(editDraft, setEditDraft, ptName)}
                             <div className="flex gap-2 mt-2">
                               <button type="button" onClick={handleSaveEdit} className="inline-flex items-center gap-1 text-xs font-medium text-white bg-gray-900 rounded px-3 py-1.5 hover:bg-gray-800">
                                 <Save className="h-3 w-3" /> Save
@@ -395,7 +458,7 @@ export default function FabricRulesSettings() {
                             <div className="text-xs space-y-1">
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-gray-900">{rule.display_name || rule.style_code || '(default)'}</span>
-                                {rule.product_line && <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">{rule.product_line}</span>}
+                                {(rule as any).fabric_group && <span className="bg-purple-50 text-purple-700 rounded px-1.5 py-0.5">{(rule as any).fabric_group}</span>}
                                 <span className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5">{rule.formula_code}</span>
                                 {!rule.is_active && <span className="bg-red-50 text-red-600 rounded px-1.5 py-0.5">Inactive</span>}
                               </div>
@@ -417,6 +480,7 @@ export default function FabricRulesSettings() {
                                   </>
                                 )}
                                 <span>Waste: {(rule.waste_pct * 100).toFixed(0)}%</span>
+                                {(rule.confection_pct ?? 0) > 0 && <span>Confection: {(rule.confection_pct * 100).toFixed(0)}%</span>}
                                 <span>UOM: {rule.pricing_output_uom}</span>
                               </div>
                             </div>
@@ -473,7 +537,7 @@ export default function FabricRulesSettings() {
 
                   {addingForType === ptId ? (
                     <div className="space-y-2">
-                      {renderRuleForm(newDraft, setNewDraft)}
+                      {renderRuleForm(newDraft, setNewDraft, ptName)}
                       <div className="flex gap-2">
                         <button type="button" onClick={handleSaveNew} className="inline-flex items-center gap-1 text-xs font-medium text-white bg-gray-900 rounded px-3 py-1.5 hover:bg-gray-800">
                           <Save className="h-3 w-3" /> Create Rule

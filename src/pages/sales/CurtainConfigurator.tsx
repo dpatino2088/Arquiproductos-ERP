@@ -3,7 +3,6 @@ import ProductStep from './curtain-config/ProductStep';
 import MeasurementsStep from './curtain-config/MeasurementsStep';
 import VariantsStep from './curtain-config/VariantsStep';
 import OperatingSystemStep from './curtain-config/OperatingSystemStep';
-import AccessoriesStep from './curtain-config/AccessoriesStep';
 import ReviewStep from './curtain-config/ReviewStep';
 import { ProductConfig } from './product-config/types';
 
@@ -12,7 +11,7 @@ export type ConfigStep =
   | 'measurements' 
   | 'variants' 
   | 'operating-system' 
-  | 'accessories' 
+  | 'catalog' 
   | 'review';
 
 export interface CurtainConfiguration {
@@ -73,7 +72,7 @@ const STEPS: { id: ConfigStep; label: string }[] = [
   { id: 'measurements', label: 'MEASUREMENTS' },
   { id: 'variants', label: 'VARIANTS' },
   { id: 'operating-system', label: 'OPERATING SYSTEM' },
-  { id: 'accessories', label: 'ACCESSORIES' },
+  { id: 'catalog', label: 'CATALOG ITEM' },
   { id: 'review', label: 'REVIEW' },
 ];
 
@@ -90,18 +89,18 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
 
   const handleNext = () => {
     if (canGoNext) {
-      // If productType is 'accessories' and we're on product step, jump directly to accessories
-      if (config.productType === 'accessories' && currentStep === 'product') {
-        setCurrentStep('accessories');
+      // If productType is 'catalog' and we're on product step, jump directly to catalog step
+      if (config.productType === 'catalog' && currentStep === 'product') {
+        setCurrentStep('catalog');
         return;
       }
       
-      // Skip intermediate steps if productType is 'accessories'
-      if (config.productType === 'accessories') {
+      // Skip intermediate steps if productType is 'catalog'
+      if (config.productType === 'catalog') {
         let nextIndex = currentStepIndex + 1;
         while (nextIndex < STEPS.length) {
           const nextStep = STEPS[nextIndex];
-          if (nextStep && (nextStep.id === 'accessories' || nextStep.id === 'review')) {
+          if (nextStep && (nextStep.id === 'catalog' || nextStep.id === 'review')) {
             setCurrentStep(nextStep.id);
             return;
           }
@@ -135,9 +134,9 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
     const newConfig = { ...config, ...updates } as CurtainConfiguration;
     setConfig(newConfig);
     
-    // If productType is set to 'accessories', jump directly to accessories step
-    if (updates.productType === 'accessories') {
-      setCurrentStep('accessories');
+    // If productType is set to 'catalog', jump directly to catalog step
+    if (updates.productType === 'catalog') {
+      setCurrentStep('catalog');
     }
   };
 
@@ -159,8 +158,8 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
       case 'product':
         return !!config.productType;
       case 'measurements':
-        // Skip measurements validation if productType is 'accessories'
-        if (config.productType === 'accessories') return true;
+        // Skip measurements validation if productType is 'catalog'
+        if (config.productType === 'catalog') return true;
         return !!config.width_mm && !!config.height_mm;
       default:
         return true;
@@ -172,13 +171,13 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
       case 'product':
         return <ProductStep config={config} onUpdate={handleUpdate} />;
       case 'measurements':
-        // If productType is 'accessories', skip measurements and show message
-        if (config.productType === 'accessories') {
+        // If productType is 'catalog', skip measurements
+        if (config.productType === 'catalog') {
           return (
             <div className="max-w-4xl mx-auto">
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <p className="text-sm text-gray-600">
-                  Measurements are not required for accessories. Please proceed to the Accessories step.
+                  Measurements are not required for catalog items. Please proceed to the Catalog Item step.
                 </p>
               </div>
             </div>
@@ -186,13 +185,13 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
         }
         return <MeasurementsStep config={config} onUpdate={handleUpdate} />;
       case 'variants':
-        // If productType is 'accessories', skip variants and show message
-        if (config.productType === 'accessories') {
+        // If productType is 'catalog', skip variants
+        if (config.productType === 'catalog') {
           return (
             <div className="max-w-4xl mx-auto">
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <p className="text-sm text-gray-600">
-                  Variants are not required for accessories. Please proceed to the Accessories step.
+                  Variants are not required for catalog items. Please proceed to the Catalog Item step.
                 </p>
               </div>
             </div>
@@ -200,21 +199,21 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
         }
         return <VariantsStep config={config} onUpdate={handleUpdate} />;
       case 'operating-system':
-        // If productType is 'accessories', skip operating system and show message
-        if (config.productType === 'accessories') {
+        // If productType is 'catalog', skip operating system
+        if (config.productType === 'catalog') {
           return (
             <div className="max-w-4xl mx-auto">
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <p className="text-sm text-gray-600">
-                  Operating system is not required for accessories. Please proceed to the Accessories step.
+                  Operating system is not required for catalog items. Please proceed to the Catalog Item step.
                 </p>
               </div>
             </div>
           );
         }
         return <OperatingSystemStep config={config} onUpdate={handleUpdate} />;
-      case 'accessories':
-        return <AccessoriesStep config={config} onUpdate={handleUpdate} />;
+      case 'catalog':
+        return null; {/* CurtainConfigurator is legacy - use ProductConfigurator for catalog items */}
       case 'review':
         return <ReviewStep config={config as ProductConfig} onUpdate={handleUpdate} />;
       default:
@@ -233,18 +232,18 @@ export default function CurtainConfigurator({ quoteId, onComplete, onClose }: Cu
           {STEPS.map((step, index) => {
             const isActive = currentStep === step.id;
             const isCompleted = index < currentStepIndex;
-            // For accessories product type, skip intermediate steps
-            const isSkipped = config.productType === 'accessories' && 
+            // For catalog product type, skip intermediate steps
+            const isSkipped = config.productType === 'catalog' && 
                             (step.id === 'measurements' || step.id === 'variants' || step.id === 'operating-system');
-            const isAccessible = index <= currentStepIndex || (config.productType === 'accessories' && step.id === 'accessories');
+            const isAccessible = index <= currentStepIndex || (config.productType === 'catalog' && step.id === 'catalog');
             
             return (
               <button
                 key={step.id}
                 onClick={() => {
-                  if (isSkipped && config.productType === 'accessories') {
-                    // If clicking on a skipped step, jump to accessories
-                    handleStepClick('accessories');
+                  if (isSkipped && config.productType === 'catalog') {
+                    // If clicking on a skipped step, jump to catalog
+                    handleStepClick('catalog');
                   } else if (isAccessible) {
                     handleStepClick(step.id);
                   }

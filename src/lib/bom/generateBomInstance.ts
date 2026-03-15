@@ -10,6 +10,8 @@ import { BOMInstanceMetadata, RollerBOMConfigState } from './types';
 import { ResolvedBOMTemplate } from './resolveBomTemplate';
 import { normalizeRole } from './roles';
 import { calculateFabricLinearM } from './fabric-calculations';
+import { resolveCascade, CascadeComponent } from './cascadeResolver';
+import { getCascadeOrder, getDefaultDependsOn, getCascadeAxis } from './cascadePriority';
 
 export interface GenerateBOMInstanceParams {
   organizationId: string;
@@ -127,7 +129,123 @@ export async function generateBomInstance(
   // Note: BOMInstances doesn't have metadata column in current schema
   // Metadata will be stored in BOMInstanceLines or handled separately if needed
 
-  // Process slots and create lines
+  // ── Phase 1: Resolve all slots to catalog items ──
+  interface ResolvedSlot {
+    slotId: string;
+    catalogItemId: string;
+    role: string;
+    qty: number;
+    costExw: number | null;
+    measureBasis: string | null;
+    isRoll: boolean;
+    deltaXMm: number | null;
+    deltaYMm: number | null;
+    dependsOnRole: string | null;
+    affectsRole: string | null;
+    cutDeltaMm: number;
+    cutDeltaScope: string | null;
+  }
+  const resolvedSlots: ResolvedSlot[] = [];
+
+  for (const slot of template.slots) {
+    let finalCatalogItemId: string | null = null;
+    if (slot.catalog_item_id) {
+      finalCatalogItemId = slot.catalog_item_id;
+    } else {
+      const normalizedRole = normalizeRole(slot.item_role);
+      const userSelection = getSelectionForRole(normalizedRole, metadata.selections);
+      if (userSelection) {
+        finalCatalogItemId = userSelection;
+      } else {
+        if (import.meta.env.DEV) {
+          console.warn(`[generateBomInstance] No selection for role ${normalizedRole}, skipping slot ${slot.id}`);
+        }
+        continue;
+      }
+    }
+
+    const normalizedSlotRole = normalizeRole(slot.item_role) || slot.item_role;
+
+    const { data: catalogItem } = await supabase
+      .from('CatalogItems')
+      .select('cost_exw, measure_basis, is_roll, delta_x_mm, delta_y_mm')
+      .eq('id', finalCatalogItemId)
+      .maybeSingle();
+
+    resolvedSlots.push({
+      slotId: slot.id,
+      catalogItemId: finalCatalogItemId,
+      role: normalizedSlotRole,
+      qty: slot.qty,
+      costExw: catalogItem?.cost_exw ?? null,
+      measureBasis: catalogItem?.measure_basis ?? null,
+      isRoll: catalogItem?.is_roll ?? false,
+      deltaXMm: catalogItem?.delta_x_mm != null ? Number(catalogItem.delta_x_mm) : null,
+      deltaYMm: catalogItem?.delta_y_mm != null ? Number(catalogItem.delta_y_mm) : null,
+      dependsOnRole: getDefaultDependsOn(normalizedSlotRole),
+      affectsRole: null,
+      cutDeltaMm: 0,
+      cutDeltaScope: null,
+    });
+  }
+
+  // ── Phase 2: Load BOMComponents engineering rules for this template ──
+  const { data: bomComps } = await supabase
+    .from('BOMComponents')
+    .select('id, component_role, component_item_id, depends_on_role, affects_role, cut_delta_mm, cut_delta_scope, cut_axis, sort_order, qty_value')
+    .eq('bom_template_id', template.id)
+    .eq('deleted', false)
+    .eq('archived', false)
+    .is('parent_component_id', null)
+    .order('sort_order');
+
+  if (bomComps && bomComps.length > 0) {
+    for (const rs of resolvedSlots) {
+      const matchingComp = bomComps.find(
+        (bc: any) => bc.component_role === rs.role || bc.component_item_id === rs.catalogItemId,
+      );
+      if (matchingComp) {
+        rs.dependsOnRole = matchingComp.depends_on_role ?? rs.dependsOnRole;
+        rs.affectsRole = matchingComp.affects_role ?? null;
+        rs.cutDeltaMm = Number(matchingComp.cut_delta_mm ?? 0);
+        rs.cutDeltaScope = matchingComp.cut_delta_scope ?? null;
+      }
+    }
+  }
+
+  // ── Phase 3: Run cascade resolver ──
+  const cascadeComponents: CascadeComponent[] = resolvedSlots.map(rs => ({
+    id: rs.slotId,
+    role: rs.role,
+    depends_on_role: rs.dependsOnRole,
+    affects_role: rs.affectsRole,
+    cut_delta_mm: rs.cutDeltaMm,
+    cut_delta_scope: rs.cutDeltaScope,
+    qty: rs.qty,
+    measure_basis: rs.measureBasis,
+    is_roll: rs.isRoll,
+    cut_axis: getCascadeAxis(rs.role) === 'y' ? 'height' : getCascadeAxis(rs.role) === 'x' ? 'width' : null,
+    cascade_order: getCascadeOrder(rs.role),
+    catalog_delta_x_mm: rs.deltaXMm,
+    catalog_delta_y_mm: rs.deltaYMm,
+  }));
+
+  const cascadeResult = resolveCascade({
+    width_mm: configState.width_mm || 0,
+    height_mm: configState.height_mm || 0,
+    components: cascadeComponents,
+  });
+
+  if (import.meta.env.DEV) {
+    console.log('[generateBomInstance] Cascade resolution:', {
+      order: cascadeResult.order,
+      resolved: Object.fromEntries(
+        Array.from(cascadeResult.resolved.entries()).map(([k, v]) => [k, { base: `${v.base_source}=${v.base_value_mm}`, deltas: v.deltas.length, result: v.resolved_mm }]),
+      ),
+    });
+  }
+
+  // ── Phase 4: Build BOM instance lines using cascade results ──
   const linesToInsert: Array<{
     bom_instance_id: string;
     bom_component_id: string | null;
@@ -142,79 +260,54 @@ export async function generateBomInstance(
     total_cost_exw: number | null;
   }> = [];
 
-  for (const slot of template.slots) {
-    // Determine final catalog_item_id
-    let finalCatalogItemId: string | null = null;
-
-    // a) If slot has fixed catalog_item_id, use it
-    if (slot.catalog_item_id) {
-      finalCatalogItemId = slot.catalog_item_id;
-    } else {
-      // b) Check if user selected this role
-      const normalizedRole = normalizeRole(slot.item_role);
-      const userSelection = getSelectionForRole(normalizedRole, metadata.selections);
-
-      if (userSelection) {
-        finalCatalogItemId = userSelection;
-      } else {
-        if (import.meta.env.DEV) {
-          console.warn(
-            `[generateBomInstance] No selection for role ${normalizedRole}, skipping slot ${slot.id}`
-          );
-        }
-        continue;
-      }
-    }
-
-    const normalizedSlotRole = normalizeRole(slot.item_role) || slot.item_role;
-
-    // Get item details for cost and measure_basis
-    const { data: catalogItem } = await supabase
-      .from('CatalogItems')
-      .select('cost_exw, measure_basis, is_roll')
-      .eq('id', finalCatalogItemId)
-      .maybeSingle();
-
-    const isFabric = normalizedSlotRole === 'fabric' || catalogItem?.is_roll === true;
-    const isLinear = catalogItem?.measure_basis === 'linear' && !catalogItem?.is_roll;
+  for (const rs of resolvedSlots) {
+    const isFabric = rs.role === 'fabric' || rs.isRoll;
+    const isLinear = rs.measureBasis === 'linear' && !rs.isRoll;
 
     let lineUom = 'ea';
-    let lineQty = slot.qty;
+    let lineQty = rs.qty;
     let cutLengthMm: number | null = null;
     let cutWidthMm: number | null = null;
     let cutHeightMm: number | null = null;
 
+    const cascadeCut = cascadeResult.resolved.get(rs.role);
+
     if (isFabric && configState.width_mm && configState.height_mm) {
-      // Fabric: UOM = m, qty = calculated linear meters, cut_width = product width
       lineUom = 'm';
+      const fabricWidthMm = cascadeCut ? cascadeCut.resolved_mm : configState.width_mm;
       const fabricM = calculateFabricLinearM({
-        width_m: configState.width_mm / 1000,
+        width_m: fabricWidthMm / 1000,
         height_m: configState.height_mm / 1000,
         roll_width_m: 2.8,
       });
       lineQty = Math.round(fabricM * 1000) / 1000;
-      cutWidthMm = configState.width_mm;
+      cutWidthMm = fabricWidthMm;
       cutHeightMm = configState.height_mm;
-    } else if (isLinear && configState.width_mm) {
-      // Linear profiles (tube, headbox, etc.): UOM = m, cut_length = product width
+    } else if (isLinear) {
       lineUom = 'm';
-      cutLengthMm = configState.width_mm;
-      cutWidthMm = configState.width_mm;
-      cutHeightMm = configState.height_mm || null;
+      if (cascadeCut) {
+        cutLengthMm = cascadeCut.resolved_mm;
+        const isYAxis = getCascadeAxis(rs.role) === 'y';
+        cutWidthMm = isYAxis ? (configState.width_mm || null) : cascadeCut.resolved_mm;
+        cutHeightMm = isYAxis ? cascadeCut.resolved_mm : (configState.height_mm || null);
+      } else {
+        cutLengthMm = configState.width_mm;
+        cutWidthMm = configState.width_mm;
+        cutHeightMm = configState.height_mm || null;
+      }
     } else {
-      // Unit items (ea): use product dimensions as reference
       cutWidthMm = configState.width_mm || null;
       cutHeightMm = configState.height_mm || null;
     }
 
-    const unitCost = catalogItem?.cost_exw || null;
+    const unitCost = rs.costExw;
     const totalCost = unitCost && lineQty ? unitCost * lineQty : null;
 
     linesToInsert.push({
       bom_instance_id: instanceId,
       bom_component_id: null,
-      resolved_part_id: finalCatalogItemId,
-      part_role: normalizedSlotRole,
+      resolved_part_id: rs.catalogItemId,
+      part_role: rs.role,
       qty: lineQty,
       uom: lineUom,
       cut_length_mm: cutLengthMm,

@@ -1540,6 +1540,34 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                             <option value="roll">roll</option>
                             <option value={line.unit_of_measure_snapshot}>{line.unit_of_measure_snapshot}</option>
                           </select>
+                        ) : canEdit && (line.units_per_purchase_unit_snapshot ?? 1) > 1 && line.purchase_unit_snapshot && line.purchase_unit_snapshot !== 'each' ? (
+                          <select
+                            value={line.unit}
+                            onChange={e => {
+                              const newUnit = e.target.value;
+                              const upp = line.units_per_purchase_unit_snapshot ?? 1;
+                              const pkgUnit = line.purchase_unit_snapshot!;
+                              const isCurrentlyPkg = line.unit === pkgUnit;
+                              let newQty = line.ordered_qty;
+                              let newCost = line.unit_cost;
+                              if (isCurrentlyPkg && newUnit === 'each') {
+                                newQty = line.ordered_qty * upp;
+                                newCost = line.unit_cost / upp;
+                              } else if (!isCurrentlyPkg && newUnit === pkgUnit) {
+                                newQty = Math.max(1, Math.ceil(line.ordered_qty / upp));
+                                newCost = line.unit_cost * upp;
+                              }
+                              setDraftLines(prev => prev.map(dl =>
+                                dl.tempId === line.tempId
+                                  ? { ...dl, unit: newUnit, unit_cost: newCost, ordered_qty: newQty }
+                                  : dl
+                              ));
+                            }}
+                            className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border-0 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                          >
+                            <option value={line.purchase_unit_snapshot}>{line.purchase_unit_snapshot}</option>
+                            <option value="each">each</option>
+                          </select>
                         ) : (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
                             {line.unit || 'ea'}

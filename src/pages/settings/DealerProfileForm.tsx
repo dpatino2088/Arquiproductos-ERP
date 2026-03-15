@@ -1023,7 +1023,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
                           className="h-4 w-4 rounded border-gray-300"
                           disabled={isReadOnly}
                         />
-                        <span className="text-sm text-gray-800">Accessories Only Mode</span>
+                        <span className="text-sm text-gray-800">Catalog Items Mode</span>
                       </label>
                     </div>
                   </div>

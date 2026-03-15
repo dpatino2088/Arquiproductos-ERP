@@ -10,6 +10,7 @@ export interface FabricRule {
   display_name: string | null;
   image_url: string | null;
   product_line: string | null;
+  fabric_group: string | null;
   formula_code: string;
   height_multiplier: number;
   width_multiplier: number;
@@ -31,6 +32,7 @@ export interface FabricRule {
   panel_multiplier: number;
   heatseal_price_per_m: number;
   bottom_bar_wrap_pct: number;
+  confection_pct: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;

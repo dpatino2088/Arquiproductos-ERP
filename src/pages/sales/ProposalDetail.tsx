@@ -252,6 +252,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     exempt_tax: false,
   });
 
+  const [showAdjSubtotal, setShowAdjSubtotal] = useState(false);
+  const [showAdjTotal, setShowAdjTotal] = useState(false);
+
   const resolvedLogoUrl = useResolvedStorageUrl(dealerLogoUrl ?? null);
   const [logoError, setLogoError] = useState(false);
   const showLogo = Boolean(resolvedLogoUrl) && !logoError;
@@ -309,7 +312,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     if (!proposal || !headerDirty || saving || !canWrite) return false;
     setSaving(true);
     try {
-      const feePct = headerForm.global_fee_amount ? parseFloat(headerForm.global_fee_amount) : null;
+      const parsePct = (v: string) => { const n = parseFloat(v); return Number.isNaN(n) ? 0 : n; };
       const payload: Record<string, unknown> = {
         proposal_no: headerForm.proposal_no || null,
         status: headerForm.status,
@@ -318,10 +321,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         terms_title: headerForm.terms_title?.trim() || null,
         terms_content: headerForm.terms_content ?? null,
         valid_until: headerForm.valid_until || null,
-        global_discount_pct: headerForm.global_discount_pct ? parseFloat(headerForm.global_discount_pct) : null,
-        global_fee_amount: feePct,
-        global_installation_discount_pct: headerForm.global_installation_discount_pct ? parseFloat(headerForm.global_installation_discount_pct) : null,
-        global_installation_fee_pct: headerForm.global_installation_fee_pct ? parseFloat(headerForm.global_installation_fee_pct) : null,
+        global_discount_pct: parsePct(headerForm.global_discount_pct),
+        global_fee_amount: parsePct(headerForm.global_fee_amount),
+        global_installation_discount_pct: parsePct(headerForm.global_installation_discount_pct),
+        global_installation_fee_pct: parsePct(headerForm.global_installation_fee_pct),
         exempt_tax: headerForm.exempt_tax,
       };
       const { error: e } = await supabase.from('Proposals').update(payload).eq('id', proposal.id);
@@ -700,65 +703,52 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   );
 
   const totals = useMemo(() => {
+    // Read percentages from headerForm (live); '0' and '' both parse to 0
+    const discountPct = headerForm.global_discount_pct !== '' ? parseFloat(headerForm.global_discount_pct) || 0 : 0;
+    const globalFeePct = headerForm.global_fee_amount !== '' ? parseFloat(headerForm.global_fee_amount) || 0 : 0;
+    const instDiscountPct = headerForm.global_installation_discount_pct !== '' ? parseFloat(headerForm.global_installation_discount_pct) || 0 : 0;
+    const instFeePct = headerForm.global_installation_fee_pct !== '' ? parseFloat(headerForm.global_installation_fee_pct) || 0 : 0;
+
+    const feeMul = 1 + ((Number.isNaN(globalFeePct) ? 0 : globalFeePct) / 100);
+    const instFeeMul = 1 + ((Number.isNaN(instFeePct) ? 0 : instFeePct) / 100);
+
+    // Fee is baked into each line total so Unit Price & Line Total reflect it
     const lineTotals: number[] = [];
-    let totalProduct = 0; // Sum of all line totals only (no installation)
+    let totalProduct = 0;
     let installationTotal = 0;
     displayLines.forEach((line) => {
       const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
-      const material = computeLineTotal(line, qlInfo, proposal?.status);
+      const rawMaterial = computeLineTotal(line, qlInfo, proposal?.status);
+      const material = rawMaterial * feeMul;
       lineTotals.push(material);
       totalProduct += material;
       const installationAddons = (displayAddonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
-      installationTotal += installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
+      const rawInstall = installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
+      installationTotal += rawInstall * instFeeMul;
     });
 
-    const discountPct = proposal?.global_discount_pct ?? 0;
-    const discountAmount = totalProduct * (discountPct / 100);
+    // Discount applies to fee-inclusive Total Product
+    const discountAmount = Number.isNaN(discountPct) ? 0 : totalProduct * (discountPct / 100);
+    const afterDiscount = Math.max(totalProduct - discountAmount, 0);
 
-    // Installation: apply Labor Discount % and Labor Fee % (same formula as recalc_proposal_totals)
-    const instDiscountPct = headerForm.global_installation_discount_pct ? parseFloat(headerForm.global_installation_discount_pct) : (proposal?.global_installation_discount_pct ?? 0);
-    const instFeePct = headerForm.global_installation_fee_pct ? parseFloat(headerForm.global_installation_fee_pct) : (proposal?.global_installation_fee_pct ?? 0);
+    // Labor Discount applies to fee-inclusive Installation
     const laborDiscountAmount = Number.isNaN(instDiscountPct) ? 0 : installationTotal * (instDiscountPct / 100);
-    const afterLaborDiscount = installationTotal - laborDiscountAmount;
-    const laborFeeAmount = Number.isNaN(instFeePct) ? 0 : afterLaborDiscount * (instFeePct / 100);
-    const installationNet = afterLaborDiscount + laborFeeAmount;
+    const installationNet = installationTotal - laborDiscountAmount;
 
-    // Subtotal = Total Product - Discount + Installation net (before tax)
-    const subtotal = Math.max(totalProduct - discountAmount, 0) + installationNet;
+    const subtotal = afterDiscount + installationNet;
 
-    if (proposal?.tax_amount != null && proposal?.total_amount != null && !headerForm.global_installation_discount_pct && !headerForm.global_installation_fee_pct) {
-      const pctD = proposal.global_installation_discount_pct ?? 0;
-      const pctF = proposal.global_installation_fee_pct ?? 0;
-      const labDisc = installationTotal * (pctD / 100);
-      const afterDisc = installationTotal - labDisc;
-      const labFee = afterDisc * (pctF / 100);
-      const instNet = afterDisc + labFee;
-      const subtotalServer = Math.max(totalProduct - discountAmount, 0) + instNet;
-      return {
-        totalProduct,
-        discountAmount,
-        installationTotal,
-        laborDiscountAmount: labDisc,
-        laborFeeAmount: labFee,
-        installationAmount: proposal.installation_amount ?? installationTotal,
-        installationNet: instNet,
-        subtotal: proposal.subtotal_amount ?? subtotalServer,
-        taxAmount: proposal.tax_amount,
-        total: proposal.total_amount,
-        lineTotals,
-        instDiscountPct: pctD,
-        instFeePct: pctF,
-      };
-    }
-    const taxPct = 0.07;
-    const taxAmount = subtotal * taxPct;
+    const exemptTax = headerForm.exempt_tax;
+    const taxPct = proposal?.tax_pct ?? 0.07;
+    const taxAmount = exemptTax ? 0 : subtotal * taxPct;
     const total = subtotal + taxAmount;
+
     return {
       totalProduct,
+      discountPct,
       discountAmount,
+      globalFeePct,
       installationTotal,
       laborDiscountAmount,
-      laborFeeAmount,
       installationAmount: installationTotal,
       installationNet,
       subtotal,
@@ -768,7 +758,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       instDiscountPct,
       instFeePct,
     };
-  }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.tax_amount, proposal?.total_amount, proposal?.global_discount_pct, proposal?.global_installation_discount_pct, proposal?.global_installation_fee_pct, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct]);
+  }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.status, proposal?.global_discount_pct, proposal?.global_fee_amount, proposal?.global_installation_discount_pct, proposal?.global_installation_fee_pct, proposal?.tax_pct, headerForm.global_discount_pct, headerForm.global_fee_amount, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct, headerForm.exempt_tax]);
 
   const customLinesInvalid = useMemo(() => {
     return displayLines.some(
@@ -1206,8 +1196,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     >
       {activeTab === 'overview' && (
         <div className="space-y-6 w-full max-w-full">
-          {/* Header cards (Invoice-style: customer left, settings right) */}
+          {/* Header cards (2 columns: Left = names/details, Right = discounts + summary) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* LEFT CARD: Customer Info + Proposal Details */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Customer Info</h3>
               <dl className="space-y-2 text-sm">
@@ -1248,111 +1239,268 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   </div>
                 )}
               </dl>
+
+              <div className="border-t border-gray-200 mt-4 pt-4">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Details</h3>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label>Proposal No</Label>
+                      <Input
+                        value={headerForm.proposal_no}
+                        onChange={(e) => { setHeaderForm((f) => ({ ...f, proposal_no: e.target.value })); setHeaderDirty(true); }}
+                        disabled={contentReadOnly}
+                      />
+                    </div>
+                    <div>
+                      <Label>Status</Label>
+                      <SelectShadcn
+                        value={headerForm.status}
+                        onValueChange={(v) => { setHeaderForm((f) => ({ ...f, status: v as Proposal['status'] })); setHeaderDirty(true); }}
+                        disabled={statusDropdownDisabled}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PROPOSAL_STATUS_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label>Valid until</Label>
+                      <Input
+                        type="date"
+                        value={headerForm.valid_until}
+                        onChange={(e) => { setHeaderForm((f) => ({ ...f, valid_until: e.target.value })); setHeaderDirty(true); }}
+                        disabled={contentReadOnly}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Description</Label>
+                    <textarea
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                      rows={2}
+                      value={headerForm.description}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                      placeholder="Short proposal description"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
+            {/* RIGHT CARD: Adjustments + Summary */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Details</h3>
-              <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Adjustments</h3>
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                 <div>
-                  <Label>Proposal No</Label>
+                  <Label className="block min-h-[2.5rem] leading-5">Global Disc. %</Label>
                   <Input
-                    value={headerForm.proposal_no}
-                    onChange={(e) => { setHeaderForm((f) => ({ ...f, proposal_no: e.target.value })); setHeaderDirty(true); }}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="0"
+                    value={headerForm.global_discount_pct}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, global_discount_pct: e.target.value })); setHeaderDirty(true); }}
                     disabled={contentReadOnly}
                   />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <Label>Status</Label>
-                    <SelectShadcn
-                      value={headerForm.status}
-                      onValueChange={(v) => { setHeaderForm((f) => ({ ...f, status: v as Proposal['status'] })); setHeaderDirty(true); }}
-                      disabled={statusDropdownDisabled}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PROPOSAL_STATUS_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </SelectShadcn>
-                  </div>
-                  <div>
-                    <Label>Valid until</Label>
-                    <Input
-                      type="date"
-                      value={headerForm.valid_until}
-                      onChange={(e) => { setHeaderForm((f) => ({ ...f, valid_until: e.target.value })); setHeaderDirty(true); }}
-                      disabled={contentReadOnly}
-                    />
-                  </div>
                 </div>
                 <div>
-                  <Label>Description</Label>
-                  <textarea
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                    rows={2}
-                    value={headerForm.description}
-                    onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
+                  <Label className="block min-h-[2.5rem] leading-5">Global Fee %</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="0"
+                    value={headerForm.global_fee_amount}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
                     disabled={contentReadOnly}
-                    placeholder="Short proposal description"
                   />
                 </div>
-                <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-                  <div>
-                    <Label className="block min-h-[2.5rem] leading-5">Global Disc. %</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={headerForm.global_discount_pct}
-                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_discount_pct: e.target.value })); setHeaderDirty(true); }}
-                      disabled={contentReadOnly}
-                    />
-                  </div>
-                  <div>
-                    <Label className="block min-h-[2.5rem] leading-5">Global Fee %</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      placeholder="e.g. 10"
-                      value={headerForm.global_fee_amount}
-                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
-                      disabled={contentReadOnly}
-                    />
-                  </div>
-                  <div>
-                    <Label className="block min-h-[2.5rem] leading-5">Labor Disc. %</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      placeholder="Installation discount"
-                      value={headerForm.global_installation_discount_pct}
-                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_discount_pct: e.target.value })); setHeaderDirty(true); }}
-                      disabled={contentReadOnly}
-                    />
-                  </div>
-                  <div>
-                    <Label className="block min-h-[2.5rem] leading-5">Labor Fee %</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      placeholder="Installation fee"
-                      value={headerForm.global_installation_fee_pct}
-                      onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_fee_pct: e.target.value })); setHeaderDirty(true); }}
-                      disabled={contentReadOnly}
-                    />
-                  </div>
+                <div>
+                  <Label className="block min-h-[2.5rem] leading-5">Labor Disc. %</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="0"
+                    value={headerForm.global_installation_discount_pct}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_discount_pct: e.target.value })); setHeaderDirty(true); }}
+                    disabled={contentReadOnly}
+                  />
                 </div>
+                <div>
+                  <Label className="block min-h-[2.5rem] leading-5">Labor Fee %</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="0"
+                    value={headerForm.global_installation_fee_pct}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, global_installation_fee_pct: e.target.value })); setHeaderDirty(true); }}
+                    disabled={contentReadOnly}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 mt-5 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={headerForm.exempt_tax}
+                      onChange={(e) => { setHeaderForm((f) => ({ ...f, exempt_tax: e.target.checked })); setHeaderDirty(true); }}
+                      disabled={contentReadOnly}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-xs text-gray-600">Exempt Tax</span>
+                  </label>
+                </div>
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Total Product</span>
+                  <span className="tabular-nums">{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
+                </div>
+                {(totals.discountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Discount {totals.discountPct ? `(${totals.discountPct}%)` : ''}</span>
+                    <span className="tabular-nums">-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+                  </div>
+                )}
+                {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
+                  <>
+                    {(totals.laborDiscountAmount ?? 0) > 0 ? (
+                      <>
+                        <div className="flex justify-between py-1 text-sm">
+                          <span className="text-gray-600">Installation</span>
+                          <span className="tabular-nums">{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
+                        </div>
+                        <div className="flex justify-between py-1 text-sm">
+                          <span className="text-gray-600">Labor discount {totals.instDiscountPct ? `(${totals.instDiscountPct}%)` : ''}</span>
+                          <span className="tabular-nums">-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
+                        </div>
+                        <div className="flex justify-between py-1 text-sm font-medium">
+                          <span className="text-gray-700">Installation (net)</span>
+                          <span className="tabular-nums">{formatCurrency(totals.installationNet ?? 0, currency)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between py-1 text-sm">
+                        <span className="text-gray-600">Installation</span>
+                        <span className="tabular-nums">{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+                <div
+                  className="flex justify-between py-1 text-sm cursor-pointer group"
+                  onClick={() => { if (!contentReadOnly) { setShowAdjSubtotal((v) => !v); setShowAdjTotal(false); } }}
+                >
+                  <span className="text-gray-600">Subtotal</span>
+                  <span className="tabular-nums inline-flex items-center gap-1">
+                    {!contentReadOnly && (showAdjSubtotal
+                      ? <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
+                      : <ChevronRight className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
+                    )}
+                    {formatCurrency(totals.subtotal ?? 0, currency)}
+                  </span>
+                </div>
+                {showAdjSubtotal && !contentReadOnly && (
+                  <div className="flex justify-end pb-2">
+                    <div>
+                      <Label className="text-xs text-gray-500">Target subtotal</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="w-32 mt-0.5"
+                        defaultValue=""
+                        placeholder={String(Math.round((totals.subtotal ?? 0) * 100) / 100)}
+                        onBlur={(e) => {
+                          const target = parseFloat(e.target.value);
+                          if (Number.isNaN(target) || target < 0) return;
+                          const installNet = totals.installationNet ?? 0;
+                          const tp = totals.totalProduct ?? 0;
+                          if (tp <= 0) return;
+                          const targetProductNet = target - installNet;
+                          if (targetProductNet <= 0) {
+                            setHeaderForm((f) => ({ ...f, global_discount_pct: '100' }));
+                          } else if (targetProductNet < tp) {
+                            const disc = Math.round(((tp - targetProductNet) / tp) * 1000000) / 10000;
+                            setHeaderForm((f) => ({ ...f, global_discount_pct: String(disc) }));
+                          } else {
+                            setHeaderForm((f) => ({ ...f, global_discount_pct: '0' }));
+                          }
+                          setHeaderDirty(true);
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {!headerForm.exempt_tax && (
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Tax</span>
+                    <span className="tabular-nums">{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
+                  </div>
+                )}
+                <div
+                  className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold cursor-pointer group"
+                  onClick={() => { if (!contentReadOnly) { setShowAdjTotal((v) => !v); setShowAdjSubtotal(false); } }}
+                >
+                  <span>Total {currency ? `(${currency})` : ''}</span>
+                  <span className="tabular-nums inline-flex items-center gap-1">
+                    {!contentReadOnly && (showAdjTotal
+                      ? <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
+                      : <ChevronRight className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
+                    )}
+                    {formatCurrency(totals.total, currency)}
+                  </span>
+                </div>
+                {showAdjTotal && !contentReadOnly && (
+                  <div className="flex justify-end pb-2">
+                    <div>
+                      <Label className="text-xs text-gray-500">Target total (inc. tax)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="w-32 mt-0.5"
+                        defaultValue=""
+                        placeholder={String(Math.round((totals.total ?? 0) * 100) / 100)}
+                        onBlur={(e) => {
+                          const targetTotal = parseFloat(e.target.value);
+                          if (Number.isNaN(targetTotal) || targetTotal < 0) return;
+                          const taxPct = headerForm.exempt_tax ? 0 : (proposal?.tax_pct ?? 0.07);
+                          const targetSub = targetTotal / (1 + taxPct);
+                          const installNet = totals.installationNet ?? 0;
+                          const tp = totals.totalProduct ?? 0;
+                          if (tp <= 0) return;
+                          const targetProductNet = targetSub - installNet;
+                          if (targetProductNet <= 0) {
+                            setHeaderForm((f) => ({ ...f, global_discount_pct: '100' }));
+                          } else if (targetProductNet < tp) {
+                            const disc = Math.round(((tp - targetProductNet) / tp) * 1000000) / 10000;
+                            setHeaderForm((f) => ({ ...f, global_discount_pct: String(disc) }));
+                          } else {
+                            setHeaderForm((f) => ({ ...f, global_discount_pct: '0' }));
+                          }
+                          setHeaderDirty(true);
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1434,6 +1582,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   panels?: unknown[] | null;
                   name?: string | null;
                   sku?: string | null;
+                  drive_type?: string | null;
                 } | null;
                 const dimsSource = {
                   measurements: snap?.measurements ?? (qlInfo?.config_snapshot as { measurements?: { panels?: unknown[]; height_mm?: number } } | undefined)?.measurements,
@@ -1510,6 +1659,13 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                               )}
                             </div>
                             <div className="flex flex-col gap-0.5 mt-0.5">
+                              {(() => {
+                                const driveRaw = snap?.drive_type ?? qlInfo?.drive_type ?? null;
+                                const driveLabel = driveRaw === 'motor' ? 'Motorized' : driveRaw === 'manual' ? 'Manual' : null;
+                                return driveLabel ? (
+                                  <span className="text-xs text-gray-500">{driveLabel}</span>
+                                ) : null;
+                              })()}
                               {dimsMm && dimsMm !== '—' && <span className="text-xs text-gray-500 whitespace-pre-line">{dimsMm}</span>}
                               {isInstallIncluded ? (
                                 <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
@@ -1788,9 +1944,32 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                   placeholder="0"
                                 />
                               </div>
+                              {baseAmount > 0 && (
+                                <div>
+                                  <Label className="text-xs">Adjusted Price</Label>
+                                  <Input
+                                    key={`adj-${line.id}-${line.line_adjustment_pct ?? 0}-${totals.globalFeePct ?? 0}`}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    className="w-28"
+                                    defaultValue={String(Math.round(lineTotal * 100) / 100)}
+                                    onBlur={(e) => {
+                                      const target = parseFloat(e.target.value);
+                                      if (Number.isNaN(target) || target < 0 || baseAmount <= 0) return;
+                                      const fMul = 1 + ((totals.globalFeePct ?? 0) / 100);
+                                      const rawTarget = fMul > 0 ? target / fMul : target;
+                                      const pct = Math.round(((rawTarget / baseAmount) - 1) * 1000000) / 10000;
+                                      updateLineAdjustment(line.id, Math.max(-100, Math.min(100, pct)));
+                                    }}
+                                    disabled={contentReadOnly}
+                                    placeholder={formatCurrency(lineTotal, currency)}
+                                  />
+                                </div>
+                              )}
                               {((line.line_adjustment_pct ?? 0) !== 0) && (
                                 <span className="text-xs text-gray-500 self-center">
-                                  Base: {formatCurrency(baseAmount, currency)} → Adjusted: {formatCurrency(materialTotal, currency)}
+                                  Base: {formatCurrency(baseAmount, currency)}
                                 </span>
                               )}
                           </div>
@@ -1845,30 +2024,22 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               </div>
               {(totals.discountAmount ?? 0) > 0 && (
                 <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Discount {proposal?.global_discount_pct != null ? `(${proposal.global_discount_pct}%)` : ''}</span>
+                  <span className="text-gray-600">Discount {totals.discountPct ? `(${totals.discountPct}%)` : ''}</span>
                   <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
                 </div>
               )}
               {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
                 <>
-                  {((totals.laborDiscountAmount ?? 0) > 0 || (totals.laborFeeAmount ?? 0) > 0) ? (
+                  {(totals.laborDiscountAmount ?? 0) > 0 ? (
                     <>
                       <div className="flex justify-between py-1 text-sm">
                         <span className="text-gray-600">Installation</span>
                         <span>{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
                       </div>
-                      {(totals.laborDiscountAmount ?? 0) > 0 && (
-                        <div className="flex justify-between py-1 text-sm">
-                          <span className="text-gray-600">Labor discount {totals.instDiscountPct != null ? `(${totals.instDiscountPct}%)` : ''}</span>
-                          <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
-                        </div>
-                      )}
-                      {(totals.laborFeeAmount ?? 0) > 0 && (
-                        <div className="flex justify-between py-1 text-sm">
-                          <span className="text-gray-600">Labor fee {totals.instFeePct != null ? `(${totals.instFeePct}%)` : ''}</span>
-                          <span>{formatCurrency(totals.laborFeeAmount ?? 0, currency)}</span>
-                        </div>
-                      )}
+                      <div className="flex justify-between py-1 text-sm">
+                        <span className="text-gray-600">Labor discount {totals.instDiscountPct ? `(${totals.instDiscountPct}%)` : ''}</span>
+                        <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
+                      </div>
                       <div className="flex justify-between py-1 text-sm font-medium">
                         <span className="text-gray-700">Installation (net)</span>
                         <span>{formatCurrency(totals.installationNet ?? 0, currency)}</span>

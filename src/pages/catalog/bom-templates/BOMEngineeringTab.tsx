@@ -45,6 +45,7 @@ export default function BOMEngineeringTab() {
   const { activeOrganizationId } = useOrganizationContext();
   const { updateComponent } = useBOMCRUD();
   const [rows, setRows] = useState<EngineeringRow[]>([]);
+  const [allTemplates, setAllTemplates] = useState<EngineeringTemplateSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState('');
@@ -77,21 +78,43 @@ export default function BOMEngineeringTab() {
   const fetchComponents = useCallback(async (showSpinner = true) => {
     if (!activeOrganizationId) {
       setRows([]);
+      setAllTemplates([]);
       setLoading(false);
       return;
     }
     if (showSpinner) setLoading(true);
     setError(null);
     try {
-      const { data: activeTemplateIds } = await supabase
+      // Fetch ALL templates (not just those with components)
+      const { data: tplData, error: tplErr } = await supabase
         .from('BOMTemplates')
-        .select('id')
+        .select('id, name, code, product_type_id, ProductType:product_type_id (name)')
         .eq('organization_id', activeOrganizationId)
+        .eq('is_active', true)
         .eq('deleted', false)
-        .eq('archived', false);
+        .eq('archived', false)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
 
-      const tplIds = (activeTemplateIds ?? []).map((t: any) => t.id);
+      if (tplErr) throw new Error(tplErr.message);
+
+      const tplIds = (tplData ?? []).map((t: any) => t.id);
+
+      // Build template summaries from actual template records
+      const tplSummaryMap = new Map<string, EngineeringTemplateSummary>();
+      for (const t of tplData ?? []) {
+        tplSummaryMap.set(t.id, {
+          id: t.id,
+          name: t.name ?? '',
+          code: t.code ?? null,
+          product_type_id: t.product_type_id ?? null,
+          product_type_name: (t.ProductType as any)?.name ?? '',
+          parent_count: 0,
+        });
+      }
+
       if (tplIds.length === 0) {
+        setAllTemplates([]);
         setRows([]);
         setLoading(false);
         return;
@@ -116,7 +139,7 @@ export default function BOMEngineeringTab() {
           engineering_attr_key,
           engineering_scope,
           engineering_source_role,
-          BOMTemplate:bom_template_id (name, product_type_id),
+          BOMTemplate:bom_template_id (name, code, product_type_id),
           component_item:component_item_id (sku, name, measure_basis, delta_x_mm, delta_y_mm)
         `)
         .eq('organization_id', activeOrganizationId)
@@ -128,19 +151,10 @@ export default function BOMEngineeringTab() {
 
       if (compErr) throw new Error(compErr.message);
 
-      const ptIds = [...new Set((compData ?? []).map((c: any) => c.BOMTemplate?.product_type_id).filter(Boolean))];
-      let productTypeMap: Record<string, string> = {};
-      if (ptIds.length > 0) {
-        const { data: pts } = await supabase.from('ProductTypes').select('id, name').in('id', ptIds);
-        productTypeMap = (pts ?? []).reduce((acc: Record<string, string>, p: any) => {
-          acc[p.id] = p.name ?? '';
-          return acc;
-        }, {});
-      }
-
       const allRows: EngineeringRow[] = (compData ?? []).map((c: any) => {
         const template = c.BOMTemplate;
         const item = c.component_item;
+        const tplSummary = tplSummaryMap.get(c.bom_template_id);
         return {
           id: c.id,
           bom_template_id: c.bom_template_id,
@@ -161,17 +175,26 @@ export default function BOMEngineeringTab() {
           engineering_attr_key: c.engineering_attr_key ?? null,
           engineering_scope: c.engineering_scope ?? 'total',
           engineering_source_role: c.engineering_source_role ?? null,
-          template_name: template?.name ?? template?.template_name ?? '',
-          product_type_name: template?.product_type_id ? (productTypeMap[template.product_type_id] ?? '') : '',
+          template_name: template?.name ?? tplSummary?.name ?? '',
+          product_type_name: tplSummary?.product_type_name ?? '',
           component_sku: item?.sku ?? '',
           component_name: item?.name ?? '',
         };
       });
 
+      // Count parent components per template
+      for (const r of allRows) {
+        if (!r.parent_component_id && tplSummaryMap.has(r.bom_template_id)) {
+          tplSummaryMap.get(r.bom_template_id)!.parent_count += 1;
+        }
+      }
+
+      setAllTemplates(Array.from(tplSummaryMap.values()));
       setRows(allRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error loading components');
       setRows([]);
+      setAllTemplates([]);
     } finally {
       setLoading(false);
     }
@@ -194,25 +217,10 @@ export default function BOMEngineeringTab() {
     return map;
   }, [rows]);
 
-  const templateList = useMemo(() => {
-    const byId = new Map<string, EngineeringTemplateSummary>();
-    for (const r of parentRows) {
-      const id = r.bom_template_id;
-      if (!byId.has(id)) {
-        byId.set(id, {
-          id,
-          name: r.template_name ?? '',
-          code: null,
-          product_type_id: null,
-          product_type_name: r.product_type_name ?? '',
-          parent_count: 0,
-        });
-      }
-      const t = byId.get(id)!;
-      t.parent_count += 1;
-    }
-    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [parentRows]);
+  const templateList = useMemo(
+    () => [...allTemplates].sort((a, b) => a.name.localeCompare(b.name)),
+    [allTemplates],
+  );
 
   const filteredTemplateList = useMemo(() => {
     if (!templateSearch.trim()) return templateList;
@@ -224,6 +232,16 @@ export default function BOMEngineeringTab() {
         t.product_type_name.toLowerCase().includes(q),
     );
   }, [templateList, templateSearch]);
+
+  const componentCountByTemplate = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const r of rows) {
+      if (!r.parent_component_id) {
+        map[r.bom_template_id] = (map[r.bom_template_id] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [rows]);
 
   const selectedTemplate = useMemo(
     () => (selectedTemplateId ? templateList.find((t) => t.id === selectedTemplateId) : null),
@@ -278,40 +296,48 @@ export default function BOMEngineeringTab() {
             />
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            {filteredTemplateList.length} template{filteredTemplateList.length !== 1 ? 's' : ''}
+            {filteredTemplateList.length} of {templateList.length} template{templateList.length !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0">
           {filteredTemplateList.length === 0 ? (
             <div className="p-4 text-center text-sm text-gray-500">
-              {templateList.length === 0 ? 'No BOM templates with components.' : 'No templates match search.'}
+              {templateList.length === 0 ? 'No BOM templates found.' : 'No templates match search.'}
             </div>
           ) : (
             <ul className="py-1">
-              {filteredTemplateList.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTemplateId(t.id)}
-                    className={`w-full text-left px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 border-l-2 border-transparent ${
-                      selectedTemplateId === t.id ? 'bg-primary/5 border-l-primary border-l-2' : ''
-                    }`}
-                  >
-                    <LayoutTemplate className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-900" title={t.name}>
-                        {t.name || 'Unnamed'}
-                      </p>
-                      {t.product_type_name && (
-                        <p className="truncate text-xs text-gray-500" title={t.product_type_name}>
-                          {t.product_type_name} · {t.parent_count} components
+              {filteredTemplateList.map((t) => {
+                const compCount = componentCountByTemplate[t.id] ?? 0;
+                const displayCode = t.code && t.code !== t.name ? t.code : null;
+                return (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTemplateId(t.id)}
+                      className={`w-full text-left px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 border-l-2 border-transparent ${
+                        selectedTemplateId === t.id ? 'bg-primary/5 border-l-primary border-l-2' : ''
+                      }`}
+                    >
+                      <LayoutTemplate className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate text-sm font-medium text-gray-900" title={t.name}>
+                          {t.name || 'Unnamed'}
                         </p>
-                      )}
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                  </button>
-                </li>
-              ))}
+                        {displayCode && (
+                          <p className="truncate text-xs font-mono text-primary/70" title={t.code ?? ''}>
+                            {t.code}
+                          </p>
+                        )}
+                        <p className="truncate text-xs text-gray-500">
+                          {t.product_type_name}
+                          {compCount > 0 ? ` · ${compCount} component${compCount !== 1 ? 's' : ''}` : ' · no components'}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

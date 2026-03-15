@@ -22,22 +22,17 @@ export default function DimensionsStackView({
   const heightPart = `${heightMm}${unitSuffix}`;
 
   return (
-    // ✅ Layout rules:
-    // - widths stacked vertically
-    // - spacing between width and "x" MUST equal spacing between "x" and height
-    // - vertical spacing between rows slightly increased (requested)
+    // Layout: widths stacked vertically, height only on first row
+    // Additional panel widths align LEFT under the first width value
     <div className={`flex flex-col gap-1 leading-none ${className}`}>
       {widths.map((w, i) => (
         <div key={i} className="flex items-baseline">
-          {/* Right-align inside fixed width so (width↔x) spacing is symmetric */}
-          <span className="tabular-nums min-w-[6ch] text-right shrink-0">
+          <span className="tabular-nums min-w-[5ch] text-right shrink-0">
             {w}
           </span>
           {i === 0 && (
             <>
-              <span className="shrink-0 px-1" aria-hidden>
-                {' '}x{' '}
-              </span>
+              <span className="shrink-0 px-1" aria-hidden>x</span>
               <span className="tabular-nums whitespace-nowrap shrink-0">
                 {heightPart}
               </span>

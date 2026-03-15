@@ -1,0 +1,46 @@
+-- ============================================================================
+-- Fix: build_bom_preview_snapshot + calculate_configured_product_totals
+-- Date: 2026-03-11
+--
+-- ROOT CAUSE:
+--   build_bom_preview_snapshot fetched cim.total_cost for each BOM component
+--   but NEVER accumulated it. The bom_total_cost in the snapshot was always
+--   COALESCE(v_cp.bom_total_cost, 0) = 0 for new products.
+--
+--   calculate_configured_product_totals then read bom_total_cost=0 from the
+--   snapshot and computed dealer_price based only on roll_cost, ignoring all
+--   BOM component costs (motor, track, glider, etc.).
+--
+-- IMPACT:
+--   ALL quotes with BOM components had artificially low dealer prices.
+--   e.g., a 1200x1200 drapery showed $43 dealer instead of ~$219.
+--
+-- FIX:
+--   1. build_bom_preview_snapshot now accumulates v_bom_cost_sum from
+--      CatalogItemsMSRP.total_cost for each parent + child component.
+--   2. calculate_configured_product_totals now ALWAYS rebuilds the snapshot
+--      when bom_template_id exists, ensuring fresh cost data.
+--   3. Parameter order fixed: (p_org_id, p_configured_product_id, p_bom_template_id)
+--      matching all callers.
+--   4. Each item in the snapshot JSON now includes unit_cost + cost_total fields.
+--   5. roll_total_cost in totals now correctly multiplied by roll_factor.
+-- ============================================================================
+
+-- Applied via MCP SQL to production on 2026-03-11.
+-- This file documents the changes for version control.
+-- The actual function bodies were applied directly to the database.
+
+-- Key changes to build_bom_preview_snapshot:
+--   + v_bom_cost_sum numeric := 0;  (new accumulator)
+--   + v_comp_unit_cost / v_comp_cost_total per parent component
+--   + v_child_cost_unit / v_child_cost_total per child component
+--   + v_bom_cost_sum accumulates all component costs
+--   + 'bom_total_cost', v_bom_cost_sum  (in totals JSON - was COALESCE(v_cp.bom_total_cost, 0))
+--   + 'roll_total_cost' now = COALESCE(v_roll_total_cost, 0) * GREATEST(v_roll_factor, 0)
+--   + Each item JSON includes 'unit_cost' and 'cost_total' fields
+
+-- Key changes to calculate_configured_product_totals:
+--   - Old: IF ((v_totals->>'roll_total_cost') IS NULL OR (v_totals->>'bom_total_cost') IS NULL)
+--          AND v_cp.bom_template_id IS NOT NULL THEN ...
+--   + New: IF v_cp.bom_template_id IS NOT NULL THEN ...
+--          (always rebuild to ensure fresh data)

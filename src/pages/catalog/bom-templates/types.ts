@@ -1,7 +1,9 @@
 import { normalizeRole } from '../../../lib/bom/roles';
 
-export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_area' | 'per_spacing' | 'per_joint' | 'per_fabric_width';
-export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_area', 'per_spacing', 'per_joint', 'per_fabric_width'] as const;
+export { CASCADE_PRIORITY, getCascadeOrder, getCascadeLabel, getCascadeAxis, getDefaultDependsOn } from '../../../lib/bom/cascadePriority';
+
+export type BOMQtyType = 'fixed' | 'per_width' | 'per_height' | 'per_spacing' | 'per_joint';
+export const BOM_QTY_TYPES = ['fixed', 'per_width', 'per_height', 'per_spacing', 'per_joint'] as const;
 
 export type SKUResolutionRule = 'EXACT_SKU' | 'SKU_SUFFIX_COLOR' | 'ROLE_AND_COLOR' | 'CATEGORY_FIRST_MATCH' | string;
 export type HardwareColor = 'none' | 'white' | 'black' | 'silver' | 'bronze' | 'grey' | string;
@@ -32,6 +34,7 @@ export interface BOMComponentDraft {
   sequence_order: number;
   is_required: boolean;
   auto_select: boolean;
+  per_panel: boolean;
   condition_key?: string | null;
   condition_value?: string | null;
   component_mode?: string;
@@ -55,6 +58,7 @@ export interface ComponentFormData {
   uom: string;
   sequence_order: number;
   is_required: boolean;
+  per_panel: boolean;
   condition_key: string;
   condition_value: string;
 }
@@ -80,6 +84,9 @@ export interface ChildFormData {
   qty_min: number | null;
   uom: string;
   required: boolean;
+  per_panel: boolean;
+  condition_key: string;
+  condition_value: string;
   notes: string;
 }
 
@@ -89,12 +96,13 @@ export interface BOMTemplateFormState {
   templateName: string;
   templateDescription: string;
   templateHardwareColor: string;
-  templatePanelCount: 1 | 2 | 3;
+  templatePanelCount: number;
   templateDriveType: 'manual' | 'motor' | null;
   templateDriveSide: 'left' | 'right' | 'both' | null;
   templateOpeningDirection: 'left' | 'right' | 'center' | null;
   templateManufacturer: string | null;
   templateProductLine: string | null;
+  templateSystemSize: string | null;
 }
 
 export interface ComponentGroupedByCategory {
@@ -105,15 +113,24 @@ export interface ComponentGroupedByCategory {
 }
 
 export const CONDITION_KEY_OPTIONS = [
-  { value: '', label: '— None —' },
-  { value: 'installation_type', label: 'Installation Type (wall / ceiling)' },
-  { value: 'side_channel', label: 'Side Channel (true / false)' },
-  { value: 'bottom_channel', label: 'Bottom Channel (true / false)' },
-  { value: 'cassette', label: 'Cassette (true / false)' },
-  { value: 'drive_type', label: 'Drive Type (manual / motor)' },
-  { value: 'opening_direction', label: 'Opening Direction (left / right / center)' },
-  { value: 'bottom_bar_wrapped', label: 'Bottom Bar Wrapped (true / false)' },
+  { value: '', label: '-- None --' },
+  { value: 'system_size', label: 'System Size (glider spacing)' },
+  { value: 'gear_ratio', label: 'Gear Ratio (clutch type)' },
 ] as const;
+
+export const CONDITION_VALUE_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  system_size: [
+    { value: '48mm', label: '48mm' },
+    { value: '54mm', label: '54mm' },
+    { value: '60mm', label: '60mm' },
+    { value: '80mm', label: '80mm' },
+  ],
+  gear_ratio: [
+    { value: 'standard', label: 'Standard (1:1)' },
+    { value: '1:1.5', label: '1:1.5' },
+    { value: '1:1.3', label: '1:1.3' },
+  ],
+};
 
 export const INITIAL_FORM_DATA: ComponentFormData = {
   component_item_id: '',
@@ -125,6 +142,7 @@ export const INITIAL_FORM_DATA: ComponentFormData = {
   uom: 'ea',
   sequence_order: 0,
   is_required: true,
+  per_panel: false,
   condition_key: '',
   condition_value: '',
 };
@@ -150,6 +168,9 @@ export const INITIAL_CHILD_FORM_DATA: ChildFormData = {
   qty_min: null,
   uom: 'ea',
   required: true,
+  per_panel: false,
+  condition_key: '',
+  condition_value: '',
   notes: '',
 };
 

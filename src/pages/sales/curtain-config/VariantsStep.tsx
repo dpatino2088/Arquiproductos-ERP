@@ -33,6 +33,9 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
 
   const showCatalog = !policy || policy.allow_variants_catalog;
 
+  const isDrapery = (config as any).productType === 'drapery';
+  const trackOnly = !!(config as any).track_only;
+
   // Get productTypeId from config (set by ProductStep)
   const productTypeId = (config as any).productTypeId || (config as any).product_type_id;
   const collectionName = (config as any).collectionName || (config as any).collection_name || '';
@@ -607,7 +610,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                       <div
                         key={variant.id}
                         onClick={() => handleVariantChange(variant.id)}
-                        className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                        className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
                           isSelected
                             ? 'border-2 border-gray-900 shadow-lg'
                             : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -650,7 +653,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                         </div>
                         
                         {/* Card Content */}
-                        <div className="p-4 bg-gray-100">
+                        <div className="p-4 bg-gray-100 flex-1">
                           {/* Variant Name */}
                           <h3 className={`font-semibold text-sm mb-2 truncate ${
                             isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
@@ -783,10 +786,56 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
       </div>
   );
 
+  const handleTrackOnlyToggle = (enabled: boolean) => {
+    if (enabled) {
+      onUpdate({
+        track_only: true,
+        variantId: undefined,
+        fabric_catalog_item_id: undefined,
+        variantName: undefined,
+        variant_name: undefined,
+        collectionName: undefined,
+        collection_name: undefined,
+      } as any);
+    } else {
+      onUpdate({ track_only: false } as any);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
-        {catalogContent}
+        {isDrapery && (
+          <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Track Only</p>
+              <p className="text-xs text-gray-500">Customer supplies their own fabric</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={trackOnly}
+              onClick={() => handleTrackOnlyToggle(!trackOnly)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 ${trackOnly ? 'bg-gray-900' : 'bg-gray-300'}`}
+            >
+              <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${trackOnly ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
+          </div>
+        )}
+
+        {trackOnly ? (
+          <div className="text-center py-12 space-y-3">
+            <div className="mx-auto w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+              <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-gray-900">No fabric required</p>
+            <p className="text-xs text-gray-500">Only track, hardware, and accessories will be quoted.</p>
+          </div>
+        ) : (
+          catalogContent
+        )}
       </div>
     </div>
   );

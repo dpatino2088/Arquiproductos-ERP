@@ -13,7 +13,7 @@ import { createProposalFromQuote } from '../../hooks/useProposals';
 import { useSOActions } from '../../hooks/useSOActions';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { FileText, ShoppingBag, Edit, ArrowLeft } from 'lucide-react';
+import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock } from 'lucide-react';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 
 const SALES_SUBMODULES = [
@@ -50,6 +50,9 @@ interface Quote {
   converted_at: string | null;
   created_at: string;
   created_by_user_id: string | null;
+  measures_confirmed: boolean;
+  measures_confirmed_at: string | null;
+  measures_confirmed_by: string | null;
 }
 
 interface QuoteLine {
@@ -171,7 +174,7 @@ export default function QuoteDetail() {
       await initSessionContext();
       const quoteRes = await supabase
         .from('Quotes')
-        .select('id, quote_no, status, customer_id, contact_id, dealer_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id')
+        .select('id, quote_no, status, customer_id, contact_id, dealer_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id, measures_confirmed, measures_confirmed_at, measures_confirmed_by')
         .eq('id', quoteId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
@@ -352,6 +355,55 @@ export default function QuoteDetail() {
     }
   }, [quoteId, user, createSOFromQuote, refetch, acting]);
 
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
+  const handleConfirmMeasures = useCallback(async () => {
+    if (!quoteId || !user?.id || acting) return;
+    setActing(true);
+    try {
+      const { error } = await supabase.rpc('confirm_quote_measures', {
+        p_quote_id: quoteId,
+        p_user_id: user.id,
+      });
+      if (error) throw error;
+      addNotification({
+        type: 'success',
+        title: 'Measures Confirmed',
+        message: 'Rectified measures confirmed for production. Quote is now locked.',
+      });
+      setShowConfirmDialog(false);
+      refetch();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to confirm measures';
+      addNotification({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setActing(false);
+    }
+  }, [quoteId, user, acting, addNotification, refetch]);
+
+  const handleReopenMeasures = useCallback(async () => {
+    if (!quoteId || !user?.id || acting) return;
+    setActing(true);
+    try {
+      const { error } = await supabase.rpc('reopen_quote_measures', {
+        p_quote_id: quoteId,
+        p_user_id: user.id,
+      });
+      if (error) throw error;
+      addNotification({
+        type: 'success',
+        title: 'Measures Reopened',
+        message: 'Quote unlocked for measurement corrections.',
+      });
+      refetch();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to reopen measures';
+      addNotification({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setActing(false);
+    }
+  }, [quoteId, user, acting, addNotification, refetch]);
+
   const listPath = '/sales/quotes';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -368,8 +420,15 @@ export default function QuoteDetail() {
     });
 
   const status = (quote?.status || '').toLowerCase();
-  const canCreateProposal = status === 'draft' && !hasActiveProposal;
-  const canCreateSO = status === 'approved' && !salesOrder;
+  const measuresConfirmed = quote?.measures_confirmed ?? false;
+  const canCreateProposal =
+    ['draft', 'approved'].includes(status) && !hasActiveProposal && !measuresConfirmed;
+  const canConfirmMeasures =
+    status === 'approved' && !measuresConfirmed && !salesOrder;
+  const canReopenMeasures =
+    measuresConfirmed && status !== 'converted' && !salesOrder;
+  const canCreateSO = status === 'approved' && measuresConfirmed && !salesOrder;
+  const canEditQuote = !measuresConfirmed && status !== 'converted';
   const currentMfgStepIndex = useMemo(() => {
     if (mos.length === 0) {
       return -1;
@@ -399,17 +458,19 @@ export default function QuoteDetail() {
       );
     }
     if (!isPortal) {
-      btns.push(
-        <button
-          key="edit"
-          type="button"
-          onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}/edit`))}
-          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-          title="Edit Quote"
-        >
-          <Edit style={{ width: 14, height: 14 }} />
-        </button>
-      );
+      if (canEditQuote) {
+        btns.push(
+          <button
+            key="edit"
+            type="button"
+            onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}/edit`))}
+            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+            title="Edit Quote"
+          >
+            <Edit style={{ width: 14, height: 14 }} />
+          </button>
+        );
+      }
       if (canCreateProposal) {
         btns.push(
           <button
@@ -420,6 +481,34 @@ export default function QuoteDetail() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50"
           >
             Create Proposal
+          </button>
+        );
+      }
+      if (canConfirmMeasures) {
+        btns.push(
+          <button
+            key="confirm-measures"
+            type="button"
+            onClick={() => setShowConfirmDialog(true)}
+            disabled={acting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Confirm Measures
+          </button>
+        );
+      }
+      if (canReopenMeasures) {
+        btns.push(
+          <button
+            key="reopen-measures"
+            type="button"
+            onClick={handleReopenMeasures}
+            disabled={acting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Unlock className="w-4 h-4" />
+            Reopen Measures
           </button>
         );
       }
@@ -439,7 +528,7 @@ export default function QuoteDetail() {
     }
     if (btns.length === 0) return null;
     return <div className="flex items-center gap-2">{btns}</div>;
-  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, acting, handleCreateProposal, handleCreateSalesOrder, onBackContextual]);
+  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, canConfirmMeasures, canReopenMeasures, canEditQuote, acting, handleCreateProposal, handleCreateSalesOrder, handleReopenMeasures, onBackContextual]);
 
   if (!quoteId) {
     return (
@@ -541,6 +630,33 @@ export default function QuoteDetail() {
           </button>
         </div>
       )}
+      {measuresConfirmed && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 flex items-center gap-3">
+          <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-emerald-800">
+              Measures confirmed for production
+            </p>
+            {quote.measures_confirmed_at && (
+              <p className="text-xs text-emerald-600">
+                Confirmed on {new Date(quote.measures_confirmed_at).toLocaleString()}
+              </p>
+            )}
+          </div>
+          {canReopenMeasures && !isPortal && (
+            <button
+              type="button"
+              onClick={handleReopenMeasures}
+              disabled={acting}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-100 border border-emerald-300 rounded-lg hover:bg-emerald-200 disabled:opacity-50"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              Reopen
+            </button>
+          )}
+        </div>
+      )}
+
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {/* Row 1: Quote Details + Financial Summary — same layout as Sales Order Order Details */}
@@ -859,6 +975,48 @@ export default function QuoteDetail() {
 
       {activeTab === 'timeline' && (
         <TimelineView events={timeline} loading={loading && timeline.length === 0} emptyMessage="No activity yet" />
+      )}
+
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowConfirmDialog(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100">
+                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Rectified Measures</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-2">
+              You are confirming that this quote contains the final rectified measurements for production.
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-5">
+              <p className="text-sm text-amber-800 font-medium">Once confirmed:</p>
+              <ul className="text-sm text-amber-700 mt-1 space-y-1 list-disc list-inside">
+                <li>The quote will be <strong>locked</strong> and cannot be edited</li>
+                <li>You can then create a <strong>Sales Order</strong></li>
+                <li>If corrections are needed, you can reopen the measures</li>
+              </ul>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowConfirmDialog(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMeasures}
+                disabled={acting}
+                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {acting ? 'Confirming...' : 'Confirm for Production'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </DetailPageLayout>
   );

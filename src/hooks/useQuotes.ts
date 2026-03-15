@@ -459,11 +459,6 @@ export function useQuoteLines(quoteId: string | null) {
           .order('sort_order', { ascending: true, nullsFirst: false })
           .order('created_at', { ascending: true });
 
-        // ✅ OPTIMIZED: Solo log resumen, no datos completos
-        if (import.meta.env.DEV) {
-          console.log('[useQuoteLines] Loaded', data?.length || 0, 'quote lines');
-        }
-
         if (queryError) {
           // Format error to avoid [circular] reference
           const errorMsg = queryError?.message || queryError?.error_description || queryError?.hint || 'Error fetching QuoteLines';
@@ -473,9 +468,6 @@ export function useQuoteLines(quoteId: string | null) {
         }
 
         if (!data || data.length === 0) {
-          if (import.meta.env.DEV) {
-            console.log('[useQuoteLines] No rows for quote_id:', quoteId);
-          }
           setLines([]);
           return;
         }
@@ -544,7 +536,7 @@ export function useQuoteLines(quoteId: string | null) {
         if (catalogItemIdsFromLines.length > 0) {
           const { data: catalogItemsData } = await supabase
             .from('CatalogItems')
-            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, metadata')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, metadata, item_role')
             .in('id', catalogItemIdsFromLines)
             .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
             .eq('is_active', true);
@@ -569,11 +561,9 @@ export function useQuoteLines(quoteId: string | null) {
           }
         });
 
-        // 4.6. ✅ SNAPSHOT SOURCE OF TRUTH: Obtener ConfiguredProducts con bom_preview_snapshot
-        // Usar configured_product_id directamente de QuoteLine (no de metadata)
+        // Fetch ConfiguredProducts to get config_snapshot and pricing data
         const configuredProductIds = new Set<string>();
         data.forEach((line: any) => {
-          // ✅ Priorizar configured_product_id directo, fallback a metadata
           const cpId = line.configured_product_id || line.metadata?.configured_product_id;
           if (cpId) {
             configuredProductIds.add(cpId);
@@ -581,24 +571,30 @@ export function useQuoteLines(quoteId: string | null) {
         });
 
         interface ConfiguredProductData {
-          roll_plus_bom_total: number;
+          roll_msrp_total: number;
+          bom_total: number;
           total_msrp: number;
           bom_preview_snapshot: any;
           config_snapshot: any;
         }
         let configuredProductsMap = new Map<string, ConfiguredProductData>();
         if (configuredProductIds.size > 0) {
-          const { data: cpData } = await supabase
+          const { data: cpData, error: cpError } = await supabase
             .from('ConfiguredProducts')
-            .select('id, roll_plus_bom_total, total_msrp, bom_preview_snapshot, config_snapshot')
+            .select('id, roll_msrp_total, bom_total, total_msrp, bom_preview_snapshot, config_snapshot')
             .in('id', Array.from(configuredProductIds))
             .eq('organization_id', activeOrganizationId)
             .or('deleted.eq.false,deleted.is.null');
 
+          if (cpError) {
+            console.error('[useQuoteLines] Error fetching ConfiguredProducts:', cpError.message);
+          }
+
           if (cpData) {
             configuredProductsMap = new Map(
               cpData.map((cp: any) => [cp.id, {
-                roll_plus_bom_total: cp.roll_plus_bom_total || 0,
+                roll_msrp_total: cp.roll_msrp_total || 0,
+                bom_total: cp.bom_total || 0,
                 total_msrp: cp.total_msrp || 0,
                 bom_preview_snapshot: cp.bom_preview_snapshot || null,
                 config_snapshot: cp.config_snapshot || null,
@@ -622,7 +618,7 @@ export function useQuoteLines(quoteId: string | null) {
           const ids = Array.from(accessoryCatalogItemIds);
           const { data: accessoryItems } = await supabase
             .from('CatalogItems')
-            .select('id, name, sku, collection_name, variant_name, unit_of_measure')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, item_role')
             .in('id', ids)
             .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
             .eq('is_active', true);
@@ -660,8 +656,6 @@ export function useQuoteLines(quoteId: string | null) {
           const fabricItem = fabric?.CatalogItems || null;
           const options = optionsByLineId.get(line.id) || {};
           
-          // ✅ UI solo lee del backend: QuoteLines.msrp = total de línea, QuoteLines.unit_msrp = precio unitario.
-          // No sobrescribir con snapshot/ConfiguredProduct cuando ya hay valor en la línea (evita doble qty y fuentes distintas).
           const cpId = line.configured_product_id || line.metadata?.configured_product_id;
           const configuredProduct = cpId ? configuredProductsMap.get(cpId) : null;
           const snapshot = configuredProduct?.bom_preview_snapshot;
@@ -677,7 +671,6 @@ export function useQuoteLines(quoteId: string | null) {
               finalUnitMsrp = qty > 0 ? finalMsrp / qty : finalMsrp;
             }
           } else {
-            // Orden: snapshot total_msrp → suma de partes del snapshot → CP total_msrp → CP roll_plus_bom_total → columnas de línea
             const fromSnapshotTotal = snapshotTotals?.total_msrp != null && Number(snapshotTotals.total_msrp) > 0
               ? Number(snapshotTotals.total_msrp)
               : 0;
@@ -690,8 +683,8 @@ export function useQuoteLines(quoteId: string | null) {
             const fromCpTotal = configuredProduct?.total_msrp != null && Number(configuredProduct.total_msrp) > 0
               ? Number(configuredProduct.total_msrp)
               : 0;
-            const fromCpRollPlusBom = configuredProduct?.roll_plus_bom_total != null && Number(configuredProduct.roll_plus_bom_total) > 0
-              ? Number(configuredProduct.roll_plus_bom_total)
+            const fromCpRollPlusBom = (configuredProduct?.roll_msrp_total != null && configuredProduct?.bom_total != null)
+              ? (Number(configuredProduct.roll_msrp_total) || 0) + (Number(configuredProduct.bom_total) || 0)
               : 0;
             const fromLineSnapshots = (Number(line.roll_msrp_snapshot) || 0) + (Number(line.bom_msrp_snapshot) || 0);
 
@@ -706,20 +699,17 @@ export function useQuoteLines(quoteId: string | null) {
             ...line,
             msrp: finalMsrp,
             unit_msrp: finalUnitMsrp,
-            // Usar snapshots de costos si están disponibles
-            total_cost: line.total_cost || ((line.roll_cost_snapshot || 0) + (line.bom_cost_snapshot || 0)),
-            // Datos de QuoteLines (si existen)
+              total_cost: line.total_cost || ((line.roll_cost_snapshot || 0) + (line.bom_cost_snapshot || 0)),
             area: line.area || options.area || null,
             position: line.position || options.position || null,
             drive_type: line.drive_type || options.drive_type || null,
-            // Datos relacionados
             ProductType: line.product_type_id ? productTypesMap.get(line.product_type_id) || null : null,
             collection_name: line.collection_name || fabricItem?.collection_name || null,
             variant_name: line.variant_name || fabricItem?.variant_name || null,
             Accessories: components.accessories,
             CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null,
-            // ✅ NEW: Incluir datos del ConfiguredProduct para debug/UI
             ConfiguredProduct: configuredProduct || null,
+            config_snapshot: configuredProduct?.config_snapshot || null,
             bom_preview_snapshot: snapshot || null,
             // Created by = del Quote (QuoteLines no tiene created_by_user_id)
             quote_created_at: quoteCreatedAt,
@@ -727,42 +717,8 @@ export function useQuoteLines(quoteId: string | null) {
             quote_created_by: quoteCreatedBy,
           };
 
-        // ✅ DEBUG: Log snapshot source para verificar prioridad de precios
-        if (import.meta.env.DEV) {
-          console.log('[useQuoteLines] Pricing source:', {
-            id: line.id,
-            configured_product_id: cpId,
-            hasConfiguredProduct: !!configuredProduct,
-            snapshotVersion: snapshot?.version,
-            snapshotTotalMsrp: snapshotTotals?.total_msrp,
-            cpTotalMsrp: configuredProduct?.total_msrp,
-            lineMsrp: line.msrp,
-            lineRollSnapshot: line.roll_msrp_snapshot,
-            lineBomSnapshot: line.bom_msrp_snapshot,
-            finalMsrp: finalMsrp,
-          });
-        }
-        
-        // ✅ OPTIMIZED: Solo log en DEV si hay menos de 10 líneas para evitar spam
-        if (import.meta.env.DEV && data.length <= 10) {
-          console.log('[useQuoteLines] Enriched line:', {
-            id: line.id,
-            area: enriched.area,
-            position: enriched.position,
-            drive_type: enriched.drive_type,
-            product_type_id: line.product_type_id,
-            collection_name: enriched.collection_name,
-            variant_name: enriched.variant_name,
-            accessoriesCount: components.accessories.length,
-          });
-        }
-
           return enriched;
         });
-
-        if (import.meta.env.DEV) {
-          console.log('[useQuoteLines] Total lines enriched:', enrichedLines.length);
-        }
 
         setLines(enrichedLines as QuoteLine[]);
       } catch (err: any) {

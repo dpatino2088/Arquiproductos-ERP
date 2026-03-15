@@ -3,6 +3,7 @@ import { Plus, X, ExternalLink } from 'lucide-react';
 import { Select as SelectShadcn, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../../../components/ui/SelectShadcn';
 import { getRoleLabel } from '../../../lib/bom/roles';
 import { router } from '../../../lib/router';
+import { getCascadeOrder, getCascadeLabel } from './types';
 import type { EngineeringRow } from './BOMEngineeringTab';
 
 export interface CutBreakdownHandle {
@@ -73,7 +74,9 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
   const hasChanges = Object.keys(localOverrides).length > 0;
 
   const cuttableTargets = useMemo(
-    () => effectiveRows.filter((r) => r.measure_basis === 'linear' || r.measure_basis === 'area'),
+    () => effectiveRows
+      .filter((r) => r.measure_basis === 'linear' || r.measure_basis === 'area')
+      .sort((a, b) => getCascadeOrder(a.component_role) - getCascadeOrder(b.component_role)),
     [effectiveRows],
   );
 
@@ -191,6 +194,9 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                   {isExpanded ? '▼' : '▶'}
                 </span>
                 <div className="flex-1 min-w-0">
+                  {getCascadeLabel(role) && (
+                    <span className="text-[10px] font-mono text-gray-400 mr-2">{getCascadeLabel(role)?.split(' ')[0]}</span>
+                  )}
                   <span className="font-semibold text-sm text-gray-900">
                     {getRoleLabel(role) || role || 'Unknown'}
                   </span>
@@ -199,6 +205,11 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                   </span>
                   {target.cut_axis && (
                     <span className="text-xs text-gray-400 ml-1">· Cut {axisLabel}</span>
+                  )}
+                  {target.depends_on_role && (
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded font-mono">
+                      ← {getRoleLabel(target.depends_on_role)}
+                    </span>
                   )}
                 </div>
                 <span className="text-right tabular-nums flex-shrink-0">
@@ -326,7 +337,12 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                   {/* Formula — single line */}
                   {grandTotal !== 0 && (
                     <div className="px-4 py-2 bg-gray-50/50 border-t border-gray-100 text-xs font-mono text-gray-500">
-                      {getRoleLabel(role)} = Curtain {target.cut_axis === 'height' ? 'Height' : 'Width'} <span className="text-red-500">− {Math.abs(grandTotal)}</span> mm
+                      {getRoleLabel(role)} ={' '}
+                      {target.depends_on_role
+                        ? <><span className="text-blue-600">{getRoleLabel(target.depends_on_role)}.cut</span></>
+                        : <>Curtain {target.cut_axis === 'height' ? 'Height' : 'Width'}</>
+                      }
+                      {' '}<span className="text-red-500">{grandTotal > 0 ? '+' : '−'} {Math.abs(grandTotal)}</span> mm
                     </div>
                   )}
 

@@ -123,20 +123,28 @@ async function resolveBomTemplateIdFrontendStrict(args: {
     setIf('bottom_channel', config_snapshot.bottom_channel_item_id);
   }
 
-  // Enforce strict required fields (same spirit as v2_strict)
-  if (!selections.get('tube')) throw new Error('Missing tube_item_id in config');
-  if (!selections.get('bottom_bar')) throw new Error('Missing bottom_bar_item_id in config');
+  // Enforce strict required fields — but only for product types that have these roles
+  // Drapery does NOT have tube or bottom_bar; those are Roller Shade roles.
+  const productType = config_snapshot?.productType || config_snapshot?.product_type || '';
+  const isDraperyProduct = String(productType).toLowerCase().includes('drapery');
+
+  if (!isDraperyProduct) {
+    if (!selections.get('tube')) throw new Error('Missing tube_item_id in config');
+    if (!selections.get('bottom_bar')) throw new Error('Missing bottom_bar_item_id in config');
+  }
 
   const hasMotor = selections.has('motor');
   const hasDrive = selections.has('drive');
   if (hasMotor && hasDrive) {
     throw new Error('Config cannot contain both motor_item_id and drive_item_id');
   }
-  if (!hasMotor && !hasDrive) {
-    throw new Error('Config must contain motor_item_id OR drive_item_id');
+  if (!isDraperyProduct) {
+    if (!hasMotor && !hasDrive) {
+      throw new Error('Config must contain motor_item_id OR drive_item_id');
+    }
+    if (op === 'motor' && !hasMotor) throw new Error('Operating type is motor but motor_item_id is missing');
+    if (op === 'manual' && !hasDrive) throw new Error('Operating type is manual but drive_item_id is missing');
   }
-  if (op === 'motor' && !hasMotor) throw new Error('Operating type is motor but motor_item_id is missing');
-  if (op === 'manual' && !hasDrive) throw new Error('Operating type is manual but drive_item_id is missing');
 
   // Enforce XOR based on operation type (ignore stale fields if any exist in snapshot)
   if (op === 'motor') selections.delete('drive');
@@ -151,7 +159,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   })();
 
   // Load templates (be resilient to schema differences)
-  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null; drive_type?: string | null; drive_side?: string | null; manufacturer?: string | null; product_line?: string | null; installation_location?: string | null }> = [];
+  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null; drive_type?: string | null; drive_side?: string | null; manufacturer?: string | null; product_line?: string | null; installation_location?: string | null; system_size?: string | null }> = [];
   {
     const candidateIdsRaw = config_snapshot?.candidate_template_ids;
     const candidateIds =
@@ -159,7 +167,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
 
     const base = supabase
       .from('BOMTemplates')
-      .select('id, archived, deleted, is_active, hardware_color, drive_type, drive_side, manufacturer, product_line, installation_location')
+      .select('id, archived, deleted, is_active, hardware_color, drive_type, drive_side, manufacturer, product_line, installation_location, system_size')
       .eq('product_type_id', product_type_id)
       .or(`organization_id.eq.${organization_id},organization_id.is.null`);
 
@@ -251,14 +259,13 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   const userDriveSide = config_snapshot?.drive_side || config_snapshot?.driveSide || null;
   let driveSideFilteredTemplates = driveTypeFilteredTemplates;
   if (userDriveSide) {
-    driveSideFilteredTemplates = colorFilteredTemplates.filter((t) =>
+    const dsMatches = driveTypeFilteredTemplates.filter((t) =>
       !(t as any).drive_side || (t as any).drive_side === userDriveSide
     );
-    if (driveSideFilteredTemplates.length === 0) {
-      driveSideFilteredTemplates = colorFilteredTemplates;
-      if (import.meta.env.DEV) {
-        console.warn('[resolveBomTemplateIdFrontendStrict] No drive_side match, ignoring filter:', { userDriveSide });
-      }
+    if (dsMatches.length > 0) {
+      driveSideFilteredTemplates = dsMatches;
+    } else if (import.meta.env.DEV) {
+      console.warn('[resolveBomTemplateIdFrontendStrict] No drive_side match, ignoring filter:', { userDriveSide });
     }
   }
 
@@ -290,11 +297,25 @@ async function resolveBomTemplateIdFrontendStrict(args: {
     }
   }
 
+  // Paso 5b: Filtrar por system_size (NULL template = todos, '48mm'/'60mm' = específico)
+  const userSystemSize = config_snapshot?.system_size || config_snapshot?.systemSize || null;
+  let systemSizeFilteredTemplates = productLineFilteredTemplates;
+  if (userSystemSize) {
+    const ssMatches = productLineFilteredTemplates.filter((t) =>
+      !(t as any).system_size || String((t as any).system_size).toLowerCase() === String(userSystemSize).toLowerCase()
+    );
+    if (ssMatches.length > 0) {
+      systemSizeFilteredTemplates = ssMatches;
+    } else if (import.meta.env.DEV) {
+      console.warn('[resolveBomTemplateIdFrontendStrict] No system_size match, ignoring filter:', { userSystemSize });
+    }
+  }
+
   // Paso 6: Filtrar por installation_location (NULL template = ambos, 'ceiling'/'wall' = específico)
   const userInstallLocation = config_snapshot?.installation_location ?? config_snapshot?.installationLocation ?? null;
-  let installLocationFilteredTemplates = productLineFilteredTemplates;
+  let installLocationFilteredTemplates = systemSizeFilteredTemplates;
   if (userInstallLocation) {
-    const ilMatches = productLineFilteredTemplates.filter((t) =>
+    const ilMatches = systemSizeFilteredTemplates.filter((t) =>
       !(t as any).installation_location || (t as any).installation_location === userInstallLocation
     );
     if (ilMatches.length > 0) {
@@ -307,7 +328,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   const templateIds = installLocationFilteredTemplates.map((t) => String(t.id)).filter(Boolean);
 
   if (templateIds.length === 0) {
-    throw new Error('No BOMTemplates found for this product type (after color + drive_type + drive_side + manufacturer + product_line + installation_location filter)');
+    throw new Error('No BOMTemplates found for this product type (after color + drive_type + drive_side + manufacturer + product_line + system_size + installation_location filter)');
   }
 
   // Load parent components for templates

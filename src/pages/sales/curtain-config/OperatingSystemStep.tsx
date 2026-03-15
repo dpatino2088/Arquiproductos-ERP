@@ -31,6 +31,71 @@ interface OperatingSystemStepProps {
   filteredTemplateIds?: string[];
 }
 
+function DriveSideCard({
+  value,
+  label,
+  imagePaths,
+  isSelected,
+  onSelect,
+}: {
+  value: string;
+  label: string;
+  imagePaths: string[];
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const [imgSrcIndex, setImgSrcIndex] = useState(0);
+  const [imgError, setImgError] = useState(false);
+
+  const handleError = () => {
+    if (imgSrcIndex < imagePaths.length - 1) {
+      setImgSrcIndex(imgSrcIndex + 1);
+    } else {
+      setImgError(true);
+    }
+  };
+
+  return (
+    <div
+      onClick={onSelect}
+      className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
+        isSelected
+          ? 'border-2 border-gray-900 shadow-lg'
+          : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+      }`}
+    >
+      {isSelected && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+          title="Remove selection"
+        >
+          <X className="w-4 h-4 text-gray-600" />
+        </button>
+      )}
+      <div className="aspect-square bg-white flex items-center justify-center overflow-hidden relative">
+        {imgError ? (
+          <ImageIcon className="w-16 h-16 text-gray-300" />
+        ) : (
+          <img
+            src={imagePaths[imgSrcIndex]}
+            alt={label}
+            className="w-full h-full object-cover"
+            style={{ display: 'block' }}
+            onError={handleError}
+          />
+        )}
+      </div>
+      <div className="p-4 bg-gray-100 flex-1">
+        <h3 className="font-semibold text-sm truncate text-center text-gray-900" title={label}>
+          {label}
+        </h3>
+      </div>
+    </div>
+  );
+}
+
 export default function OperatingSystemStep({
   config,
   onUpdate,
@@ -41,6 +106,9 @@ export default function OperatingSystemStep({
   
   // ✅ Templates filtrados desde HardwareStep
   const hardwareFilteredTemplates = (config as any)._hardware_filtered_templates as string[] | undefined;
+
+  // ✅ Manufacturer filter (from ManufacturerStep) — used as fallback constraint
+  const mfrFilteredTemplates = (config as any)._manufacturer_filtered_templates as string[] | undefined;
   
   // ✅ Templates BASE del Hardware step (persistidos en config para sobrevivir al volver/desmontar)
   // Si no hay selección de operación, _hardware_filtered_templates ES la base.
@@ -58,6 +126,9 @@ export default function OperatingSystemStep({
   const motorItemId = (config as any).motor_item_id || undefined;
   const driveItemId = (config as any).drive_item_id || undefined;
   const tubeItemId = (config as any).tube_item_id || undefined;
+  
+  const productType = (config as any).productType;
+  const isDrapery = productType === 'drapery';
   
   // ✅ CRÍTICO: Determinar si ya hay CUALQUIER selección de operación
   const hasAnyOperationSelection = !!(operationType || motorItemId || driveItemId);
@@ -151,7 +222,7 @@ export default function OperatingSystemStep({
     let cancelled = false;
     const loadFallback = async () => {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('BOMTemplates')
           .select('id')
           .eq('organization_id', activeOrganizationId)
@@ -159,13 +230,24 @@ export default function OperatingSystemStep({
           .eq('is_active', true)
           .eq('archived', false);
 
+        // Apply manufacturer filter if available so that motors/drives are
+        // constrained to the selected manufacturer even before color is chosen.
+        if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) {
+          query = query.in('id', mfrFilteredTemplates);
+        }
+
+        const { data, error } = await query;
+
         if (error) throw error;
 
         if (!cancelled) {
           const templateIds = (data || []).map((t: { id: string }) => t.id);
           setLoadedFallbackTemplates(templateIds.length > 0 ? templateIds : null);
           if (import.meta.env.DEV) {
-            console.debug('[OperatingSystemStep] Loaded fallback templates:', templateIds.length);
+            console.debug('[OperatingSystemStep] Loaded fallback templates:', {
+              count: templateIds.length,
+              mfrFiltered: mfrFilteredTemplates?.length ?? 'none',
+            });
           }
         }
       } catch (e: any) {
@@ -180,7 +262,7 @@ export default function OperatingSystemStep({
     return () => {
       cancelled = true;
     };
-  }, [canLoadOptions, activeOrganizationId, productTypeId, hardwareFilteredTemplates]);
+  }, [canLoadOptions, activeOrganizationId, productTypeId, hardwareFilteredTemplates, mfrFilteredTemplates?.join(',')]);
 
   // ✅ effectiveBaseTemplates: usa baseTemplatesForOptions o loadedFallbackTemplates como fallback
   const effectiveBaseTemplates = useMemo(() => baseTemplatesForOptions || loadedFallbackTemplates || null, [baseTemplatesForOptions, loadedFallbackTemplates]);
@@ -208,30 +290,45 @@ export default function OperatingSystemStep({
     let cancelled = false;
     const loadRolePresence = async () => {
       try {
-        const { data, error } = await supabase
-          .from('BOMComponents')
-          .select('bom_template_id, component_role')
-          .in('bom_template_id', effectiveBaseTemplates)
-          .is('parent_component_id', null)
-          .eq('deleted', false)
-          .eq('archived', false);
+        // Load component roles AND template drive_type for drapery support
+        const [compResult, templateResult] = await Promise.all([
+          supabase
+            .from('BOMComponents')
+            .select('bom_template_id, component_role')
+            .in('bom_template_id', effectiveBaseTemplates)
+            .is('parent_component_id', null)
+            .eq('deleted', false)
+            .eq('archived', false),
+          supabase
+            .from('BOMTemplates')
+            .select('id, drive_type')
+            .in('id', effectiveBaseTemplates),
+        ]);
 
-        if (error) throw error;
+        if (compResult.error) throw compResult.error;
 
         const hasMotor = new Set<string>();
         const hasDrive = new Set<string>();
 
-        (data || []).forEach((row: any) => {
+        (compResult.data || []).forEach((row: any) => {
           const tid = row.bom_template_id as string;
           const role = String(row.component_role || '').toLowerCase().trim();
           if (role === 'motor') hasMotor.add(tid);
           if (role === 'drive') hasDrive.add(tid);
         });
 
-        // ✅ SIMPLIFICADO: Templates que tienen el rol correspondiente
-        // NO excluir templates que tienen ambos roles - dejar que el matching final decida
-        const manualIds = effectiveBaseTemplates.filter((tid: string) => hasDrive.has(tid));
-        const motorIds = effectiveBaseTemplates.filter((tid: string) => hasMotor.has(tid));
+        // For drapery: manual templates have wand (not drive), so use drive_type field
+        const templateDriveTypes = new Map<string, string>();
+        (templateResult.data || []).forEach((t: any) => {
+          if (t.drive_type) templateDriveTypes.set(t.id, t.drive_type);
+        });
+
+        const manualIds = effectiveBaseTemplates.filter((tid: string) =>
+          hasDrive.has(tid) || templateDriveTypes.get(tid) === 'manual'
+        );
+        const motorIds = effectiveBaseTemplates.filter((tid: string) =>
+          hasMotor.has(tid) || templateDriveTypes.get(tid) === 'motor'
+        );
         
         if (import.meta.env.DEV) {
           console.debug('[OperatingSystemStep] Role presence:', {
@@ -331,12 +428,12 @@ export default function OperatingSystemStep({
     return base;
   }, [operationType, selectedMotor, selectedDrive, effectiveBaseTemplates, templatesForMotor, templatesForManual]);
   
-  // ✅ Tube: desde templates filtrados por motor/drive (tube NO depende de color)
+  // ✅ Tube: desde templates filtrados por motor/drive (tube NO depende de color) — skip for drapery
   const { options: tubeOptions, loading: loadingTube, error: tubeError } = useBOMTemplateOptionsSimple(
-    canLoadOptions ? productTypeId : null,
+    canLoadOptions && !isDrapery ? productTypeId : null,
     null,
     'tube',
-    templatesAfterOperation,
+    isDrapery ? null : templatesAfterOperation,
     panelCount
   );
 
@@ -398,14 +495,11 @@ export default function OperatingSystemStep({
     { value: 'motor', label: 'Motor' },
   ];
 
-  const productType = (config as any).productType;
-  const isDrapery = productType === 'drapery';
-
   // ✅ Track image load errors
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const defaultImageSources = useMemo(() => ({
-    manual: isDrapery ? '/images/DR-Manual.png' : '/images/drive-manual.png',
-    motor: isDrapery ? '/images/DR-Motor.png' : '/images/drive-motor.png',
+    manual: isDrapery ? '/images/DR_Manual.png' : '/images/drive-manual.png',
+    motor: isDrapery ? '/images/DR_Motor.png' : '/images/drive-motor.png',
   }), [isDrapery]);
   const [imageSources, setImageSources] = useState<Record<string, string>>(defaultImageSources);
 
@@ -547,19 +641,20 @@ export default function OperatingSystemStep({
       });
     }
     
+    const gearRatio = item.metadata?.gear_ratio || 'standard';
+
     onUpdate({
       drive_item_id: isVirtual ? null : item.id,
       drive_sku: item.sku,
       manual_drive: item.name,
+      gear_ratio: gearRatio,
       motor_item_id: undefined,
       motor_sku: null,
       motor_family: undefined,
       remote_control: undefined,
-      // Clear tube when drive changes
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
-      // ✅ Guardar templates filtrados con fallback a effectiveBaseTemplates
       _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForManual) ?? uniq(effectiveBaseTemplates) ?? null,
     } as any);
   };
@@ -648,31 +743,40 @@ export default function OperatingSystemStep({
           const isDrapery = pt === 'drapery';
           if (isDrapery) return null;
           const currentDriveSide = (config as any).driveSide || (config as any).drive_side || null;
+          const driveSideOptions: Array<{ value: 'left' | 'right'; label: string; imagePaths: string[] }> = [
+            {
+              value: 'left',
+              label: 'Left',
+              imagePaths: ['/images/Drive Left .png'],
+            },
+            {
+              value: 'right',
+              label: 'Right',
+              imagePaths: ['/images/Driver Right.png'],
+            },
+          ];
           return (
             <div>
               <Label className="text-sm font-medium mb-3 block">DRIVE SIDE</Label>
               <p className="text-xs text-gray-500 mb-3">Select where the motor or chain drive will be positioned (facing the window from inside)</p>
-              <div className="grid grid-cols-2 gap-4 max-w-xs">
-                {([
-                  { value: 'left', label: 'Left' },
-                  { value: 'right', label: 'Right' },
-                ] as const).map((side) => {
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {driveSideOptions.map((side) => {
                   const isSelected = currentDriveSide === side.value;
                   return (
-                    <div
+                    <DriveSideCard
                       key={side.value}
-                      onClick={() => onUpdate({ driveSide: side.value } as any)}
-                      className={`relative bg-white border rounded-lg p-4 transition-all cursor-pointer text-center ${
-                        isSelected
-                          ? 'border-2 border-gray-900 shadow-md'
-                          : 'border-gray-200 hover:shadow-md hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="text-2xl mb-1">{side.value === 'left' ? '◀' : '▶'}</div>
-                      <p className={`text-sm font-semibold ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>
-                        {side.label}
-                      </p>
-                    </div>
+                      value={side.value}
+                      label={side.label}
+                      imagePaths={side.imagePaths}
+                      isSelected={isSelected}
+                      onSelect={() => {
+                        if (isSelected) {
+                          onUpdate({ driveSide: undefined } as any);
+                        } else {
+                          onUpdate({ driveSide: side.value } as any);
+                        }
+                      }}
+                    />
                   );
                 })}
               </div>
@@ -702,7 +806,7 @@ export default function OperatingSystemStep({
                       if (selectionDisabled) return;
                       await handleOperatingSystemChange(option.value);
                     }}
-                    className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                    className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
                       isSelected
                         ? 'border-2 border-gray-900 shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -737,13 +841,13 @@ export default function OperatingSystemStep({
                       )}
                     </div>
                     
-                    <div className="p-4 bg-gray-100">
+                    <div className="p-4 bg-gray-100 flex-1">
                       <h3 className={`font-semibold text-sm truncate text-center ${
                         isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                       }`} title={option.label}>
                         {option.label}
                       </h3>
-                      {!hasOptions && !loading && (
+                      {!hasOptions && !loading && !isDrapery && (
                         <p className="text-xs text-gray-400 text-center mt-1">
                           No options available
                         </p>
@@ -773,7 +877,7 @@ export default function OperatingSystemStep({
                         if (selectionDisabled) return;
                         await handleMotorSelect(item);
                       }}
-                      className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                      className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -818,7 +922,7 @@ export default function OperatingSystemStep({
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4 bg-gray-100">
+                      <div className="p-4 bg-gray-100 flex-1">
                         <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>
@@ -836,8 +940,8 @@ export default function OperatingSystemStep({
           </div>
         )}
 
-        {/* Manual Drive Selection (only if manual) */}
-        {operationType === 'manual' && (
+        {/* Manual Drive Selection (only if manual) — drapery uses wand from template, no selection needed */}
+        {operationType === 'manual' && !isDrapery && (
           <div>
             <Label className="text-sm font-medium mb-5 block">MECHANISM / MANUAL DRIVE</Label>
             {loadingDrive ? (
@@ -853,7 +957,7 @@ export default function OperatingSystemStep({
                         if (selectionDisabled) return;
                         await handleDriveSelect(item);
                       }}
-                      className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                      className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -897,7 +1001,7 @@ export default function OperatingSystemStep({
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4 bg-gray-100">
+                      <div className="p-4 bg-gray-100 flex-1">
                         <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>
@@ -915,8 +1019,8 @@ export default function OperatingSystemStep({
           </div>
         )}
 
-        {/* Tube Selection (show when motor or drive is selected) */}
-        {((operationType === 'motor' && motorItemId) || (operationType === 'manual' && driveItemId)) && (
+        {/* Tube Selection (show when motor or drive is selected) — NOT for drapery */}
+        {!isDrapery && ((operationType === 'motor' && motorItemId) || (operationType === 'manual' && driveItemId)) && (
           <div>
             <Label className="text-sm font-medium mb-5 block">TUBE TYPE</Label>
             {loadingTube ? (
@@ -932,7 +1036,7 @@ export default function OperatingSystemStep({
                         if (selectionDisabled) return;
                         await handleTubeSelect(item);
                       }}
-                      className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer relative ${
+                      className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-2 border-gray-900 shadow-lg'
                           : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -983,7 +1087,7 @@ export default function OperatingSystemStep({
                           <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
-                      <div className="p-4 bg-gray-100">
+                      <div className="p-4 bg-gray-100 flex-1">
                         <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
                           {item.name || item.sku}
                         </h3>

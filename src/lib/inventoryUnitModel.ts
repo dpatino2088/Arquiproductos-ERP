@@ -154,18 +154,18 @@ export function convertInternalToPurchaseQty(input: ConversionToExternalInput): 
   }
 
   const unitsPerPurchase = Math.max(1, Number(input.unitsPerPurchaseUnit ?? 1));
-  if (unitsPerPurchase > 1 && qty >= unitsPerPurchase) {
-    const orderQty = Math.ceil(qty / unitsPerPurchase);
+  if (unitsPerPurchase > 1) {
+    const orderQty = Math.max(1, Math.ceil(qty / unitsPerPurchase));
     return {
       orderQty,
-      lineUnit: input.purchaseUnit || 'set',
+      lineUnit: input.purchaseUnit || 'box',
       unitCost: (costPerUnit) => costPerUnit * unitsPerPurchase,
     };
   }
 
   return {
     orderQty: Math.ceil(qty),
-    lineUnit: 'each',
+    lineUnit: input.purchaseUnit || 'each',
     unitCost: (costPerUnit) => costPerUnit,
   };
 }

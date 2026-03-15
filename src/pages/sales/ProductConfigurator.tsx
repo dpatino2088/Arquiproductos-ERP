@@ -29,7 +29,7 @@ import MeasurementsStepComponent from './curtain-config/MeasurementsStep';
 import VariantsStepComponent from './curtain-config/VariantsStep';
 import HardwareStepComponent from './curtain-config/HardwareStep';
 import OperatingSystemStepComponent from './curtain-config/OperatingSystemStep';
-import AccessoriesStepComponent from './curtain-config/AccessoriesStep';
+import CatalogItemStepComponent from './curtain-config/CatalogItemStep';
 import ReviewStepComponent from './curtain-config/ReviewStep';
 
 // Import all product modules to register them
@@ -39,13 +39,14 @@ interface ProductConfiguratorProps {
   quoteId: string;
   onComplete: (config: ProductConfig) => Promise<void>;
   onClose: () => void;
-  initialConfig?: Partial<ProductConfig>; // Optional initial config for editing
+  initialConfig?: Partial<ProductConfig>;
+  dealerId?: string | null;
 }
 
-export default function ProductConfigurator({ quoteId, onComplete, onClose, initialConfig }: ProductConfiguratorProps) {
+export default function ProductConfigurator({ quoteId, onComplete, onClose, initialConfig, dealerId }: ProductConfiguratorProps) {
   const draftKey = `productConfiguratorDraft:${quoteId}`;
   const { activeOrganizationId } = useOrganizationContext();
-  const { policy, loading: policyLoading } = useDealerConfiguratorPolicy();
+  const { policy, loading: policyLoading } = useDealerConfiguratorPolicy(dealerId);
   
   // ✅ SOLUCIÓN DEFINITIVA: Ref para evitar loops en auto-commit
   const autoCommittedRef = useRef<string | null>(null);
@@ -430,11 +431,10 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   const steps = useMemo(() => {
     if (!productType) return [];
 
-    // Accessories as product type: only ACCESSORIES step then REVIEW
-    if (productType === 'accessories') {
+    // Catalog Item: only CATALOG ITEM step (no review needed — direct save)
+    if (productType === 'catalog') {
       return [
-        { id: 'accessories', label: 'ACCESSORIES', component: AccessoriesStepComponent },
-        { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
+        { id: 'catalog', label: 'CATALOG ITEM', component: CatalogItemStepComponent },
       ];
     }
 
@@ -515,7 +515,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       // New selection or ProductType changed - update productType but preserve bom_template_id
       // if it was already set (auto-select might have set it before this runs)
       const baseConfig: Partial<ProductConfig> = { 
-        productType: type, 
+        productType: type as any, 
         position: prev.position || '',
         ...(productTypeId ? { productTypeId, product_type_id: productTypeId } : {}),
         // CRITICAL: If ProductType is changing, clear bom_template_id
@@ -672,9 +672,30 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           _manufacturer_filtered_templates: undefined,
           _hardware_filtered_templates: undefined,
         } as any;
+      case 'product-line':
+        return {
+          productLine: undefined,
+          product_line: undefined,
+          styleCode: undefined,
+          style_code: undefined,
+          systemSize: undefined,
+          system_size: undefined,
+          fullness: undefined,
+        } as any;
+      case 'drapery-hardware':
+        return {
+          openingDirection: undefined,
+          opening_direction: undefined,
+          driveSide: undefined,
+          drive_side: undefined,
+          hardwareColor: undefined,
+          hardware_color: undefined,
+          _hardware_filtered_templates: undefined,
+        } as any;
       case 'measurements':
         return {
           panels: undefined,
+          measurements: undefined,
           width_mm: undefined,
           width_m: undefined,
           height_mm: undefined,
@@ -682,9 +703,15 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           area: undefined,
           position: undefined,
           installationType: undefined,
+          installation_type: undefined,
           installationLocation: undefined,
+          installation_location: undefined,
           openingDirection: undefined,
+          opening_direction: undefined,
           driveSide: undefined,
+          drive_side: undefined,
+          force_track_join: undefined,
+          forceTrackJoin: undefined,
         } as any;
       case 'variants':
         return {
@@ -741,9 +768,13 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           _operating_system_base_templates: undefined,
           _hardware_filtered_templates: undefined,
         } as any;
-      case 'accessories':
+      case 'catalog':
         return {
-          accessories: [],
+          catalog_item_id: null,
+          name: '',
+          sku: '',
+          unit_price: 0,
+          qty: 1,
         } as any;
       default:
         return {};
@@ -847,12 +878,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     
     // ✅ NO inicializar hardware_color automáticamente - usuario debe seleccionar
 
-    // Accessories-only: no validations for width, height, fabric, hardware, operating system
-    const isAccessoriesOnly = productType === 'accessories' || configAny.productType === 'accessories';
-    if (isAccessoriesOnly) {
-      // Only ensure we have productType; no product_type_id required (no DB ProductType for accessories-only)
-      if (!productType && !configAny.productType) {
-        errors.push('Product Type is required');
+    // Catalog Item: only needs catalog_item_id, no measurements/fabric/hardware
+    const isCatalogItem = productType === 'catalog' || configAny.productType === 'catalog';
+    if (isCatalogItem) {
+      if (!configAny.catalog_item_id) {
+        errors.push('Please select a catalog item');
       }
     } else {
     // Core validations (full products). product_type_id puede venir de config como productTypeId (paso PRODUCT)
@@ -893,8 +923,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     
     // FASE 3: Validate based on BOMTemplate questions (if template is available)
       if (questions) {
+      const isTrackOnly = !!(configAny as any).track_only;
       const hasVariant = !!(normalizedConfig.fabric_variant_id || normalizedConfig.variantId);
-      if (questions.requiredSteps.variants && !hasVariant) {
+      if (questions.requiredSteps.variants && !hasVariant && !isTrackOnly) {
         errors.push('Fabric variant is required');
       }
       if (questions.requiredSteps.operatingSystem) {
@@ -916,15 +947,23 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             });
           }
           
+          const isDraperyProduct = String(configAny.productType || '').toLowerCase() === 'drapery';
+
           if (isMotorized) {
             const hasMotor = !!(configAny.motor_sku || configAny.motorSku || configAny.motor_item_id || configAny.motorItemId);
             if (!hasMotor) errors.push('Motor selection is required');
           } else if (isManual) {
-            const hasDrive = !!(configAny.drive_sku || configAny.driveSku || configAny.drive_item_id || configAny.driveItemId || configAny.manual_drive);
-            if (!hasDrive) errors.push('Manual drive selection is required');
+            // Drapery manual uses wand (auto-included in template), no drive selection needed
+            if (!isDraperyProduct) {
+              const hasDrive = !!(configAny.drive_sku || configAny.driveSku || configAny.drive_item_id || configAny.driveItemId || configAny.manual_drive);
+              if (!hasDrive) errors.push('Manual drive selection is required');
+            }
           }
-          const hasTube = !!(configAny.tube_sku || configAny.tubeSku || configAny.tube_type || configAny.tubeType || configAny.tube_item_id || configAny.tubeItemId);
-          if (!hasTube) errors.push('Tube selection is required');
+          // Drapery doesn't have tubes
+          if (!isDraperyProduct) {
+            const hasTube = !!(configAny.tube_sku || configAny.tubeSku || configAny.tube_type || configAny.tubeType || configAny.tube_item_id || configAny.tubeItemId);
+            if (!hasTube) errors.push('Tube selection is required');
+          }
         }
       }
       if (questions.selectQuestions.hardware_color && !normalizedConfig.hardware_color && !configAny.hardwareColor && !configAny.operatingSystemColor) {
@@ -955,17 +994,19 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       const panelsForValidation = Array.isArray((config as any).panels) ? (config as any).panels : ((config as any).measurements?.panels ?? []);
       const panelsSumMm = panelsForValidation.reduce((s: number, p: any) => s + (Number(p?.width_mm) || 0), 0);
 
-      // ✅ Accessories-only: no ConfiguredProduct; pass minimal config and let QuoteNew create line with metadata
-      if (isAccessoriesOnly) {
-        const accessoriesPayload = {
-          ...finalNormalizedConfig,
-          productType: 'accessories' as const,
-          area:     (config as any).area     ?? null,
-          position: (config as any).position ?? null,
-          quantity: (config as any).quantity ?? 1,
-          accessories: Array.isArray((config as any).accessories) ? (config as any).accessories : [],
+      // Catalog Item: pass config to QuoteNew which calls the RPC to create ConfiguredProduct
+      if (isCatalogItem) {
+        const catalogPayload = {
+          productType: 'catalog' as const,
+          catalog_item_id: configAny.catalog_item_id,
+          name:       configAny.name ?? '',
+          sku:        configAny.sku ?? '',
+          unit_price: configAny.unit_price ?? 0,
+          qty:        configAny.qty ?? 1,
+          area:       configAny.area ?? null,
+          position:   configAny.position ?? null,
         } as ProductConfig;
-        await onComplete(accessoriesPayload);
+        await onComplete(catalogPayload);
         clearDraft();
         onClose();
         return;
@@ -1026,10 +1067,12 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             motor_sku: configAny.motor_sku ? String(configAny.motor_sku).trim() : null,
             drive_item_id: configAny.drive_item_id || null,
             drive_sku: configAny.drive_sku ? String(configAny.drive_sku).trim() : null,
+            gear_ratio: configAny.gear_ratio || null,
             tube_item_id: configAny.tube_item_id || null,
             tube_sku: pickSku(configAny, ['tube_sku', 'tubeSku', 'tube_type', 'tubeType']) || null,
             operating_type: configAny.operation_type || configAny.drive_type || null,
-            roll_catalog_item_id: (finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId) || null,
+            track_only: configAny.track_only || false,
+            roll_catalog_item_id: configAny.track_only ? null : ((finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId) || null),
             quantity: finalNormalizedConfig.quantity || 1,
             // ✅ Drop e instalación (para QuoteLines vía commit y config_snapshot)
             fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
@@ -1163,6 +1206,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       (finalNormalizedConfig as any).tube_sku = configAny.tube_sku ?? configAny.tubeSku ?? configAny.tube_type ?? null;
       (finalNormalizedConfig as any).drive_item_id = configAny.drive_item_id ?? null;
       (finalNormalizedConfig as any).drive_sku = configAny.drive_sku ?? null;
+      (finalNormalizedConfig as any).gear_ratio = configAny.gear_ratio ?? null;
       (finalNormalizedConfig as any).motor_item_id = configAny.motor_item_id ?? null;
       (finalNormalizedConfig as any).motor_sku = configAny.motor_sku ?? null;
       (finalNormalizedConfig as any).operation_type = configAny.operation_type ?? configAny.drive_type ?? (finalNormalizedConfig as any).operation_type ?? null;
@@ -1171,7 +1215,28 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       (finalNormalizedConfig as any).fabricDrop = configAny.fabricDrop ?? configAny.fabric_drop ?? (finalNormalizedConfig as any).fabricDrop ?? null;
       (finalNormalizedConfig as any).installationType = configAny.installationType ?? configAny.installation_type ?? (finalNormalizedConfig as any).installationType ?? null;
       (finalNormalizedConfig as any).installationLocation = configAny.installationLocation ?? configAny.installation_location ?? (finalNormalizedConfig as any).installationLocation ?? null;
-      
+
+      // Drapery-specific fields (not included in normalizeConfig)
+      (finalNormalizedConfig as any).product_line = configAny.productLine ?? configAny.product_line ?? null;
+      (finalNormalizedConfig as any).productLine = (finalNormalizedConfig as any).product_line;
+      (finalNormalizedConfig as any).style_code = configAny.styleCode ?? configAny.style_code ?? null;
+      (finalNormalizedConfig as any).styleCode = (finalNormalizedConfig as any).style_code;
+      (finalNormalizedConfig as any).system_size = configAny.systemSize ?? configAny.system_size ?? null;
+      (finalNormalizedConfig as any).systemSize = (finalNormalizedConfig as any).system_size;
+      (finalNormalizedConfig as any).manufacturer = configAny.manufacturer ?? null;
+      (finalNormalizedConfig as any).opening_direction = configAny.openingDirection ?? configAny.opening_direction ?? null;
+      (finalNormalizedConfig as any).openingDirection = (finalNormalizedConfig as any).opening_direction;
+      (finalNormalizedConfig as any).drive_side = configAny.driveSide ?? configAny.drive_side ?? null;
+      (finalNormalizedConfig as any).driveSide = (finalNormalizedConfig as any).drive_side;
+      (finalNormalizedConfig as any).track_only = configAny.track_only ?? false;
+      (finalNormalizedConfig as any).force_track_join = configAny.forceTrackJoin ?? configAny.force_track_join ?? false;
+
+      // Fields stripped by normalizeConfig that apply to all product types
+      (finalNormalizedConfig as any).cassette_type = configAny.cassette_type ?? configAny.cassetteType ?? null;
+      if (configAny.frontFabric && typeof configAny.frontFabric === 'object') {
+        (finalNormalizedConfig as any).frontFabric = configAny.frontFabric;
+      }
+
       if (import.meta.env.DEV) {
         console.log('[ProductConfigurator] Passing to onComplete', {
           width_m: (finalNormalizedConfig as any).width_m,
@@ -1232,8 +1297,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     const newProductTypeId = (updates as any).productTypeId;
     
     if (newProductType) {
-      // Validate that it's a valid ProductType (including 'accessories' for accessories-only flow)
-      const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'window-film', 'accessories'];
+      // Validate that it's a valid ProductType (including 'catalog' for catalog item flow)
+      const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'window-film', 'honey-comb', 'vertical', 'wood', 'roman-shade', 'catalog'];
       if (validTypes.includes(newProductType)) {
         handleProductTypeSelect(newProductType as ProductType, newProductTypeId);
       }

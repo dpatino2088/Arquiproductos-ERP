@@ -7,7 +7,7 @@ export interface ProductType {
   name: string;
   code?: string | null;
   sort_order?: number | null;
-  // NOTE: archived and deleted do NOT exist in ProductTypes table (per DB dump 2026-01-14)
+  status?: string | null;
 }
 
 // ✅ OPTIMIZATION: In-memory cache (5 min TTL)
@@ -68,7 +68,7 @@ export function useProductTypes() {
         // ✅ FIX: Soportar registros globales (organization_id NULL)
         const { data, error: queryError } = await supabase
           .from('ProductTypes')
-          .select('id, name, code, sort_order')
+          .select('id, name, code, sort_order, status')
           .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
           .order('sort_order', { ascending: true, nullsFirst: false })
           .order('name', { ascending: true });

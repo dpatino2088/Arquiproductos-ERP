@@ -15,7 +15,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
-import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import ProductConfigurator from './ProductConfigurator';
@@ -165,7 +165,7 @@ function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string
   const finalNormalizedConfig = normalizeConfig(productConfig as any) as any;
   const panelsList = Array.isArray(configAny.panels) ? configAny.panels : (configAny.panels ? [configAny.panels] : []);
   const panelCount = configAny.measurements?.panel_count ?? (panelsList.length || 1);
-  const widthTotalMm = configAny.measurements?.width_total_mm ?? panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0);
+  const widthTotalMm = configAny.measurements?.width_total_mm || panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0) || (configAny.width_mm ?? 0);
   const measurements = configAny.measurements ?? {
     height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : configAny.height_mm ?? null,
     width_total_mm: widthTotalMm,
@@ -206,7 +206,8 @@ function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string
     tube_item_id: configAny.tube_item_id || null,
     tube_sku: pickSku(configAny, ['tube_sku', 'tubeSku', 'tube_type', 'tubeType']) || null,
     operating_type: configAny.operation_type || configAny.drive_type || null,
-    roll_catalog_item_id: finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId || null,
+    track_only: configAny.track_only || false,
+    roll_catalog_item_id: configAny.track_only ? null : (finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId || null),
     quantity: finalNormalizedConfig.quantity || 1,
     fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
     installationType: configAny.installationType ?? configAny.installation_type ?? null,
@@ -215,8 +216,11 @@ function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string
     opening_direction: configAny.openingDirection || configAny.opening_direction || null,
     manufacturer: configAny.manufacturer || null,
     product_line: configAny.productLine || configAny.product_line || null,
+    system_size: configAny.systemSize || configAny.system_size || null,
     style_code: configAny.styleCode || configAny.style_code || null,
     force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
+    cassette_type: configAny.cassette_type ?? configAny.cassetteType ?? null,
+    frontFabric: configAny.frontFabric && typeof configAny.frontFabric === 'object' ? configAny.frontFabric : null,
     accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
   };
 }
@@ -1061,10 +1065,10 @@ export default function QuoteNew() {
       const configuredProductId = (productConfig as any).configured_product_id;
       const configuredProductTotalsFromConfig = (productConfig as any).configured_product_totals;
       const draftQuoteLineId = (productConfig as any).quote_line_id;
-      const isAccessoriesOnly = productConfig.productType === 'accessories';
+      const isCatalogItem = productConfig.productType === 'catalog';
 
-      // EDIT: no ConfiguredProduct required (we create CP_NEW on save). Accessories-only lines don't use ConfiguredProduct.
-      if (!editingLineId && !configuredProductId && !isAccessoriesOnly) {
+      // EDIT: no ConfiguredProduct required (we create CP_NEW on save). Catalog lines create their own CP via RPC.
+      if (!editingLineId && !configuredProductId && !isCatalogItem) {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Configuration Error',
@@ -1096,59 +1100,102 @@ export default function QuoteNew() {
       let shouldUseSnapshotService = false;
 
       // ═══════════════════════════════════════════════════════════════════
-      // ACCESSORIES-ONLY: create QuoteLine without ConfiguredProduct (no width, height, fabric, etc.)
+      // CATALOG ITEM: create ConfiguredProduct via RPC then insert QuoteLine
       // ═══════════════════════════════════════════════════════════════════
-      if (isAccessoriesOnly && !editingLineId && quoteId) {
-        const accessoriesList = Array.isArray((productConfig as any).accessories) ? (productConfig as any).accessories : [];
-        const totalMsrp = accessoriesList.reduce((sum: number, item: { qty?: number; price?: number }) => {
-          const qty = Number(item?.qty) || 1;
-          const price = Number(item?.price) || 0;
-          return sum + qty * price;
-        }, 0);
+      if (isCatalogItem && !editingLineId && quoteId) {
+        const cfg = productConfig as any;
+        const catalogItemId: string = cfg.catalog_item_id;
+        const itemName: string = cfg.name ?? '';
+        const itemSku: string = cfg.sku ?? '';
+        const unitMsrp: number = Number(cfg.unit_price) || 0;
+        const qty: number = Math.max(1, Number(cfg.qty) || 1);
+
+        if (!catalogItemId) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error',
+            message: 'Please select a catalog item before saving.',
+          });
+          return;
+        }
+
+        // Fetch catalog product_type_id
+        const { data: catalogPT } = await supabase
+          .from('ProductTypes')
+          .select('id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('code', 'catalog')
+          .maybeSingle();
+
+        if (!catalogPT?.id) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error',
+            message: 'Catalog product type not found. Run DB migration.',
+          });
+          return;
+        }
+
+        // Fetch quote dealer_id
         const { data: quoteRow } = await supabase
           .from('Quotes')
           .select('dealer_id')
           .eq('id', quoteId)
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
-        // Solo columnas que existen en todas las versiones de QuoteLines (sin metadata si no existe la columna)
-        const insertPayload: Record<string, unknown> = {
-          organization_id: activeOrganizationId,
-          quote_id: quoteId,
-          dealer_id: quoteRow?.dealer_id ?? null,
-          product_type: 'accessories',
-          configured_product_id: null,
-          product_type_id: null,
-          quantity: 1,
-          msrp: totalMsrp > 0 ? totalMsrp : null,
-          unit_msrp: totalMsrp > 0 ? totalMsrp : null,
-          name: 'Accessories',
-          sku: null,
-          position: productConfig.position != null ? String(productConfig.position) : null,
-          area: productConfig.area ?? null,
-        };
-        if (accessoriesList.length > 0) {
-          insertPayload.metadata = { accessories: accessoriesList };
-        }
-        let insertResult = await supabase.from('QuoteLines').insert(insertPayload).select('id').single();
-        if (insertResult.error && insertResult.error.message?.includes('metadata')) {
-          delete insertPayload.metadata;
-          insertResult = await supabase.from('QuoteLines').insert(insertPayload).select('id').single();
-        }
-        const { data: newLine, error: insertError } = insertResult;
-        if (insertError) {
-          console.error('[QuoteNew] Accessories-only line insert failed', insertError);
+
+        // Create ConfiguredProduct via RPC
+        const { data: cpResult, error: cpError } = await supabase.rpc('create_catalog_configured_product', {
+          p_org_id: activeOrganizationId,
+          p_product_type_id: catalogPT.id,
+          p_quote_id: quoteId,
+          p_catalog_item_id: catalogItemId,
+          p_qty: qty,
+          p_unit_msrp: unitMsrp,
+        });
+
+        if (cpError || !cpResult?.configured_product_id) {
+          console.error('[QuoteNew] create_catalog_configured_product failed', cpError);
           useUIStore.getState().addNotification({
             type: 'error',
             title: 'Error',
-            message: insertError.message || 'Failed to add accessories line.',
+            message: cpError?.message || 'Failed to create configured product.',
           });
           return;
         }
+
+        const totalMsrp = unitMsrp * qty;
+        const { error: insertError } = await supabase.from('QuoteLines').insert({
+          organization_id: activeOrganizationId,
+          quote_id: quoteId,
+          dealer_id: quoteRow?.dealer_id ?? null,
+          product_type: 'catalog',
+          product_type_id: catalogPT.id,
+          catalog_item_id: catalogItemId,
+          configured_product_id: cpResult.configured_product_id,
+          quantity: qty,
+          name: itemName,
+          sku: itemSku,
+          msrp: totalMsrp,
+          unit_msrp: unitMsrp,
+          position: cfg.position != null ? String(cfg.position) : null,
+          area: cfg.area ?? null,
+        });
+
+        if (insertError) {
+          console.error('[QuoteNew] Catalog line insert failed', insertError);
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Error',
+            message: insertError.message || 'Failed to add catalog line.',
+          });
+          return;
+        }
+
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Success',
-          message: 'Accessories line added successfully.',
+          message: 'Catalog item added successfully.',
         });
         refetchLines();
         return;
@@ -1183,15 +1230,21 @@ export default function QuoteNew() {
           return;
         }
 
-        // 2. Build snapshot and send to backend (createConfiguredProductPreview)
-        const configSnapshot = buildConfigSnapshotFromProductConfig(productConfig);
-        const previewResult = await createConfiguredProductPreview({
-          organization_id: activeOrganizationId,
-          product_type_id: productTypeId,
-          config_snapshot: configSnapshot,
-          quote_id: quoteId || null,
-        });
-        const cpNewId = previewResult.configured_product_id;
+        // 2. Use the CP already created by ProductConfigurator if available; otherwise create one
+        let cpNewId: string;
+        const existingCpId = (productConfig as any).configured_product_id;
+        if (existingCpId) {
+          cpNewId = existingCpId;
+        } else {
+          const configSnapshot = buildConfigSnapshotFromProductConfig(productConfig);
+          const previewResult = await createConfiguredProductPreview({
+            organization_id: activeOrganizationId,
+            product_type_id: productTypeId,
+            config_snapshot: configSnapshot,
+            quote_id: quoteId || null,
+          });
+          cpNewId = previewResult.configured_product_id;
+        }
 
         // 3. Read CP_NEW from backend — this is the ONLY source of truth
         const { data: cpNew } = await supabase
@@ -1293,6 +1346,8 @@ export default function QuoteNew() {
               console.warn('[QuoteNew EDIT] Override msrp by unit_msrp×qty failed', overrideErr);
             }
           } else {
+            // Unlock pricing so the sync RPC can update snapshots
+            await supabase.from('QuoteLines').update({ pricing_locked: false }).eq('id', editingLineId).eq('organization_id', activeOrganizationId);
             const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
               p_quote_line_id: editingLineId,
             });
@@ -2474,7 +2529,7 @@ export default function QuoteNew() {
                   const configuredProductId = (productConfig as any).configured_product_id;
                   const { data: cpData } = await supabase
                     .from('ConfiguredProducts')
-                    .select('roll_msrp_total, bom_total, roll_plus_bom_total, labor_pct, accessories_total, total_msrp')
+                    .select('roll_msrp_total, bom_total, labor_pct, accessories_total, total_msrp')
                     .eq('id', configuredProductId)
                     .eq('organization_id', activeOrganizationId)
                     .eq('deleted', false)
@@ -3110,10 +3165,10 @@ export default function QuoteNew() {
           dimensions_source: {
             width_m: line.width_m,
             height_m: line.height_m,
-            width_mm: (line.ConfiguredProduct?.config_snapshot as any)?.width_mm,
-            height_mm: (line.ConfiguredProduct?.config_snapshot as any)?.height_mm,
-            measurements: (line.ConfiguredProduct?.config_snapshot as any)?.measurements,
-            panels: (line.ConfiguredProduct?.config_snapshot as any)?.panels,
+            width_mm: line.config_snapshot?.width_mm,
+            height_mm: line.config_snapshot?.height_mm,
+            measurements: line.config_snapshot?.measurements,
+            panels: line.config_snapshot?.panels,
           },
           qty: n,
           line_total: lineTotal,
@@ -3183,7 +3238,7 @@ export default function QuoteNew() {
   };
 
   // Preview PDF in new tab (same as Proposal)
-  const handlePreviewPDF = async () => {
+  const handlePreviewPDF = async (variant: 'dealer' | 'client' = 'dealer') => {
     if (!quoteId || !quoteData) {
       useUIStore.getState().addNotification({
         type: 'error',
@@ -3340,7 +3395,7 @@ export default function QuoteNew() {
         pdfLines,
         organizationName,
         {
-          variant: 'dealer',
+          variant,
           logoPngBase64,
           logoWidthPx,
           logoHeightPx,
@@ -3484,9 +3539,10 @@ export default function QuoteNew() {
             message: 'Quote created successfully',
           });
           
-          // Only navigate if shouldNavigate is true
           if (shouldNavigate) {
             router.navigate('/sales/quotes');
+          } else {
+            window.history.replaceState(null, '', `/sales/quotes/${created.id}/edit`);
           }
         }
       }
@@ -3513,6 +3569,19 @@ export default function QuoteNew() {
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [printDropdownOpen, setPrintDropdownOpen] = useState(false);
+  const printDropdownRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!printDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (printDropdownRef.current && !printDropdownRef.current.contains(e.target as Node)) {
+        setPrintDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [printDropdownOpen]);
+
   const handleDeleteDraftQuote = async () => {
     if (!quoteId || !activeOrganizationId) return;
     setIsDeleting(true);
@@ -3549,7 +3618,7 @@ export default function QuoteNew() {
   return (
     <div className="py-6 min-w-0 max-w-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">
             {quoteId ? 'Edit Quote' : 'New Quote'}
@@ -3561,26 +3630,38 @@ export default function QuoteNew() {
 
         <div className="flex items-center gap-3">
           {quoteId && (
-            <button
-              type="button"
-              onClick={handlePreviewPDF}
-              className="flex items-center gap-2 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-              title="Abrir PDF en el navegador"
-            >
-              <Eye className="w-4 h-4" />
-              PDF Dealer
-            </button>
-          )}
-          {quoteId && quoteData?.status === 'draft' && (
-            <button
-              type="button"
-              onClick={() => setDeleteConfirmOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-red-300 bg-white text-red-600 transition-colors text-sm hover:bg-red-50"
-              title="Eliminar cotización"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
+            <div className="relative" ref={printDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setPrintDropdownOpen((v) => !v)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50"
+                title="Print"
+                aria-expanded={printDropdownOpen}
+                aria-haspopup="true"
+              >
+                <Printer className="w-4 h-4 shrink-0 text-gray-600" />
+                <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+              </button>
+              {printDropdownOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                  role="menu"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => {
+                      handlePreviewPDF('dealer');
+                      setPrintDropdownOpen(false);
+                    }}
+                  >
+                    <Eye className="w-4 h-4 shrink-0 text-gray-500" />
+                    PDF Dealer
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           <button
             type="button"
@@ -3616,146 +3697,61 @@ export default function QuoteNew() {
         </div>
       )}
 
-      {/* Quote Form */}
-      <div className="bg-white border border-gray-200 rounded-lg mb-6">
-        {/* Dealer Info Banner: DEALER name, Create Proposal (si quoteId), DEALER NO. a la derecha */}
-        {dealerInfo && (
-          <div className="bg-gray-50 border-b border-gray-200 px-6 py-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-gray-500">Dealer:</span>
-                <span className="font-semibold text-gray-900">{dealerInfo.name}</span>
-                {dealerInfo.number && (
-                  <>
-                    <span className="text-gray-400" aria-hidden>|</span>
-                    <span className="text-gray-500">Dealer No:</span>
-                    <span className="font-semibold text-gray-900">{dealerInfo.number}</span>
-                  </>
+      {/* Quote Form — two-card layout: Customer left, Dealer/Quote right */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* LEFT CARD: Customer Info */}
+        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Customer Info</h3>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="customer_id">Customer (optional)</Label>
+                <SelectShadcn
+                  value={watch('customer_id') || 'none'}
+                  onValueChange={(value) => {
+                    setValue('customer_id', value === 'none' ? '' : value);
+                    setSelectedContactId('');
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select customer (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {customers.map((customer) => (
+                      <SelectItem key={customer.id} value={customer.id}>
+                        {customer.customer_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+                {errors.customer_id && (
+                  <p className="text-red-600 text-xs mt-1">{errors.customer_id.message}</p>
                 )}
               </div>
-              {quoteId && (
-                <div className="flex-shrink-0">
-                  <CreateProposalButton quoteId={quoteId} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Form Fields */}
-        <div className="p-6">
-          <div className="grid grid-cols-12 gap-4">
-            {/* Quote Number | Status | Currency — same row */}
-            <div className="col-span-12 md:col-span-6">
-              <Label htmlFor="quote_no">Quote Number *</Label>
-              <Input
-                id="quote_no"
-                {...register('quote_no')}
-                error={errors.quote_no?.message}
-              />
-            </div>
-
-            {/* Status */}
-            <div className="col-span-12 md:col-span-3">
-              <Label htmlFor="status">Status *</Label>
-            <SelectShadcn
-              value={watch('status') || 'draft'}
-              disabled={isStatusLocked}
-              onValueChange={(value) => {
-                if (isStatusLocked) return;
-                const validStatus = value as 'draft' | 'approved' | 'canceled';
-                setValue('status', validStatus);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUOTE_STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-            {isStatusLocked && (
-              <p className="mt-1 text-xs text-gray-500">
-                Status is locked because this quote is approved.
-              </p>
-            )}
+              <div>
+                <Label htmlFor="contact_id">Contact (optional)</Label>
+                <SelectShadcn
+                  value={selectedContactId || 'none'}
+                  onValueChange={(value) => setSelectedContactId(value === 'none' ? '' : value)}
+                  disabled={!effectiveCustomerIdForContacts}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select contact (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {contacts.map((contact) => (
+                      <SelectItem key={contact.id} value={contact.id}>
+                        {contact.contact_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
             </div>
 
-            {/* Currency */}
-            <div className="col-span-12 md:col-span-3">
-              <Label htmlFor="currency">Currency *</Label>
-            <SelectShadcn
-              value={watch('currency') || 'USD'}
-              onValueChange={(value) => setValue('currency', value)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CURRENCY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-            </div>
-
-            {/* Customer (optional) | Contact (optional) — side by side below */}
-            <div className="col-span-12 md:col-span-6">
-              <Label htmlFor="customer_id">Customer (optional)</Label>
-            <SelectShadcn
-              value={watch('customer_id') || 'none'}
-              onValueChange={(value) => {
-                setValue('customer_id', value === 'none' ? '' : value);
-                setSelectedContactId(''); // Reset contact when customer changes
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select customer (optional)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {customers.map((customer) => (
-                  <SelectItem key={customer.id} value={customer.id}>
-                    {customer.customer_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-              {errors.customer_id && (
-                <p className="text-red-600 text-xs mt-1">{errors.customer_id.message}</p>
-              )}
-            </div>
-
-            {/* Contact (optional) */}
-            <div className="col-span-12 md:col-span-6">
-              <Label htmlFor="contact_id">Contact (optional)</Label>
-            <SelectShadcn
-              value={selectedContactId || 'none'}
-              onValueChange={(value) => setSelectedContactId(value === 'none' ? '' : value)}
-              disabled={!effectiveCustomerIdForContacts}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select contact (optional)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {contacts.map((contact) => (
-                  <SelectItem key={contact.id} value={contact.id}>
-                    {contact.contact_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </SelectShadcn>
-            </div>
-
-            {/* Description — aligned with Customer (left column), same height as Contact */}
-            <div className="col-span-12 md:col-span-6">
+            <div>
               <Label htmlFor="description">Description</Label>
               <textarea
                 id="description"
@@ -3766,63 +3762,142 @@ export default function QuoteNew() {
               />
             </div>
 
-            {/* PO: Dealer PO / order tracking number — between Description and Notas */}
-            <div className="col-span-12 md:col-span-6">
-              <Label htmlFor="po_number">PO</Label>
-              <Input
-                id="po_number"
-                {...register('po_number')}
-                placeholder="Dealer PO / order number (optional)"
-              />
-            </div>
-
-            {/* Notas — aligned with Customer, bottom aligned with Created by (same row as Summary) */}
-            <div className="col-span-12 md:col-span-6 flex flex-col gap-1 min-h-0">
+            <div>
               <Label htmlFor="notes">Notas</Label>
               <textarea
                 id="notes"
                 {...register('notes')}
-                className="flex-1 min-h-[8rem] w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 resize-y"
+                className="w-full min-h-[6rem] px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 resize-y"
                 placeholder="Notas adicionales..."
               />
             </div>
+          </div>
+        </div>
 
-            {/* Summary + Created by — lado derecho del Head Form */}
-            {quoteId && (
-              <div className="col-span-12 md:col-span-4 md:col-start-9 md:row-span-1">
-                <div className="w-full max-w-xs ml-auto">
-                  <div className="flex items-center gap-2 pb-3 mb-3 border-b border-gray-100">
-                    <input
-                      type="checkbox"
-                      {...register('exempt_tax')}
-                      className="rounded border-gray-300"
-                    />
-                    <Label className="text-sm text-gray-700 cursor-pointer">Exempt Tax</Label>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Subtotal:</span>
-                      <span className="font-medium">{formatCurrency(totals.subtotal, watch('currency'))}</span>
-                    </div>
-                    {!exemptTax && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Tax{taxPct > 0 ? ` (${Math.round(taxPct * 100)}%)` : ''}:</span>
-                        <span className="font-medium">{formatCurrency(totals.tax, watch('currency'))}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-lg font-semibold border-t border-gray-200 pt-2">
-                      <span>Total:</span>
-                      <span>{formatCurrency(totals.total, watch('currency'))}</span>
-                    </div>
-                    {quoteLines.length > 0 && (quoteLines[0] as { quote_created_by?: string })?.quote_created_by && (
-                      <div className="text-sm text-gray-500 pt-1 border-t border-gray-100">
-                        Created by: {(quoteLines[0] as { quote_created_by?: string }).quote_created_by}
-                      </div>
-                    )}
-                  </div>
+        {/* RIGHT CARD: Dealer / Quote Info + Summary */}
+        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm flex flex-col justify-end">
+          <div className="space-y-3">
+            {dealerInfo && (
+              <div className="flex items-center justify-between gap-4 pb-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-500">Dealer:</span>
+                  <span className="font-semibold text-gray-900">{dealerInfo.name}</span>
+                  {dealerInfo.number && (
+                    <>
+                      <span className="text-gray-400" aria-hidden>|</span>
+                      <span className="text-gray-500">Dealer No:</span>
+                      <span className="font-semibold text-gray-900">{dealerInfo.number}</span>
+                    </>
+                  )}
                 </div>
+                {quoteId && (
+                  <div className="flex-shrink-0">
+                    <CreateProposalButton quoteId={quoteId} />
+                  </div>
+                )}
               </div>
             )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="quote_no">Quote Number *</Label>
+                <Input
+                  id="quote_no"
+                  {...register('quote_no')}
+                  error={errors.quote_no?.message}
+                />
+              </div>
+              <div>
+                <Label htmlFor="po_number">PO</Label>
+                <Input
+                  id="po_number"
+                  {...register('po_number')}
+                  placeholder="Dealer PO / order number (optional)"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="status">Status *</Label>
+                <SelectShadcn
+                  value={watch('status') || 'draft'}
+                  disabled={isStatusLocked}
+                  onValueChange={(value) => {
+                    if (isStatusLocked) return;
+                    const validStatus = value as 'draft' | 'approved' | 'canceled';
+                    setValue('status', validStatus);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {QUOTE_STATUS_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+                {isStatusLocked && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Status is locked because this quote is approved.
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="currency">Currency *</Label>
+                <SelectShadcn
+                  value={watch('currency') || 'USD'}
+                  onValueChange={(value) => setValue('currency', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CURRENCY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 mt-5 pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  {...register('exempt_tax')}
+                  className="rounded border-gray-300"
+                />
+                <span className="text-xs text-gray-600">Exempt Tax</span>
+              </label>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-600">Subtotal</span>
+                <span className="tabular-nums">{formatCurrency(totals.subtotal, watch('currency'))}</span>
+              </div>
+              {!exemptTax && (
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Tax{taxPct > 0 ? ` (${Math.round(taxPct * 100)}%)` : ''}</span>
+                  <span className="tabular-nums">{formatCurrency(totals.tax, watch('currency'))}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
+                <span>Total</span>
+                <span className="tabular-nums">{formatCurrency(totals.total, watch('currency'))}</span>
+              </div>
+              {quoteLines.length > 0 && (quoteLines[0] as { quote_created_by?: string })?.quote_created_by && (
+                <div className="text-xs text-gray-500 pt-1 border-t border-gray-100">
+                  Created by: {(quoteLines[0] as { quote_created_by?: string }).quote_created_by}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -3867,21 +3942,21 @@ export default function QuoteNew() {
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
             <div className="table-fit-wrapper quote-lines-table-wrapper">
-              <table className="table-fit w-full quote-lines-table">
-                <thead className="bg-gray-50 border-b border-gray-200">
+              <table className="table-fit w-full quote-lines-table" style={{ tableLayout: 'fixed' }}>
+                <thead className="bg-gray-50 border-b-2 border-gray-300">
                   <tr>
-                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10 whitespace-nowrap" style={{ width: '2%' }} title="Drag to reorder"> </th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">#</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>Area</th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '6%' }}>Position</th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[120px]" style={{ width: '10%' }}>Product type</th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '20%' }}>Description</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>System Drive</th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap min-w-[100px]" style={{ width: '10%' }}>Measurements</th>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Qty</th>
-                    <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
-                    <th className="py-3 px-4 font-medium text-gray-700 text-xs text-center whitespace-nowrap" style={{ width: '8%' }}>Total</th>
-                    <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Action</th>
+                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '32px' }} title="Drag to reorder"> </th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '40px' }}>#</th>
+                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '7%' }}>Area</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Position</th>
+                    <th className="text-center py-3 pl-4 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Product type</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '22%' }}>Description</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>System Drive</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '11%' }}>Measurements</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '36px' }}>Qty</th>
+                    <th className="text-right py-3 pl-2 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '88px' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
+                    <th className="text-right py-3 pl-2 pr-6 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '88px' }}>Total</th>
+                    <th className="text-right py-3 pl-4 pr-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '106px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -3890,31 +3965,24 @@ export default function QuoteNew() {
                     const area = line.area ?? null;
                     const position = line.position ?? null;
 
-                    // Debug en DEV
-                    if (import.meta.env.DEV && quoteLines.indexOf(line) === 0) {
-                      console.log('[QuoteNew] Rendering line:', {
-                        id: line.id,
-                        area,
-                        position,
-                        ProductType: line.ProductType,
-                        product_type_id: line.product_type_id,
-                        collection_name: line.collection_name,
-                        variant_name: line.variant_name,
-                        drive_type: line.drive_type,
-                        width_m: line.width_m,
-                        height_m: line.height_m,
-                        Accessories: line.Accessories,
-                        quantity: line.quantity,
-                        msrp: line.msrp,
-                      });
-                    }
-                    
-                    const productTypeName = line.ProductType?.name || line.product_type || 'N/A';
-                    const collectionDisplay = line.collection_name && line.variant_name
-                      ? `${line.collection_name} - ${line.variant_name}`
-                      : line.collection_name || line.variant_name || 'N/A';
+                    const isCatalogLine = line.product_type === 'catalog';
+                    const productTypeName = isCatalogLine
+                      ? (line.CatalogItems?.item_role
+                          ? String(line.CatalogItems.item_role).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+                          : 'Catalog')
+                      : (line.ProductType?.name || line.product_type || 'N/A');
+                    const collectionDisplay = isCatalogLine
+                      ? (() => {
+                          const itemName = line.CatalogItems?.name || line.name || '';
+                          const itemSku = line.CatalogItems?.sku || line.sku || '';
+                          if (itemName && itemSku && itemName !== itemSku) return `${itemName} (${itemSku})`;
+                          return itemName || itemSku || '—';
+                        })()
+                      : (line.collection_name && line.variant_name
+                          ? `${line.collection_name} - ${line.variant_name}`
+                          : line.collection_name || line.variant_name || 'N/A');
                     const driveType = line.drive_type;
-                    const driveDisplay = driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A';
+                    const driveDisplay = isCatalogLine ? '—' : (driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A');
 
                     const isDragging = draggedLineId === line.id;
                     const isDragOver = dragOverLineId === line.id;
@@ -3936,41 +4004,43 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">
                           {index + 1}
                         </td>
-                        <td className="py-4 px-4 text-gray-700 text-sm whitespace-nowrap text-left">
+                        <td className="py-4 px-2 text-gray-700 text-sm whitespace-nowrap text-left overflow-hidden text-ellipsis">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
-                        <td className="py-4 px-4 text-gray-700 text-sm text-center whitespace-nowrap">
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center whitespace-nowrap overflow-hidden text-ellipsis">
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
-                        <td className="py-4 px-6 text-gray-900 text-sm font-medium whitespace-nowrap text-center">
+                        <td className="py-4 pl-4 pr-2 text-gray-900 text-sm font-medium whitespace-nowrap text-center overflow-hidden text-ellipsis">
                           {productTypeName}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm min-w-0 overflow-hidden text-ellipsis text-center" title={collectionDisplay}>
-                          <span className="block truncate">{collectionDisplay}</span>
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center overflow-hidden" title={collectionDisplay}>
+                          <span className="block truncate text-center">{collectionDisplay}</span>
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm text-left whitespace-nowrap">
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center whitespace-nowrap overflow-hidden text-ellipsis">
                           {driveDisplay}
                         </td>
-                        <td className="py-4 px-6 text-gray-700 text-sm align-top text-center whitespace-nowrap min-w-[100px]">
-                          <div className="w-fit mx-auto">
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center align-middle">
+                          {isCatalogLine ? (
+                            <span className="text-gray-400">—</span>
+                          ) : (
+                          <div className="inline-block">
                             <DimensionsStackView
                               source={{
                                 width_m: line.width_m,
                                 height_m: line.height_m,
-                                width_mm: (line.ConfiguredProduct?.config_snapshot as any)?.width_mm,
-                                height_mm: (line.ConfiguredProduct?.config_snapshot as any)?.height_mm,
-                                measurements: (line.ConfiguredProduct?.config_snapshot as any)?.measurements,
-                                panels: (line.ConfiguredProduct?.config_snapshot as any)?.panels,
+                                width_mm: line.config_snapshot?.width_mm,
+                                height_mm: line.config_snapshot?.height_mm,
+                                measurements: line.config_snapshot?.measurements,
+                                panels: line.config_snapshot?.panels,
                               }}
                             />
                           </div>
+                          )}
                         </td>
-                        <td className="py-4 px-6 text-center text-gray-900 text-sm tabular-nums whitespace-nowrap">
-                          {/* ✅ FIX: Usar "quantity" (columna correcta en QuoteLines) */}
+                        <td className="py-4 px-2 text-center text-gray-900 text-sm tabular-nums whitespace-nowrap">
                           {line.quantity ? line.quantity.toFixed(0) : 'N/A'}
                         </td>
-                        {/* Dealer price / MSRP: precio unitario estable (unit_msrp); no debe variar al cambiar solo qty */}
-                        <td className="py-4 px-6 text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap text-center">
+                        <td className="py-4 pl-2 pr-2 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '88px' }}>
                           {(() => {
                             const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
                             const unitMsrp =
@@ -3984,7 +4054,7 @@ export default function QuoteNew() {
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
-                              <div className="relative group w-full whitespace-nowrap text-center">
+                              <div className="relative group whitespace-nowrap text-right">
                                 <span>{formatCurrency(unitPrice, watch('currency'))}</span>
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
@@ -4000,7 +4070,7 @@ export default function QuoteNew() {
                           })()}
                         </td>
                         {/* TOTAL column: siempre unit_price × qty para que sea consistente con el unitario */}
-                        <td className="py-4 px-6 text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap text-center">
+                        <td className="py-4 pl-2 pr-6 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '88px' }}>
                           {(() => {
                             const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
                             const unitMsrp =
@@ -4014,7 +4084,7 @@ export default function QuoteNew() {
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
-                              <div className="relative group w-full whitespace-nowrap text-center">
+                              <div className="relative group whitespace-nowrap text-right">
                                 <span className="font-semibold">{formatCurrency(lineTotal, watch('currency'))}</span>
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
@@ -4030,7 +4100,7 @@ export default function QuoteNew() {
                             );
                           })()}
                         </td>
-                        <td className="py-4 px-6 whitespace-nowrap">
+                        <td className="py-4 pl-4 pr-4 whitespace-nowrap text-right" style={{ width: '106px' }}>
                           <div className="flex items-center gap-1 justify-end">
                             <button
                               type="button"
@@ -4056,7 +4126,7 @@ export default function QuoteNew() {
                             </button>
                             <button
                               onClick={() => handleDeleteLine(line.id)}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600"
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
                               title="Delete line"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -4075,9 +4145,12 @@ export default function QuoteNew() {
 
       {/* Proposals for this Quote — organizar proposals dentro del quote */}
       {quoteId && (
-        <div className="bg-white border border-gray-200 rounded-lg mb-6">
+        <>
+          <div className="border-t border-gray-200 my-4" aria-hidden />
+          <div className="bg-white border border-gray-200 rounded-lg mb-6">
           <QuoteProposalsSection quoteId={quoteId} />
         </div>
+        </>
       )}
 
       {/* Terms & Conditions (read-only, from Dealer template) */}
@@ -4123,6 +4196,7 @@ export default function QuoteNew() {
                   clearConfiguratorDraft();
                 }}
                 initialConfig={initialLineConfig}
+                dealerId={dealerInfo?.id ?? quoteData?.dealer_id ?? null}
               />
             </div>
           </div>
@@ -4133,7 +4207,7 @@ export default function QuoteNew() {
       {previewLineId && (() => {
         const line = quoteLines.find((l: any) => l.id === previewLineId) as any;
         if (!line) return null;
-        const config = line.ConfiguredProduct?.config_snapshot || {};
+        const config = line.config_snapshot ?? {};
         const productTypeName = line.ProductType?.name || line.product_type || config.productType || '—';
         const productTypeSlug = (productTypeName || '').toLowerCase().replace(/\s+/g, '-') || '—';
         const driveTypeRaw = line.drive_type ?? config.operatingSystem ?? config.drive_type;
@@ -4165,8 +4239,8 @@ export default function QuoteNew() {
           </div>
         );
         const fabricM2 = (() => {
-          const snap = (line.ConfiguredProduct as any)?.bom_preview_snapshot;
-          const items = snap?.items;
+          const bomSnap = line.bom_preview_snapshot;
+          const items = bomSnap?.items;
           if (!Array.isArray(items)) return null;
           const roll = items.find((i: any) => i.kind === 'roll' || i.role === 'fabric');
           return roll?.qty != null ? Number(roll.qty) : null;

@@ -6,10 +6,9 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useDirectoryVendors, type VendorInput } from '../../hooks/useDirectoryVendors';
-import { useManufacturers } from '../../hooks/useCatalog';
 import { useUIStore } from '../../stores/ui-store';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Building, Store, Building2 } from 'lucide-react';
+import { Building, Store, Building2, ExternalLink } from 'lucide-react';
 import { COUNTRIES } from '../../lib/constants';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
@@ -87,7 +86,7 @@ const vendorSchema = z.object({
   delivery_terms: z.string().optional().or(z.literal('')),
   transport: z.string().optional().or(z.literal('')),
   tax_rule: z.enum(['taxable', 'tax_exempt']).optional().or(z.literal('')),
-  manufacturer_id: z.string().optional().or(z.literal('')),
+  manufacturer_id: z.string().optional().or(z.literal('')), // legacy — kept for backward compat
 });
 
 type VendorFormValues = z.infer<typeof vendorSchema>;
@@ -95,6 +94,8 @@ type VendorFormValues = z.infer<typeof vendorSchema>;
 interface PartnerVendorFormProps {
   vendorId?: string | null;
 }
+
+
 
 function loadVendorDraft(): { values: VendorFormValues; billingSameAsLocation: boolean } | null {
   try {
@@ -127,7 +128,6 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { createVendor, updateVendor } = useDirectoryVendors();
-  const { manufacturers, loading: loadingManufacturers } = useManufacturers();
   const { addNotification } = useUIStore();
   const [isSaving, setIsSaving] = useState(false);
   const [billingSameAsLocation, setBillingSameAsLocation] = useState(true);
@@ -135,6 +135,7 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
   const savedSuccessfullyRef = useRef(false);
 
   const isEdit = !!vendorId;
+  const [linkedMfrNames, setLinkedMfrNames] = useState<string[]>([]);
 
   const form = useForm<VendorFormValues>({
     resolver: zodResolver(vendorSchema),
@@ -236,6 +237,23 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
       });
       const hasBilling = !!(data.billing_street_address_line_1 || data.billing_city || data.billing_state);
       setBillingSameAsLocation(!hasBilling);
+
+      // Load linked manufacturer names (read-only)
+      const { data: vmRows } = await supabase
+        .from('VendorManufacturers')
+        .select('manufacturer_id')
+        .eq('vendor_id', vendorId);
+      if (mounted && vmRows && vmRows.length > 0) {
+        const mfrIds = vmRows.map((r: any) => r.manufacturer_id);
+        const { data: mfrRows } = await supabase
+          .from('Manufacturers')
+          .select('name')
+          .in('id', mfrIds)
+          .order('name');
+        if (mounted) setLinkedMfrNames((mfrRows ?? []).map((m: any) => m.name));
+      } else {
+        if (mounted) setLinkedMfrNames([]);
+      }
     })();
     return () => { mounted = false; };
   }, [vendorId, form]);
@@ -265,12 +283,12 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
     setIsSaving(true);
     try {
       const values = form.getValues();
-      const { manufacturer_id: mfgId, ...rest } = values;
+      const { manufacturer_id: _legacyMfg, ...rest } = values;
       const payload: VendorInput = {
         ...rest,
         vendor_name: values.name,
         tax_rule: (values.tax_rule as 'taxable' | 'tax_exempt' | '') || 'taxable',
-        manufacturer_id: mfgId?.trim() || null,
+        manufacturer_id: _legacyMfg?.trim() || null,
       };
       if (billingSameAsLocation) {
         payload.billing_street_address_line_1 = values.street_address_line_1;
@@ -290,6 +308,7 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
         savedSuccessfullyRef.current = true;
         clearVendorDraft();
       }
+
       router.navigate('/partners/vendors');
     } catch (err: any) {
       addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to save vendor' });
@@ -439,32 +458,32 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
               </div>
             </div>
 
-            {/* Manufacturer Related */}
+            {/* Manufacturers (read-only — managed from Partners > Manufacturers) */}
+            {isEdit && (
             <div className="col-span-12 mt-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Manufacturer Related</h3>
-              <div className="grid grid-cols-12 gap-x-4 gap-y-3">
-                <div className="col-span-4">
-                  <Label htmlFor="manufacturer_id" className="text-xs">Manufacturer</Label>
-                  <SelectShadcn
-                    value={form.watch('manufacturer_id') || '__none__'}
-                    onValueChange={(value) => form.setValue('manufacturer_id', value === '__none__' ? '' : value, { shouldValidate: true })}
-                  >
-                    <SelectTrigger className="py-1 text-xs">
-                      <SelectValue placeholder={loadingManufacturers ? 'Loading...' : 'Select manufacturer (optional)'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">None</SelectItem>
-                      {manufacturers.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </SelectShadcn>
-                </div>
-                <div className="col-span-8" />
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-sm font-semibold text-gray-900">Manufacturers Supplied</h3>
+                <button
+                  type="button"
+                  onClick={() => router.navigate('/partners/manufacturers')}
+                  className="p-1 rounded hover:bg-gray-100 transition-colors text-gray-400 hover:text-primary"
+                  title="Go to Manufacturers to manage links"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
               </div>
+              {linkedMfrNames.length > 0 ? (
+                <div className="flex flex-col gap-0.5">
+                  {linkedMfrNames.map((name) => (
+                    <span key={name} className="text-xs text-gray-700 py-0.5">• {name}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">No manufacturers linked to this vendor.</p>
+              )}
+              <p className="text-[10px] text-gray-400 mt-2">Managed from Partners → Manufacturers</p>
             </div>
+            )}
 
             {/* Location Section */}
             <div className="col-span-12 mt-4">

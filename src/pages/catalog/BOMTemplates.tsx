@@ -28,6 +28,8 @@ interface BOMTemplateRow {
   drive_side?: string;
   opening_direction?: string;
   installation_location?: string;
+  system_size?: string;
+  headbox?: boolean;
   metadata?: any;
   is_active?: boolean;
   sort_order?: number;
@@ -66,6 +68,7 @@ export default function BOMTemplates() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedProductTypes, setSelectedProductTypes] = useState<string[]>([]);
+  const [headboxFilter, setHeadboxFilter] = useState<boolean | null>(null);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
   const [dragOverTemplateId, setDragOverTemplateId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<BOMInternalTab>(() => {
@@ -131,6 +134,7 @@ export default function BOMTemplates() {
         .select('*, ProductType:product_type_id (id, name, code)')
         .eq('organization_id', activeOrganizationId)
         .eq('is_active', true)
+        .eq('deleted', false)
         .eq('archived', false)
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: false });
@@ -138,7 +142,7 @@ export default function BOMTemplates() {
       if (fetchErr && (fetchErr.code === '42703' || fetchErr.message?.includes('sort_order'))) {
         const retry = await supabase.from('BOMTemplates')
           .select('*, ProductType:product_type_id (id, name, code)')
-          .eq('organization_id', activeOrganizationId).eq('is_active', true).eq('archived', false)
+          .eq('organization_id', activeOrganizationId).eq('is_active', true).eq('deleted', false).eq('archived', false)
           .order('created_at', { ascending: false });
         data = retry.data; fetchErr = retry.error;
       }
@@ -176,7 +180,7 @@ export default function BOMTemplates() {
     () => Array.from(new Set(templates.map((t) => t.ProductType?.name).filter(Boolean))) as string[],
     [templates]
   );
-  const totalActiveFilters = selectedProductTypes.length;
+  const totalActiveFilters = selectedProductTypes.length + (headboxFilter != null ? 1 : 0);
 
   const filteredTemplates = useMemo(() => {
     const normalizedSearch = normalizeSearchText(searchTerm);
@@ -200,8 +204,11 @@ export default function BOMTemplates() {
     if (selectedProductTypes.length > 0) {
       result = result.filter((t) => selectedProductTypes.includes(t.ProductType?.name || ''));
     }
+    if (headboxFilter != null) {
+      result = result.filter((t) => (t.headbox === true) === headboxFilter);
+    }
     return result;
-  }, [templates, searchTerm, selectedProductTypes]);
+  }, [templates, searchTerm, selectedProductTypes, headboxFilter]);
 
   // ========== ACTIONS ==========
 
@@ -230,7 +237,7 @@ export default function BOMTemplates() {
     if (!confirmed) return;
     try {
       setLoading(true);
-      const { error: err } = await supabase.from('BOMTemplates').update({ is_active: false }).eq('id', id).eq('organization_id', activeOrganizationId);
+      const { error: err } = await supabase.from('BOMTemplates').update({ is_active: false, deleted: true }).eq('id', id).eq('organization_id', activeOrganizationId);
       if (err) throw err;
       useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: 'BOM Template deleted successfully' });
       setTemplates(prev => prev.filter(t => t.id !== id));
@@ -443,36 +450,56 @@ export default function BOMTemplates() {
           </div>
 
           {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Product Type</span>
-                {selectedProductTypes.length > 0 && (
-                  <button
-                    onClick={() => setSelectedProductTypes([])}
-                    className="text-xs text-gray-500 hover:text-gray-700"
-                  >
-                    Clear
-                  </button>
-                )}
+            <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700">Product Type</span>
+                  {selectedProductTypes.length > 0 && (
+                    <button onClick={() => setSelectedProductTypes([])} className="text-xs text-gray-500 hover:text-gray-700">
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {productTypeOptions.map((name) => (
+                    <button
+                      key={name}
+                      onClick={() =>
+                        setSelectedProductTypes((prev) =>
+                          prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        selectedProductTypes.includes(name) ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {productTypeOptions.map((name) => (
-                  <button
-                    key={name}
-                    onClick={() =>
-                      setSelectedProductTypes((prev) =>
-                        prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
-                      )
-                    }
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      selectedProductTypes.includes(name)
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700">Headbox</span>
+                  {headboxFilter != null && (
+                    <button onClick={() => setHeadboxFilter(null)} className="text-xs text-gray-500 hover:text-gray-700">
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {([{ label: 'With Headbox', value: true }, { label: 'Without Headbox', value: false }] as const).map(({ label, value }) => (
+                    <button
+                      key={String(value)}
+                      onClick={() => setHeadboxFilter(headboxFilter === value ? null : value)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        headboxFilter === value ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -514,12 +541,15 @@ export default function BOMTemplates() {
                       <GripVertical className="w-5 h-5" />
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
+                      <div className="flex items-center gap-3 mb-0.5">
                         <span className="text-xs font-medium text-gray-400 tabular-nums">{idx + 1}/{filteredTemplates.length}</span>
                         <h3 className="text-base font-semibold text-gray-900">
                           {template.name || template.template_name || template.ProductType?.name || 'BOM Template'}
                         </h3>
                       </div>
+                      {(template as any).code && (
+                        <p className="text-xs font-mono text-primary/70 mb-1">{(template as any).code}</p>
+                      )}
                       <p className="text-xs text-gray-500 mb-2">Product Type: {template.ProductType?.name || 'N/A'}</p>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
                         {template.manufacturer && (
@@ -539,6 +569,9 @@ export default function BOMTemplates() {
                           <b className="text-gray-700">Drive Side:</b>{' '}
                           {template.drive_side === 'left' ? 'Left' : template.drive_side === 'right' ? 'Right' : 'L / R'}
                         </span>
+                        {template.system_size && (
+                          <span><b className="text-gray-700">System:</b> {template.system_size}</span>
+                        )}
                         {template.opening_direction && (
                           <span>
                             <b className="text-gray-700">Opening:</b>{' '}
@@ -547,13 +580,20 @@ export default function BOMTemplates() {
                         )}
                         {template.installation_location && (
                           <span>
-                            <b className="text-gray-700">Location:</b>{' '}
+                            <b className="text-gray-700">Installation:</b>{' '}
                             {template.installation_location === 'ceiling' ? 'Ceiling' : 'Wall'}
                           </span>
                         )}
-                        {(template.panel_count_min ?? 1) > 1 && (
-                          <span><b className="text-gray-700">Panels:</b> {template.panel_count_min}–{template.panel_count_max}</span>
+                        {template.system_size && (
+                          <span><b className="text-gray-700">Size:</b> {template.system_size}</span>
                         )}
+                        <span>
+                          <b className="text-gray-700">Headbox:</b>{' '}
+                          {template.headbox
+                            ? <span className="text-green-700 font-medium">Yes</span>
+                            : <span className="text-gray-400">No</span>
+                          }
+                        </span>
                       </div>
                       {template.description && <p className="text-xs text-gray-400 mt-1">{template.description}</p>}
                     </div>

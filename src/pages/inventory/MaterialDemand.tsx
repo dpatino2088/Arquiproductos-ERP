@@ -34,6 +34,8 @@ interface DemandRow {
   mo_status: string;
   on_hand: number;
   on_order: number;
+  manufacturer_id: string | null;
+  manufacturer_name: string | null;
   vendor_id: string | null;
   vendor_name: string | null;
   cost_exw: number;
@@ -52,6 +54,7 @@ interface DemandRow {
 interface CreatedPO {
   id: string;
   po_number: string;
+  manufacturer_name: string | null;
   vendor_name: string | null;
   line_count: number;
 }
@@ -106,6 +109,8 @@ export default function MaterialDemand() {
       const onOrderMap = new Map<string, number>();
 
       const vendorMap = new Map<string, {
+        manufacturer_id: string | null;
+        manufacturer_name: string | null;
         vendor_id: string | null;
         vendor_name: string | null;
         cost_exw: number;
@@ -163,23 +168,63 @@ export default function MaterialDemand() {
           .select('*')
           .in('id', catalogIds);
         const mfrIds = [...new Set((ciRows ?? []).map((c: any) => c.manufacturer_id).filter(Boolean))];
+
+        // Lookup vendor for each manufacturer via VendorManufacturers junction table
         const mfrVendorMap = new Map<string, { id: string; name: string }>();
+        const mfrNameMap = new Map<string, string>();
         if (mfrIds.length > 0) {
-          const { data: dvRows } = await supabase
-            .from('DirectoryVendors')
-            .select('id, name, manufacturer_id')
+          // Junction table lookup (preferred)
+          const { data: vmRows } = await supabase
+            .from('VendorManufacturers')
+            .select('manufacturer_id, vendor_id')
             .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false)
             .in('manufacturer_id', mfrIds);
-          (dvRows ?? []).forEach((v: any) => {
-            if (!mfrVendorMap.has(v.manufacturer_id)) {
-              mfrVendorMap.set(v.manufacturer_id, { id: v.id, name: v.name });
+          const vendorIdsNeeded = [...new Set((vmRows ?? []).map((r: any) => r.vendor_id))];
+          const vendorNameMap = new Map<string, string>();
+          if (vendorIdsNeeded.length > 0) {
+            const { data: dvRows } = await supabase
+              .from('DirectoryVendors')
+              .select('id, name')
+              .in('id', vendorIdsNeeded)
+              .eq('deleted', false);
+            (dvRows ?? []).forEach((v: any) => vendorNameMap.set(v.id, v.name));
+          }
+          (vmRows ?? []).forEach((r: any) => {
+            if (!mfrVendorMap.has(r.manufacturer_id)) {
+              const vName = vendorNameMap.get(r.vendor_id);
+              if (vName) mfrVendorMap.set(r.manufacturer_id, { id: r.vendor_id, name: vName });
             }
           });
+
+          // Fallback: legacy DirectoryVendors.manufacturer_id for any mfr not in junction
+          const missingMfrIds = mfrIds.filter(id => !mfrVendorMap.has(id));
+          if (missingMfrIds.length > 0) {
+            const { data: dvFallback } = await supabase
+              .from('DirectoryVendors')
+              .select('id, name, manufacturer_id')
+              .eq('organization_id', activeOrganizationId)
+              .eq('deleted', false)
+              .in('manufacturer_id', missingMfrIds);
+            (dvFallback ?? []).forEach((v: any) => {
+              if (!mfrVendorMap.has(v.manufacturer_id)) {
+                mfrVendorMap.set(v.manufacturer_id, { id: v.id, name: v.name });
+              }
+            });
+          }
+
+          // Manufacturer names
+          const { data: mfrRows } = await supabase
+            .from('Manufacturers')
+            .select('id, name')
+            .in('id', mfrIds);
+          (mfrRows ?? []).forEach((m: any) => mfrNameMap.set(m.id, m.name));
         }
+
         (ciRows ?? []).forEach((c: any) => {
           const vendor = c.manufacturer_id ? mfrVendorMap.get(c.manufacturer_id) : undefined;
           vendorMap.set(c.id, {
+            manufacturer_id: c.manufacturer_id ?? null,
+            manufacturer_name: c.manufacturer_id ? (mfrNameMap.get(c.manufacturer_id) ?? null) : null,
             vendor_id: vendor?.id ?? null,
             vendor_name: vendor?.name ?? null,
             cost_exw: Number(c.cost_exw ?? 0),
@@ -220,6 +265,8 @@ export default function MaterialDemand() {
           required_qty: Number(d.required_qty ?? 0),
           on_hand: onHandMap.get(d.catalog_item_id) ?? 0,
           on_order: onOrderMap.get(d.catalog_item_id) ?? 0,
+          manufacturer_id: v?.manufacturer_id ?? null,
+          manufacturer_name: v?.manufacturer_name ?? null,
           vendor_id: v?.vendor_id ?? null,
           vendor_name: v?.vendor_name ?? null,
           cost_exw: v?.cost_exw ?? 0,
@@ -345,10 +392,24 @@ export default function MaterialDemand() {
       return;
     }
 
-    const groups = new Map<string, { vendor_id: string | null; vendor_name: string | null; rows: DemandRow[] }>();
+    const groups = new Map<string, {
+      manufacturer_id: string | null;
+      manufacturer_name: string | null;
+      vendor_id: string | null;
+      vendor_name: string | null;
+      rows: DemandRow[];
+    }>();
     for (const r of withNeedToBuy) {
-      const key = r.vendor_id ?? '__no_vendor__';
-      if (!groups.has(key)) groups.set(key, { vendor_id: r.vendor_id, vendor_name: r.vendor_name, rows: [] });
+      const key = r.manufacturer_id ?? '__no_manufacturer__';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          manufacturer_id: r.manufacturer_id,
+          manufacturer_name: r.manufacturer_name,
+          vendor_id: r.vendor_id,
+          vendor_name: r.vendor_name,
+          rows: [],
+        });
+      }
       groups.get(key)!.rows.push(r);
     }
 
@@ -424,17 +485,28 @@ export default function MaterialDemand() {
         results.push({
           id: po.id,
           po_number: po.po_number ?? po.id,
+          manufacturer_name: group.manufacturer_name,
           vendor_name: group.vendor_name,
           line_count: lines.length,
         });
       } catch (err: unknown) {
-        addNotification({ type: 'error', title: 'Error', message: `Failed to create PO for ${group.vendor_name ?? 'No Vendor'}: ${(err as Error).message}` });
+        const label = group.manufacturer_name ?? group.vendor_name ?? 'Unknown';
+        addNotification({ type: 'error', title: 'Error', message: `Failed to create PO for ${label}: ${(err as Error).message}` });
       }
     }
 
     if (results.length > 0) {
       setCreatedPOs(results);
       setSelectedRows(new Set());
+      const noVendor = results.filter(r => !r.vendor_name);
+      if (noVendor.length > 0) {
+        const names = noVendor.map(r => r.manufacturer_name ?? 'Unknown').join(', ');
+        addNotification({
+          type: 'warning',
+          title: 'POs Created Without Vendor',
+          message: `${noVendor.length} PO(s) created without a vendor for: ${names}. Assign vendors in Partners > Vendors.`,
+        });
+      }
       addNotification({ type: 'success', title: 'Purchase Orders Created', message: `${results.length} PO(s) created successfully.` });
       await queryClient.invalidateQueries({ queryKey: ['material-demand', activeOrganizationId] });
     }
@@ -561,7 +633,11 @@ export default function MaterialDemand() {
               <div key={po.id} className="flex items-center justify-between text-sm">
                 <span className="text-green-900">
                   <span className="font-medium">{po.po_number}</span>
-                  <span className="text-green-700 ml-2">{po.vendor_name ?? 'No Vendor'}</span>
+                  <span className="text-green-700 ml-2">{po.manufacturer_name ?? 'Unknown'}</span>
+                  {po.vendor_name
+                    ? <span className="text-green-600 ml-1">→ {po.vendor_name}</span>
+                    : <span className="text-amber-600 ml-1">(no vendor assigned)</span>
+                  }
                   <span className="text-green-600 ml-2">({po.line_count} lines)</span>
                 </span>
                 <button

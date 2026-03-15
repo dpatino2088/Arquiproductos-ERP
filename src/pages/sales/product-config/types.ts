@@ -10,7 +10,11 @@ export type ProductType =
   | 'drapery'
   | 'awning'
   | 'window-film'
-  | 'accessories';
+  | 'honey-comb'
+  | 'vertical'
+  | 'wood'
+  | 'roman-shade'
+  | 'catalog';
 
 // Panel interface for multi-panel support (for interconnected curtains)
 // Note: height_mm is stored globally in height_mm field, not per panel
@@ -63,6 +67,7 @@ export interface RollerShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
+  gear_ratio?: 'standard' | '1:1.5' | '1:1.3' | string;
   operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
@@ -104,6 +109,7 @@ export interface DualShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
+  gear_ratio?: 'standard' | '1:1.5' | '1:1.3' | string;
   operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
@@ -159,6 +165,7 @@ export interface TripleShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
+  gear_ratio?: 'standard' | '1:1.5' | '1:1.3' | string;
   operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
@@ -185,8 +192,9 @@ export interface TripleShadeConfig extends BaseProductConfig {
 // Drapery Configuration
 export interface DraperyConfig extends BaseProductConfig {
   productType: 'drapery';
-  // Drapery style — drives FabricRules + SystemRules lookup
-  styleCode?: 'wave_2.3' | 'wave_2.8' | 'pinch_pleat';
+  // Drapery style — drives FabricRules lookup (fabric_group based)
+  styleCode?: 'wave_2.0' | 'wave_2.3' | 'wave_2.8' | 'pinch_pleat' | string;
+  systemSize?: string; // Track/rail profile size (e.g. '48mm', '60mm')
   // Legacy fields (kept for backward compatibility)
   trackSystem?: 'wave' | 'ripple-fold' | 'pleated';
   trackType?: string;
@@ -197,6 +205,8 @@ export interface DraperyConfig extends BaseProductConfig {
   // Opening & Drive Side — filters BOMTemplates
   openingDirection?: 'left' | 'right' | 'center';
   driveSide?: 'left' | 'right';
+  // Track Only — customer supplies their own fabric
+  track_only?: boolean;
   // Fabric
   fabric?: {
     manufacturer?: 'coulisse' | 'vertilux';
@@ -255,10 +265,14 @@ export interface WindowFilmConfig extends BaseProductConfig {
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }
 
-// Accessories-only configuration (no measurements/variants/hardware; goes straight to AccessoriesStep)
-export interface AccessoriesConfig extends BaseProductConfig {
-  productType: 'accessories';
-  accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
+// Catalog Item configuration — one SKU × quantity, creates a ConfiguredProduct
+export interface CatalogItemConfig extends BaseProductConfig {
+  productType: 'catalog';
+  catalog_item_id: string;
+  name: string;
+  sku: string;
+  qty: number;
+  unit_price: number;
 }
 
 // Union type for all product configurations
@@ -269,5 +283,5 @@ export type ProductConfig =
   | DraperyConfig
   | AwningConfig
   | WindowFilmConfig
-  | AccessoriesConfig;
+  | CatalogItemConfig;
 

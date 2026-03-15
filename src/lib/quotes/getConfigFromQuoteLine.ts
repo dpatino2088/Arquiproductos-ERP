@@ -223,6 +223,7 @@ export async function getConfigFromQuoteLine(
         setFromSnap('tube_item_id', 'tube_item_id', 'tubeItemId');
         setFromSnap('drive_sku', 'drive_sku', 'driveSku');
         setFromSnap('drive_item_id', 'drive_item_id', 'driveItemId');
+        setFromSnap('gear_ratio', 'gear_ratio');
         setFromSnap('motor_sku', 'motor_sku', 'motorSku');
         setFromSnap('motor_item_id', 'motor_item_id', 'motorItemId');
         setFromSnap('operation_type', 'operation_type', 'operating_type');
@@ -246,6 +247,18 @@ export async function getConfigFromQuoteLine(
         if (config.motorSku && !config.motor_sku) config.motor_sku = config.motorSku;
         if (config.hardwareColor && !config.hardware_color) config.hardware_color = config.hardwareColor;
         if (config.hardware_color && !config.hardwareColor) config.hardwareColor = config.hardware_color;
+
+        // ── Drapery-specific: ensure camelCase aliases exist ──
+        if (config.product_line && !config.productLine) config.productLine = config.product_line;
+        if (config.productLine && !config.product_line) config.product_line = config.productLine;
+        if (config.style_code && !config.styleCode) config.styleCode = config.style_code;
+        if (config.styleCode && !config.style_code) config.style_code = config.styleCode;
+        if (config.system_size && !config.systemSize) config.systemSize = config.system_size;
+        if (config.systemSize && !config.system_size) config.system_size = config.systemSize;
+        if (config.opening_direction && !config.openingDirection) config.openingDirection = config.opening_direction;
+        if (config.openingDirection && !config.opening_direction) config.opening_direction = config.openingDirection;
+        if (config.drive_side && !config.driveSide) config.driveSide = config.drive_side;
+        if (config.driveSide && !config.drive_side) config.drive_side = config.driveSide;
 
         // ── Normalize hardware_color to capitalized (White/Black/Silver) ──
         const hc = config.hardware_color;
@@ -322,6 +335,49 @@ export async function getConfigFromQuoteLine(
       }
     } else {
       console.warn('[getConfigFromQuoteLine] CP not found', { cpId });
+    }
+  }
+
+  // ── 6b. Recover drapery fields from BOM template when snapshot is incomplete ──
+  const isDrapery = config.productType === 'drapery';
+  const bomTemplateId = config.bom_template_id || line.bom_template_id;
+  const needsDraperyRecovery = isDrapery && bomTemplateId && (
+    (!config.productLine && !config.product_line) ||
+    (!config.systemSize && !config.system_size) ||
+    (!config.openingDirection && !config.opening_direction) ||
+    (!config.driveSide && !config.drive_side) ||
+    !config.manufacturer
+  );
+  if (needsDraperyRecovery) {
+    const { data: bt } = await supabase
+      .from('BOMTemplates')
+      .select('product_line, system_size, manufacturer, opening_direction, drive_side, hardware_color')
+      .eq('id', bomTemplateId)
+      .maybeSingle();
+    if (bt) {
+      if (bt.product_line && !config.productLine && !config.product_line) {
+        config.product_line = bt.product_line;
+        config.productLine = bt.product_line;
+      }
+      if (bt.system_size && !config.systemSize && !config.system_size) {
+        config.system_size = bt.system_size;
+        config.systemSize = bt.system_size;
+      }
+      if (bt.manufacturer && !config.manufacturer) {
+        config.manufacturer = bt.manufacturer;
+      }
+      if (bt.opening_direction && !config.openingDirection && !config.opening_direction) {
+        config.opening_direction = bt.opening_direction;
+        config.openingDirection = bt.opening_direction;
+      }
+      if (bt.drive_side && !config.driveSide && !config.drive_side) {
+        config.drive_side = bt.drive_side;
+        config.driveSide = bt.drive_side;
+      }
+      if (bt.hardware_color && !config.hardwareColor && !config.hardware_color) {
+        config.hardware_color = bt.hardware_color;
+        config.hardwareColor = bt.hardware_color;
+      }
     }
   }
 

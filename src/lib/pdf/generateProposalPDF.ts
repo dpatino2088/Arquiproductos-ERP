@@ -281,9 +281,11 @@ export function generateProposalPDF(
   const buildDescriptionCell = (line: ProposalPDFLine): string => {
     const name = line.description || line.product_type || '—';
     const skuPart = line.sku ? ` (${line.sku})` : '';
+    const driveLabel = line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '';
     const panelLabel = line.panel_count != null && line.panel_count >= 1
       ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
       : '';
+    const drivePart = driveLabel ? `\n${driveLabel}` : '';
     let dimsPart = '';
     if (includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—') {
       dimsPart = `\n${line.dimensions}`;
@@ -292,7 +294,7 @@ export function generateProposalPDF(
       dimsPart = `\n${panelLabel}`;
     }
     const installPart = line.install_included ? '\nInstall Included' : '';
-    return `${name}${skuPart}${dimsPart}${installPart}`.trim();
+    return `${name}${skuPart}${drivePart}${dimsPart}${installPart}`.trim();
   };
 
   const tableData = lines.map((line, index) => [

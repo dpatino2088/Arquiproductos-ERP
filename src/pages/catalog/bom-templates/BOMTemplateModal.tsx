@@ -12,26 +12,37 @@ import {
 import { Tooltip, TooltipProvider } from '../../../components/ui/Tooltip';
 import { getRoleLabel, getAllRoleOptions } from '../../../lib/bom/roles';
 import { useManufacturers } from '../../../hooks/useCatalog';
-import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS } from './types';
+import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS, getCascadeLabel, getCascadeOrder } from './types';
 import { useBOMTemplateForm } from './useBOMTemplateForm';
 import BOMChildrenModal from './BOMChildrenModal';
 import type { BOMComponentDraft } from './types';
 
 const HARDWARE_COLORS = ['White', 'Black', 'Silver', 'Bronze', 'Grey'] as const;
-const PANEL_COUNT_OPTIONS = [
-  { value: 1, label: '1 paño' },
-  { value: 2, label: '2 paños' },
-  { value: 3, label: '3 paños' },
+const PRODUCT_LINE_OPTIONS = [
+  { value: 'wave_drapery', label: 'Wave Drapery' },
+  { value: 'ripple_fold', label: 'Ripple Fold' },
+  { value: 'pinch_pleat', label: 'Pinch Pleat' },
+] as const;
+const SYSTEM_SIZE_OPTIONS_DRAPERY = [
+  { value: '48mm', label: '48 mm' },
+  { value: '54mm', label: '54 mm' },
+  { value: '60mm', label: '60 mm' },
+  { value: '80mm', label: '80 mm' },
+] as const;
+const SYSTEM_SIZE_OPTIONS_ROLLER = [
+  { value: 'XS', label: 'XS' },
+  { value: 'S',  label: 'S'  },
+  { value: 'M',  label: 'M'  },
+  { value: 'L',  label: 'L'  },
+  { value: 'XL', label: 'XL' },
 ] as const;
 
 const QTY_TYPE_LABELS: Record<string, string> = {
   fixed: 'Fixed',
   per_width: 'Per Width',
   per_height: 'Per Height',
-  per_area: 'Per Area',
   per_spacing: 'Per Spacing',
   per_joint: 'Per Joint',
-  per_fabric_width: 'Per Fabric Width Used',
 };
 
 export interface BOMTemplateModalProps {
@@ -53,6 +64,49 @@ export default function BOMTemplateModal({
   const { manufacturers } = useManufacturers();
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [codeManuallyEdited, setCodeManuallyEdited] = useState(() => !!editingTemplateId);
+
+  const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
+  const isDrapery = !!(selectedPt && (selectedPt.code === 'drapery' || selectedPt.name?.toLowerCase().includes('drapery')));
+  // Drapery templates no longer use system_size at the template level.
+  // Glider size is handled via condition_key/condition_value on BOMComponents.
+  const needsSystemSize = false;
+
+  const autoCode = React.useMemo(() => {
+    const parts: string[] = [];
+    const ptName = selectedPt?.code?.toUpperCase() || selectedPt?.name?.toUpperCase().replace(/\s+/g, '_') || '';
+    if (ptName) parts.push(ptName);
+    if (isDrapery && form.templateProductLine) {
+      parts.push(form.templateProductLine.toUpperCase());
+    }
+    if (form.templateOpeningDirection && form.templateOpeningDirection !== 'all') {
+      parts.push(form.templateOpeningDirection.toUpperCase());
+    }
+    if (form.templateDriveType) parts.push(form.templateDriveType.toUpperCase());
+    if (form.templateHardwareColor) parts.push(form.templateHardwareColor.toUpperCase().replace(/\s+/g, '_'));
+    if (form.templateDriveSide && form.templateDriveSide !== 'both') {
+      parts.push(form.templateDriveSide.toUpperCase());
+    }
+    if (form.templateInstallationLocation && form.templateInstallationLocation !== 'both') {
+      parts.push(form.templateInstallationLocation.toUpperCase());
+    }
+    if (form.templateManufacturer) {
+      const abbr = form.templateManufacturer.substring(0, 3).toUpperCase();
+      parts.push(abbr.length >= 2 ? abbr : form.templateManufacturer.toUpperCase());
+    }
+    if (form.templateSystemSize) {
+      parts.push(form.templateSystemSize.toUpperCase().replace(/\s+/g, '_'));
+    }
+    if (form.templateHeadbox) parts.push('HB');
+    return parts.join('_') || '';
+  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, form.templateHeadbox]);
+
+  useEffect(() => {
+    if (!codeManuallyEdited && autoCode) {
+      form.setTemplateCode(autoCode);
+      form.setTemplateName(autoCode);
+    }
+  }, [autoCode, codeManuallyEdited]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedRows(prev => {
@@ -116,19 +170,19 @@ export default function BOMTemplateModal({
   };
 
   const getQtyDisplay = (comp: BOMComponentDraft) => {
-    if (comp.qty_type === 'fixed') return String(comp.qty_value ?? '—');
+    const pp = comp.per_panel ? ' ⧫PP' : '';
+    if (comp.qty_type === 'fixed') return `${comp.qty_value ?? '—'}${pp}`;
     if (comp.qty_type === 'per_spacing') {
       const sp = comp.qty_spacing_mm ?? 500;
       const min = comp.qty_min;
-      return `Every ${sp}mm${min != null ? ` (min ${min})` : ''}`;
+      return `Every ${sp}mm${min != null ? ` (min ${min})` : ''}${pp}`;
     }
     if (comp.qty_type === 'per_joint') {
-      const sp = comp.qty_spacing_mm ?? 4000;
-      return `Joint every ${sp}mm (segments−1)`;
+      return `Per Joint ×${comp.qty_value ?? 1}`;
     }
     const label = QTY_TYPE_LABELS[comp.qty_type || 'fixed'] || comp.qty_type || '—';
     const mult = comp.qty_value != null && comp.qty_value !== 1 ? ` x${comp.qty_value}` : '';
-    return `${label}${mult}`;
+    return `${label}${mult}${pp}`;
   };
 
   // Group flatFilteredItems by category for dropdown
@@ -164,239 +218,252 @@ export default function BOMTemplateModal({
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-            {/* Product Type */}
-            <div>
-              <Label htmlFor="product-type">Product Type *</Label>
-              <SelectShadcn
-                value={form.productTypeId}
-                onValueChange={form.setProductTypeId}
-              >
-                <SelectTrigger id="product-type">
-                  <SelectValue placeholder="Select product type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {form.productTypes.map((pt) => (
-                    <SelectItem key={pt.id} value={pt.id}>
-                      {pt.name || pt.code || pt.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectShadcn>
-            </div>
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
 
-            {/* Code */}
-            <div>
-              <Label htmlFor="template-code">Code *</Label>
-              <Input
-                id="template-code"
-                value={form.templateCode}
-                onChange={(e) => form.setTemplateCode(e.target.value)}
-                placeholder="TEMPLATE_CODE"
-              />
-            </div>
-
-            {/* Name + Description */}
+            {/* ── ROW 1: Product Type + Manufacturer ── */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="template-name">Name *</Label>
-                <Input
-                  id="template-name"
-                  value={form.templateName}
-                  onChange={(e) => form.setTemplateName(e.target.value)}
-                  placeholder="Template name"
-                />
-              </div>
-              <div>
-                <Label htmlFor="template-description">Description</Label>
-                <Input
-                  id="template-description"
-                  value={form.templateDescription}
-                  onChange={(e) => form.setTemplateDescription(e.target.value)}
-                  placeholder="Description"
-                />
-              </div>
-            </div>
-
-            {/* Hardware Color + Panel Count */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="hardware-color" required>
-                  Hardware Color
-                </Label>
-                <SelectShadcn
-                  value={form.templateHardwareColor}
-                  onValueChange={form.setTemplateHardwareColor}
-                >
-                  <SelectTrigger id="hardware-color">
-                    <SelectValue placeholder="Select color" />
-                  </SelectTrigger>
+                <Label required>Product Type</Label>
+                <SelectShadcn value={form.productTypeId} onValueChange={form.setProductTypeId}>
+                  <SelectTrigger><SelectValue placeholder="Select product type" /></SelectTrigger>
                   <SelectContent>
-                    {HARDWARE_COLORS.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
+                    {form.productTypes.map((pt) => (
+                      <SelectItem key={pt.id} value={pt.id}>{pt.name || pt.code || pt.id}</SelectItem>
                     ))}
                   </SelectContent>
                 </SelectShadcn>
               </div>
               <div>
-                <Label htmlFor="panel-count" required>
-                  Panel Count
-                </Label>
-                <SelectShadcn
-                  value={String(form.templatePanelCount)}
-                  onValueChange={(v) =>
-                    form.setTemplatePanelCount(Number(v) as 1 | 2 | 3)
-                  }
-                >
-                  <SelectTrigger id="panel-count">
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PANEL_COUNT_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={String(o.value)}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </SelectShadcn>
-              </div>
-            </div>
-
-            {/* Manufacturer + Product Line */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Manufacturer *</Label>
-                <SelectShadcn
-                  value={form.templateManufacturer || ''}
-                  onValueChange={(v) => form.setTemplateManufacturer(v || null)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select manufacturer" />
-                  </SelectTrigger>
+                <Label required>Manufacturer</Label>
+                <SelectShadcn value={form.templateManufacturer || ''} onValueChange={(v) => form.setTemplateManufacturer(v || null)}>
+                  <SelectTrigger><SelectValue placeholder="Select manufacturer" /></SelectTrigger>
                   <SelectContent>
                     {manufacturers.map((m) => (
-                      <SelectItem key={m.id} value={m.name}>
-                        {m.name}
-                      </SelectItem>
+                      <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </SelectShadcn>
               </div>
-              {(() => {
-                const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
-                const isDrapery = selectedPt && (selectedPt.code === 'drapery' || selectedPt.name?.toLowerCase().includes('drapery'));
-                if (!isDrapery) return <div />;
-                return (
-                  <div>
-                    <Label>Product Line *</Label>
-                    <Input
-                      value={form.templateProductLine || ''}
-                      onChange={(e) => form.setTemplateProductLine(e.target.value || null)}
-                      placeholder="e.g. Ripple Fold, Wave, Pinch Pleat"
-                    />
-                  </div>
-                );
-              })()}
             </div>
 
-            {/* Drive Type + Opening Direction (Drapery only) + Drive Side — unified toggle */}
-            {(() => {
-              const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
-              const isDrapery = selectedPt && (selectedPt.code === 'drapery' || selectedPt.name?.toLowerCase().includes('drapery'));
-              const hasDriveType = !!form.templateDriveType;
-              const openDir = form.templateOpeningDirection;
-
-              const driveSideToggle = (
+            {/* ── ROW 2: Product Line + System Size (Drapery only) ── */}
+            {isDrapery && (
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Drive Side *</Label>
-                  {!hasDriveType ? (
-                    <div className="mt-1 text-xs text-gray-500 py-1.5">Select drive type first</div>
-                  ) : (
-                    <SelectShadcn
-                      value={form.templateDriveSide ?? ''}
-                      onValueChange={(v) => form.setTemplateDriveSide(v as 'left' | 'right' | 'both')}
-                    >
-                      <SelectTrigger className="text-xs mt-1">
-                        <SelectValue placeholder="Select side" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="left">Left</SelectItem>
-                        <SelectItem value="right">Right</SelectItem>
-                        <SelectItem value="both">Left and Right</SelectItem>
-                      </SelectContent>
-                    </SelectShadcn>
-                  )}
+                  <Label required>Product Line</Label>
+                  <SelectShadcn
+                    value={form.templateProductLine || ''}
+                    onValueChange={(v) => {
+                      form.setTemplateProductLine(v || null);
+                      if (v === 'pinch_pleat') form.setTemplateSystemSize(null);
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select product line" /></SelectTrigger>
+                    <SelectContent>
+                      {PRODUCT_LINE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
                 </div>
-              );
-
-              return (
-                <div className={`grid gap-4 ${isDrapery ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                {needsSystemSize ? (
                   <div>
-                    <Label>Drive Type *</Label>
-                    <SelectShadcn
-                      value={form.templateDriveType ?? ''}
-                      onValueChange={(v) => {
-                        form.setTemplateDriveType(v as 'manual' | 'motor');
-                      }}
-                    >
-                      <SelectTrigger className="text-xs mt-1">
-                        <SelectValue placeholder="Select drive type" />
-                      </SelectTrigger>
+                    <Label>System Size</Label>
+                    <SelectShadcn value={form.templateSystemSize || ''} onValueChange={(v) => form.setTemplateSystemSize(v || null)}>
+                      <SelectTrigger><SelectValue placeholder="Select system size" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="manual">Manual</SelectItem>
-                        <SelectItem value="motor">Motor</SelectItem>
+                        {SYSTEM_SIZE_OPTIONS_DRAPERY.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </SelectShadcn>
                   </div>
+                ) : (
+                  <div />
+                )}
+              </div>
+            )}
+
+            {/* ── ROW 3: Hardware Color + Drive Type ── */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label required>Hardware Color</Label>
+                <SelectShadcn value={form.templateHardwareColor} onValueChange={form.setTemplateHardwareColor}>
+                  <SelectTrigger><SelectValue placeholder="Select color" /></SelectTrigger>
+                  <SelectContent>
+                    {HARDWARE_COLORS.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+              <div>
+                <Label required>Drive Type</Label>
+                <SelectShadcn value={form.templateDriveType ?? ''} onValueChange={(v) => form.setTemplateDriveType(v as 'manual' | 'motor')}>
+                  <SelectTrigger><SelectValue placeholder="Select drive type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="motor">Motor</SelectItem>
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+            </div>
+
+            {/* ── ROW 4: Opening Direction + Drive Side ── */}
+            {(() => {
+              const hasDriveType = !!form.templateDriveType;
+              return (
+                <div className={`grid gap-4 ${isDrapery ? 'grid-cols-3' : 'grid-cols-2'}`}>
                   {isDrapery && (
                     <div>
-                      <Label>Opening Direction *</Label>
-                      <SelectShadcn
-                        value={form.templateOpeningDirection ?? ''}
-                        onValueChange={(v) => {
-                          const val = v as 'left' | 'center' | 'right' | 'all';
-                          form.setTemplateOpeningDirection(val);
-                          if (val === 'left') form.setTemplateDriveSide('left');
-                          else if (val === 'right') form.setTemplateDriveSide('right');
-                          else form.setTemplateDriveSide('both');
-                        }}
-                      >
-                        <SelectTrigger className="text-xs mt-1">
-                          <SelectValue placeholder="Select direction" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="left">Left</SelectItem>
-                          <SelectItem value="center">Center</SelectItem>
-                          <SelectItem value="right">Right</SelectItem>
-                          <SelectItem value="all">Left and Right</SelectItem>
-                        </SelectContent>
-                      </SelectShadcn>
+                      <Label required>Opening Direction</Label>
+                      {!hasDriveType ? (
+                        <p className="mt-1.5 text-xs text-gray-400 italic">Select drive type first</p>
+                      ) : (
+                        <SelectShadcn
+                          value={form.templateOpeningDirection ?? ''}
+                          onValueChange={(v) => {
+                            const val = v as 'left' | 'center' | 'right' | 'all';
+                            form.setTemplateOpeningDirection(val);
+                            if (val === 'left') form.setTemplateDriveSide('left');
+                            else if (val === 'right') form.setTemplateDriveSide('right');
+                            else form.setTemplateDriveSide('both');
+                          }}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Select direction" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="left">Left</SelectItem>
+                            <SelectItem value="center">Center</SelectItem>
+                            <SelectItem value="right">Right</SelectItem>
+                            <SelectItem value="all">Left and Right</SelectItem>
+                          </SelectContent>
+                        </SelectShadcn>
+                      )}
                     </div>
                   )}
-                  {driveSideToggle}
+                  <div>
+                    <Label required>Drive Side</Label>
+                    {!hasDriveType ? (
+                      <p className="mt-1.5 text-xs text-gray-400 italic">Select drive type first</p>
+                    ) : (
+                      <SelectShadcn value={form.templateDriveSide ?? ''} onValueChange={(v) => form.setTemplateDriveSide(v as 'left' | 'right' | 'both')}>
+                        <SelectTrigger><SelectValue placeholder="Select side" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="left">Left</SelectItem>
+                          <SelectItem value="right">Right</SelectItem>
+                          <SelectItem value="both">Both (any)</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
+                    )}
+                  </div>
+                  {!isDrapery && <div />}
                 </div>
               );
             })()}
 
-            {/* Installation Location */}
-            <div>
-              <Label>Installation Location</Label>
-              <SelectShadcn
-                value={form.templateInstallationLocation ?? 'any'}
-                onValueChange={(v) => form.setTemplateInstallationLocation(v === 'any' ? null : v as 'ceiling' | 'wall')}
-              >
-                <SelectTrigger className="text-xs mt-1">
-                  <SelectValue placeholder="Both (any)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="any">Both (any)</SelectItem>
-                  <SelectItem value="ceiling">Ceiling</SelectItem>
-                  <SelectItem value="wall">Wall</SelectItem>
-                </SelectContent>
-              </SelectShadcn>
-              <p className="text-[10px] text-gray-400 mt-0.5">Only set when model has ceiling/wall variants</p>
+            {/* ── ROW 5: System Size (non-drapery) + Installation ── */}
+            <div className="grid grid-cols-2 gap-4">
+              {!isDrapery && (
+                <div>
+                  <Label>System Size</Label>
+                  <SelectShadcn
+                    value={form.templateSystemSize || 'any'}
+                    onValueChange={(v) => form.setTemplateSystemSize(v === 'any' ? null : v)}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Any size" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Any size</SelectItem>
+                      {SYSTEM_SIZE_OPTIONS_ROLLER.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                </div>
+              )}
+              <div>
+                <Label>Installation</Label>
+                <SelectShadcn
+                  value={form.templateInstallationLocation ?? 'any'}
+                  onValueChange={(v) => form.setTemplateInstallationLocation(v === 'any' ? null : v as 'ceiling' | 'wall')}
+                >
+                  <SelectTrigger><SelectValue placeholder="Both (any)" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Both (any)</SelectItem>
+                    <SelectItem value="ceiling">Ceiling</SelectItem>
+                    <SelectItem value="wall">Wall</SelectItem>
+                  </SelectContent>
+                </SelectShadcn>
+              </div>
+              {isDrapery && <div />}
+            </div>
+
+            {/* ── ROW 6: Headbox toggle — only for roller / dual-shade / triple ── */}
+            {['roller', 'dual-shade', 'triple'].includes(selectedPt?.code ?? '') && (
+              <div className="flex items-center gap-3 py-1">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={form.templateHeadbox}
+                    onChange={(e) => form.setTemplateHeadbox(e.target.checked)}
+                    className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                  />
+                  <span className="text-sm font-medium text-gray-900">Includes Headbox / Cassette</span>
+                </label>
+                <p className="text-xs text-gray-400">
+                  {form.templateHeadbox ? 'This template requires a headbox. Code will include _HB.' : 'No headbox — template matches products without cassette.'}
+                </p>
+              </div>
+            )}
+
+            {/* ── ROW 7: Auto-generated Code + Name + Description ── */}
+            <div className="border-t border-gray-200 pt-4 space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label htmlFor="template-code">Code *</Label>
+                  {!codeManuallyEdited && autoCode && (
+                    <span className="text-[10px] text-green-600 font-medium">Auto-generated</span>
+                  )}
+                </div>
+                <Input
+                  id="template-code"
+                  value={form.templateCode}
+                  onChange={(e) => {
+                    setCodeManuallyEdited(true);
+                    form.setTemplateCode(e.target.value);
+                  }}
+                  placeholder="TEMPLATE_CODE"
+                  className="font-mono text-xs"
+                />
+                {codeManuallyEdited && autoCode && (
+                  <button
+                    type="button"
+                    onClick={() => { setCodeManuallyEdited(false); form.setTemplateCode(autoCode); form.setTemplateName(autoCode); }}
+                    className="text-[10px] text-primary hover:underline mt-0.5"
+                  >
+                    Reset to auto-generated
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="template-name">Name *</Label>
+                  <Input
+                    id="template-name"
+                    value={form.templateName}
+                    onChange={(e) => form.setTemplateName(e.target.value)}
+                    placeholder="Template name"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="template-description">Description</Label>
+                  <Input
+                    id="template-description"
+                    value={form.templateDescription}
+                    onChange={(e) => form.setTemplateDescription(e.target.value)}
+                    placeholder="Optional description"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Components section */}
@@ -592,7 +659,7 @@ export default function BOMTemplateModal({
                       </div>
                     </div>
                   )}
-                  {(form.formData.qty_type === 'per_width' || form.formData.qty_type === 'per_height' || form.formData.qty_type === 'per_area') && (
+                  {(form.formData.qty_type === 'per_width' || form.formData.qty_type === 'per_height') && (
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label>Multiplier</Label>
@@ -685,6 +752,23 @@ export default function BOMTemplateModal({
                         Required
                       </Label>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="per-panel"
+                        checked={form.formData.per_panel ?? false}
+                        onChange={(e) =>
+                          form.setFormData((prev) => ({
+                            ...prev,
+                            per_panel: e.target.checked,
+                          }))
+                        }
+                        className="rounded border-gray-300"
+                      />
+                      <Label htmlFor="per-panel" className="mb-0">
+                        Per Panel
+                      </Label>
+                    </div>
                     <div>
                       <Label>Order</Label>
                       <Input
@@ -721,12 +805,25 @@ export default function BOMTemplateModal({
                     {form.formData.condition_key ? (
                       <div className="w-40">
                         <Label>Value</Label>
-                        <Input
-                          value={form.formData.condition_value || ''}
-                          onChange={(e) => form.setFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
-                          placeholder="e.g. wall, true"
-                          className="text-sm"
-                        />
+                        {CONDITION_VALUE_OPTIONS[form.formData.condition_key] ? (
+                          <select
+                            value={form.formData.condition_value || ''}
+                            onChange={(e) => form.setFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                          >
+                            <option value="">— Select —</option>
+                            {CONDITION_VALUE_OPTIONS[form.formData.condition_key].map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            value={form.formData.condition_value || ''}
+                            onChange={(e) => form.setFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
+                            placeholder="Value"
+                            className="text-sm"
+                          />
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -767,11 +864,11 @@ export default function BOMTemplateModal({
                       <th className="text-center px-2 py-2 font-medium">ΔX</th>
                       <th className="text-center px-2 py-2 font-medium">ΔY</th>
                       <th className="text-left px-3 py-2 font-medium">Role</th>
+                      <th className="text-left px-3 py-2 font-medium">Depends On</th>
                       <th className="text-left px-3 py-2 font-medium">
                         Children
                       </th>
                       <th className="text-left px-3 py-2 font-medium">Eng.</th>
-                      <th className="text-left px-3 py-2 font-medium">Order</th>
                       <th className="text-left px-3 py-2 font-medium">Req.</th>
                       <th className="text-left px-3 py-2 font-medium">Condition</th>
                       <th className="text-right px-3 py-2 font-medium">
@@ -787,7 +884,7 @@ export default function BOMTemplateModal({
                           className="bg-gray-100 font-medium text-gray-700"
                         >
                           <td
-                            colSpan={12}
+                            colSpan={13}
                             className="px-3 py-1.5"
                           >
                             {group.category_name}
@@ -855,7 +952,21 @@ export default function BOMTemplateModal({
                                   ) : <span className="text-xs text-gray-300">—</span>}
                                 </td>
                                 <td className="px-3 py-2">
-                                  {getRoleLabel(comp.component_role)}
+                                  <span className="text-gray-700">{getRoleLabel(comp.component_role)}</span>
+                                  {getCascadeLabel(comp.component_role) && (
+                                    <span className="ml-1.5 text-[10px] text-gray-400">{getCascadeLabel(comp.component_role)?.split(' ')[0]}</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {comp.depends_on_role ? (
+                                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-mono">
+                                      ← {getRoleLabel(comp.depends_on_role)}
+                                    </span>
+                                  ) : comp.uom === 'm' || comp.uom === 'm2' ? (
+                                    <span className="text-[10px] text-gray-400">base</span>
+                                  ) : (
+                                    <span className="text-gray-300">—</span>
+                                  )}
                                 </td>
                                 <td className="px-3 py-2">{childCount}</td>
                                 <td className="px-3 py-2">
@@ -864,9 +975,6 @@ export default function BOMTemplateModal({
                                   ) : (
                                     '—'
                                   )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {comp.sort_order ?? comp.sequence_order ?? 0}
                                 </td>
                                 <td className="px-3 py-2">
                                   {comp.is_required !== false ? (
@@ -969,11 +1077,9 @@ export default function BOMTemplateModal({
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {getRoleLabel(child.component_role)}
                                       </td>
+                                      <td className="px-3 py-1.5 text-gray-300">—</td>
                                       <td className="px-3 py-1.5" />
                                       <td className="px-3 py-1.5" />
-                                      <td className="px-3 py-1.5 text-gray-500">
-                                        {child.sort_order ?? 0}
-                                      </td>
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {child.is_required !== false
                                           ? 'Yes'
@@ -1012,9 +1118,15 @@ export default function BOMTemplateModal({
               disabled={
                 form.isSaving || form.displayComponents.length === 0
               }
-              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="relative px-4 py-2 text-sm font-medium text-white bg-primary rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {form.isSaving ? 'Saving…' : 'Save'}
+              {form.childrenHavePendingChanges && !form.isSaving && (
+                <span
+                  className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border border-white"
+                  title="Children have unsaved changes"
+                />
+              )}
             </button>
           </div>
         </div>
@@ -1039,6 +1151,7 @@ export default function BOMTemplateModal({
         catalogItems={form.catalogItems}
         categories={form.categories}
         parentComponentRole={form.editingParentComponentRole}
+        hasPendingChanges={form.childrenHavePendingChanges}
         onClose={form.handleCloseChildrenModal}
         onAddChild={form.handleAddChild}
         onDeleteChild={form.handleDeleteChild}

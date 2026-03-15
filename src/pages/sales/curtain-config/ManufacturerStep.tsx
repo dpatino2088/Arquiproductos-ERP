@@ -138,7 +138,7 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
                 _manufacturer_filtered_templates: templatesByMfr.get(mfr.name) || null,
                 _hardware_filtered_templates: undefined,
               })}
-              className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+              className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer ${
                 isSelected
                   ? 'border-2 border-gray-900 shadow-lg'
                   : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -156,7 +156,7 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
                   <Building2 className="w-16 h-16 text-gray-300" />
                 )}
               </div>
-              <div className="p-4 bg-gray-100">
+              <div className="p-4 bg-gray-100 flex-1">
                 <h3 className={`font-semibold text-sm truncate text-center ${
                   isSelected ? 'text-gray-900' : 'text-gray-900'
                 }`}>

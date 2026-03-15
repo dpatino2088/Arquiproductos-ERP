@@ -22,24 +22,25 @@ export type UseDealerConfiguratorPolicyResult = {
 };
 
 /**
- * Loads DealerConfiguratorPolicies for the current acting-as dealer.
- * - policy null = not acting as dealer or no policy row (no restriction).
+ * Loads DealerConfiguratorPolicies for the effective dealer.
+ * Priority: overrideDealerId (from Quote) > activeDealerId (acting-as context).
+ * - policy null = no dealer or no policy row (no restriction).
  * - allowed_product_type_codes are normalized to lowercase for case-insensitive matching.
  */
-export function useDealerConfiguratorPolicy(): UseDealerConfiguratorPolicyResult {
+export function useDealerConfiguratorPolicy(overrideDealerId?: string | null): UseDealerConfiguratorPolicyResult {
   const { activeDealerId } = useActingAsContext() ?? {};
   const { activeOrganizationId } = useOrganizationContext();
+  const effectiveDealerId = overrideDealerId ?? activeDealerId ?? null;
   const [policy, setPolicy] = useState<DealerConfiguratorPolicy | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!activeDealerId || !activeOrganizationId) {
+    if (!effectiveDealerId || !activeOrganizationId) {
       setPolicy(null);
       setLoading(false);
       return;
     }
 
-    // Reset immediately on deps change so we don't show previous policy for one frame (org/dealer/session switch).
     setPolicy(null);
     setLoading(true);
     let mounted = true;
@@ -49,7 +50,7 @@ export function useDealerConfiguratorPolicy(): UseDealerConfiguratorPolicyResult
         .from('DealerConfiguratorPolicies')
         .select('*')
         .eq('organization_id', activeOrganizationId)
-        .eq('dealer_id', activeDealerId)
+        .eq('dealer_id', effectiveDealerId)
         .maybeSingle();
 
       if (!mounted) return;
@@ -70,7 +71,7 @@ export function useDealerConfiguratorPolicy(): UseDealerConfiguratorPolicyResult
     return () => {
       mounted = false;
     };
-  }, [activeDealerId, activeOrganizationId]);
+  }, [effectiveDealerId, activeOrganizationId]);
 
   return { policy, loading };
 }

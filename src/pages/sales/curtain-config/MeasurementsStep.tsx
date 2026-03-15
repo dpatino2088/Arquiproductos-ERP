@@ -4,8 +4,6 @@ import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import { Plus, X, Image as ImageIcon } from 'lucide-react';
 import type { Panel } from '../product-config/types';
-import { supabase } from '../../../lib/supabase/client';
-import { useOrganizationContext } from '../../../context/OrganizationContext';
 
 interface MeasurementsStepProps {
   config: CurtainConfiguration;
@@ -25,28 +23,18 @@ const FABRIC_DROP_OPTIONS = [
 ];
 
 const INSTALLATION_TYPE_OPTIONS = [
-  { id: 'inside' as const, name: 'Inside', imagePath: '/images/Inside.png', draperyImagePath: '/images/DR-Inside.png' },
-  { id: 'outside' as const, name: 'Outside', imagePath: '/images/Outside.png', draperyImagePath: '/images/DR-Outside.png' },
+  { id: 'inside' as const, name: 'Inside', imagePath: '/images/Inside.png', draperyImagePath: '/images/DR_Inside.png' },
+  { id: 'outside' as const, name: 'Outside', imagePath: '/images/Outside.png', draperyImagePath: '/images/DR_Outside.png' },
 ];
 
 const INSTALLATION_LOCATION_OPTIONS = [
-  { id: 'ceiling' as const, name: 'Ceiling', imagePath: '/images/Ceilling.png', draperyImagePath: '/images/DR-Ceiling.png' },
+  { id: 'ceiling' as const, name: 'Ceiling', imagePath: '/images/Ceilling.png', draperyImagePath: '/images/DR_Ceilling.png' },
   { id: 'wall' as const, name: 'Wall', imagePath: '/images/Wall.png', draperyImagePath: '/images/DR-Wall.png' },
 ];
 
-const OPENING_DIRECTION_OPTIONS = [
-  { id: 'left' as const, name: 'Left', imagePath: '/images/Opening Left.png' },
-  { id: 'center' as const, name: 'Center', imagePath: '/images/Opening Center.png' },
-  { id: 'right' as const, name: 'Right', imagePath: '/images/Opening Right.png' },
-];
-
-const DRIVE_SIDE_OPTIONS = [
-  { id: 'left' as const, name: 'Left', imagePath: '/images/Drive Left.png' },
-  { id: 'right' as const, name: 'Right', imagePath: '/images/Drive Right.png' },
-];
 
 export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepProps) {
-  const { activeOrganizationId } = useOrganizationContext();
+
   const [imageLoadErrors, setImageLoadErrors] = React.useState<Set<string>>(new Set());
   const markImageError = React.useCallback((key: string) => {
     setImageLoadErrors((prev) => new Set(prev).add(key));
@@ -61,49 +49,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
   const currentFabricDrop = (config as any).fabricDrop ?? (config as any).fabric_drop;
   const currentInstallationType = (config as any).installationType ?? (config as any).installation_type;
   const currentInstallationLocation = (config as any).installationLocation ?? (config as any).installation_location;
-  const currentOpeningDirection = (config as any).openingDirection ?? (config as any).opening_direction;
-  const currentDriveSide = (config as any).driveSide ?? (config as any).drive_side;
-
   const productTypeId = (config as any).product_type_id || (config as any).productTypeId;
-
-  // Filter BOMTemplates by opening_direction + drive_side for drapery
-  React.useEffect(() => {
-    if (!isDrapery || !activeOrganizationId || !productTypeId) return;
-    if (!currentOpeningDirection) return;
-
-    let cancelled = false;
-    (async () => {
-      let query = supabase
-        .from('BOMTemplates')
-        .select('id')
-        .eq('organization_id', activeOrganizationId)
-        .eq('product_type_id', productTypeId)
-        .eq('is_active', true)
-        .eq('archived', false);
-
-      // opening_direction: match NULL (applies to all) or exact value
-      query = query.or(`opening_direction.is.null,opening_direction.eq.${currentOpeningDirection}`);
-
-      if (currentDriveSide) {
-        query = query.or(`drive_side.is.null,drive_side.eq.${currentDriveSide}`);
-      }
-
-      const { data, error } = await query;
-      if (cancelled) return;
-
-      if (error) {
-        console.error('[MeasurementsStep] Failed to filter templates by opening/drive:', error);
-        return;
-      }
-
-      const templateIds = (data || []).map((t: { id: string }) => t.id);
-      if (templateIds.length > 0) {
-        onUpdate({ _hardware_filtered_templates: templateIds } as any);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [isDrapery, activeOrganizationId, productTypeId, currentOpeningDirection, currentDriveSide]);
 
   // Products that support multiple panels (interconnected curtains)
   const supportsPanels = ['roller-shade', 'dual-shade', 'triple-shade'].includes(productType);
@@ -434,7 +380,10 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     onChange={(e) => {
                       const width_mm = parseInt(e.target.value) || undefined;
                       const width_m = width_mm ? width_mm / 1000 : null;
-                      onUpdate({ width_mm, width_m } as any);
+                      const updatedPanels: Panel[] = [{ width_mm: width_mm || 0 }];
+                      setPanels(updatedPanels);
+                      const measurements = buildMeasurements(config.height_mm, updatedPanels);
+                      onUpdate({ width_mm, width_m, measurements, panels: updatedPanels } as any);
                     }}
                     placeholder="400"
                   />
@@ -449,7 +398,8 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     onChange={(e) => {
                       const height_mm = parseInt(e.target.value) || undefined;
                       const height_m = height_mm ? height_mm / 1000 : null;
-                      onUpdate({ height_mm, height_m } as any);
+                      const measurements = buildMeasurements(height_mm, panels);
+                      onUpdate({ height_mm, height_m, measurements } as any);
                     }}
                     placeholder="700"
                   />
@@ -472,7 +422,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                   <div
                     key={option.id}
                     onClick={() => onUpdate({ fabricDrop: isSelected ? undefined : option.id })}
-                    className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                    className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer ${
                       isSelected
                         ? 'border-2 border-gray-900 shadow-lg'
                         : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -493,7 +443,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                     </div>
                     
                     {/* Card Content */}
-                    <div className="p-4 bg-gray-100">
+                    <div className="p-4 bg-gray-100 flex-1">
                       {/* Option Name */}
                       <h3 className={`font-semibold text-sm truncate text-center ${
                         isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
@@ -521,7 +471,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                 <div
                   key={option.id}
                   onClick={() => onUpdate({ installationType: isSelected ? undefined : option.id })}
-                  className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                  className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer ${
                     isSelected
                       ? 'border-2 border-gray-900 shadow-lg'
                       : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -539,7 +489,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                       <ImageIcon className="w-16 h-16 text-gray-300" />
                     )}
                   </div>
-                  <div className="p-4 bg-gray-100">
+                  <div className="p-4 bg-gray-100 flex-1">
                     <h3 className={`font-semibold text-sm truncate text-center ${
                       isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                     }`} title={option.name}>
@@ -559,7 +509,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                 <div
                   key={option.id}
                   onClick={() => onUpdate({ installationLocation: isSelected ? undefined : option.id })}
-                  className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
+                  className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer ${
                     isSelected
                       ? 'border-2 border-gray-900 shadow-lg'
                       : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
@@ -577,7 +527,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                       <ImageIcon className="w-16 h-16 text-gray-300" />
                     )}
                   </div>
-                  <div className="p-4 bg-gray-100">
+                  <div className="p-4 bg-gray-100 flex-1">
                     <h3 className={`font-semibold text-sm truncate text-center ${
                       isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
                     }`} title={option.name}>
@@ -590,165 +540,7 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
           </div>
         </div>
 
-        {/* 4. OPENING DIRECTION — Drapery only */}
-        {isDrapery && (
-          <div>
-            <Label className="text-sm font-medium mb-5 block">OPENING DIRECTION</Label>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {OPENING_DIRECTION_OPTIONS.map((option) => {
-                const isSelected = currentOpeningDirection === option.id;
-                return (
-                  <div
-                    key={option.id}
-                    onClick={() => {
-                      const updates: Record<string, unknown> = {
-                        openingDirection: isSelected ? undefined : option.id,
-                      };
-                      if (isSelected) {
-                        updates.driveSide = undefined;
-                      } else if (option.id === 'center') {
-                        updates.driveSide = undefined;
-                      } else {
-                        updates.driveSide = option.id;
-                      }
-                      onUpdate(updates as any);
-                    }}
-                    className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
-                      isSelected
-                        ? 'border-2 border-gray-900 shadow-lg'
-                        : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                      {option.imagePath && !imageLoadErrors.has(`opening-${option.id}`) ? (
-                        <img
-                          src={getImageUrl(option.imagePath)}
-                          alt={option.name}
-                          className="w-full h-full object-cover"
-                          onError={() => markImageError(`opening-${option.id}`)}
-                        />
-                      ) : (
-                        <ImageIcon className="w-16 h-16 text-gray-300" />
-                      )}
-                    </div>
-                    <div className="p-4 bg-gray-100">
-                      <h3
-                        className={`font-semibold text-sm truncate text-center ${
-                          isSelected ? 'text-gray-900' : 'text-gray-900'
-                        }`}
-                        title={option.name}
-                      >
-                        {option.name}
-                      </h3>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 5. DRIVE SIDE — Drapery only, visible when Opening = Center */}
-        {isDrapery && currentOpeningDirection === 'center' && (
-          <div>
-            <Label className="text-sm font-medium mb-5 block">DRIVE SIDE</Label>
-            <p className="text-xs text-gray-500 mb-3">
-              With center opening, select which side the drive mechanism goes.
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {DRIVE_SIDE_OPTIONS.map((option) => {
-                const isSelected = currentDriveSide === option.id;
-                return (
-                  <div
-                    key={option.id}
-                    onClick={() => {
-                      onUpdate({ driveSide: isSelected ? undefined : option.id } as any);
-                    }}
-                    className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
-                      isSelected
-                        ? 'border-2 border-gray-900 shadow-lg'
-                        : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                      {option.imagePath && !imageLoadErrors.has(`drive-${option.id}`) ? (
-                        <img
-                          src={getImageUrl(option.imagePath)}
-                          alt={option.name}
-                          className="w-full h-full object-cover"
-                          onError={() => markImageError(`drive-${option.id}`)}
-                        />
-                      ) : (
-                        <ImageIcon className="w-16 h-16 text-gray-300" />
-                      )}
-                    </div>
-                    <div className="p-4 bg-gray-100">
-                      <h3
-                        className={`font-semibold text-sm truncate text-center ${
-                          isSelected ? 'text-gray-900' : 'text-gray-900'
-                        }`}
-                        title={option.name}
-                      >
-                        {option.name}
-                      </h3>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 6. TRACK SPLIT — Drapery only */}
-        {isDrapery && (() => {
-          const totalWidthMm = config.width_mm || 0;
-          const isOver4m = totalWidthMm > 4000;
-          const currentForce = (config as any).forceTrackJoin ?? (config as any).force_track_join ?? false;
-
-          if (isOver4m) {
-            const joints = Math.max(0, Math.ceil(totalWidthMm / 4000) - 1);
-            return (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <Label className="text-sm font-medium mb-1 block">TRACK JOINT</Label>
-                <p className="text-sm text-amber-800">
-                  Width exceeds 4m — the track will be split into {joints + 1} pieces with {joints} joint{joints > 1 ? 's' : ''} (automatic).
-                </p>
-              </div>
-            );
-          }
-
-          if (totalWidthMm > 0) {
-            return (
-              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-sm font-medium mb-1 block">SPLIT TRACK (OPTIONAL)</Label>
-                    <p className="text-xs text-gray-500">
-                      Width is under 4m. You can optionally split the track into 2 pieces with a joint.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onUpdate({ forceTrackJoin: !currentForce } as any)}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                      currentForce ? 'bg-gray-900' : 'bg-gray-200'
-                    }`}
-                    role="switch"
-                    aria-checked={currentForce}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        currentForce ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-            );
-          }
-
-          return null;
-        })()}
+        {/* Opening Direction, Drive Side, Track Split moved to DraperyHardwareStep for Drapery */}
       </div>
     </div>
   );

@@ -58,9 +58,43 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', notes: '', logo_url: '' });
+  const [formData, setFormData] = useState({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  // Vendors for dropdown + vendor map for table column
+  const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
+  const [mfrVendorMap, setMfrVendorMap] = useState<Map<string, { vendor_id: string; vendor_name: string }>>(new Map());
+
+  useEffect(() => {
+    if (!activeOrganizationId) return;
+    let mounted = true;
+    (async () => {
+      const { data: dvRows } = await supabase
+        .from('DirectoryVendors')
+        .select('id, name')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .order('name');
+      if (mounted && dvRows) setVendors(dvRows);
+
+      const { data: vmRows } = await supabase
+        .from('VendorManufacturers')
+        .select('vendor_id, manufacturer_id')
+        .eq('organization_id', activeOrganizationId);
+      if (mounted && vmRows && dvRows) {
+        const vNameMap = new Map(dvRows.map((v: any) => [v.id, v.name]));
+        const map = new Map<string, { vendor_id: string; vendor_name: string }>();
+        vmRows.forEach((r: any) => {
+          if (!map.has(r.manufacturer_id)) {
+            map.set(r.manufacturer_id, { vendor_id: r.vendor_id, vendor_name: vNameMap.get(r.vendor_id) ?? '' });
+          }
+        });
+        setMfrVendorMap(map);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [activeOrganizationId, showNewModal]);
 
   // Filter and sort (sobre manufacturersToShow, ya sin los de "cero que mostrar")
   const filteredManufacturers = useMemo(() => {
@@ -109,7 +143,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
       router.navigate('/partners/manufacturers');
       return;
     }
-    setFormData({ name: '', code: '', notes: '', logo_url: '' });
+    setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
     setEditingId(null);
     setShowNewModal(true);
   };
@@ -121,11 +155,13 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
       router.navigate('/partners/manufacturers');
       return;
     }
+    const linked = mfrVendorMap.get(manufacturer.id);
     setFormData({
       name: manufacturer.name,
       code: manufacturer.code || '',
       notes: manufacturer.notes || '',
       logo_url: manufacturer.logo_url || '',
+      vendor_id: linked?.vendor_id || '',
     });
     setEditingId(manufacturer.id);
     setShowNewModal(true);
@@ -152,23 +188,57 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
 
   const handleSave = async () => {
     try {
+      const { vendor_id, ...mfrData } = formData;
+      let savedId = editingId;
+
       if (editingId) {
-        await updateManufacturer(editingId, formData);
+        await updateManufacturer(editingId, mfrData);
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Manufacturer updated',
           message: 'Manufacturer has been updated successfully.',
         });
       } else {
-        await createManufacturer(formData);
+        const created = await createManufacturer(mfrData);
+        savedId = (created as any)?.id ?? null;
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Manufacturer created',
           message: 'Manufacturer has been created successfully.',
         });
       }
+
+      // Sync VendorManufacturers
+      if (savedId && activeOrganizationId) {
+        await supabase
+          .from('VendorManufacturers')
+          .delete()
+          .eq('manufacturer_id', savedId)
+          .eq('organization_id', activeOrganizationId);
+
+        if (vendor_id?.trim()) {
+          await supabase
+            .from('VendorManufacturers')
+            .insert({
+              vendor_id: vendor_id.trim(),
+              manufacturer_id: savedId,
+              organization_id: activeOrganizationId,
+              is_primary: true,
+            });
+        }
+
+        // Also update legacy DirectoryVendors.manufacturer_id
+        if (vendor_id?.trim()) {
+          await supabase
+            .from('DirectoryVendors')
+            .update({ manufacturer_id: savedId })
+            .eq('id', vendor_id.trim())
+            .eq('organization_id', activeOrganizationId);
+        }
+      }
+
       setShowNewModal(false);
-      setFormData({ name: '', code: '', notes: '', logo_url: '' });
+      setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
       setEditingId(null);
     } catch (error) {
       useUIStore.getState().addNotification({
@@ -277,6 +347,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                       {sortBy === 'code' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Vendor</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Notes</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
@@ -284,7 +355,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
               <tbody className="divide-y divide-gray-200">
                 {filteredManufacturers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-12 px-6 text-center">
+                    <td colSpan={6} className="py-12 px-6 text-center">
                       <div className="flex flex-col items-center">
                         <Building2 className="w-12 h-12 text-gray-400 mb-4" />
                         <p className="text-gray-600 mb-2">No manufacturers found</p>
@@ -314,6 +385,12 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                       </td>
                       <td className="py-3 px-4 text-gray-700 text-xs">
                         {manufacturer.code || 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 text-xs">
+                        {mfrVendorMap.get(manufacturer.id)?.vendor_name
+                          ? <span className="text-gray-900">{mfrVendorMap.get(manufacturer.id)!.vendor_name}</span>
+                          : <span className="text-gray-400 italic">Not assigned</span>
+                        }
                       </td>
                       <td className="py-3 px-4 text-gray-700 text-xs">
                         {manufacturer.notes || 'N/A'}
@@ -401,7 +478,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
             <button
               onClick={() => {
                 setShowNewModal(false);
-                setFormData({ name: '', code: '', notes: '', logo_url: '' });
+                setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
                 setEditingId(null);
               }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
@@ -503,13 +580,30 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                   rows={3}
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Vendor (Supplier)
+                </label>
+                <select
+                  value={formData.vendor_id}
+                  onChange={(e) => setFormData({ ...formData, vendor_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white"
+                >
+                  <option value="">No vendor assigned</option>
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-400 mt-1">Which vendor supplies products from this manufacturer?</p>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 mt-6">
               <button
                 onClick={() => {
                   setShowNewModal(false);
-                  setFormData({ name: '', code: '', notes: '', logo_url: '' });
+                  setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
                   setEditingId(null);
                 }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"

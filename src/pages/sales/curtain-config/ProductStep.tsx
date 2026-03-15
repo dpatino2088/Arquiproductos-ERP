@@ -20,10 +20,14 @@ const PRODUCT_TYPE_IMAGES: Record<string, string> = {
   'Drapery': '/images/Drapery.png',
   'Awning': '/images/Awning.png',
   'Window Film': '/images/Window Film.png',
+  'Honey Comb': '/images/Honey Comb.png',
+  'Vertical': '/images/Vertical.png',
+  'Wood': '/images/Wood.png',
+  'Roman Shade': '/images/Roman Shade.png',
   'Accessories': '/images/Accessories.png',
 };
 // Fallback si el archivo está guardado como "Accesories" (una s)
-const ACCESSORIES_IMAGE_PATHS = ['/images/Accessories.png', '/images/Accesories.png'];
+const ACCESSORIES_IMAGE_PATHS = ['/images/CatalogItems.png', '/images/Accessories.png', '/images/Accesories.png'];
 
 interface ProductStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -112,18 +116,39 @@ const PRODUCT_UI_METADATA: Record<string, {
       'Easy installation'
     ]
   },
-  // DB code: ACCESSORIES
-  ACCESSORIES: {
-    uiCode: 'accessories',
-    maxWidth: 0,
-    maxHeight: 0,
-    variations: 'Individual Items',
-    additionalInfo: [
-      'Controls, clutches, supports, and other accessories',
-      'Items sold separately from main products'
-    ],
-    isAccessoriesOnly: true
+  // DB code: HONEY_COMB
+  HONEY_COMB: {
+    uiCode: 'honey-comb',
+    maxWidth: 2400,
+    maxHeight: 3000,
+    variations: 'Manual, Electric',
+    additionalInfo: ['Cellular structure for superior insulation'],
   },
+  // DB code: VERTICAL
+  VERTICAL: {
+    uiCode: 'vertical',
+    maxWidth: 4000,
+    maxHeight: 4000,
+    variations: 'Manual, Electric',
+    additionalInfo: ['Vertical slats for wide openings'],
+  },
+  // DB code: WOOD
+  WOOD: {
+    uiCode: 'wood',
+    maxWidth: 2400,
+    maxHeight: 3000,
+    variations: 'Manual',
+    additionalInfo: ['Natural wood blinds'],
+  },
+  // DB code: ROMAN_SHADE
+  ROMAN_SHADE: {
+    uiCode: 'roman-shade',
+    maxWidth: 2200,
+    maxHeight: 3000,
+    variations: 'Manual, Electric',
+    additionalInfo: ['Classic Roman fold design'],
+  },
+  // Note: 'catalog' ProductType is handled by the special showAccessoriesCard below, not here
 };
 
 export default function ProductStep({ config, onUpdate, policy: policyProp, policyLoading: policyLoadingProp, onNavigateToStep }: ProductStepProps) {
@@ -131,11 +156,11 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
   const { activeDisplayName } = useActingAsContext() ?? {};
   const policy = policyProp ?? policyCtx;
   const policyLoading = policyLoadingProp ?? policyLoadingCtx;
-  const accessoriesOnlyMode = !!policy && policy.allow_accessories_only === true;
+  const showAccessoriesCard = !policy || policy.allow_accessories_only === true;
 
   const handleAccessoriesSelect = () => {
     onUpdate({
-      productType: 'accessories' as any,
+      productType: 'catalog' as any,
       productTypeId: undefined,
       product_type_id: undefined,
       bom_template_id: null,
@@ -194,6 +219,7 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
     if (!productTypes.length) return [];
     
     return productTypes
+      .filter(pt => pt.code !== 'catalog') // catalog has its own special card
       .map(pt => {
         // ✅ FIX: Try exact match first, then case-insensitive, then name-based matching
         let metadata = PRODUCT_UI_METADATA[pt.code || ''];
@@ -229,15 +255,16 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
         }
         
         return {
-          id: pt.id,                    // DB UUID
-          code: pt.code || '',          // DB code (ROLLER, DUAL, etc.)
-          uiCode: metadata.uiCode,      // UI code (roller-shade, dual-shade, etc.)
-          name: pt.name,                // DB name (Roller Shade, Dual Shade, etc.)
+          id: pt.id,
+          code: pt.code || '',
+          uiCode: metadata.uiCode,
+          name: pt.name,
           maxWidth: metadata.maxWidth,
           maxHeight: metadata.maxHeight,
           variations: metadata.variations,
           additionalInfo: metadata.additionalInfo,
           isAccessoriesOnly: metadata.isAccessoriesOnly,
+          status: pt.status || 'active',
         };
       })
       .filter(Boolean);
@@ -347,28 +374,32 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
           {visibleProductCards.map((product) => {
             if (!product) return null;
             
-            // Check if selected by comparing UUID (support both unified contract and legacy)
-            const isSelected = (config as any).product_type_id === product.id || 
-                              (config as any).productTypeId === product.id || 
-                              config.productType === product.uiCode;
+            const isComingSoon = product.status === 'coming_soon';
+            const isSelected = !isComingSoon && (
+              (config as any).product_type_id === product.id || 
+              (config as any).productTypeId === product.id || 
+              config.productType === product.uiCode
+            );
             
             return (
               <div
                 key={product.id}
                 onClick={() => {
+                  if (isComingSoon) return;
                   if (isSelected) {
                     handleProductTypeDeselect();
                   } else {
                     handleProductTypeSelect(product.id, product.uiCode);
                   }
                 }}
-                className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
-                  isSelected
-                    ? 'border-2 border-gray-900 shadow-lg'
-                    : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all ${
+                  isComingSoon
+                    ? 'border-gray-200 opacity-60 cursor-not-allowed'
+                    : isSelected
+                    ? 'border-2 border-gray-900 shadow-lg cursor-pointer'
+                    : 'border-gray-200 hover:shadow-lg hover:border-gray-300 cursor-pointer'
                 }`}
               >
-                {/* Image: fondo blanco */}
                 <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
                   {PRODUCT_TYPE_IMAGES[product.name] && !productImageErrors[product.name] ? (
                     <img
@@ -382,30 +413,29 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
                   )}
                 </div>
                 
-                {/* Pie del Card: gris (mismo que el fondo del card) */}
-                <div className="p-4 bg-gray-100">
-                  {/* Product Name */}
-                  <h3 className={`font-semibold text-sm truncate text-center ${
-                    isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'
-                  }`} title={product.name}>
+                <div className="p-4 bg-gray-100 flex-1">
+                  <h3 className="font-semibold text-sm truncate text-center text-gray-900" title={product.name}>
                     {product.name}
                   </h3>
+                  {isComingSoon && (
+                    <p className="text-[10px] text-gray-400 text-center mt-1 tracking-wide uppercase">Coming Soon</p>
+                  )}
                 </div>
               </div>
             );
           })}
-          {accessoriesOnlyMode && (
+          {showAccessoriesCard && (
             <div
               onClick={() => {
-                const isAccessoriesSelected = (config as any).productType === 'accessories';
-                if (isAccessoriesSelected) {
+                const isCatalogSelected = (config as any).productType === 'catalog';
+                if (isCatalogSelected) {
                   handleProductTypeDeselect();
                 } else {
                   handleAccessoriesSelect();
                 }
               }}
-              className={`bg-white border rounded-lg overflow-hidden transition-all cursor-pointer ${
-                (config as any).productType === 'accessories'
+              className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer ${
+                (config as any).productType === 'catalog'
                   ? 'border-2 border-gray-900 shadow-lg'
                   : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
               }`}
@@ -414,7 +444,7 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
                 {!productImageErrors['Accessories'] ? (
                   <img
                     src={ACCESSORIES_IMAGE_PATHS[accessoriesImageIndex]}
-                    alt="Accessories"
+                    alt="Catalog Items"
                     className="w-full h-full object-contain"
                     onError={() => {
                       if (accessoriesImageIndex + 1 < ACCESSORIES_IMAGE_PATHS.length) {
@@ -428,9 +458,9 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
                   <ImageIcon className="w-16 h-16 text-gray-300" />
                 )}
               </div>
-              <div className="p-4 bg-gray-100">
-                <h3 className="font-semibold text-sm truncate text-center text-gray-900" title="Accessories">
-                  Accessories
+              <div className="p-4 bg-gray-100 flex-1">
+                <h3 className="font-semibold text-sm truncate text-center text-gray-900" title="Catalog Items">
+                  Catalog Items
                 </h3>
               </div>
             </div>

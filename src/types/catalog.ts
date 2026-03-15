@@ -296,6 +296,7 @@ export interface BOMTemplate {
   hardware_color?: string | null; // Hardware color (White, Black, Silver, Bronze, etc.) to differentiate templates. NULL means template applies to all colors.
   panel_count_min?: number; // Min number of panels (1-3). Default 1.
   panel_count_max?: number; // Max number of panels (1-3). Default 1.
+  system_size?: string | null; // Track/rail profile size (48mm, 60mm, etc.)
   metadata?: Record<string, any> | null; // Template metadata: { drive, cassette, hardware_color, system, notes }
   deleted: boolean;
   archived: boolean;

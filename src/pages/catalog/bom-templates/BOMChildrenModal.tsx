@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { X, Plus, Trash2, Search } from 'lucide-react';
+import { X, Plus, Trash2, Search, Pencil } from 'lucide-react';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import {
@@ -10,16 +10,14 @@ import {
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
 import { getRoleLabel, getChildRoleOptions } from '../../../lib/bom/roles';
-import { BOM_QTY_TYPES, INITIAL_CHILD_FORM_DATA } from './types';
+import { BOM_QTY_TYPES, INITIAL_CHILD_FORM_DATA, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS } from './types';
 import type { BOMComponentDraft, BOMQtyType, ChildFormData } from './types';
 
 const QTY_TYPE_LABELS: Record<string, string> = {
   fixed: 'Fixed',
   per_width: 'Per Width',
   per_height: 'Per Height',
-  per_area: 'Per Area',
   per_spacing: 'Per Spacing',
-  per_fabric_width: 'Per Fabric Width Used',
   per_joint: 'Per Joint',
 };
 
@@ -41,6 +39,8 @@ export interface BOMChildrenModalProps {
   catalogItems: any[];
   categories: any[];
   parentComponentRole?: string | null;
+  /** True when there are local changes (adds, updates, deletes) not yet committed to DB */
+  hasPendingChanges?: boolean;
   onClose: () => void;
   onAddChild: () => void;
   onDeleteChild: (childId: string) => void;
@@ -63,6 +63,7 @@ export default function BOMChildrenModal({
   catalogItems,
   categories,
   parentComponentRole,
+  hasPendingChanges,
   onClose,
   onAddChild,
   onDeleteChild,
@@ -115,6 +116,9 @@ export default function BOMChildrenModal({
         qty_min: child.qty_min ?? null,
         uom: child.uom || 'ea',
         required: child.is_required !== false,
+        per_panel: child.per_panel === true,
+        condition_key: child.condition_key || '',
+        condition_value: child.condition_value || '',
         notes: '',
       });
       setShowAddChildForm(true);
@@ -159,6 +163,14 @@ export default function BOMChildrenModal({
           </button>
         </div>
 
+        {hasPendingChanges && (
+          <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2 shrink-0">
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+            <p className="text-xs text-amber-700 font-medium">
+              Changes pending — close this panel and click <strong>Save</strong> on the template to commit.
+            </p>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
           <div className="flex justify-end">
             <button
@@ -319,22 +331,79 @@ export default function BOMChildrenModal({
                   />
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="child-required"
-                  checked={childFormData.required}
-                  onChange={(e) =>
-                    setChildFormData((prev) => ({
-                      ...prev,
-                      required: e.target.checked,
-                    }))
-                  }
-                  className="rounded border-gray-300"
-                />
-                <Label htmlFor="child-required" className="mb-0">
-                  Required
-                </Label>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="child-required"
+                    checked={childFormData.required}
+                    onChange={(e) =>
+                      setChildFormData((prev) => ({
+                        ...prev,
+                        required: e.target.checked,
+                      }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  <Label htmlFor="child-required" className="mb-0">
+                    Required
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="child-per-panel"
+                    checked={childFormData.per_panel ?? false}
+                    onChange={(e) =>
+                      setChildFormData((prev) => ({
+                        ...prev,
+                        per_panel: e.target.checked,
+                      }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  <Label htmlFor="child-per-panel" className="mb-0">
+                    Per Panel
+                  </Label>
+                </div>
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Label>Condition</Label>
+                  <select
+                    value={childFormData.condition_key || ''}
+                    onChange={(e) => setChildFormData((prev) => ({ ...prev, condition_key: e.target.value, condition_value: e.target.value ? prev.condition_value : '' }))}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                  >
+                    {CONDITION_KEY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {childFormData.condition_key ? (
+                  <div className="w-40">
+                    <Label>Value</Label>
+                    {CONDITION_VALUE_OPTIONS[childFormData.condition_key] ? (
+                      <select
+                        value={childFormData.condition_value || ''}
+                        onChange={(e) => setChildFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm"
+                      >
+                        <option value="">-- Select --</option>
+                        {CONDITION_VALUE_OPTIONS[childFormData.condition_key].map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Input
+                        value={childFormData.condition_value || ''}
+                        onChange={(e) => setChildFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
+                        placeholder="Value"
+                        className="text-sm"
+                      />
+                    )}
+                  </div>
+                ) : null}
               </div>
               <div className="flex gap-2">
                 <button
@@ -362,6 +431,7 @@ export default function BOMChildrenModal({
                   <th className="text-left px-3 py-2 font-medium">SKU / Name</th>
                   <th className="text-left px-3 py-2 font-medium">Role</th>
                   <th className="text-left px-3 py-2 font-medium">Consumption</th>
+                  <th className="text-center px-3 py-2 font-medium">×Panel</th>
                   <th className="text-right px-3 py-2 font-medium w-20">Actions</th>
                 </tr>
               </thead>
@@ -385,15 +455,32 @@ export default function BOMChildrenModal({
                       </td>
                       <td className="px-3 py-2">{getRoleLabel(child.component_role)}</td>
                       <td className="px-3 py-2">{consumptionDisplay}</td>
+                      <td className="px-3 py-2 text-center">
+                        {child.per_panel ? (
+                          <span className="inline-block w-4 h-4 rounded-full bg-gray-700" title="Per Panel" />
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteChild(child.id)}
-                          className="p-1 rounded hover:bg-red-50 text-red-600"
-                          aria-label="Delete"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="inline-flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleEditChild(child)}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                            aria-label="Edit"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteChild(child.id)}
+                            className="p-1 rounded hover:bg-red-50 text-red-600"
+                            aria-label="Delete"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
