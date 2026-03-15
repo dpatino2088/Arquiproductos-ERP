@@ -87,7 +87,7 @@ export default function BOMTemplateModal({
     if (form.templateDriveSide && form.templateDriveSide !== 'both') {
       parts.push(form.templateDriveSide.toUpperCase());
     }
-    if (form.templateInstallationLocation && form.templateInstallationLocation !== 'both') {
+    if (form.templateInstallationLocation) {
       parts.push(form.templateInstallationLocation.toUpperCase());
     }
     if (form.templateManufacturer) {

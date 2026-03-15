@@ -426,6 +426,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       sort_order: cascadeOrder,
       sequence_order: cascadeOrder,
       is_required: formData.is_required ?? true,
+      per_panel: formData.per_panel ?? false,
       auto_select: false,
       condition_key: formData.condition_key || null,
       condition_value: formData.condition_value || null,

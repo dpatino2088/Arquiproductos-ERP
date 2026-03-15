@@ -87,7 +87,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
         const map = new Map<string, { vendor_id: string; vendor_name: string }>();
         vmRows.forEach((r: any) => {
           if (!map.has(r.manufacturer_id)) {
-            map.set(r.manufacturer_id, { vendor_id: r.vendor_id, vendor_name: vNameMap.get(r.vendor_id) ?? '' });
+            map.set(r.manufacturer_id, { vendor_id: r.vendor_id, vendor_name: String(vNameMap.get(r.vendor_id) ?? '') });
           }
         });
         setMfrVendorMap(map);

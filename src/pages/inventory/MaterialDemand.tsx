@@ -197,7 +197,7 @@ export default function MaterialDemand() {
           });
 
           // Fallback: legacy DirectoryVendors.manufacturer_id for any mfr not in junction
-          const missingMfrIds = mfrIds.filter(id => !mfrVendorMap.has(id));
+          const missingMfrIds = mfrIds.filter((id): id is string => typeof id === 'string' && !mfrVendorMap.has(id));
           if (missingMfrIds.length > 0) {
             const { data: dvFallback } = await supabase
               .from('DirectoryVendors')
