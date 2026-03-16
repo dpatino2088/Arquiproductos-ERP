@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useBOMCRUD } from '../../../hooks/useBOM';
-import { Search, ChevronRight, LayoutTemplate, Save } from 'lucide-react';
+import { Search, ChevronRight, LayoutTemplate, Save, Pencil, CheckCircle2, Circle, AlertCircle } from 'lucide-react';
 import EngineeringCutBreakdown from './EngineeringCutBreakdown';
 import type { CutBreakdownHandle } from './EngineeringCutBreakdown';
+
+export type EngStatus = 'configured' | 'partial' | 'none';
 
 export interface EngineeringTemplateSummary {
   id: string;
@@ -13,6 +15,8 @@ export interface EngineeringTemplateSummary {
   product_type_id: string | null;
   product_type_name: string;
   parent_count: number;
+  eng_status: EngStatus;
+  last_eng_update: string | null;
 }
 
 export interface EngineeringRow {
@@ -40,6 +44,19 @@ export interface EngineeringRow {
   product_type_name?: string;
   component_sku?: string;
   component_name?: string;
+}
+
+function formatRelativeTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 export default function BOMEngineeringTab() {
@@ -111,6 +128,8 @@ export default function BOMEngineeringTab() {
           product_type_id: t.product_type_id ?? null,
           product_type_name: (t.ProductType as any)?.name ?? '',
           parent_count: 0,
+          eng_status: 'none',
+          last_eng_update: null,
         });
       }
 
@@ -141,6 +160,7 @@ export default function BOMEngineeringTab() {
           engineering_attr_key,
           engineering_scope,
           engineering_source_role,
+          updated_at,
           BOMTemplate:bom_template_id (name, code, product_type_id),
           component_item:component_item_id (sku, name, measure_basis, delta_x_mm, delta_y_mm)
         `)
@@ -182,14 +202,39 @@ export default function BOMEngineeringTab() {
           product_type_name: tplSummary?.product_type_name ?? '',
           component_sku: item?.sku ?? '',
           component_name: item?.name ?? '',
-        };
+          updated_at: c.updated_at ?? null,
+        } as EngineeringRow;
       });
 
-      // Count parent components per template
+      // Count parent components + compute engineering status per template
+      const engConfigured = new Map<string, { total: number; configured: number; lastUpdate: string | null }>();
       for (const r of allRows) {
         if (!r.parent_component_id && tplSummaryMap.has(r.bom_template_id)) {
           tplSummaryMap.get(r.bom_template_id)!.parent_count += 1;
+          const isCuttable = r.measure_basis === 'linear' || r.measure_basis === 'area';
+          if (isCuttable) {
+            const entry = engConfigured.get(r.bom_template_id) ?? { total: 0, configured: 0, lastUpdate: null };
+            entry.total += 1;
+            const hasEng = !!(r.depends_on_role || r.affects_role);
+            if (hasEng) {
+              entry.configured += 1;
+              const rowUpdated = (r as any).updated_at ?? null;
+              if (rowUpdated && (!entry.lastUpdate || rowUpdated > entry.lastUpdate)) {
+                entry.lastUpdate = rowUpdated;
+              }
+            }
+            engConfigured.set(r.bom_template_id, entry);
+          }
         }
+      }
+      for (const [tplId, counts] of engConfigured) {
+        const tpl = tplSummaryMap.get(tplId);
+        if (!tpl) continue;
+        if (counts.total === 0) tpl.eng_status = 'none';
+        else if (counts.configured >= counts.total) tpl.eng_status = 'configured';
+        else if (counts.configured > 0) tpl.eng_status = 'partial';
+        else tpl.eng_status = 'none';
+        tpl.last_eng_update = counts.lastUpdate;
       }
 
       setAllTemplates(Array.from(tplSummaryMap.values()));
@@ -321,7 +366,18 @@ export default function BOMEngineeringTab() {
                         selectedTemplateId === t.id ? 'bg-primary/5 border-l-primary border-l-2' : ''
                       }`}
                     >
-                      <LayoutTemplate className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      <span className="flex-shrink-0" title={
+                        t.eng_status === 'configured' ? 'Engineering configured' :
+                        t.eng_status === 'partial' ? 'Partially configured' : 'Not configured'
+                      }>
+                        {t.eng_status === 'configured' ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        ) : t.eng_status === 'partial' ? (
+                          <AlertCircle className="h-4 w-4 text-amber-500" />
+                        ) : (
+                          <Circle className="h-4 w-4 text-gray-300" />
+                        )}
+                      </span>
                       <div className="flex-1 min-w-0">
                         <p className="truncate text-sm font-medium text-gray-900" title={t.name}>
                           {t.name || 'Unnamed'}
@@ -334,6 +390,9 @@ export default function BOMEngineeringTab() {
                         <p className="truncate text-xs text-gray-500">
                           {t.product_type_name}
                           {compCount > 0 ? ` · ${compCount} component${compCount !== 1 ? 's' : ''}` : ' · no components'}
+                          {t.last_eng_update && (
+                            <span className="text-gray-400"> · {formatRelativeTime(t.last_eng_update)}</span>
+                          )}
                         </p>
                       </div>
                       <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
@@ -365,9 +424,23 @@ export default function BOMEngineeringTab() {
               {selectedTemplate?.product_type_name && (
                 <span className="text-xs text-gray-500">{selectedTemplate.product_type_name}</span>
               )}
-              <span className="text-xs text-gray-500 ml-auto">
-                {componentsForSelected.length} component{componentsForSelected.length !== 1 ? 's' : ''}
-              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-gray-500">
+                  {componentsForSelected.length} component{componentsForSelected.length !== 1 ? 's' : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedTemplateId) return;
+                    window.dispatchEvent(new CustomEvent('bom:editTemplate', { detail: selectedTemplateId }));
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-primary border border-gray-200 hover:border-primary/30 rounded px-2 py-1 transition-colors"
+                  title="Edit template definition"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit Template
+                </button>
+              </div>
               {breakdownState.hasChanges && (
                 <>
                   <button type="button" onClick={() => breakdownRef.current?.discard()} disabled={breakdownState.saving} className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40">

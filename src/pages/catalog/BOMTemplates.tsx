@@ -122,6 +122,19 @@ export default function BOMTemplates() {
     catch { /* ignore */ }
   }, [editingTemplateId, showTemplateModal]);
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const templateId = (e as CustomEvent<string>).detail;
+      if (templateId) {
+        setActiveTab('templates');
+        setEditingTemplateId(templateId);
+        setShowTemplateModal(true);
+      }
+    };
+    window.addEventListener('bom:editTemplate', handler);
+    return () => window.removeEventListener('bom:editTemplate', handler);
+  }, []);
+
   // ========== LOAD TEMPLATES ==========
 
   const loadTemplates = async () => {
