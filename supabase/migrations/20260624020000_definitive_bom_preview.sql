@@ -70,6 +70,12 @@ DECLARE
   v_parent_sku text;
   v_parent_name text;
   v_parent_uom text;
+  -- Cascade resolution
+  v_resolved_cuts jsonb := '{}'::jsonb;
+  v_cascade RECORD;
+  v_cascade_base numeric;
+  v_cascade_subtract numeric;
+  v_cascade_role text;
 BEGIN
   SELECT * INTO v_cp
   FROM public."ConfiguredProducts"
@@ -210,6 +216,61 @@ BEGIN
     v_roll_total_cost := 0;
   END IF;
 
+  -- ===== Cascade pre-pass: resolve cut dimensions in order =====
+  IF p_bom_template_id IS NOT NULL THEN
+    FOR v_cascade IN
+      SELECT bc.id, bc.component_role, bc.depends_on_role,
+             bc.cut_delta_mm AS tolerance_mm, bc.cut_axis,
+             ci.measure_basis
+      FROM public."BOMComponents" bc
+      LEFT JOIN public."CatalogItems" ci ON ci.id = bc.component_item_id AND ci.organization_id = p_org_id
+      WHERE bc.bom_template_id = p_bom_template_id
+        AND bc.organization_id = p_org_id
+        AND bc.deleted = false AND bc.archived = false
+        AND bc.parent_component_id IS NULL
+        AND COALESCE(ci.measure_basis, '') IN ('linear', 'area')
+      ORDER BY CASE COALESCE(bc.component_role, '')
+        WHEN 'headbox' THEN 10 WHEN 'cassette' THEN 10 WHEN 'top_rail' THEN 10
+        WHEN 'tube' THEN 20 WHEN 'track' THEN 20
+        WHEN 'bottom_bar' THEN 30 WHEN 'hem_weight' THEN 35
+        WHEN 'fabric' THEN 40
+        WHEN 'side_channel' THEN 50 WHEN 'bottom_channel' THEN 60
+        WHEN 'chain' THEN 70 WHEN 'belt' THEN 70 WHEN 'brush' THEN 75
+        ELSE 99
+      END ASC
+    LOOP
+      v_cascade_role := COALESCE(v_cascade.component_role, '');
+
+      IF v_cascade.depends_on_role IS NOT NULL
+         AND v_resolved_cuts ? v_cascade.depends_on_role THEN
+        v_cascade_base := (v_resolved_cuts->>v_cascade.depends_on_role)::numeric;
+      ELSE
+        IF COALESCE(v_cascade.cut_axis, '') = 'height'
+           OR v_cascade_role IN ('side_channel','chain','belt','brush') THEN
+          v_cascade_base := v_height_mm;
+        ELSE
+          v_cascade_base := v_width_mm;
+        END IF;
+      END IF;
+
+      v_cascade_base := v_cascade_base + COALESCE(v_cascade.tolerance_mm, 0);
+
+      SELECT COALESCE(SUM(
+        COALESCE(ci2.delta_x_mm, 0) * COALESCE(bc2.qty_value, 1)
+      ), 0) INTO v_cascade_subtract
+      FROM public."BOMComponents" bc2
+      LEFT JOIN public."CatalogItems" ci2 ON ci2.id = bc2.component_item_id AND ci2.organization_id = p_org_id
+      WHERE bc2.bom_template_id = p_bom_template_id
+        AND bc2.organization_id = p_org_id
+        AND bc2.deleted = false AND bc2.archived = false
+        AND bc2.affects_role = v_cascade_role
+        AND COALESCE(bc2.delta_mode, 'subtract') = 'subtract';
+
+      v_cascade_base := GREATEST(0, v_cascade_base - v_cascade_subtract);
+      v_resolved_cuts := v_resolved_cuts || jsonb_build_object(v_cascade_role, v_cascade_base);
+    END LOOP;
+  END IF;
+
   -- ===== BOM components (with condition filtering, per_spacing, per_joint, per_panel) =====
   IF p_bom_template_id IS NOT NULL THEN
     FOR v_comp IN
@@ -282,21 +343,33 @@ BEGIN
       ORDER BY cim.updated_at DESC NULLS LAST
       LIMIT 1;
 
-      -- Qty calculation with all types
+      -- Qty calculation with cascade-resolved cuts
       v_qty := COALESCE(v_comp.qty_value, 1);
+      DECLARE
+        v_eff_width numeric;
+        v_eff_height numeric;
+        v_comp_role_lc text := lower(COALESCE(v_comp.component_role, ''));
+      BEGIN
+        IF v_resolved_cuts ? v_comp_role_lc THEN
+          v_eff_width := (v_resolved_cuts->>v_comp_role_lc)::numeric;
+          v_eff_height := (v_resolved_cuts->>v_comp_role_lc)::numeric;
+        ELSE
+          v_eff_width := v_width_mm + COALESCE(v_comp.qty_delta_mm, 0);
+          v_eff_height := v_height_mm + COALESCE(v_comp.qty_delta_mm, 0);
+        END IF;
       CASE COALESCE(v_comp.qty_type, 'fixed')
         WHEN 'per_width', 'width' THEN
-          v_qty := GREATEST(0, (v_width_mm + COALESCE(v_comp.qty_delta_mm, 0)) / 1000.0)
+          v_qty := GREATEST(0, v_eff_width / 1000.0)
                    * COALESCE(v_comp.qty_value, 1);
         WHEN 'per_height', 'height' THEN
-          v_qty := GREATEST(0, (v_height_mm + COALESCE(v_comp.qty_delta_mm, 0)) / 1000.0)
+          v_qty := GREATEST(0, v_eff_height / 1000.0)
                    * COALESCE(v_comp.qty_value, 1);
         WHEN 'per_m2', 'area' THEN
           v_qty := GREATEST(0, v_area_m2)
                    * COALESCE(v_comp.qty_value, 1);
         WHEN 'per_spacing' THEN
           v_qty := CEIL(
-            GREATEST(0, v_width_mm + COALESCE(v_comp.qty_delta_mm, 0))
+            GREATEST(0, v_eff_width)
             / GREATEST(v_comp.qty_spacing_mm::numeric, 1)
           ) * COALESCE(v_comp.qty_value, 1);
           IF v_comp.qty_min IS NOT NULL AND v_qty < v_comp.qty_min THEN
@@ -307,6 +380,7 @@ BEGIN
         ELSE
           v_qty := COALESCE(v_comp.qty_value, 1);
       END CASE;
+      END; -- close cascade DECLARE block
 
       -- per_panel multiplier
       IF COALESCE(v_comp.per_panel, false) AND v_panel_count > 1 THEN
@@ -464,7 +538,8 @@ BEGIN
     'bom_total_cost', v_bom_cost_sum,
     'accessories_total_cost', 0,
     'fabric_calc', COALESCE(v_fabric_calc, '{"source":"none"}'::jsonb),
-    'panel_count', v_panel_count
+    'panel_count', v_panel_count,
+    'resolved_cuts', v_resolved_cuts
   );
 
   RETURN jsonb_build_object(

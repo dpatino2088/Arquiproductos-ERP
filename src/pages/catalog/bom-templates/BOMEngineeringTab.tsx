@@ -26,6 +26,7 @@ export interface EngineeringRow {
   cut_delta_scope: string | null;
   depends_on_role: string | null;
   affects_role: string | null;
+  delta_mode: 'subtract' | 'add' | 'info';
   engineering_delta_source: string | null;
   engineering_attr_key: string | null;
   engineering_scope: string | null;
@@ -133,6 +134,7 @@ export default function BOMEngineeringTab() {
           cut_delta_scope,
           depends_on_role,
           affects_role,
+          delta_mode,
           uom,
           qty_value,
           engineering_delta_source,
@@ -166,6 +168,7 @@ export default function BOMEngineeringTab() {
           cut_delta_scope: c.cut_delta_scope ?? null,
           depends_on_role: c.depends_on_role ?? null,
           affects_role: c.affects_role ?? null,
+          delta_mode: (c as any).delta_mode ?? 'subtract',
           uom: c.uom ?? 'ea',
           qty_value: c.qty_value ?? 1,
           measure_basis: item?.measure_basis ?? null,
@@ -253,10 +256,10 @@ export default function BOMEngineeringTab() {
     return parentRows.filter((r) => r.bom_template_id === selectedTemplateId);
   }, [parentRows, selectedTemplateId]);
 
-  const handleSaveAllAffects = useCallback(
-    async (changes: Array<{ componentId: string; role: string | null }>) => {
+  const handleSaveAllChanges = useCallback(
+    async (changes: Array<{ componentId: string; updates: Record<string, any> }>) => {
       await Promise.all(
-        changes.map((c) => updateComponent(c.componentId, { affects_role: c.role || null })),
+        changes.map((c) => updateComponent(c.componentId, c.updates)),
       );
       await fetchComponents(false);
     },
@@ -382,7 +385,7 @@ export default function BOMEngineeringTab() {
                 ref={breakdownRef}
                 parentRows={componentsForSelected}
                 childrenByParent={childrenByParent}
-                onSaveAll={handleSaveAllAffects}
+                onSaveAll={handleSaveAllChanges}
                 onPendingChange={handlePendingChange}
               />
             </div>
