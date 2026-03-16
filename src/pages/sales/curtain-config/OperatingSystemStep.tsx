@@ -641,7 +641,7 @@ export default function OperatingSystemStep({
       });
     }
     
-    const gearRatio = item.metadata?.gear_ratio || 'standard';
+    const gearRatio = item.gear_ratio || 'standard';
 
     onUpdate({
       drive_item_id: isVirtual ? null : item.id,

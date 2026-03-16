@@ -67,7 +67,7 @@ export interface RollerShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
-  gear_ratio?: 'standard' | '1:1.5' | '1:1.3' | string;
+  gear_ratio?: 'standard' | '1:1.5' | '1:3' | string;
   operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
@@ -109,7 +109,7 @@ export interface DualShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
-  gear_ratio?: 'standard' | '1:1.5' | '1:1.3' | string;
+  gear_ratio?: 'standard' | '1:1.5' | '1:3' | string;
   operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';
@@ -165,7 +165,7 @@ export interface TripleShadeConfig extends BaseProductConfig {
   operatingSystemSide?: 'left' | 'right';
   // Manual specific
   clutchSize?: 'S' | 'M' | 'L';
-  gear_ratio?: 'standard' | '1:1.5' | '1:1.3' | string;
+  gear_ratio?: 'standard' | '1:1.5' | '1:3' | string;
   operatingSystemColor?: 'white' | 'black' | 'silver' | 'bronze';
   chainColor?: 'white' | 'black';
   operatingSystemHeight?: 'standard' | 'custom';

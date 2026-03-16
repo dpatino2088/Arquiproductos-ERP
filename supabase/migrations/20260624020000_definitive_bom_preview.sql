@@ -67,6 +67,9 @@ DECLARE
   v_config_val text;
   v_panel_count integer;
   v_panels jsonb;
+  v_parent_sku text;
+  v_parent_name text;
+  v_parent_uom text;
 BEGIN
   SELECT * INTO v_cp
   FROM public."ConfiguredProducts"
@@ -261,6 +264,9 @@ BEGIN
       FROM public."CatalogItems" ci
       WHERE ci.id = v_comp.component_item_id AND ci.organization_id = p_org_id
       LIMIT 1;
+      v_parent_sku := v_item_info.sku;
+      v_parent_name := v_item_info.name;
+      v_parent_uom := v_item_info.unit_of_measure;
 
       SELECT cim.msrp, cim.total_cost INTO v_msrp_info
       FROM public."CatalogItemsMSRP" cim
@@ -403,9 +409,9 @@ BEGIN
       v_items := v_items || jsonb_build_object(
         'id', v_comp.id::text, 'kind', 'parent', 'role', COALESCE(v_comp.component_role, 'component'),
         'level', 0, 'selected', v_selected, 'catalog_item_id', v_comp.component_item_id,
-        'sku', v_item_info.sku, 'name', v_item_info.name,
+        'sku', v_parent_sku, 'name', v_parent_name,
         'qty', ROUND(v_qty, 3),
-        'uom', COALESCE(v_comp.uom, v_item_info.unit_of_measure, 'ea'),
+        'uom', COALESCE(v_comp.uom, v_parent_uom, 'ea'),
         'unit_price', v_unit_price, 'line_total', v_line_total,
         'unit_cost', v_comp_unit_cost, 'cost_total', v_comp_cost_total,
         'children', v_children,

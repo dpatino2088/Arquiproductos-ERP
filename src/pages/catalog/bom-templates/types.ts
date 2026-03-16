@@ -128,7 +128,7 @@ export const CONDITION_VALUE_OPTIONS: Record<string, { value: string; label: str
   gear_ratio: [
     { value: 'standard', label: 'Standard (1:1)' },
     { value: '1:1.5', label: '1:1.5' },
-    { value: '1:1.3', label: '1:1.3' },
+    { value: '1:3', label: '1:3' },
   ],
 };
 

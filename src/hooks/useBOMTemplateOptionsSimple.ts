@@ -21,6 +21,18 @@ const NON_COLOR_ROLES = new Set<string>(['motor', 'tube']);
 // ✅ Reglas según usuario: estos roles SÍ aplican color
 const COLOR_ROLES = new Set<string>(['bottom_bar', 'headbox', 'side_channel', 'bottom_channel', 'drive']);
 
+function inferGearRatio(
+  sku: string | null | undefined,
+  name: string | null | undefined,
+  description: string | null | undefined,
+): 'standard' | '1:1.5' | '1:3' {
+  const text = `${sku || ''} ${name || ''} ${description || ''}`.toLowerCase();
+  // Accept multiple text variants from supplier catalogs.
+  if (text.includes('1:1.5') || text.includes('1,5') || text.includes('1:5')) return '1:1.5';
+  if (text.includes('1:3') || text.includes('1,3') || text.includes('1:1.3')) return '1:3';
+  return 'standard';
+}
+
 export interface RoleOption {
   id: string;
   sku: string;
@@ -29,7 +41,7 @@ export interface RoleOption {
   color: string | null;
   cost_exw: number | null;
   category_id: string | null;
-  metadata?: Record<string, any> | null;
+  gear_ratio?: 'standard' | '1:1.5' | '1:3' | null;
   /** IDs de templates que tienen este componente */
   templateIds?: string[];
   virtual?: boolean;
@@ -301,7 +313,7 @@ export function useProgressiveTemplateFilter(
       // Fetch CatalogItems
       const { data: catalogItems, error: itemsError } = await supabase
         .from('CatalogItems')
-        .select('id, sku, name, image_url, color, cost_exw, category_id, metadata')
+        .select('id, sku, name, description, image_url, color, cost_exw, category_id')
         .in('id', Array.from(componentItemIds))
         .eq('organization_id', activeOrganizationId)
         .eq('is_active', true);
@@ -328,7 +340,7 @@ export function useProgressiveTemplateFilter(
             color: item.color ?? null,
             cost_exw: item.cost_exw ?? null,
             category_id: item.category_id ?? null,
-            metadata: (item as any).metadata ?? null,
+            gear_ratio: inferGearRatio(item.sku, item.name, (item as any).description),
             templateIds,
             virtual: false,
           });
@@ -577,7 +589,7 @@ export function useBOMTemplateOptionsSimple(
         // Fetch CatalogItems
         const { data: catalogItems, error: itemsError } = await supabase
           .from('CatalogItems')
-          .select('id, sku, name, image_url, color, cost_exw, category_id, metadata')
+          .select('id, sku, name, description, image_url, color, cost_exw, category_id')
           .in('id', Array.from(componentItemIds))
           .eq('organization_id', activeOrganizationId)
           .eq('is_active', true);
@@ -613,7 +625,7 @@ export function useBOMTemplateOptionsSimple(
               color: item.color ?? null,
               cost_exw: item.cost_exw ?? null,
               category_id: item.category_id ?? null,
-              metadata: (item as any).metadata ?? null,
+              gear_ratio: inferGearRatio(item.sku, item.name, (item as any).description),
               templateIds,
               virtual: false,
             });
@@ -800,7 +812,7 @@ export function useBOMTemplateAllRoleOptions(
         // Fetch all CatalogItems
         const { data: catalogItems, error: itemsError } = await supabase
           .from('CatalogItems')
-          .select('id, sku, name, image_url, color, cost_exw, category_id, metadata')
+          .select('id, sku, name, description, image_url, color, cost_exw, category_id')
           .in('id', Array.from(allComponentItemIds))
           .eq('organization_id', activeOrganizationId)
           .eq('is_active', true);
@@ -837,7 +849,7 @@ export function useBOMTemplateAllRoleOptions(
                   color: item.color,
                   cost_exw: item.cost_exw,
                   category_id: item.category_id,
-                  metadata: (item as any).metadata ?? null,
+                  gear_ratio: inferGearRatio(item.sku, item.name, (item as any).description),
                   templateIds,
                 });
               } else {
