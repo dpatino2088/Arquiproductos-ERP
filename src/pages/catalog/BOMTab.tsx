@@ -352,7 +352,7 @@ function BOMTemplateCard({ template, onEdit, onDelete }: { template: any; onEdit
                             </span>
                           </td>
                           <td className="py-2 px-4 text-xs text-gray-700 text-center">
-                            {component.sequence_order || 0}
+                            {component.sort_order || 0}
                           </td>
                         </tr>
                       ))}
@@ -421,7 +421,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
     qty_per_unit: 1,
     uom: 'unit',
     is_required: true,
-    sequence_order: 0,
+    sort_order: 0,
   });
 
   // Load template data if editing
@@ -489,9 +489,9 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       return a.category_name.localeCompare(b.category_name);
     });
 
-    // Sort components within each category by sequence_order
+    // Sort components within each category by sort_order
     sortedGroups.forEach(group => {
-      group.components.sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+      group.components.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
     });
 
     return sortedGroups;
@@ -510,7 +510,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       qty_per_unit: 1,
       uom: 'unit',
       is_required: true,
-      sequence_order: components.length,
+      sort_order: components.length,
     });
     setShowAddComponentForm(false);
     setComponentSearchTerm('');
@@ -553,7 +553,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
       qty_per_unit: 1,
       uom: 'unit',
       is_required: true,
-      sequence_order: 0,
+      sort_order: 0,
     });
     setShowAddComponentForm(false);
     setComponentSearchTerm('');
@@ -632,7 +632,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
             qty_per_unit: component.qty_per_unit,
             uom: component.uom,
             is_required: component.is_required,
-            sequence_order: component.sequence_order,
+            sort_order: component.sort_order,
           } as any);
           console.log('✅ Component created successfully');
         } catch (error) {
@@ -854,7 +854,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                     qty_per_unit: 1,
                     uom: 'unit',
                     is_required: true,
-                    sequence_order: components.length,
+                    sort_order: components.length,
                   });
                 }}
                 className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
@@ -1008,12 +1008,12 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                     />
                   </div>
                   <div className="col-span-2">
-                    <Label htmlFor="sequence_order" className="text-xs">Order</Label>
+                    <Label htmlFor="sort_order" className="text-xs">Order</Label>
                     <Input
-                      id="sequence_order"
+                      id="sort_order"
                       type="number"
-                      value={formData.sequence_order}
-                      onChange={(e) => setFormData({ ...formData, sequence_order: parseInt(e.target.value) || 0 })}
+                      value={formData.sort_order}
+                      onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
                       className="py-1 text-xs"
                     />
                   </div>
@@ -1046,7 +1046,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                         qty_per_unit: 1,
                         uom: 'unit',
                         is_required: true,
-                        sequence_order: 0,
+                        sort_order: 0,
                       });
                       setComponentSearchTerm('');
                       setSelectedCategoryFilter('');
@@ -1136,7 +1136,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                   </span>
                                 </td>
                                 <td className="py-2 px-4 text-xs text-gray-700 text-center">
-                                  {component.sequence_order || 0}
+                                  {component.sort_order || 0}
                                 </td>
                                 <td className="py-2 px-4 text-right">
                                   <div className="flex items-center gap-1 justify-end">
@@ -1149,7 +1149,7 @@ function BOMModal({ isOpen, onClose, onSave, editingTemplateId }: {
                                           qty_per_unit: component.qty_per_unit || 1,
                                           uom: component.uom || 'unit',
                                           is_required: component.is_required ?? true,
-                                          sequence_order: component.sequence_order || 0,
+                                          sort_order: component.sort_order || 0,
                                         });
                                         setShowAddComponentForm(true);
                                         setComponentSearchTerm('');

@@ -31,7 +31,6 @@ export interface BOMComponentDraft {
   qty_min?: number | null;
   uom: string;
   sort_order: number;
-  sequence_order: number;
   is_required: boolean;
   auto_select: boolean;
   per_panel: boolean;
@@ -56,7 +55,7 @@ export interface ComponentFormData {
   qty_spacing_mm: number | null;
   qty_min: number | null;
   uom: string;
-  sequence_order: number;
+  sort_order: number;
   is_required: boolean;
   per_panel: boolean;
   condition_key: string;
@@ -140,7 +139,7 @@ export const INITIAL_FORM_DATA: ComponentFormData = {
   qty_spacing_mm: null,
   qty_min: null,
   uom: 'ea',
-  sequence_order: 0,
+  sort_order: 0,
   is_required: true,
   per_panel: false,
   condition_key: '',

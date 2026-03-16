@@ -774,11 +774,11 @@ export default function BOMTemplateModal({
                       <Input
                         type="number"
                         min={0}
-                        value={form.formData.sequence_order}
+                        value={form.formData.sort_order}
                         onChange={(e) =>
                           form.setFormData((prev) => ({
                             ...prev,
-                            sequence_order: parseInt(
+                            sort_order: parseInt(
                               e.target.value,
                               10
                             ) || 0,

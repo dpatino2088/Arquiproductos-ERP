@@ -282,7 +282,6 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
         uom: syncedUom,
         sort_order: comp.sort_order || 0,
-        sequence_order: comp.sort_order || 0,
         is_required: comp.is_required !== false,
         per_panel: comp.per_panel === true,
         auto_select: false,
@@ -370,7 +369,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
 
   const resetForm = useCallback(() => {
     setEditingComponentId(null);
-    setFormData({ ...INITIAL_FORM_DATA, sequence_order: components.length });
+    setFormData({ ...INITIAL_FORM_DATA, sort_order: components.length });
     setShowAddComponentForm(false);
     setComponentSearchTerm('');
     setSelectedCategoryFilter('');
@@ -424,7 +423,6 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       qty_min: finalQty === 'per_spacing' ? formData.qty_min : null,
       uom: finalUom,
       sort_order: cascadeOrder,
-      sequence_order: cascadeOrder,
       is_required: formData.is_required ?? true,
       per_panel: formData.per_panel ?? false,
       auto_select: false,
@@ -464,8 +462,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         qty_spacing_mm: finalQty === 'per_spacing' ? (formData.qty_spacing_mm ?? 500) : null,
         qty_min: finalQty === 'per_spacing' ? formData.qty_min : null,
         uom: finalUom,
-        sort_order: formData.sequence_order ?? 0,
-        sequence_order: formData.sequence_order ?? 0,
+        sort_order: formData.sort_order ?? 0,
         is_required: formData.is_required ?? true,
         condition_key: formData.condition_key || null,
         condition_value: formData.condition_value || null,
@@ -511,7 +508,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       qty_spacing_mm: component.qty_spacing_mm ?? null,
       qty_min: component.qty_min ?? null,
       uom: uomNorm,
-      sequence_order: component.sort_order || component.sequence_order || 0,
+      sort_order: component.sort_order || 0,
       is_required: component.is_required ?? true,
       per_panel: component.per_panel === true,
       condition_key: component.condition_key || '',
@@ -629,7 +626,6 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       qty_min: childQtyType === 'per_spacing' ? childFormData.qty_min : null,
       uom,
       sort_order: sortOrder,
-      sequence_order: sortOrder,
       is_required: childFormData.required !== false,
       per_panel: childFormData.per_panel === true,
       auto_select: false,
@@ -716,7 +712,6 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         qty_min: childQtyType === 'per_spacing' ? childFormData.qty_min ?? null : null,
         uom,
         sort_order: sortOrder,
-        sequence_order: sortOrder,
         is_required: childFormData.required !== false,
         per_panel: childFormData.per_panel === true,
         auto_select: false,
@@ -787,7 +782,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           qty_spacing_mm: c.qty_spacing_mm ?? null,
           qty_min: c.qty_min ?? null,
           uom: isFabric ? 'm' : canonicalUom(c.uom, null),
-          sort_order: c.sort_order || c.sequence_order || 0,
+          sort_order: c.sort_order || 0,
           is_required: c.is_required !== false,
           per_panel: c.per_panel === true,
           condition_key: c.condition_key || null,
@@ -845,7 +840,6 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
           uom: comp.uom || 'ea',
           sort_order: comp.sort_order || 0,
-          sequence_order: comp.sort_order || 0,
           is_required: comp.is_required !== false,
           per_panel: comp.per_panel === true,
           auto_select: false,

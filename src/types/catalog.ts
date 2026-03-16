@@ -250,7 +250,7 @@ export interface BOMComponent {
   qty_per_unit: number;
   uom: string;
   is_required: boolean;
-  sequence_order: number;
+  sort_order: number;
   metadata: Record<string, any>;
   deleted: boolean;
   archived: boolean;
