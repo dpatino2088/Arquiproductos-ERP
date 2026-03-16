@@ -77,7 +77,9 @@ export default function BOMTemplateModal({
     const ptName = selectedPt?.code?.toUpperCase() || selectedPt?.name?.toUpperCase().replace(/\s+/g, '_') || '';
     if (ptName) parts.push(ptName);
     if (isDrapery && form.templateProductLine) {
-      parts.push(form.templateProductLine.toUpperCase());
+      let plUpper = form.templateProductLine.toUpperCase().replace(/\s+/g, '_');
+      if (ptName) plUpper = plUpper.replace(new RegExp(`_?${ptName}_?`, 'g'), '').replace(/^_|_$/g, '');
+      if (plUpper) parts.push(plUpper);
     }
     if (form.templateOpeningDirection && form.templateOpeningDirection !== 'all') {
       parts.push(form.templateOpeningDirection.toUpperCase());
