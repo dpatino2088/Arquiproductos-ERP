@@ -159,7 +159,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   })();
 
   // Load templates (be resilient to schema differences)
-  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null; drive_type?: string | null; drive_side?: string | null; manufacturer?: string | null; product_line?: string | null; installation_location?: string | null; system_size?: string | null }> = [];
+  let templates: Array<{ id: string; archived?: boolean; deleted?: boolean; is_active?: boolean; hardware_color?: string | null; drive_type?: string | null; drive_side?: string | null; opening_direction?: string | null; manufacturer?: string | null; product_line?: string | null; installation_location?: string | null; system_size?: string | null }> = [];
   {
     const candidateIdsRaw = config_snapshot?.candidate_template_ids;
     const candidateIds =
@@ -167,7 +167,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
 
     const base = supabase
       .from('BOMTemplates')
-      .select('id, archived, deleted, is_active, hardware_color, drive_type, drive_side, manufacturer, product_line, installation_location, system_size')
+      .select('id, archived, deleted, is_active, hardware_color, drive_type, drive_side, opening_direction, manufacturer, product_line, installation_location, system_size')
       .eq('product_type_id', product_type_id)
       .or(`organization_id.eq.${organization_id},organization_id.is.null`);
 
@@ -255,17 +255,45 @@ async function resolveBomTemplateIdFrontendStrict(args: {
     }
   }
 
-  // Paso 3b: Filtrar por drive_side (NULL = aplica a ambos, 'left'/'right' = específico)
-  const userDriveSide = config_snapshot?.drive_side || config_snapshot?.driveSide || null;
-  let driveSideFilteredTemplates = driveTypeFilteredTemplates;
-  if (userDriveSide) {
-    const dsMatches = driveTypeFilteredTemplates.filter((t) =>
-      !(t as any).drive_side || (t as any).drive_side === userDriveSide
+  // Paso 3b: Filtrar por opening_direction (drapery: left/right/center — NULL template = any)
+  const userOpeningDirection = config_snapshot?.opening_direction || config_snapshot?.openingDirection || null;
+  let openingDirFilteredTemplates = driveTypeFilteredTemplates;
+  if (userOpeningDirection) {
+    const odExact = driveTypeFilteredTemplates.filter((t) =>
+      (t as any).opening_direction === userOpeningDirection
     );
-    if (dsMatches.length > 0) {
-      driveSideFilteredTemplates = dsMatches;
-    } else if (import.meta.env.DEV) {
-      console.warn('[resolveBomTemplateIdFrontendStrict] No drive_side match, ignoring filter:', { userDriveSide });
+    if (odExact.length > 0) {
+      openingDirFilteredTemplates = odExact;
+    } else {
+      const odLoose = driveTypeFilteredTemplates.filter((t) =>
+        !(t as any).opening_direction
+      );
+      if (odLoose.length > 0) {
+        openingDirFilteredTemplates = odLoose;
+      } else if (import.meta.env.DEV) {
+        console.warn('[resolveBomTemplateIdFrontendStrict] No opening_direction match, ignoring filter:', { userOpeningDirection });
+      }
+    }
+  }
+
+  // Paso 3c: Filtrar por drive_side (NULL = aplica a ambos, 'left'/'right' = específico)
+  const userDriveSide = config_snapshot?.drive_side || config_snapshot?.driveSide || null;
+  let driveSideFilteredTemplates = openingDirFilteredTemplates;
+  if (userDriveSide) {
+    const dsExact = openingDirFilteredTemplates.filter((t) =>
+      (t as any).drive_side === userDriveSide
+    );
+    if (dsExact.length > 0) {
+      driveSideFilteredTemplates = dsExact;
+    } else {
+      const dsLoose = openingDirFilteredTemplates.filter((t) =>
+        !(t as any).drive_side
+      );
+      if (dsLoose.length > 0) {
+        driveSideFilteredTemplates = dsLoose;
+      } else if (import.meta.env.DEV) {
+        console.warn('[resolveBomTemplateIdFrontendStrict] No drive_side match, ignoring filter:', { userDriveSide });
+      }
     }
   }
 

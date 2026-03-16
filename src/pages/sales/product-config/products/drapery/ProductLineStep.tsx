@@ -149,7 +149,8 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
         .eq('fabric_group', group)
         .order('fullness_factor', { ascending: true });
 
-      const sizesQuery = supabase
+      // Query 1: template-level system_size (roller products store it here)
+      const tplSizesQuery = supabase
         .from('BOMTemplates')
         .select('system_size')
         .eq('product_type_id', productTypeId)
@@ -159,7 +160,17 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
         .not('system_size', 'is', null)
         .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`);
 
-      const [rulesResult, sizesResult] = await Promise.all([rulesQuery, sizesQuery]);
+      // Query 2: component-level condition_value (drapery stores system_size here via glider conditions)
+      const tplIdsQuery = supabase
+        .from('BOMTemplates')
+        .select('id')
+        .eq('product_type_id', productTypeId)
+        .eq('is_active', true)
+        .eq('deleted', false)
+        .eq('product_line', selectedLine)
+        .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`);
+
+      const [rulesResult, tplSizesResult, tplIdsResult] = await Promise.all([rulesQuery, tplSizesQuery, tplIdsQuery]);
 
       if (cancelled) return;
 
@@ -177,18 +188,45 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
         }
       }
 
-      if (sizesResult.error) {
-        console.error('[ProductLineStep] Failed to load system sizes:', sizesResult.error);
-        setAvailableSystemSizes([]);
-      } else {
-        const rows = Array.isArray(sizesResult.data) ? sizesResult.data : [];
-        const unique = Array.from(
-          new Set(rows.map((r: { system_size?: string }) => (r.system_size ?? '').trim()).filter(Boolean))
-        ).sort() as string[];
-        setAvailableSystemSizes(unique);
-        if (unique.length === 1 && !selectedSystemSize) {
-          onUpdate({ systemSize: unique[0] });
+      // Merge system_size from both template-level and component-level sources
+      let allSizes = new Set<string>();
+
+      if (!tplSizesResult.error) {
+        for (const r of (tplSizesResult.data ?? []) as { system_size?: string }[]) {
+          const v = (r.system_size ?? '').trim();
+          if (v) allSizes.add(v);
         }
+      }
+
+      // If no template-level sizes, check component conditions
+      if (allSizes.size === 0 && !tplIdsResult.error) {
+        const tIds = ((tplIdsResult.data ?? []) as { id: string }[]).map(t => t.id);
+        if (tIds.length > 0) {
+          const { data: condData } = await supabase
+            .from('BOMComponents')
+            .select('condition_value')
+            .eq('organization_id', activeOrganizationId)
+            .eq('condition_key', 'system_size')
+            .eq('deleted', false)
+            .eq('archived', false)
+            .in('bom_template_id', tIds)
+            .not('condition_value', 'is', null);
+
+          if (!cancelled && condData) {
+            for (const r of condData as { condition_value?: string }[]) {
+              const v = (r.condition_value ?? '').trim();
+              if (v) allSizes.add(v);
+            }
+          }
+        }
+      }
+
+      if (cancelled) return;
+
+      const unique = Array.from(allSizes).sort() as string[];
+      setAvailableSystemSizes(unique);
+      if (unique.length === 1 && !selectedSystemSize) {
+        onUpdate({ systemSize: unique[0] });
       }
     })();
 
