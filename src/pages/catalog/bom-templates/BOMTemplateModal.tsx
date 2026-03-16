@@ -124,6 +124,10 @@ export default function BOMTemplateModal({
   }, [form.isDirty, onClose]);
 
   const handleSaveClick = useCallback(async () => {
+    await form.handleSave();
+  }, [form.handleSave]);
+
+  const handleSaveAndClose = useCallback(async () => {
     const ok = await form.handleSave();
     if (ok) onSave();
   }, [form.handleSave, onSave]);
@@ -1112,15 +1116,13 @@ export default function BOMTemplateModal({
               onClick={handleRequestClose}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50"
             >
-              Cancel
+              Close
             </button>
             <button
               type="button"
               onClick={handleSaveClick}
-              disabled={
-                form.isSaving || form.displayComponents.length === 0
-              }
-              className="relative px-4 py-2 text-sm font-medium text-white bg-primary rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={form.isSaving || form.displayComponents.length === 0}
+              className="relative px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {form.isSaving ? 'Saving…' : 'Save'}
               {form.childrenHavePendingChanges && !form.isSaving && (
@@ -1129,6 +1131,14 @@ export default function BOMTemplateModal({
                   title="Children have unsaved changes"
                 />
               )}
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveAndClose}
+              disabled={form.isSaving || form.displayComponents.length === 0}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Save & Close
             </button>
           </div>
         </div>

@@ -73,14 +73,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   const productType = (config as any).productType || (config as any).product_type || '';
   const isRollerShade = productType === 'roller_shade' || productType === 'roller-shade' || productType === 'ROLLER';
 
-  // Headbox policy for this product type
   const headboxPolicy: 'required' | 'optional' | 'none' = HEADBOX_POLICY[productType] ?? 'none';
-  // with_headbox: null means "not set yet" (user hasn't decided); true/false = decided
-  const withHeadbox: boolean | null = headboxPolicy === 'required'
-    ? true
-    : headboxPolicy === 'none'
-    ? null
-    : ((config as any).with_headbox ?? null);
 
   // Always show these hardware options
   const showHardwareColor = true;
@@ -91,12 +84,10 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     ? (config as any)._manufacturer_filtered_templates
     : null;
 
-  const loadTemplatesForColor = async (color: string, resolvedWithHeadbox?: boolean | null): Promise<string[]> => {
+  const loadTemplatesForColor = async (color: string): Promise<string[]> => {
     if (!activeOrganizationId || !productTypeId) return [];
     
     const normalizedColor = color.trim().charAt(0).toUpperCase() + color.trim().slice(1).toLowerCase();
-    // Use passed value if provided, otherwise fall back to component-level withHeadbox
-    const headboxFilter = resolvedWithHeadbox !== undefined ? resolvedWithHeadbox : withHeadbox;
     
     let query = supabase
       .from('BOMTemplates')
@@ -107,7 +98,6 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
       .eq('is_active', true)
       .eq('archived', false);
 
-    if (headboxFilter != null) query = query.eq('headbox', headboxFilter);
     if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) query = query.in('id', mfrFilteredTemplates);
     
     const { data: templates, error } = await query;
@@ -127,7 +117,6 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         .eq('is_active', true)
         .eq('archived', false);
 
-      if (headboxFilter != null) fallbackQuery = fallbackQuery.eq('headbox', headboxFilter);
       if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) fallbackQuery = fallbackQuery.in('id', mfrFilteredTemplates);
 
       const { data: nullTemplates } = await fallbackQuery;
@@ -586,72 +575,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         )}
         <div className={`space-y-8 ${selectionDisabled ? 'pointer-events-none opacity-50' : ''}`}>
 
-        {/* Headbox / Cassette toggle — shown when policy is 'optional' */}
-        {headboxPolicy === 'optional' && (
-          <div className="flex items-center gap-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900">Headbox / Cassette</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {withHeadbox === true
-                  ? 'Templates that include a headbox assembly will be used.'
-                  : withHeadbox === false
-                  ? 'Templates without headbox will be used.'
-                  : 'Select whether this product includes a headbox cassette.'}
-              </p>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={async () => {
-                  if (selectionDisabled) return;
-                  // Reset hardware selections when headbox preference changes
-                  const newTemplates = currentHardwareColor
-                    ? await loadTemplatesForColor(currentHardwareColor, false)
-                    : null;
-                  onUpdate({
-                    with_headbox: false,
-                    bottom_bar_item_id: null, bottom_bar_sku: null,
-                    headbox_item_id: null, headbox_sku: null,
-                    side_channel_item_id: null, side_channel_sku: null,
-                    bottom_channel_item_id: null, bottom_channel_sku: null,
-                    _hardware_filtered_templates: newTemplates && newTemplates.length > 0 ? newTemplates : null,
-                  } as any);
-                }}
-                className={`px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
-                  withHeadbox === false
-                    ? 'border-2 border-gray-900 bg-gray-900 text-white'
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
-              >
-                Without Headbox
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (selectionDisabled) return;
-                  const newTemplates = currentHardwareColor
-                    ? await loadTemplatesForColor(currentHardwareColor, true)
-                    : null;
-                  onUpdate({
-                    with_headbox: true,
-                    bottom_bar_item_id: null, bottom_bar_sku: null,
-                    headbox_item_id: null, headbox_sku: null,
-                    side_channel_item_id: null, side_channel_sku: null,
-                    bottom_channel_item_id: null, bottom_channel_sku: null,
-                    _hardware_filtered_templates: newTemplates && newTemplates.length > 0 ? newTemplates : null,
-                  } as any);
-                }}
-                className={`px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
-                  withHeadbox === true
-                    ? 'border-2 border-gray-900 bg-gray-900 text-white'
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
-              >
-                With Headbox
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Headbox / Cassette toggle REMOVED — selection is handled by the card section below with "Not Included" button */}
 
         {/* Headbox required notice — for triple and other 'required' types */}
         {headboxPolicy === 'required' && (
@@ -913,8 +837,8 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
               </div>
             )}
 
-            {/* Bottom Bar Wrapped (Forrado) checkbox */}
-            {(config as any).bottom_bar_item_id && (
+            {/* Bottom Bar Wrapped (Forrado) checkbox — Roller only */}
+            {isRollerShade && (config as any).bottom_bar_item_id && (
               <div className="mt-4 pt-3 border-t border-gray-200">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -938,31 +862,33 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
           <div>
             <div className="flex items-center gap-3 mb-5">
               <Label className="text-sm font-medium block min-w-[12rem]">HEADBOX / CASSETTE</Label>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (selectionDisabled) return;
-                  if ((config as any).headbox_item_id === 'NONE') {
-                    await clearHeadboxSelection();
-                  } else {
-                    onUpdate({
-                      headbox_item_id: 'NONE',
-                      headbox_sku: null,
-                      cassette: false,
-                      cassette_shape: 'none',
-                    } as any);
-                  }
-                }}
-                className={`shrink-0 w-[7.5rem] px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
-                  String((config as any).headbox_item_id) === 'NONE'
-                    ? 'border-2 border-gray-900 bg-gray-100 text-gray-900'
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
-                } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
-              >
-                Not Included
-              </button>
+              {headboxPolicy !== 'required' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (selectionDisabled) return;
+                    if ((config as any).headbox_item_id === 'NONE') {
+                      await clearHeadboxSelection();
+                    } else {
+                      onUpdate({
+                        headbox_item_id: 'NONE',
+                        headbox_sku: null,
+                        cassette: false,
+                        cassette_shape: 'none',
+                      } as any);
+                    }
+                  }}
+                  className={`shrink-0 w-[7.5rem] px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+                    String((config as any).headbox_item_id) === 'NONE'
+                      ? 'border-2 border-gray-900 bg-gray-100 text-gray-900'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
+                  } ${selectionDisabled ? 'opacity-50 pointer-events-none' : ''}`}
+                >
+                  Not Included
+                </button>
+              )}
             </div>
-            {String((config as any).headbox_item_id) !== 'NONE' && (
+            {(headboxPolicy === 'required' || String((config as any).headbox_item_id) !== 'NONE') && (
               <>
                 {loadingHeadbox ? (
                   <div className="text-sm text-gray-500 mt-2">Loading headbox options...</div>
@@ -1152,8 +1078,8 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
           </div>
         )}
 
-        {/* Add Bottom Channel */}
-        {currentHardwareColor && (config as any).bottom_bar_item_id && (
+        {/* Add Bottom Channel — Roller only */}
+        {isRollerShade && currentHardwareColor && (config as any).bottom_bar_item_id && (
           <div>
             <div className="flex items-center gap-3 mb-5">
               <Label className="text-sm font-medium block min-w-[12rem]">ADD BOTTOM CHANNEL</Label>

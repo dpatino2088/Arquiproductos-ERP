@@ -364,6 +364,12 @@ BEGIN
         END IF;
       END IF;
 
+      -- Intermediate components only exist between panels; skip when single panel
+      IF lower(COALESCE(v_comp.component_role, '')) LIKE 'intermediate%'
+         AND v_panel_count <= 1 THEN
+        CONTINUE;
+      END IF;
+
       v_selected := false;
       DECLARE
         v_role_lower text := lower(COALESCE(v_comp.component_role, ''));
@@ -449,9 +455,17 @@ BEGIN
       END CASE;
       END; -- close cascade DECLARE block
 
-      -- per_panel multiplier
-      IF COALESCE(v_comp.per_panel, false) AND v_panel_count > 1 THEN
-        v_qty := v_qty * v_panel_count;
+      -- per_panel multiplier — only for 'fixed' qty_type (discrete items).
+      -- Dimension-based types (per_width, per_height, per_m2) already use the
+      -- total dimension which covers all panels; multiplying again would double-count.
+      -- intermediate_* roles use (panel_count - 1): they exist BETWEEN panels.
+      IF COALESCE(v_comp.per_panel, false) AND v_panel_count > 1
+         AND COALESCE(v_comp.qty_type, 'fixed') = 'fixed' THEN
+        IF lower(COALESCE(v_comp.component_role,'')) LIKE 'intermediate%' THEN
+          v_qty := v_qty * GREATEST(1, v_panel_count - 1);
+        ELSE
+          v_qty := v_qty * v_panel_count;
+        END IF;
       END IF;
 
       v_unit_price := COALESCE(v_msrp_info.msrp, 0);
@@ -482,6 +496,12 @@ BEGIN
           IF v_config_val != v_cond_val THEN
             CONTINUE;
           END IF;
+        END IF;
+
+        -- Intermediate children only exist between panels; skip when single panel
+        IF lower(COALESCE(v_child.component_role, '')) LIKE 'intermediate%'
+           AND v_panel_count <= 1 THEN
+          CONTINUE;
         END IF;
 
         IF v_child.component_item_id IS NULL THEN CONTINUE; END IF;
@@ -527,9 +547,15 @@ BEGIN
               v_child_qty := COALESCE(v_child.qty_value, 1);
           END CASE;
 
-          -- per_panel multiplier for children
-          IF COALESCE(v_child.per_panel, false) AND v_panel_count > 1 THEN
-            v_child_qty := v_child_qty * v_panel_count;
+          -- per_panel multiplier for children — only for 'fixed' qty_type
+          IF COALESCE(v_child.per_panel, false) AND v_panel_count > 1
+             AND COALESCE(v_child.qty_type, 'fixed') = 'fixed' THEN
+            IF lower(COALESCE(v_child.component_role,'')) LIKE 'intermediate%'
+               OR lower(COALESCE(v_comp.component_role,'')) LIKE 'intermediate%' THEN
+              v_child_qty := v_child_qty * GREATEST(1, v_panel_count - 1);
+            ELSE
+              v_child_qty := v_child_qty * v_panel_count;
+            END IF;
           END IF;
 
           v_child_unit_price := COALESCE(v_msrp_info.msrp, 0);

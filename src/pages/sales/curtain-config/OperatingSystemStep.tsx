@@ -126,7 +126,8 @@ export default function OperatingSystemStep({
   const motorItemId = (config as any).motor_item_id || undefined;
   const driveItemId = (config as any).drive_item_id || undefined;
   const tubeItemId = (config as any).tube_item_id || undefined;
-  
+  const selectedGearRatio: 'standard' | '1:1.5' | '1:3' = (config as any).gear_ratio || 'standard';
+
   const productType = (config as any).productType;
   const isDrapery = productType === 'drapery';
   
@@ -396,6 +397,19 @@ export default function OperatingSystemStep({
     panelCount
   );
   
+  // Gear ratio: determine which ratios are available from drive options
+  const availableGearRatios = useMemo(() => {
+    const ratios = new Set<string>();
+    driveOptions.forEach(opt => ratios.add(opt.gear_ratio || 'standard'));
+    return ratios;
+  }, [driveOptions]);
+
+  // Filter drive options by selected gear ratio (only when there are multiple ratios)
+  const filteredDriveOptions = useMemo(() => {
+    if (availableGearRatios.size <= 1) return driveOptions;
+    return driveOptions.filter(opt => (opt.gear_ratio || 'standard') === selectedGearRatio);
+  }, [driveOptions, selectedGearRatio, availableGearRatios]);
+
   // ✅ Calcular templates filtrados por motor/drive seleccionado
   const selectedMotor = motorOptions.find(opt => opt.id === motorItemId);
   const selectedDrive = driveOptions.find(opt => opt.id === driveItemId);
@@ -940,15 +954,52 @@ export default function OperatingSystemStep({
           </div>
         )}
 
+        {/* Gear Ratio Selection (only if manual, not drapery, and multiple ratios available) */}
+        {operationType === 'manual' && !isDrapery && availableGearRatios.size > 1 && (
+          <div>
+            <Label className="text-sm font-medium mb-5 block">GEAR RATIO</Label>
+            <div className="grid grid-cols-3 gap-4 max-w-md">
+              {(['standard', '1:1.5', '1:3'] as const).filter(r => availableGearRatios.has(r)).map((ratio) => {
+                const isSelected = selectedGearRatio === ratio;
+                const label = ratio === 'standard' ? 'Standard' : ratio;
+                return (
+                  <button
+                    key={ratio}
+                    type="button"
+                    onClick={() => {
+                      onUpdate({
+                        gear_ratio: ratio,
+                        drive_item_id: undefined,
+                        drive_sku: null,
+                        manual_drive: undefined,
+                        tube_item_id: undefined,
+                        tube_sku: null,
+                        tube_type: undefined,
+                      } as any);
+                    }}
+                    className={`px-4 py-3 text-sm font-medium rounded-lg border-2 transition-all ${
+                      isSelected
+                        ? 'border-gray-900 bg-gray-900 text-white shadow-md'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400 hover:shadow-sm'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Manual Drive Selection (only if manual) — drapery uses wand from template, no selection needed */}
         {operationType === 'manual' && !isDrapery && (
           <div>
             <Label className="text-sm font-medium mb-5 block">MECHANISM / MANUAL DRIVE</Label>
             {loadingDrive ? (
               <div className="text-sm text-gray-500 mt-2">Loading drive options...</div>
-            ) : driveOptions.length > 0 ? (
+            ) : filteredDriveOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {driveOptions.map((item) => {
+                {filteredDriveOptions.map((item) => {
                   const isSelected = driveItemId === item.id;
                   return (
                     <div
@@ -1006,6 +1057,11 @@ export default function OperatingSystemStep({
                           {item.name || item.sku}
                         </h3>
                         <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
+                        {item.gear_ratio && item.gear_ratio !== 'standard' && (
+                          <span className="inline-block mt-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                            {item.gear_ratio}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -1013,7 +1069,7 @@ export default function OperatingSystemStep({
               </div>
             ) : (
               <div className="text-sm text-gray-500">
-                No manual drive options available
+                No manual drive options available for {selectedGearRatio !== 'standard' ? `gear ratio ${selectedGearRatio}` : 'current selection'}
               </div>
             )}
           </div>

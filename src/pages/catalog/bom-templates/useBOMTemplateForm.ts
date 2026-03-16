@@ -464,6 +464,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         uom: finalUom,
         sort_order: formData.sort_order ?? 0,
         is_required: formData.is_required ?? true,
+        per_panel: formData.per_panel ?? false,
         condition_key: formData.condition_key || null,
         condition_value: formData.condition_value || null,
         catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : c.catalog_item,

@@ -91,8 +91,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   const [templateInfo, setTemplateInfo] = useState<{ code: string; name: string } | null>(null);
 
   const bomPreviewSnapshot = (config as any).bom_preview_snapshot as BOMPreviewSnapshot | undefined;
-  const hasValidSnapshot = (bomPreviewSnapshot?.version === '1' || bomPreviewSnapshot?.version === '2') && 
-    Array.isArray(bomPreviewSnapshot?.items) && 
+  const hasValidSnapshot = !!(bomPreviewSnapshot?.version) &&
+    Array.isArray(bomPreviewSnapshot?.items) &&
     bomPreviewSnapshot.items.length > 0;
 
   // Get variant ID from config (supports different product types)

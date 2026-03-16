@@ -122,5 +122,5 @@ export function snapshotTotalMsrp(snapshot: BOMPreviewSnapshot | undefined | nul
  */
 export function isValidSnapshot(snapshot: unknown): snapshot is BOMPreviewSnapshot {
   const s = snapshot as BOMPreviewSnapshot;
-  return s?.version === '1' && Array.isArray(s?.items) && s.items.length > 0;
+  return !!(s?.version) && Array.isArray(s?.items) && s.items.length > 0;
 }

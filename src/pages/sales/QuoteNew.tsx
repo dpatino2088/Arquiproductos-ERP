@@ -4004,7 +4004,7 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">
                           {index + 1}
                         </td>
-                        <td className="py-4 px-2 text-gray-700 text-sm whitespace-nowrap text-left overflow-hidden text-ellipsis">
+                        <td className="py-4 px-2 text-gray-700 text-sm text-left break-words leading-tight">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center whitespace-nowrap overflow-hidden text-ellipsis">
