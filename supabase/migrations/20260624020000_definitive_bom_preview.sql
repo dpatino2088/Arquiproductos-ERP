@@ -217,7 +217,8 @@ BEGIN
              bc.qty_type, bc.qty_value, bc.qty_delta_mm,
              bc.qty_spacing_mm, bc.qty_min,
              bc.uom, bc.parent_component_id, bc.sort_order,
-             bc.per_panel, bc.condition_key, bc.condition_value
+             bc.per_panel, bc.condition_key, bc.condition_value,
+             bc.is_required
       FROM public."BOMComponents" bc
       WHERE bc.bom_template_id = p_bom_template_id
         AND bc.organization_id = p_org_id
@@ -255,6 +256,13 @@ BEGIN
         IF v_selected_id IS NOT NULL THEN
           v_comp.component_item_id := v_selected_id;
           v_selected := true;
+        END IF;
+
+        -- Optional components (is_required=false): skip if user didn't select
+        IF NOT v_selected AND COALESCE(v_comp.is_required, true) = false
+           AND v_role_lower IN ('side_channel','bottom_channel','headbox','bottom_bar','motor','drive','tube','track')
+        THEN
+          CONTINUE;
         END IF;
       END;
 
