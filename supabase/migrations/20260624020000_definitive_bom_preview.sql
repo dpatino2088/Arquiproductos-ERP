@@ -70,12 +70,17 @@ DECLARE
   v_parent_sku text;
   v_parent_name text;
   v_parent_uom text;
-  -- Cascade resolution
+  -- Cascade resolution (topological sort)
   v_resolved_cuts jsonb := '{}'::jsonb;
   v_cascade RECORD;
   v_cascade_base numeric;
   v_cascade_subtract numeric;
   v_cascade_role text;
+  v_topo_queue text[] := '{}';
+  v_topo_all jsonb := '[]'::jsonb;
+  v_topo_resolved text[] := '{}';
+  v_topo_progress boolean;
+  v_topo_item jsonb;
 BEGIN
   SELECT * INTO v_cp
   FROM public."ConfiguredProducts"
@@ -216,12 +221,13 @@ BEGIN
     v_roll_total_cost := 0;
   END IF;
 
-  -- ===== Cascade pre-pass: resolve cut dimensions in order =====
+  -- ===== Cascade pre-pass: topological sort + resolve cut dimensions =====
   IF p_bom_template_id IS NOT NULL THEN
+    -- Step 1: collect all cuttable parents into a JSONB array
+    v_topo_all := '[]'::jsonb;
     FOR v_cascade IN
-      SELECT bc.id, bc.component_role, bc.depends_on_role,
-             bc.cut_delta_mm AS tolerance_mm, bc.cut_axis,
-             ci.measure_basis
+      SELECT bc.component_role, bc.depends_on_role,
+             bc.cut_delta_mm AS tolerance_mm, bc.cut_axis
       FROM public."BOMComponents" bc
       LEFT JOIN public."CatalogItems" ci ON ci.id = bc.component_item_id AND ci.organization_id = p_org_id
       WHERE bc.bom_template_id = p_bom_template_id
@@ -229,45 +235,85 @@ BEGIN
         AND bc.deleted = false AND bc.archived = false
         AND bc.parent_component_id IS NULL
         AND COALESCE(ci.measure_basis, '') IN ('linear', 'area')
-      ORDER BY CASE COALESCE(bc.component_role, '')
-        WHEN 'headbox' THEN 10 WHEN 'cassette' THEN 10 WHEN 'top_rail' THEN 10
-        WHEN 'tube' THEN 20 WHEN 'track' THEN 20
-        WHEN 'bottom_bar' THEN 30 WHEN 'hem_weight' THEN 35
-        WHEN 'fabric' THEN 40
-        WHEN 'side_channel' THEN 50 WHEN 'bottom_channel' THEN 60
-        WHEN 'chain' THEN 70 WHEN 'belt' THEN 70 WHEN 'brush' THEN 75
-        ELSE 99
-      END ASC
     LOOP
-      v_cascade_role := COALESCE(v_cascade.component_role, '');
+      v_topo_all := v_topo_all || jsonb_build_object(
+        'role', v_cascade.component_role,
+        'dep',  v_cascade.depends_on_role,
+        'tol',  COALESCE(v_cascade.tolerance_mm, 0),
+        'axis', COALESCE(v_cascade.cut_axis, '')
+      );
+    END LOOP;
 
-      IF v_cascade.depends_on_role IS NOT NULL
-         AND v_resolved_cuts ? v_cascade.depends_on_role THEN
-        v_cascade_base := (v_resolved_cuts->>v_cascade.depends_on_role)::numeric;
-      ELSE
-        IF COALESCE(v_cascade.cut_axis, '') = 'height'
+    -- Step 2: Kahn's topological sort — iteratively resolve nodes whose deps are met
+    v_topo_resolved := '{}';
+    LOOP
+      v_topo_progress := false;
+      FOR v_topo_item IN SELECT * FROM jsonb_array_elements(v_topo_all)
+      LOOP
+        v_cascade_role := v_topo_item->>'role';
+        IF v_cascade_role = ANY(v_topo_resolved) THEN CONTINUE; END IF;
+
+        -- Check if dependency is satisfied (NULL dep = no dependency = ready)
+        IF v_topo_item->>'dep' IS NOT NULL
+           AND v_topo_item->>'dep' != ''
+           AND NOT (v_topo_item->>'dep' = ANY(v_topo_resolved))
+        THEN
+          CONTINUE; -- dependency not yet resolved, skip this round
+        END IF;
+
+        -- Resolve this component's cut dimension
+        IF v_topo_item->>'dep' IS NOT NULL
+           AND v_topo_item->>'dep' != ''
+           AND v_resolved_cuts ? (v_topo_item->>'dep')
+        THEN
+          v_cascade_base := (v_resolved_cuts->>(v_topo_item->>'dep'))::numeric;
+        ELSE
+          IF (v_topo_item->>'axis') = 'height'
+             OR v_cascade_role IN ('side_channel','chain','belt','brush') THEN
+            v_cascade_base := v_height_mm;
+          ELSE
+            v_cascade_base := v_width_mm;
+          END IF;
+        END IF;
+
+        v_cascade_base := v_cascade_base + (v_topo_item->>'tol')::numeric;
+
+        -- Subtract deltas from affecting components
+        SELECT COALESCE(SUM(
+          COALESCE(ci2.delta_x_mm, 0) * COALESCE(bc2.qty_value, 1)
+        ), 0) INTO v_cascade_subtract
+        FROM public."BOMComponents" bc2
+        LEFT JOIN public."CatalogItems" ci2 ON ci2.id = bc2.component_item_id AND ci2.organization_id = p_org_id
+        WHERE bc2.bom_template_id = p_bom_template_id
+          AND bc2.organization_id = p_org_id
+          AND bc2.deleted = false AND bc2.archived = false
+          AND bc2.affects_role = v_cascade_role
+          AND COALESCE(bc2.delta_mode, 'subtract') = 'subtract';
+
+        v_cascade_base := GREATEST(0, v_cascade_base - v_cascade_subtract);
+        v_resolved_cuts := v_resolved_cuts || jsonb_build_object(v_cascade_role, v_cascade_base);
+        v_topo_resolved := array_append(v_topo_resolved, v_cascade_role);
+        v_topo_progress := true;
+      END LOOP;
+
+      -- Exit when no more progress (all resolved, or cycle detected)
+      IF NOT v_topo_progress THEN EXIT; END IF;
+    END LOOP;
+
+    -- Cycle fallback: any unresolved components get raw dimension
+    FOR v_topo_item IN SELECT * FROM jsonb_array_elements(v_topo_all)
+    LOOP
+      v_cascade_role := v_topo_item->>'role';
+      IF NOT (v_cascade_role = ANY(v_topo_resolved)) THEN
+        IF (v_topo_item->>'axis') = 'height'
            OR v_cascade_role IN ('side_channel','chain','belt','brush') THEN
           v_cascade_base := v_height_mm;
         ELSE
           v_cascade_base := v_width_mm;
         END IF;
+        v_cascade_base := v_cascade_base + (v_topo_item->>'tol')::numeric;
+        v_resolved_cuts := v_resolved_cuts || jsonb_build_object(v_cascade_role, v_cascade_base);
       END IF;
-
-      v_cascade_base := v_cascade_base + COALESCE(v_cascade.tolerance_mm, 0);
-
-      SELECT COALESCE(SUM(
-        COALESCE(ci2.delta_x_mm, 0) * COALESCE(bc2.qty_value, 1)
-      ), 0) INTO v_cascade_subtract
-      FROM public."BOMComponents" bc2
-      LEFT JOIN public."CatalogItems" ci2 ON ci2.id = bc2.component_item_id AND ci2.organization_id = p_org_id
-      WHERE bc2.bom_template_id = p_bom_template_id
-        AND bc2.organization_id = p_org_id
-        AND bc2.deleted = false AND bc2.archived = false
-        AND bc2.affects_role = v_cascade_role
-        AND COALESCE(bc2.delta_mode, 'subtract') = 'subtract';
-
-      v_cascade_base := GREATEST(0, v_cascade_base - v_cascade_subtract);
-      v_resolved_cuts := v_resolved_cuts || jsonb_build_object(v_cascade_role, v_cascade_base);
     END LOOP;
   END IF;
 

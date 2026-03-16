@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Plus, X, ExternalLink, Minus } from 'lucide-react';
+import { Plus, X, ExternalLink } from 'lucide-react';
 import { getRoleLabel } from '../../../lib/bom/roles';
 import { router } from '../../../lib/router';
-import { getCascadeOrder, getCascadeLabel } from './types';
+import { getCascadeLabel } from './types';
 import type { EngineeringRow } from './BOMEngineeringTab';
 
 export interface CutBreakdownHandle {
@@ -39,6 +39,22 @@ function getRawDelta(row: EngineeringRow, axis: string | null): number | null {
   return axis === 'height' ? row.delta_y_mm : row.delta_x_mm;
 }
 
+function wouldCreateCycle(
+  depGraph: Map<string, string | null>,
+  fromRole: string,
+  toRole: string,
+): boolean {
+  const visited = new Set<string>();
+  let current: string | null | undefined = toRole;
+  while (current) {
+    if (current === fromRole) return true;
+    if (visited.has(current)) return false;
+    visited.add(current);
+    current = depGraph.get(current) ?? null;
+  }
+  return false;
+}
+
 const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps>(function EngineeringCutBreakdown({
   parentRows,
   childrenByParent,
@@ -67,12 +83,18 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
 
   const hasChanges = Object.keys(localChanges).length > 0;
 
-  const cuttableTargets = useMemo(
-    () => parentRows
-      .filter((r) => r.measure_basis === 'linear' || r.measure_basis === 'area')
-      .sort((a, b) => getCascadeOrder(a.component_role) - getCascadeOrder(b.component_role)),
-    [parentRows],
-  );
+  const cuttableTargets = useMemo(() => {
+    const filtered = parentRows.filter((r) => r.measure_basis === 'linear' || r.measure_basis === 'area');
+    const depthOf = (role: string | null, visited = new Set<string>()): number => {
+      if (!role) return 0;
+      if (visited.has(role)) return 0;
+      visited.add(role);
+      const row = filtered.find(r => r.component_role === role);
+      const dep = row?.depends_on_role;
+      return dep ? 1 + depthOf(dep, visited) : 0;
+    };
+    return filtered.sort((a, b) => depthOf(a.component_role) - depthOf(b.component_role));
+  }, [parentRows]);
 
   const cuttableRoles = useMemo(
     () => cuttableTargets.map(t => t.component_role).filter(Boolean) as string[],
@@ -83,6 +105,16 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
     () => parentRows.filter(r => r.measure_basis !== 'linear' && r.measure_basis !== 'area'),
     [parentRows],
   );
+
+  const depGraph = useMemo(() => {
+    const graph = new Map<string, string | null>();
+    for (const t of cuttableTargets) {
+      const role = t.component_role ?? '';
+      const dep = getEffective(t, 'depends_on_role') as string | null;
+      graph.set(role, dep || null);
+    }
+    return graph;
+  }, [cuttableTargets, getEffective]);
 
   const affectingByRole = useMemo(() => {
     const map: Record<string, EngineeringRow[]> = {};
@@ -98,42 +130,53 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
 
   const resolvedCuts = useMemo(() => {
     const resolved = new Map<string, number>();
-    for (const target of cuttableTargets) {
-      const role = target.component_role ?? '';
+    const remaining = new Set(cuttableTargets.map(t => t.component_role ?? ''));
+    const byRole = new Map(cuttableTargets.map(t => [t.component_role ?? '', t]));
+
+    const resolveOne = (role: string) => {
+      const target = byRole.get(role);
+      if (!target) return;
       const depRole = getEffective(target, 'depends_on_role') as string | null;
       const tolerance = Number(getEffective(target, 'cut_delta_mm') ?? 0);
       const isYAxis = target.cut_axis === 'height';
 
-      let baseValue: number;
-      if (depRole && resolved.has(depRole)) {
-        baseValue = resolved.get(depRole)!;
-      } else {
-        baseValue = 0;
-      }
-
-      const affecting = affectingByRole[role] ?? [];
-      const ownChildren = childrenByParent[target.id] ?? [];
+      let baseValue = depRole && resolved.has(depRole) ? resolved.get(depRole)! : 0;
 
       let subtractTotal = 0;
-      for (const comp of affecting) {
+      for (const comp of affectingByRole[role] ?? []) {
         const mode = (getEffective(comp, 'delta_mode') ?? 'subtract') as DeltaMode;
         if (mode !== 'subtract') continue;
         const raw = getRawDelta(comp, isYAxis ? 'height' : null);
         if (raw != null) subtractTotal += raw * (comp.qty_value ?? 1);
-        const children = childrenByParent[comp.id] ?? [];
-        for (const ch of children) {
+        for (const ch of childrenByParent[comp.id] ?? []) {
           const craw = getRawDelta(ch, isYAxis ? 'height' : null);
           if (craw != null) subtractTotal += craw * (ch.qty_value ?? 1);
         }
       }
-
-      for (const ch of ownChildren) {
+      for (const ch of childrenByParent[target.id] ?? []) {
         const craw = getRawDelta(ch, isYAxis ? 'height' : null);
         if (craw != null) subtractTotal += craw * (ch.qty_value ?? 1);
       }
 
       resolved.set(role, baseValue + tolerance - subtractTotal);
+    };
+
+    // Kahn's algorithm: resolve nodes whose dependencies are already resolved
+    let progress = true;
+    while (progress && remaining.size > 0) {
+      progress = false;
+      for (const role of [...remaining]) {
+        const target = byRole.get(role)!;
+        const dep = getEffective(target, 'depends_on_role') as string | null;
+        if (dep && remaining.has(dep)) continue;
+        resolveOne(role);
+        remaining.delete(role);
+        progress = true;
+      }
     }
+    // Fallback: cycle — resolve remaining with raw dimensions
+    for (const role of remaining) { resolveOne(role); }
+
     return resolved;
   }, [cuttableTargets, affectingByRole, childrenByParent, getEffective]);
 
@@ -243,7 +286,7 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
           const baseOptions = [
             { value: '', label: `Curtain ${isYAxis ? 'Height' : 'Width'}` },
             ...cuttableRoles
-              .filter(r => r !== role && getCascadeOrder(r) < getCascadeOrder(role))
+              .filter(r => r !== role && !wouldCreateCycle(depGraph, role, r))
               .map(r => ({ value: r, label: `${getRoleLabel(r)}.cut` })),
           ];
 
