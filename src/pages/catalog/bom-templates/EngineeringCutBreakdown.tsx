@@ -154,6 +154,8 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
         }
       }
       for (const ch of childrenByParent[target.id] ?? []) {
+        const chMode = (getEffective(ch, 'delta_mode') ?? 'subtract') as DeltaMode;
+        if (chMode !== 'subtract') continue;
         const craw = getRawDelta(ch, isYAxis ? 'height' : null);
         if (craw != null) subtractTotal += craw * (ch.qty_value ?? 1);
       }
@@ -262,12 +264,14 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
             groupData.push({ comp, children, mode, groupDelta });
           }
 
-          let ownChildrenDelta = 0;
           for (const ch of ownChildren) {
             const cr = getRawDelta(ch, isYAxis ? 'height' : null);
-            if (cr != null) ownChildrenDelta += cr * (ch.qty_value ?? 1);
+            if (cr == null) continue;
+            const chDelta = cr * (ch.qty_value ?? 1);
+            const chMode = (getEffective(ch, 'delta_mode') ?? 'subtract') as DeltaMode;
+            if (chMode === 'subtract') subtractTotal += chDelta;
+            else if (chMode === 'add') addTotal += chDelta;
           }
-          subtractTotal += ownChildrenDelta;
 
           const baseLabel = depRole ? `${getRoleLabel(depRole)}.cut` : `Curtain ${isYAxis ? 'Height' : 'Width'}`;
           const cutResult = tolerance - subtractTotal;
@@ -365,9 +369,14 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                         {ownChildren.map(child => {
                           const qty = child.qty_value ?? 1;
                           const raw = getRawDelta(child, isYAxis ? 'height' : null);
+                          const childMode = (getEffective(child, 'delta_mode') ?? 'subtract') as DeltaMode;
                           const eff = raw != null ? raw * qty : null;
+                          const cModeColor = childMode === 'subtract' ? 'bg-red-50 text-red-600' : childMode === 'add' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500';
+                          const cTotalColor = childMode === 'subtract' ? 'text-red-500' : childMode === 'add' ? 'text-green-600' : 'text-gray-400';
+                          const cPrefix = childMode === 'subtract' ? '−' : childMode === 'add' ? '+' : '';
+                          const isModified = child.id in localChanges;
                           return (
-                            <tr key={child.id} className="border-b border-gray-50 group hover:bg-gray-50/50">
+                            <tr key={child.id} className={`border-b border-gray-50 group hover:bg-gray-50/50 ${isModified ? 'bg-amber-50/40' : ''}`}>
                               <td className="py-1 pl-10 pr-4">
                                 <span className="text-gray-300 mr-1">↳</span>
                                 <span className="font-mono text-gray-600">{child.component_sku}</span>
@@ -379,11 +388,19 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                                 <span className="font-mono text-gray-600">{raw != null ? `${raw}` : '—'}</span>
                               </td>
                               <td className="py-1 text-center">
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-600">− Sub</span>
+                                <select
+                                  value={childMode}
+                                  onChange={e => setChange(child.id, 'delta_mode', e.target.value as DeltaMode)}
+                                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded border-0 cursor-pointer focus:outline-none ${cModeColor}`}
+                                >
+                                  <option value="subtract">− Subtract</option>
+                                  <option value="add">+ Add</option>
+                                  <option value="info">Info</option>
+                                </select>
                               </td>
                               <td className="py-1 text-center">
-                                <span className={`font-mono font-medium ${eff != null ? 'text-red-500' : 'text-gray-200'}`}>
-                                  {eff != null ? `−${Math.abs(eff)}` : '—'}
+                                <span className={`font-mono font-medium ${eff != null ? cTotalColor : 'text-gray-200'}`}>
+                                  {eff != null ? `${cPrefix}${Math.abs(eff)}` : '—'}
                                 </span>
                               </td>
                               <td className="py-1 text-right pr-3">

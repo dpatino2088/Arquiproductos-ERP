@@ -226,7 +226,7 @@ BEGIN
     -- Step 1: collect all cuttable parents into a JSONB array
     v_topo_all := '[]'::jsonb;
     FOR v_cascade IN
-      SELECT bc.component_role, bc.depends_on_role,
+      SELECT bc.id, bc.component_role, bc.depends_on_role,
              bc.cut_delta_mm AS tolerance_mm, bc.cut_axis
       FROM public."BOMComponents" bc
       LEFT JOIN public."CatalogItems" ci ON ci.id = bc.component_item_id AND ci.organization_id = p_org_id
@@ -237,6 +237,7 @@ BEGIN
         AND COALESCE(ci.measure_basis, '') IN ('linear', 'area')
     LOOP
       v_topo_all := v_topo_all || jsonb_build_object(
+        'id',   v_cascade.id,
         'role', v_cascade.component_role,
         'dep',  v_cascade.depends_on_role,
         'tol',  COALESCE(v_cascade.tolerance_mm, 0),
@@ -278,7 +279,7 @@ BEGIN
 
         v_cascade_base := v_cascade_base + (v_topo_item->>'tol')::numeric;
 
-        -- Subtract deltas from affecting components
+        -- Subtract deltas from affecting components (external)
         SELECT COALESCE(SUM(
           COALESCE(ci2.delta_x_mm, 0) * COALESCE(bc2.qty_value, 1)
         ), 0) INTO v_cascade_subtract
@@ -289,6 +290,26 @@ BEGIN
           AND bc2.deleted = false AND bc2.archived = false
           AND bc2.affects_role = v_cascade_role
           AND COALESCE(bc2.delta_mode, 'subtract') = 'subtract';
+
+        -- Also subtract deltas from own children (delta_mode = 'subtract')
+        DECLARE
+          v_own_children_sub numeric := 0;
+          v_parent_uuid uuid;
+        BEGIN
+          v_parent_uuid := public.try_parse_uuid(v_topo_item->>'id');
+          IF v_parent_uuid IS NOT NULL THEN
+            SELECT COALESCE(SUM(
+              COALESCE(ci3.delta_x_mm, 0) * COALESCE(bc3.qty_value, 1)
+            ), 0) INTO v_own_children_sub
+            FROM public."BOMComponents" bc3
+            LEFT JOIN public."CatalogItems" ci3 ON ci3.id = bc3.component_item_id AND ci3.organization_id = p_org_id
+            WHERE bc3.parent_component_id = v_parent_uuid
+              AND bc3.organization_id = p_org_id
+              AND bc3.deleted = false AND bc3.archived = false
+              AND COALESCE(bc3.delta_mode, 'subtract') = 'subtract';
+          END IF;
+          v_cascade_subtract := v_cascade_subtract + v_own_children_sub;
+        END;
 
         v_cascade_base := GREATEST(0, v_cascade_base - v_cascade_subtract);
         v_resolved_cuts := v_resolved_cuts || jsonb_build_object(v_cascade_role, v_cascade_base);
