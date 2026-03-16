@@ -1081,6 +1081,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             manufacturer: configAny.manufacturer || null,
             product_line: configAny.productLine || configAny.product_line || null,
             style_code: configAny.styleCode || configAny.style_code || null,
+            system_size: configAny.systemSize || configAny.system_size || null,
+            opening_direction: configAny.openingDirection || configAny.opening_direction || null,
+            drive_side: configAny.driveSide || configAny.drive_side || null,
             force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
             accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
           };
