@@ -1126,15 +1126,26 @@ export default function Items() {
       const { data: inserted, error: insertErr } = await supabase
         .from('CatalogItems')
         .insert({ ...rest, sku: newSku, name: newName })
-        .select('id')
+        .select('id, sku, name, category_id, cost_exw, manufacturer_id, item_role, measure_basis')
         .single();
       if (insertErr) {
         if (insertErr.code === '23505') throw new Error(`SKU "${newSku}" already exists.`);
         throw insertErr;
       }
+      if (!inserted) throw new Error('Insert returned no data');
 
-      if (inserted) {
-        // Copy supply info
+      // Verify critical fields were copied correctly
+      if (inserted.category_id !== original.category_id) {
+        console.warn('⚠️ Duplicate: category_id mismatch', { original: original.category_id, copy: inserted.category_id });
+      }
+      if (String(inserted.cost_exw) !== String(original.cost_exw)) {
+        console.warn('⚠️ Duplicate: cost_exw mismatch', { original: original.cost_exw, copy: inserted.cost_exw });
+      }
+
+      const warnings: string[] = [];
+
+      // Copy supply info
+      try {
         const { data: supplyData } = await supabase
           .from('CatalogItemSupply')
           .select('*')
@@ -1143,13 +1154,22 @@ export default function Items() {
           .maybeSingle();
         if (supplyData) {
           const { created_at: _sca, updated_at: _sua, ...supplyRest } = supplyData;
-          await supabase.from('CatalogItemSupply').upsert({
+          const { error: supplyErr } = await supabase.from('CatalogItemSupply').upsert({
             ...supplyRest,
             catalog_item_id: inserted.id,
           });
+          if (supplyErr) {
+            console.warn('⚠️ Supply copy failed:', supplyErr.message);
+            warnings.push('Supply info');
+          }
         }
+      } catch (supplyEx: any) {
+        console.warn('⚠️ Supply copy exception:', supplyEx?.message);
+        warnings.push('Supply info');
+      }
 
-        // Copy product type associations
+      // Copy product type associations
+      try {
         const { data: ptRows } = await supabase
           .from('CatalogItemProductTypes')
           .select('product_type_id')
@@ -1160,38 +1180,49 @@ export default function Items() {
             organization_id: activeOrganizationId,
             catalog_item_id: inserted.id,
             product_type_id: row.product_type_id,
-            catalog_item_sku: newSku,
-            catalog_item_name: newName,
           }));
-          await supabase.from('CatalogItemProductTypes').insert(ptInserts);
+          const { error: ptErr } = await supabase.from('CatalogItemProductTypes').insert(ptInserts);
+          if (ptErr) {
+            console.warn('⚠️ ProductTypes copy failed:', ptErr.message);
+            warnings.push('Product Types');
+          }
         }
-
-        // Compute MSRP for the new item
-        try {
-          await supabase.rpc('msrp_compute_for_item', { p_item_id: inserted.id });
-        } catch {
-          // Non-blocking
-        }
-
-        // Clear any stale session for the new item
-        try {
-          window.sessionStorage.removeItem(`catalogItemEdit:${inserted.id}`);
-        } catch {
-          // no-op
-        }
+      } catch (ptEx: any) {
+        console.warn('⚠️ ProductTypes copy exception:', ptEx?.message);
+        warnings.push('Product Types');
       }
 
-      useUIStore.getState().addNotification({
-        type: 'success',
-        title: 'Item duplicado',
-        message: `Se creó "${newSku}" correctamente.`,
-      });
+      // Compute MSRP for the new item
+      try {
+        await supabase.rpc('msrp_compute_for_item', { p_item_id: inserted.id });
+      } catch {
+        warnings.push('MSRP');
+      }
+
+      // Clear any stale session for the new item
+      try {
+        window.sessionStorage.removeItem(`catalogItemEdit:${inserted.id}`);
+      } catch {
+        // no-op
+      }
+
+      if (warnings.length > 0) {
+        useUIStore.getState().addNotification({
+          type: 'warning',
+          title: 'Item duplicado con advertencias',
+          message: `Se creó "${newSku}" pero no se pudieron copiar: ${warnings.join(', ')}.`,
+        });
+      } else {
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Item duplicado',
+          message: `Se creó "${newSku}" correctamente.`,
+        });
+      }
       refetch();
 
-      if (inserted) {
-        const returnTo = getReturnToFromCurrentQuery() ?? '/catalog/items';
-        router.navigate(withReturnTo(`/catalog/items/edit/${inserted.id}`, returnTo));
-      }
+      const returnTo = getReturnToFromCurrentQuery() ?? '/catalog/items';
+      router.navigate(withReturnTo(`/catalog/items/edit/${inserted.id}`, returnTo));
     } catch (err: any) {
       useUIStore.getState().addNotification({
         type: 'error',

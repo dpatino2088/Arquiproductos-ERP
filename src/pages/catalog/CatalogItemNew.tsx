@@ -92,7 +92,6 @@ const catalogItemSchema = z.object({
   // Component fields
   item_role: z.string().optional().nullable(),
   color: z.string().optional().nullable(),
-  
   // Profile/component dimensions for BOM engineering
   delta_x_mm: z.number().optional().nullable(),
   delta_y_mm: z.number().optional().nullable(),
@@ -1157,6 +1156,7 @@ export default function CatalogItemNew() {
         is_active: values.is_active,
         delta_x_mm: values.delta_x_mm != null ? Number(values.delta_x_mm) : null,
         delta_y_mm: values.delta_y_mm != null ? Number(values.delta_y_mm) : null,
+        updated_at: new Date().toISOString(),
       };
       
       // Defensive: derive itemId from URL if state is out of sync
@@ -1789,6 +1789,8 @@ export default function CatalogItemNew() {
               </SelectContent>
             </SelectShadcn>
           </div>
+
+          <div className="col-span-3" />
 
           <div className="col-span-3" />
 

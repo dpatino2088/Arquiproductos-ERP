@@ -398,7 +398,7 @@ export default function BOMChildrenModal({
                       <Input
                         value={childFormData.condition_value || ''}
                         onChange={(e) => setChildFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
-                        placeholder="Value"
+                        placeholder={childFormData.condition_key === 'motor_item_id' ? 'e.g. EDU-100' : 'Value'}
                         className="text-sm"
                       />
                     )}

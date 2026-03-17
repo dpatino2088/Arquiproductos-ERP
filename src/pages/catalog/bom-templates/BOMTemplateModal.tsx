@@ -826,7 +826,7 @@ export default function BOMTemplateModal({
                           <Input
                             value={form.formData.condition_value || ''}
                             onChange={(e) => form.setFormData((prev) => ({ ...prev, condition_value: e.target.value }))}
-                            placeholder="Value"
+                            placeholder={form.formData.condition_key === 'motor_item_id' ? 'e.g. EDU-100' : 'Value'}
                             className="text-sm"
                           />
                         )}
@@ -993,7 +993,7 @@ export default function BOMTemplateModal({
                                 </td>
                                 <td className="px-3 py-2 text-xs text-gray-500">
                                   {comp.condition_key ? (
-                                    <span>{comp.condition_key} = {comp.condition_value || '—'}</span>
+                                    <span>{comp.condition_key === 'motor_item_id' ? `Motor = ${comp.condition_value || '—'}` : `${comp.condition_key} = ${comp.condition_value || '—'}`}</span>
                                   ) : '—'}
                                 </td>
                                 <td className="px-3 py-2 text-right">
@@ -1092,7 +1092,7 @@ export default function BOMTemplateModal({
                                           : 'No'}
                                       </td>
                                       <td className="px-3 py-1.5 text-xs text-gray-400">
-                                        {child.condition_key ? `${child.condition_key} = ${child.condition_value || '—'}` : '—'}
+                                        {child.condition_key ? (child.condition_key === 'motor_item_id' ? `Motor = ${child.condition_value || '—'}` : `${child.condition_key} = ${child.condition_value || '—'}`) : '—'}
                                       </td>
                                       <td className="px-3 py-1.5" />
                                     </tr>

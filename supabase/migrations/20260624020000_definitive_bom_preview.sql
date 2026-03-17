@@ -358,7 +358,17 @@ BEGIN
       v_cond_key := NULLIF(TRIM(COALESCE(v_comp.condition_key, '')), '');
       IF v_cond_key IS NOT NULL THEN
         v_cond_val := COALESCE(v_comp.condition_value, '');
-        v_config_val := COALESCE(v_config->>v_cond_key, '');
+        IF v_cond_key = 'motor_item_id' THEN
+          -- Resolve by selected motor item: selection_code (e.g. EDU-100) or sku
+          SELECT COALESCE(NULLIF(TRIM(ci.selection_code), ''), ci.sku, '') INTO v_config_val
+          FROM public."CatalogItems" ci
+          WHERE ci.id = public.try_parse_uuid(v_config->>'motor_item_id')
+            AND ci.organization_id = p_org_id
+          LIMIT 1;
+          IF v_config_val IS NULL THEN v_config_val := ''; END IF;
+        ELSE
+          v_config_val := COALESCE(v_config->>v_cond_key, '');
+        END IF;
         IF v_config_val != v_cond_val THEN
           CONTINUE;
         END IF;
@@ -492,7 +502,16 @@ BEGIN
         v_cond_key := NULLIF(TRIM(COALESCE(v_child.condition_key, '')), '');
         IF v_cond_key IS NOT NULL THEN
           v_cond_val := COALESCE(v_child.condition_value, '');
-          v_config_val := COALESCE(v_config->>v_cond_key, '');
+          IF v_cond_key = 'motor_item_id' THEN
+            SELECT COALESCE(NULLIF(TRIM(ci.selection_code), ''), ci.sku, '') INTO v_config_val
+            FROM public."CatalogItems" ci
+            WHERE ci.id = public.try_parse_uuid(v_config->>'motor_item_id')
+              AND ci.organization_id = p_org_id
+            LIMIT 1;
+            IF v_config_val IS NULL THEN v_config_val := ''; END IF;
+          ELSE
+            v_config_val := COALESCE(v_config->>v_cond_key, '');
+          END IF;
           IF v_config_val != v_cond_val THEN
             CONTINUE;
           END IF;

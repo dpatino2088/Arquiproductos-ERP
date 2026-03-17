@@ -115,6 +115,7 @@ export const CONDITION_KEY_OPTIONS = [
   { value: '', label: '-- None --' },
   { value: 'system_size', label: 'System Size (glider spacing)' },
   { value: 'gear_ratio', label: 'Gear Ratio (clutch type)' },
+  { value: 'motor_item_id', label: 'Motor (configurator selection)' },
 ] as const;
 
 export const CONDITION_VALUE_OPTIONS: Record<string, { value: string; label: string }[]> = {

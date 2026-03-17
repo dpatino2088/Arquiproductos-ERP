@@ -256,8 +256,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
       try {
         setLoadingBreakdown(true);
 
-        // 1. Get all parent components from BOMComponents
-        const { data: components, error: componentsError } = await supabase
+        // 1. Get all components from BOMComponents (including condition columns)
+        const { data: rawComponents, error: componentsError } = await supabase
           .from('BOMComponents')
           .select(`
             id,
@@ -267,7 +267,10 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             qty_value,
             qty_delta_mm,
             uom,
-            parent_component_id
+            parent_component_id,
+            condition_key,
+            condition_value,
+            is_required
           `)
           .eq('bom_template_id', bomTemplateId)
           .eq('organization_id', activeOrganizationId)
@@ -276,42 +279,31 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
           .order('sort_order', { ascending: true });
 
         if (componentsError) throw componentsError;
-        if (!components || components.length === 0) {
+        if (!rawComponents || rawComponents.length === 0) {
           setBreakdownLines([]);
           return;
         }
 
         // 2. Build map of selected items from config
+        const configAny = config as any;
         const selectedItems: Record<string, string | null> = {
-          bottom_bar: (config as any).bottom_bar_item_id || null,
-          headbox: (config as any).headbox_item_id || null,
-          side_channel: (config as any).side_channel_item_id || null,
-          bottom_channel: (config as any).bottom_channel_item_id || null,
-          motor: (config as any).motor_item_id || null,
-          drive: (config as any).drive_item_id || null,
-          tube: (config as any).tube_item_id || null,
+          bottom_bar: configAny.bottom_bar_item_id || null,
+          headbox: configAny.headbox_item_id || null,
+          side_channel: configAny.side_channel_item_id || null,
+          bottom_channel: configAny.bottom_channel_item_id || null,
+          motor: configAny.motor_item_id || null,
+          drive: configAny.drive_item_id || null,
+          tube: configAny.tube_item_id || null,
+          track: configAny.track_item_id || null,
         };
 
         // 3. Collect all catalog item IDs we need to fetch
         const catalogItemIds = new Set<string>();
-        
-        // Add fabric/variant ID
         const variantId = getVariantId();
-        if (variantId) {
-          catalogItemIds.add(variantId);
-        }
-        
-        // Add parent components (selected or default)
-        components.forEach((c: any) => {
-          const role = (c.component_role || '').toLowerCase();
-          const selectedId = selectedItems[role];
-          if (selectedId) {
-            catalogItemIds.add(selectedId);
-          }
-          // Always add component_item_id for both parents and children
-          if (c.component_item_id) {
-            catalogItemIds.add(c.component_item_id);
-          }
+        if (variantId) catalogItemIds.add(variantId);
+        Object.values(selectedItems).forEach(id => { if (id) catalogItemIds.add(id); });
+        rawComponents.forEach((c: any) => {
+          if (c.component_item_id) catalogItemIds.add(c.component_item_id);
         });
 
         if (catalogItemIds.size === 0) {
@@ -335,6 +327,20 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             name: item.name || item.sku || '',
             uom: item.unit_of_measure || 'ea',
           });
+        });
+
+        // 5. Filter components by condition_key/condition_value
+        const components = rawComponents.filter((c: any) => {
+          const condKey = (c.condition_key || '').trim();
+          if (!condKey) return true;
+          const condVal = c.condition_value || '';
+          if (condKey === 'motor_item_id') {
+            const selectedMotorId = configAny.motor_item_id;
+            if (!selectedMotorId) return false;
+            const motorInfo = itemMap.get(selectedMotorId);
+            return (motorInfo?.sku || '') === condVal;
+          }
+          return (configAny[condKey] ?? '') === condVal;
         });
 
         // 5. Fetch MSRP prices from CatalogItemsMSRP

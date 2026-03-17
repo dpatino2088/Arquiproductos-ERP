@@ -85,6 +85,9 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
           productLine: null,
           _manufacturer_filtered_templates: mfrToIds.get(autoName) || null,
         });
+      } else if (selected && !config._manufacturer_filtered_templates) {
+        const ids = mfrToIds.get(selected);
+        if (ids) onUpdate({ _manufacturer_filtered_templates: ids });
       }
       setLoading(false);
     })();
