@@ -17,6 +17,7 @@ import { useCatalogItems, useDeleteCatalogItem, useCatalogCategories } from '../
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
 import { catalogItemDetailKey } from '../../lib/queryKeys';
 import { fetchCatalogItemDetail } from '../../lib/catalogListFetchers';
@@ -149,6 +150,7 @@ function hasCatalogRestoreSignal(params: URLSearchParams): boolean {
 
 export default function Items() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { canCreate: canCreateCat, canArchive: canArchiveCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
   const { items, loading, loadingMore, error, refetch } = useCatalogItems();
   const { categories: catalogCategories } = useCatalogCategories();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
@@ -258,6 +260,8 @@ export default function Items() {
       // Guardrail: contextual restore must never fall back to DB hydration.
       // We either restore from snapshot or land on clean list state.
       hasHydratedDbStateRef.current = true;
+      // Always refetch items when returning after Save & Close so the list shows saved data
+      refetch();
       const raw = window.sessionStorage.getItem(CATALOG_ITEMS_LIST_STATE_KEY);
       window.sessionStorage.removeItem(CATALOG_ITEMS_RESTORE_ON_BACK_KEY);
       if (!raw) {
@@ -294,7 +298,7 @@ export default function Items() {
     } catch {
       isRestoringListStateRef.current = false;
     }
-  }, [routeSearch]);
+  }, [routeSearch, refetch]);
 
   useEffect(() => {
     if (authLoading || !userId) return;
@@ -1341,19 +1345,21 @@ export default function Items() {
                   Back
                 </button>
               )}
-              <button
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
-                onClick={() => {
-                  saveListStateSnapshot();
-                  setCatalogItemsRestoreOnBack(true);
-                  const returnTo = buildCatalogItemsReturnTo();
-                  setCatalogItemsReturnTo(returnTo);
-                  router.navigate(withReturnTo('/catalog/items/new', returnTo));
-                }}
-              >
-                <Plus className="w-4 h-4" />
-                Add New
-              </button>
+              {canCreateCat && (
+                <button
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                  onClick={() => {
+                    saveListStateSnapshot();
+                    setCatalogItemsRestoreOnBack(true);
+                    const returnTo = buildCatalogItemsReturnTo();
+                    setCatalogItemsReturnTo(returnTo);
+                    router.navigate(withReturnTo('/catalog/items/new', returnTo));
+                  }}
+                >
+                  <Plus className="w-4 h-4" />
+                  Add New
+                </button>
+              )}
             </>
           )}
           {activeTab === 'manufacturer' && (
@@ -1733,13 +1739,15 @@ export default function Items() {
             >
               Move category
             </button>
-            <button
-              onClick={handleBulkDeleteItems}
-              disabled={isDeleting}
-              className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50"
-            >
-              Delete selected
-            </button>
+            {canDeleteCat && (
+              <button
+                onClick={handleBulkDeleteItems}
+                disabled={isDeleting}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                Delete selected
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1939,23 +1947,27 @@ export default function Items() {
                           >
                             <Copy className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={(e) => handleArchiveItem(item, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Archive ${item.itemName}`}
-                            title={`Archive ${item.itemName}`}
-                          >
-                            <Archive className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={(e) => handleDeleteItem(item, e)}
-                            disabled={isDeleting}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                            aria-label={`Delete ${item.itemName}`}
-                            title={`Delete ${item.itemName}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canArchiveCat && (
+                            <button 
+                              onClick={(e) => handleArchiveItem(item, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              aria-label={`Archive ${item.itemName}`}
+                              title={`Archive ${item.itemName}`}
+                            >
+                              <Archive className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDeleteCat && (
+                            <button 
+                              onClick={(e) => handleDeleteItem(item, e)}
+                              disabled={isDeleting}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                              aria-label={`Delete ${item.itemName}`}
+                              title={`Delete ${item.itemName}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
