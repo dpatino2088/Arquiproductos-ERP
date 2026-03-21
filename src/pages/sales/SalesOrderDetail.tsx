@@ -9,7 +9,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatDate } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
 import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2 } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
@@ -494,8 +494,10 @@ export default function SalesOrderDetail() {
     }
 
     for (const pmt of soPayments) {
+      const isVoid = pmt.status === 'void';
       const methodLabel = (pmt.payment_method || 'Payment').replace(/_/g, ' ');
       const parts: string[] = [];
+      if (isVoid) parts.push('VOID');
       if (pmt.reference_number) parts.push(`Ref: ${pmt.reference_number}`);
       if (pmt.notes) parts.push(pmt.notes);
       const invoiceRefs = (pmt.invoice_refs ?? []).map(r => r.invoice_number).join(', ');
@@ -507,7 +509,8 @@ export default function SalesOrderDetail() {
         date: pmt.payment_date,
         reference: methodLabel,
         description: parts.join(' · ') || '—',
-        amount: pmt.amount,
+        amount: isVoid ? 0 : pmt.amount,
+        status: isVoid ? 'void' : undefined,
       });
     }
 
@@ -753,7 +756,8 @@ export default function SalesOrderDetail() {
   ];
 
   const soStatus = (so.status || 'draft').toLowerCase();
-  const hasPaidAmount = totalPaid > 0;
+  const MIN_PAYMENT_PCT = 0.15;
+  const hasPaidAmount = orderTotal > 0 && totalPaid >= orderTotal * MIN_PAYMENT_PCT;
   const manufacturingProgressCard = (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
       <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>
@@ -933,19 +937,19 @@ export default function SalesOrderDetail() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <dt className="text-gray-500">Order Date</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{new Date(so.created_at).toLocaleDateString()}</dd>
+                <dd className="font-medium text-gray-900 mt-0.5">{formatDate(so.created_at)}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Expected Delivery</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{so.expected_delivery_date ? new Date(so.expected_delivery_date).toLocaleDateString() : '—'}</dd>
+                <dd className="font-medium text-gray-900 mt-0.5">{formatDate(so.expected_delivery_date)}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Completed</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{so.completed_at ? new Date(so.completed_at).toLocaleDateString() : '—'}</dd>
+                <dd className="font-medium text-gray-900 mt-0.5">{formatDate(so.completed_at)}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Closed</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{so.closed_at ? new Date(so.closed_at).toLocaleDateString() : '—'}</dd>
+                <dd className="font-medium text-gray-900 mt-0.5">{formatDate(so.closed_at)}</dd>
               </div>
             </div>
           </div>
@@ -1171,7 +1175,7 @@ export default function SalesOrderDetail() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Order Date</dt>
-                  <dd className="font-medium text-gray-900">{new Date(so.created_at).toLocaleDateString()}</dd>
+                  <dd className="font-medium text-gray-900">{formatDate(so.created_at)}</dd>
                 </div>
                 <div className="flex justify-between items-center border-t pt-2">
                   <dt className="text-gray-500">Priority</dt>
@@ -1215,7 +1219,7 @@ export default function SalesOrderDetail() {
                     ) : (
                       <>
                         {!hasPaidAmount && (
-                          <p className="text-xs text-amber-600 mb-2">A payment must be recorded in Financials before creating a Manufacturing Order.</p>
+                          <p className="text-xs text-amber-600 mb-2">At least 15% of the order total must be paid before creating a Manufacturing Order.</p>
                         )}
                         {eligibleLines.length < lines.length && eligibleLines.length > 0 && (
                           <p className="text-xs text-gray-500 mb-2">{eligibleLines.length} of {lines.length} line(s) pending production. Use the Lines tab to select specific lines.</p>
@@ -1279,7 +1283,7 @@ export default function SalesOrderDetail() {
                         <StatusBadge status={mo.priority} type="priority" size="sm" />
                       )}
                     </td>
-                    <td className="px-4 py-4 text-gray-500 text-right">{new Date(mo.created_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-4 text-gray-500 text-right">{formatDate(mo.created_at)}</td>
                   </tr>
                 ))
               )}
@@ -1325,7 +1329,7 @@ export default function SalesOrderDetail() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Order Date</dt>
-                  <dd className="font-medium text-gray-900">{new Date(so.created_at).toLocaleDateString()}</dd>
+                  <dd className="font-medium text-gray-900">{formatDate(so.created_at)}</dd>
                 </div>
                 <div className="flex justify-between items-center border-t pt-2">
                   <dt className="text-gray-500">Payment Status</dt>
@@ -1491,7 +1495,7 @@ export default function SalesOrderDetail() {
                 ) : (
                   financialActivity.map((entry) => (
                     <tr key={entry.id} className={`border-t hover:bg-gray-50/50 ${entry.type === 'payment' ? 'bg-green-50/20' : ''}`}>
-                      <td className="px-3 py-2.5 text-gray-500 tabular-nums text-xs">{new Date(entry.date).toLocaleDateString()}</td>
+                      <td className="px-3 py-2.5 text-gray-500 tabular-nums text-xs">{formatDate(entry.date)}</td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1.5">
                           {entry.type === 'invoice' ? (

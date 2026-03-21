@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { router } from '../../lib/router';
 import { useDirectoryVendors, type DirectoryVendor } from '../../hooks/useDirectoryVendors';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
@@ -20,6 +21,7 @@ const PARTNERS_SUBMODULES = [
 export default function PartnerVendors() {
   const { registerSubmodules } = useSubmoduleNav();
   const { vendors, isLoading, deleteVendor } = useDirectoryVendors();
+  const { canCreate, canDelete } = useGranularAccess('directory');
   const { addNotification } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
@@ -98,14 +100,16 @@ export default function PartnerVendors() {
           </p>
         </div>
         <div className="flex items-center gap-3 ml-auto">
-          <button
-            onClick={() => router.navigate('/partners/vendors/new')}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-          >
-            <Plus style={{ width: '14px', height: '14px' }} />
-            New Vendor
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => router.navigate('/partners/vendors/new')}
+              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            >
+              <Plus style={{ width: '14px', height: '14px' }} />
+              New Vendor
+            </button>
+          )}
         </div>
       </div>
 
@@ -309,13 +313,15 @@ export default function PartnerVendors() {
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
-                              <button
-                                onClick={() => handleDelete(vendor)}
-                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                                title={`Delete ${vendor.name}`}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {canDelete && (
+                                <button
+                                  onClick={() => handleDelete(vendor)}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                  title={`Delete ${vendor.name}`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

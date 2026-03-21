@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useManufacturingOrders } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -58,6 +59,7 @@ const getStatusLabel = (status: 'needs_mo' | 'has_mo') => {
 // ============================================================================
 
 export default function OrderList() {
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { user } = useAuth();
@@ -108,7 +110,7 @@ export default function OrderList() {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
       // Always register submodules to ensure tabs are visible
-      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
+      registerSubmodules('Manufacturing', filteredSubmodules);
     }
     
     return () => {
@@ -117,7 +119,7 @@ export default function OrderList() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
   // Load SaleOrders that are ready for manufacturing
   // Statuses: 'Confirmed', 'Scheduled for Production', 'In Production'
@@ -479,7 +481,7 @@ export default function OrderList() {
                       </div>
                     </td>
                     <td className="py-4 px-6 text-gray-700 text-sm">
-                      {new Date(order.createdAt).toLocaleDateString()}
+                      {formatDate(order.createdAt)}
                     </td>
                     <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1 justify-end">

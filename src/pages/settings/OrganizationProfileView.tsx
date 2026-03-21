@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
 import { devLog } from '../../lib/dev-logger';
 import { Users, Building, Shield, Calendar, Mail, MapPin } from 'lucide-react';
@@ -294,7 +295,7 @@ export default function OrganizationProfileView() {
             </label>
             <div className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-900">
               {organizationData.created_at 
-                ? new Date(organizationData.created_at).toLocaleDateString()
+                ? formatDate(organizationData.created_at)
                 : 'N/A'}
             </div>
           </div>

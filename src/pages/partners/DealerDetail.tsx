@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { formatDate } from '../../lib/utils';
 import { Building, Building2, FileText, Store } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
@@ -164,7 +165,7 @@ export default function DealerDetail() {
                   <td className="px-4 py-4">{user.email ?? '—'}</td>
                   <td className="px-4 py-4">{user.role_code ?? '—'}</td>
                   <td className="px-4 py-4">{user.status ?? '—'}</td>
-                  <td className="px-4 py-4">{user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-4">{formatDate(user.created_at)}</td>
                 </tr>
               ))}
             </tbody>

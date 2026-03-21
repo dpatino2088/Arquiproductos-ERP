@@ -10,6 +10,7 @@ import type { ProposalLine, QuoteLineSnapshot } from '../../types/proposals';
 import { supabase } from '../../lib/supabase/client';
 import { Printer } from 'lucide-react';
 import { formatDimensionsDisplayCompact } from '../../lib/formatDimensions';
+import { formatDate } from '../../lib/utils';
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
 function getProposalIdFromPath(): string | null {
@@ -58,11 +59,6 @@ function computeLineTotal(
 
 function formatCurrency(amount: number, currency: string) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(amount || 0);
-}
-
-function formatDate(iso: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString();
 }
 
 function compactMeasurementsNoUnit(source: Parameters<typeof formatDimensionsDisplayCompact>[0]): string {

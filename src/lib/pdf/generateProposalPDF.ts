@@ -7,6 +7,7 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate } from '../utils';
 
 export type ProposalPDFVariant = 'internal' | 'customer';
 
@@ -18,6 +19,8 @@ export interface ProposalPDFLine {
   collection_name?: string | null;
   variant_name?: string | null;
   drive_type?: string | null;
+  /** Drive system brand/type (e.g. "Manual Vertilux", "Motorize Lutron") */
+  drive_system_label?: string | null;
   /** Product name or custom description */
   description?: string | null;
   sku?: string | null;
@@ -189,9 +192,9 @@ export function generateProposalPDF(
   const interlineMm = (interlinePx / 72) * 25.4;
   const lineHeightMm = 4;
   const validUntilStr = proposal.valid_until
-    ? new Date(proposal.valid_until).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    ? formatDate(proposal.valid_until)
     : '30 days';
-  const dateStr = new Date(proposal.created_at).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const dateStr = formatDate(proposal.created_at);
 
   let leftY = yPos;
   doc.setFont('helvetica', 'bold');
@@ -281,7 +284,9 @@ export function generateProposalPDF(
   const buildDescriptionCell = (line: ProposalPDFLine): string => {
     const name = line.description || line.product_type || '—';
     const skuPart = line.sku ? ` (${line.sku})` : '';
-    const driveLabel = line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '';
+    const driveLabel = line.drive_system_label
+      ? line.drive_system_label
+      : (line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '');
     const panelLabel = line.panel_count != null && line.panel_count >= 1
       ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
       : '';

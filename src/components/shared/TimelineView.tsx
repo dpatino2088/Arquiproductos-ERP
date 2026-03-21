@@ -1,4 +1,4 @@
-import { cn } from '../../lib/utils';
+import { cn, formatDate, formatDateTime } from '../../lib/utils';
 
 export interface TimelineEvent {
   id: string;
@@ -44,7 +44,7 @@ function formatRelativeTime(createdAt: string): string {
   if (diffMin < 60) return `${diffMin} min ago`;
   if (diffHours < 24) return `${diffHours} hours ago`;
   if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString();
+  return formatDate(createdAt);
 }
 
 function getDotColor(action: string): string {
@@ -115,7 +115,7 @@ export default function TimelineView({
               </div>
               <span
                 className="shrink-0 text-xs text-gray-500"
-                title={new Date(event.created_at).toLocaleDateString()}
+                title={formatDateTime(event.created_at)}
               >
                 {formatRelativeTime(event.created_at)}
               </span>

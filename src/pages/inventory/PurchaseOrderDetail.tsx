@@ -7,11 +7,14 @@ import {
   useUpdatePurchaseOrder,
   useDeletePurchaseOrder,
   useReceivePurchaseOrder,
+  useUpdatePurchaseOrderStatus,
   fetchCatalogItemCostInfo,
   type PurchaseOrderLine,
+  type PurchaseOrderStatus,
   type CreatePOLineInput,
   type UpdatePOLineInput,
 } from '../../hooks/usePurchaseOrders';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useDirectoryVendors } from '../../hooks/useDirectoryVendors';
@@ -20,9 +23,10 @@ import { supabase } from '../../lib/supabase/client';
 import { useCostSettings } from '../../hooks/useCosts';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { convertPurchaseQtyToInternal } from '../../lib/inventoryUnitModel';
-import { ArrowLeft, Plus, Trash2, Search, Package, FileDown, Eye, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Package, FileDown, Eye, ChevronDown, CheckCircle2, XCircle, Archive } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import { normalizeUUID } from '../../utils/uuid';
+import { formatDate } from '../../lib/utils';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
@@ -34,9 +38,12 @@ const INVENTORY_SUBMODULES = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
+  DRAFT: 'bg-gray-100 text-gray-600',
   OPEN: 'bg-blue-50 text-blue-700',
   PARTIAL: 'bg-yellow-50 text-yellow-700',
   CLOSED: 'bg-green-50 text-green-700',
+  CANCELLED: 'bg-red-50 text-red-600',
+  ARCHIVED: 'bg-slate-100 text-slate-500',
 };
 
 interface DraftLine {
@@ -220,12 +227,22 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
   const { updatePurchaseOrder, isUpdating } = useUpdatePurchaseOrder();
   const { deletePurchaseOrder, isDeleting } = useDeletePurchaseOrder();
   const { receivePurchaseOrder, isReceiving } = useReceivePurchaseOrder();
+  const { updateStatus, isUpdating: isStatusUpdating } = useUpdatePurchaseOrderStatus();
+
+  const { canDelete: canDeleteInv } = useGranularAccess('inventory');
 
   const isCreateMode = !poId || window.location.pathname.endsWith('/new');
-  const isOpen = purchaseOrder?.status === 'OPEN';
-  const canEdit = isCreateMode || isOpen;
-  const canReceive = purchaseOrder && (purchaseOrder.status === 'OPEN' || purchaseOrder.status === 'PARTIAL');
-  const canDelete = purchaseOrder?.status === 'OPEN' && lines.every(l => (l.received_qty ?? 0) === 0);
+  const poStatus = purchaseOrder?.status as PurchaseOrderStatus | undefined;
+  const isDraft = poStatus === 'DRAFT';
+  const isOpen = poStatus === 'OPEN';
+  const canEdit = isCreateMode || isDraft || isOpen;
+  const canReceive = purchaseOrder && (poStatus === 'OPEN' || poStatus === 'PARTIAL');
+  const canApprove = isDraft;
+  const canCancel = poStatus === 'DRAFT' || poStatus === 'OPEN' || poStatus === 'PARTIAL';
+  const canArchive = poStatus === 'CLOSED';
+  const canDeleteBiz = (poStatus === 'DRAFT' || poStatus === 'OPEN') && lines.every(l => (l.received_qty ?? 0) === 0);
+  const canDelete = canDeleteBiz && canDeleteInv;
+  const isTerminal = poStatus === 'CANCELLED' || poStatus === 'ARCHIVED';
 
   const [warehouseId, setWarehouseId] = useState('');
   const [vendorId, setVendorId] = useState('');
@@ -778,6 +795,41 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     setShowReceiveModal(true);
   };
 
+  const handleApprove = async () => {
+    if (!poId) return;
+    try {
+      await updateStatus(poId, 'OPEN');
+      addNotification({ type: 'success', title: 'Approved', message: 'Purchase order is now Open.' });
+      refetch();
+    } catch (err: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: (err as Error).message || 'Failed to approve.' });
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!poId) return;
+    if (!confirm('Cancel this purchase order? This action cannot be undone.')) return;
+    try {
+      await updateStatus(poId, 'CANCELLED');
+      addNotification({ type: 'success', title: 'Cancelled', message: 'Purchase order cancelled.' });
+      refetch();
+    } catch (err: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: (err as Error).message || 'Failed to cancel.' });
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!poId) return;
+    if (!confirm('Archive this purchase order?')) return;
+    try {
+      await updateStatus(poId, 'ARCHIVED');
+      addNotification({ type: 'success', title: 'Archived', message: 'Purchase order archived.' });
+      refetch();
+    } catch (err: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: (err as Error).message || 'Failed to archive.' });
+    }
+  };
+
   const handleConfirmReceive = async () => {
     if (!poId) return;
     const toReceive = Object.entries(receiveQtyMap)
@@ -1014,7 +1066,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {!isCreateMode && purchaseOrder && (
+            {!isCreateMode && purchaseOrder && !isTerminal && (
               <div className="relative">
                 <button
                   type="button"
@@ -1056,6 +1108,17 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 )}
               </div>
             )}
+            {canApprove && (
+              <button
+                type="button"
+                onClick={handleApprove}
+                disabled={isStatusUpdating}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {isStatusUpdating ? 'Approving...' : 'Approve'}
+              </button>
+            )}
             {canReceive && (
               <button
                 type="button"
@@ -1066,13 +1129,36 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 Receive
               </button>
             )}
+            {canArchive && (
+              <button
+                type="button"
+                onClick={handleArchive}
+                disabled={isStatusUpdating}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                <Archive className="w-4 h-4" />
+                Archive
+              </button>
+            )}
+            {canCancel && !isCreateMode && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={isStatusUpdating}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+              >
+                <XCircle className="w-4 h-4" />
+                Cancel PO
+              </button>
+            )}
             {canDelete && (
               <button
                 type="button"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
+                <Trash2 className="w-4 h-4" />
                 Delete
               </button>
             )}
@@ -1081,7 +1167,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
               onClick={handleBack}
               className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              Cancel
+              Back
             </button>
             {canEdit && (
               <button
@@ -1104,6 +1190,25 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2" />
               <p className="text-sm text-blue-700">Loading manufacturing order data...</p>
+            </div>
+          )}
+
+          {poStatus === 'CANCELLED' && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-red-500 shrink-0" />
+              <p className="text-sm text-red-700">This purchase order has been cancelled. No further actions are available.</p>
+            </div>
+          )}
+          {poStatus === 'ARCHIVED' && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex items-center gap-2">
+              <Archive className="w-4 h-4 text-slate-500 shrink-0" />
+              <p className="text-sm text-slate-600">This purchase order has been archived.</p>
+            </div>
+          )}
+          {isDraft && !isCreateMode && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-amber-500 shrink-0" />
+              <p className="text-sm text-amber-700">This PO is in <strong>Draft</strong> status. Review and click <strong>Approve</strong> to open it for receiving.</p>
             </div>
           )}
 
@@ -1303,7 +1408,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   {purchaseOrder?.expected_date && (
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Expected Date</dt>
-                      <dd className="text-gray-900">{new Date(purchaseOrder.expected_date).toLocaleDateString()}</dd>
+                      <dd className="text-gray-900">{formatDate(purchaseOrder.expected_date)}</dd>
                     </div>
                   )}
                   <div className="flex justify-between">
@@ -1540,7 +1645,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                             <option value="roll">roll</option>
                             <option value={line.unit_of_measure_snapshot}>{line.unit_of_measure_snapshot}</option>
                           </select>
-                        ) : canEdit && (line.units_per_purchase_unit_snapshot ?? 1) > 1 && line.purchase_unit_snapshot && line.purchase_unit_snapshot !== 'each' ? (
+                        ) : canEdit && line.purchase_unit_snapshot && line.purchase_unit_snapshot !== 'each' ? (
                           <select
                             value={line.unit}
                             onChange={e => {

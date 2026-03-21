@@ -14,6 +14,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { router } from '../../lib/router';
 import { fetchRolesByType, useRolesForUserType, type AppUserRole } from '../../lib/roles';
 import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check, Search, Filter, List, Grid3X3 } from 'lucide-react';
@@ -1171,7 +1172,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                     {/* Date Added */}
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
                       {user.created_at 
-                        ? new Date(user.created_at).toLocaleDateString()
+                        ? formatDate(user.created_at)
                         : '-'}
                     </td>
                     

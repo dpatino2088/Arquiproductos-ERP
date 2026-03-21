@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Plus, Trash2, Edit, ChevronDown, ChevronRight, Save } from 'lucide-react';
 import { useFabricRules, FabricRule, SystemRule } from '../../hooks/useFabricRules';
 import { useProductTypes } from '../../hooks/useProductTypes';
+import { usePermissions } from '../../hooks/usePermissions';
 import Label from '../../components/ui/Label';
 import Input from '../../components/ui/Input';
 
@@ -34,14 +35,14 @@ const FORMULA_LABELS: Record<string, string> = {
 function inferDefaults(ptName: string): Partial<FabricRule> {
   const n = ptName.toLowerCase();
   if (n.includes('dual'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08 };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
   if (n.includes('triple'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08 };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
   if (n.includes('roller') || n.includes('zip'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08 };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08, allow_rotation: true, heatseal_direction: 'horizontal' as const };
   if (n.includes('drapery') || n.includes('curtain') || n.includes('wave') || n.includes('ripple') || n.includes('pinch'))
-    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10 };
-  return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15 };
+    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10, allow_rotation: true, heatseal_direction: 'vertical' as const };
+  return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15, allow_rotation: true, heatseal_direction: 'none' as const };
 }
 
 function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule> {
@@ -74,6 +75,8 @@ function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule
     heatseal_price_per_m: defaults.heatseal_price_per_m ?? 0,
     bottom_bar_wrap_pct: defaults.bottom_bar_wrap_pct ?? 0,
     confection_pct: 0,
+    allow_rotation: defaults.allow_rotation ?? true,
+    heatseal_direction: defaults.heatseal_direction ?? 'none',
     is_active: true,
   };
 }
@@ -81,6 +84,7 @@ function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule
 export default function FabricRulesSettings() {
   const { rules, systemRules, loading, error, createRule, updateRule, deleteRule, createSystemRule, updateSystemRule, deleteSystemRule } = useFabricRules();
   const { productTypes } = useProductTypes();
+  const { can } = usePermissions();
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Partial<FabricRule>>({});
@@ -293,6 +297,15 @@ export default function FabricRulesSettings() {
                 <span className="text-[10px] text-gray-400">Per linear meter of splice</span>
               </div>
               <div>
+                <Label className="text-xs">Heatseal Direction</Label>
+                <select value={(draft as any).heatseal_direction || 'none'} onChange={e => setDraft({ ...draft, heatseal_direction: e.target.value as any })} className={selectCls}>
+                  <option value="horizontal">Horizontal (Roller)</option>
+                  <option value="vertical">Vertical (Sew/Drapery)</option>
+                  <option value="none">None (no join)</option>
+                </select>
+                <span className="text-[10px] text-gray-400">Join seam orientation</span>
+              </div>
+              <div>
                 <Label className="text-xs">Bottom Bar Wrap (%)</Label>
                 <div className="relative">
                   <Input
@@ -304,6 +317,13 @@ export default function FabricRulesSettings() {
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
                 </div>
                 <span className="text-[10px] text-gray-400">Surcharge when forrado</span>
+              </div>
+              <div className="flex items-center gap-2 pt-5">
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" checked={(draft as any).allow_rotation !== false} onChange={e => setDraft({ ...draft, allow_rotation: e.target.checked } as any)} className="rounded border-gray-300" />
+                  Allow Rotation
+                </label>
+                <span className="text-[10px] text-gray-400">On roll</span>
               </div>
             </div>
           </div>
@@ -330,6 +350,26 @@ export default function FabricRulesSettings() {
               <div>
                 <Label className="text-xs">Side Hem (cm)</Label>
                 <Input type="number" step={0.5} value={draft.side_hem_cm ?? 0} onChange={e => setDraft({ ...draft, side_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-purple-100">
+              <div>
+                <Label className="text-xs">Heat Seal Price ($/m)</Label>
+                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? 0} onChange={e => setDraft({ ...draft, heatseal_price_per_m: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Heatseal Direction</Label>
+                <select value={(draft as any).heatseal_direction || 'none'} onChange={e => setDraft({ ...draft, heatseal_direction: e.target.value as any })} className={selectCls}>
+                  <option value="vertical">Vertical (Sew/Drapery)</option>
+                  <option value="horizontal">Horizontal (Roller)</option>
+                  <option value="none">None (no join)</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2 pt-5">
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input type="checkbox" checked={(draft as any).allow_rotation !== false} onChange={e => setDraft({ ...draft, allow_rotation: e.target.checked } as any)} className="rounded border-gray-300" />
+                  Allow Rotation
+                </label>
               </div>
             </div>
           </div>
@@ -491,9 +531,11 @@ export default function FabricRulesSettings() {
                               <button type="button" onClick={() => { setEditingRuleId(rule.id); setEditDraft(rule); }} className="p-1 rounded hover:bg-gray-100 text-gray-500">
                                 <Edit className="h-3.5 w-3.5" />
                               </button>
-                              <button type="button" onClick={async () => { if (confirm('Delete this rule?')) await deleteRule(rule.id); }} className="p-1 rounded hover:bg-red-50 text-red-500">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                              {can('settings.write') && (
+                                <button type="button" onClick={async () => { if (confirm('Delete this rule?')) await deleteRule(rule.id); }} className="p-1 rounded hover:bg-red-50 text-red-500">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         )}
@@ -545,7 +587,7 @@ export default function FabricRulesSettings() {
                         <button type="button" onClick={() => { setAddingForType(null); setNewDraft({}); }} className="text-xs text-gray-600 px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
                       </div>
                     </div>
-                  ) : (
+                  ) : can('settings.write') ? (
                     <button
                       type="button"
                       onClick={() => { setAddingForType(ptId); setNewDraft(getEmptyRule(ptId, ptName)); }}
@@ -553,7 +595,7 @@ export default function FabricRulesSettings() {
                     >
                       <Plus className="h-3.5 w-3.5" /> Add Rule
                     </button>
-                  )}
+                  ) : null}
                 </div>
               )}
             </div>

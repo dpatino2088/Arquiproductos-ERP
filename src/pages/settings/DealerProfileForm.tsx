@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { COUNTRIES } from '../../lib/constants';
@@ -1370,7 +1371,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
                                 {user.created_at ? (
                                   <div className="flex items-center gap-1.5">
                                     <Calendar className="w-3 h-3 text-gray-400" />
-                                    {new Date(user.created_at).toLocaleDateString()}
+                                    {formatDate(user.created_at)}
                                   </div>
                                 ) : (
                                   <span className="text-gray-400">—</span>

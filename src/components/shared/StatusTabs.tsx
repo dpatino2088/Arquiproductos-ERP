@@ -12,7 +12,7 @@ export interface StatusTabsProps {
 
 export default function StatusTabs({ tabs, activeTab, onChange }: StatusTabsProps) {
   return (
-    <div className="overflow-x-auto border border-gray-200 rounded-lg mb-4 bg-white">
+    <div className="overflow-x-auto border border-gray-200 border-b-0 rounded-t-lg mb-4 bg-white">
       <nav className="flex min-w-0" role="tablist">
         {tabs.map((tab) => {
           const isActive = tab.value === activeTab;
@@ -32,10 +32,15 @@ export default function StatusTabs({ tabs, activeTab, onChange }: StatusTabsProp
                 height: '40px',
                 color: '#1c1f26',
                 borderColor: 'var(--gray-250)',
-                borderBottom: isActive ? '2px solid var(--sidebar-base)' : '2px solid transparent',
+                borderBottom: isActive ? '2px solid var(--sidebar-base)' : '2px solid var(--gray-250)',
               }}
             >
               <span>{tab.label}</span>
+              {tab.count > 0 && (
+                <span className="text-[11px] tabular-nums" style={{ color: isActive ? 'var(--sidebar-base)' : 'var(--gray-400)' }}>
+                  {tab.count}
+                </span>
+              )}
             </button>
           );
         })}

@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { useSalesOrders, type SalesOrder } from '../../hooks/useSalesOrders';
 import { useUIStore } from '../../stores/ui-store';
@@ -17,11 +19,13 @@ type SalesOrderRow = SalesOrder & {
   Dealers?: { dealer_name: string; dealer_no?: string | null } | null;
 };
 
-const STATUS_VALUES = ['all', 'draft', 'confirmed', 'on_hold', 'delivered', 'closed', 'cancelled'] as const;
+const STATUS_VALUES = ['all', 'draft', 'confirmed', 'in_production', 'ready_for_delivery', 'on_hold', 'delivered', 'closed', 'cancelled'] as const;
 const STATUS_LABELS: Record<string, string> = {
   all: 'All',
   draft: 'Draft',
   confirmed: 'Open',
+  in_production: 'In Production',
+  ready_for_delivery: 'Ready for Delivery',
   on_hold: 'On Hold',
   delivered: 'Completed',
   closed: 'Closed',
@@ -35,6 +39,7 @@ const TD_CENTER = 'text-center py-4 px-4';
 export default function SalesOrdersPage() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isPortal, isInternal } = useAccessContext();
+  const { canArchive: canArchiveSO, canDelete: canDeleteSO } = useGranularAccess('salesorders');
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
   const addNotification = useUIStore((s) => s.addNotification);
   const { salesOrders, loading, error, refetch } = useSalesOrders();
@@ -397,7 +402,7 @@ export default function SalesOrdersPage() {
                         </td>
                       )}
                       <td className={`${TD_CENTER} text-gray-600 text-sm`}>
-                        {new Date(order.created_at).toLocaleDateString()}
+                        {formatDate(order.created_at)}
                       </td>
                       <td className={`${TD_CENTER} text-gray-900 text-sm font-medium`}>
                         {formatCurrency(order.total_amount)}
@@ -439,15 +444,17 @@ export default function SalesOrdersPage() {
                             </button>
                           ) : (
                             <>
-                              <button
-                                type="button"
-                                onClick={(e) => handleArchive(order, e)}
-                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                                title="Archive"
-                              >
-                                <Archive style={{ width: 14, height: 14 }} />
-                              </button>
-                              {!isPortal && (
+                              {canArchiveSO && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleArchive(order, e)}
+                                  className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                  title="Archive"
+                                >
+                                  <Archive style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
+                              {!isPortal && canDeleteSO && (
                                 <button
                                   type="button"
                                   onClick={(e) => handleDelete(order, e)}

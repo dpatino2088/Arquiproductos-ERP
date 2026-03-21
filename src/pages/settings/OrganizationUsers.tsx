@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Mail, Shield, User, X, Copy, Edit } from 'lucide-react';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { useAuthStore } from '../../stores/auth-store';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -553,7 +554,7 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
                     {getStatusBadge(orgUser.status)}
                   </td>
                   <td className="py-4 px-6 whitespace-nowrap text-sm text-gray-700">
-                    {new Date(orgUser.created_at).toLocaleDateString()}
+                    {formatDate(orgUser.created_at)}
                   </td>
                   <td className="py-4 px-6 whitespace-nowrap">
                     {canManageUsers && orgUser.user_id !== user?.id && (

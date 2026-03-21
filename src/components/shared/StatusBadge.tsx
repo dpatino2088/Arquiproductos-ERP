@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils';
 
 export interface StatusBadgeProps {
   status: string;
-  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder';
+  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder' | 'bill' | 'vendorPayment' | 'purchaseOrder';
   size?: 'sm' | 'md';
 }
 
@@ -68,6 +68,7 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     paid: 'green',
     refunded: 'purple',
     overdue: 'red',
+    void: 'red',
     unassigned: 'orange',
     unapplied: 'blue',
     applied: 'green',
@@ -91,10 +92,32 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     partially_invoiced: 'amber',
     fully_invoiced: 'green',
   },
+  bill: {
+    draft: 'gray',
+    open: 'blue',
+    partial: 'amber',
+    paid: 'green',
+    void: 'red',
+  },
+  vendorPayment: {
+    active: 'green',
+    partial: 'amber',
+    applied: 'green',
+    unapplied: 'blue',
+    void: 'red',
+  },
+  purchaseOrder: {
+    open: 'blue',
+    partial: 'amber',
+    closed: 'green',
+  },
   manufacturing: {
     draft: 'gray',
     'pending review': 'gray',
     pending_review: 'gray',
+    confirmed: 'blue',
+    procurement: 'orange',
+    materials_ready: 'emerald',
     planned: 'blue',
     'in production': 'indigo',
     in_production: 'indigo',
@@ -103,7 +126,7 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     completed: 'green',
     'ready for pickup': 'emerald',
     ready_for_pickup: 'emerald',
-    delivered: 'slate',
+    delivered: 'purple',
     cancelled: 'red',
   },
   moLineStatus: {
@@ -136,6 +159,20 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
   quote: {
     approved_unpaid: 'Approved',
     approved_paid: 'Approved',
+  },
+  salesOrder: {
+    confirmed: 'Open',
+    in_production: 'In Production',
+    ready_for_delivery: 'Ready for Delivery',
+    delivered: 'Completed',
+  },
+  manufacturing: {
+    confirmed: 'Reviewed',
+    procurement: 'Planned',
+    materials_ready: 'Material Ready',
+    quality_check: 'Quality Check',
+    in_production: 'In Production',
+    ready_for_pickup: 'Ready for Pickup',
   },
   invoice: {
     not_invoiced: 'Not Invoiced',

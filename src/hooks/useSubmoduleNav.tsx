@@ -6,6 +6,8 @@ interface SubmoduleTab {
   label: string;
   href: string;
   icon?: React.ComponentType<{ className?: string }>;
+  group?: string;
+  matchPaths?: string[];
   isActive?: boolean;
   onClick?: () => void;
 }
@@ -102,27 +104,23 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
       if (matchingTab) setSalesLastPath(matchingTab.id, currentPath);
     }
 
-    // Process tabs with active state
-    // First, find the most specific matching tab (longest href that matches)
-    const matchingTabs = tabs.filter(tab => 
-      currentPath === tab.href || currentPath.startsWith(tab.href + '/')
-    );
-    const mostSpecificTab = matchingTabs.reduce((prev, current) => 
-      current.href.length > prev.href.length ? current : prev, 
-      matchingTabs[0] || { href: '', id: '' }
-    );
+    const tabMatchesPath = (tab: Omit<SubmoduleTab, 'isActive' | 'onClick'>, path: string) => {
+      const paths = tab.matchPaths ?? [tab.href];
+      return paths.some(p => path === p || path.startsWith(p + '/'));
+    };
+
+    const matchingTabs = tabs.filter(tab => tabMatchesPath(tab, currentPath));
+    const mostSpecificTab = matchingTabs.reduce((prev, current) => {
+      const prevLen = Math.max(...(prev.matchPaths ?? [prev.href]).map(p => p.length));
+      const curLen = Math.max(...(current.matchPaths ?? [current.href]).map(p => p.length));
+      return curLen > prevLen ? current : prev;
+    }, matchingTabs[0] || { href: '', id: '' });
     
-    const processedTabs = tabs.map(tab => {
-      // Tab click always goes to the list (tab.href), not the last visited detail
-      return {
-        ...tab,
-        // Only mark as active if it's the most specific match
-        isActive: tab.id === mostSpecificTab.id && (currentPath === tab.href || currentPath.startsWith(tab.href + '/')),
-        onClick: () => {
-          router.navigate(tab.href);
-        }
-      };
-    });
+    const processedTabs = tabs.map(tab => ({
+      ...tab,
+      isActive: tab.id === mostSpecificTab.id && tabMatchesPath(tab, currentPath),
+      onClick: () => { router.navigate(tab.href); },
+    }));
     
     // Only update if tabs actually changed (compare by id and href)
     setState(prev => {
@@ -170,19 +168,21 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
           if (matchingTab) setSalesLastPath(matchingTab.id, currentPath);
         }
 
-        // Find the most specific matching tab (longest href that matches)
-        const matchingTabs = state.tabs.filter(tab => 
-          currentPath === tab.href || currentPath.startsWith(tab.href + '/')
-        );
-        const mostSpecificTab = matchingTabs.reduce((prev, current) => 
-          current.href.length > prev.href.length ? current : prev, 
-          matchingTabs[0] || { href: '', id: '' }
-        );
-        
+        const matchPath = (tab: SubmoduleTab, path: string) => {
+          const paths = tab.matchPaths ?? [tab.href];
+          return paths.some(p => path === p || path.startsWith(p + '/'));
+        };
+
+        const matchingTabs = state.tabs.filter(tab => matchPath(tab, currentPath));
+        const mostSpecificTab = matchingTabs.reduce((prev, current) => {
+          const prevLen = Math.max(...(prev.matchPaths ?? [prev.href]).map(p => p.length));
+          const curLen = Math.max(...(current.matchPaths ?? [current.href]).map(p => p.length));
+          return curLen > prevLen ? current : prev;
+        }, matchingTabs[0] || { href: '', id: '' });
+
         const updatedTabs = state.tabs.map(tab => ({
           ...tab,
-          // Only mark as active if it's the most specific match
-          isActive: tab.id === mostSpecificTab.id && (currentPath === tab.href || currentPath.startsWith(tab.href + '/'))
+          isActive: tab.id === mostSpecificTab.id && matchPath(tab, currentPath),
         }));
         
         // Only update if active state changed

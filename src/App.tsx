@@ -67,6 +67,9 @@ const WorkstationView = lazy(() => import('./pages/manufacturing/WorkstationView
 const WorkOrdersList = lazy(() => import('./pages/manufacturing/WorkOrdersList'));
 const WorkOrderDetail = lazy(() => import('./pages/manufacturing/WorkOrderDetail'));
 const ProductionCalendar = lazy(() => import('./pages/manufacturing/ProductionCalendar'));
+const FinishedGoods = lazy(() => import('./pages/manufacturing/FinishedGoods'));
+const CutOptimization = lazy(() => import('./pages/manufacturing/CutOptimization'));
+const DeliveryNoteDetail = lazy(() => import('./pages/manufacturing/DeliveryNoteDetail'));
 
 // Variants component removed - use CollectionsCatalog instead
 
@@ -79,6 +82,7 @@ const PurchaseOrderDetail = lazy(() => import('./pages/inventory/PurchaseOrderDe
 const Receipts = lazy(() => import('./pages/inventory/Receipts'));
 const Transactions = lazy(() => import('./pages/inventory/Transactions'));
 const TransactionDetail = lazy(() => import('./pages/inventory/TransactionDetail'));
+const Adjustments = lazy(() => import('./pages/inventory/Adjustments'));
 const MaterialDemand = lazy(() => import('./pages/inventory/MaterialDemand'));
 const Manufacturing = lazy(() => import('./pages/manufacturing/Manufacturing'));
 const BillOfMaterials = lazy(() => import('./pages/manufacturing/BillOfMaterials'));
@@ -91,6 +95,14 @@ const InvoiceNew = lazy(() => import('./pages/financials/InvoiceNew'));
 const InvoiceDetail = lazy(() => import('./pages/financials/InvoiceDetail'));
 const FinancialPayments = lazy(() => import('./pages/financials/FinancialPayments'));
 const PaymentDetail = lazy(() => import('./pages/financials/PaymentDetail'));
+const VendorAccountsList = lazy(() => import('./pages/financials/VendorAccounts'));
+const VendorAccountDetail = lazy(() => import('./pages/financials/VendorAccountDetail'));
+const BillsList = lazy(() => import('./pages/financials/BillsList'));
+const BillNew = lazy(() => import('./pages/financials/BillNew'));
+const BillDetail = lazy(() => import('./pages/financials/BillDetail'));
+const PurchaseOrdersAP = lazy(() => import('./pages/financials/PurchaseOrdersAP'));
+const VendorPaymentsList = lazy(() => import('./pages/financials/VendorPaymentsList'));
+const VendorPaymentDetail = lazy(() => import('./pages/financials/VendorPaymentDetail'));
 const Partners = lazy(() => import('./pages/partners/Partners'));
 const PartnerDealers = lazy(() => import('./pages/partners/PartnerDealers'));
 const DealerDetail = lazy(() => import('./pages/partners/DealerDetail'));
@@ -803,6 +815,34 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/manufacturing/finished-goods', () => {
+      if (isAuthenticated) {
+        setCurrentPage('finished-goods');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/cut-optimization', () => {
+      if (isAuthenticated) {
+        setCurrentPage('cut-optimization');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/delivery-notes/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('delivery-note-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/manufacturing/delivery-notes/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('delivery-note-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     // Legacy route redirect
     router.addRoute('/manufacturing/bill-of-materials', () => {
       if (isAuthenticated) {
@@ -836,6 +876,30 @@ function App() {
     });
     router.addRoute('/financials/payments/:id', () => {
       if (isAuthenticated) { setCurrentPage('financials-payment-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/vendor-accounts', () => {
+      if (isAuthenticated) { setCurrentPage('financials-vendor-accounts'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/vendor-accounts/:vendorId', () => {
+      if (isAuthenticated) { setCurrentPage('financials-vendor-account-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/bills', () => {
+      if (isAuthenticated) { setCurrentPage('financials-bills'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/bills/new', () => {
+      if (isAuthenticated) { setCurrentPage('financials-bill-new'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/bills/:id', () => {
+      if (isAuthenticated) { setCurrentPage('financials-bill-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/purchase-orders', () => {
+      if (isAuthenticated) { setCurrentPage('financials-purchase-orders'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/vendor-payments', () => {
+      if (isAuthenticated) { setCurrentPage('financials-vendor-payments'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/vendor-payments/:id', () => {
+      if (isAuthenticated) { setCurrentPage('financials-vendor-payment-detail'); } else { setCurrentPage('login'); }
     });
 
     // Partners routes
@@ -1228,7 +1292,7 @@ function App() {
       case 'transactions':
         return <Transactions />;
       case 'inventory-adjustments':
-        return <Transactions defaultTypeFilter="adjustment" title="Adjustments" />;
+        return <Adjustments />;
       case 'transaction-new':
         return <TransactionDetail />;
       case 'transaction-detail': {
@@ -1236,7 +1300,7 @@ function App() {
         if (txId) return <TransactionDetail transactionId={txId} />;
         const path = window.location.pathname;
         if (path.startsWith('/inventory/adjustments')) {
-          return <Transactions defaultTypeFilter="adjustment" title="Adjustments" />;
+          return <Adjustments />;
         }
         return <Transactions />;
       }
@@ -1260,6 +1324,13 @@ function App() {
         return <RequireModule module="manufacturing"><WorkstationView /></RequireModule>;
       case 'production-calendar':
         return <RequireModule module="manufacturing"><ProductionCalendar /></RequireModule>;
+      case 'finished-goods':
+        return <RequireModule module="manufacturing"><FinishedGoods /></RequireModule>;
+      case 'cut-optimization':
+        return <RequireModule module="manufacturing"><CutOptimization /></RequireModule>;
+      case 'delivery-note-new':
+      case 'delivery-note-detail':
+        return <RequireModule module="manufacturing"><DeliveryNoteDetail /></RequireModule>;
       case 'workstation-detail': {
         const wcId = sessionStorage.getItem('currentWorkCenterId');
         return <RequireModule module="manufacturing"><WorkstationView workCenterId={wcId ?? undefined} /></RequireModule>;
@@ -1284,6 +1355,22 @@ function App() {
         return <RequireModule module="financials"><FinancialPayments /></RequireModule>;
       case 'financials-payment-detail':
         return <RequireModule module="financials"><PaymentDetail /></RequireModule>;
+      case 'financials-vendor-accounts':
+        return <RequireModule module="financials"><VendorAccountsList /></RequireModule>;
+      case 'financials-vendor-account-detail':
+        return <RequireModule module="financials"><VendorAccountDetail /></RequireModule>;
+      case 'financials-bills':
+        return <RequireModule module="financials"><BillsList /></RequireModule>;
+      case 'financials-bill-new':
+        return <RequireModule module="financials"><BillNew /></RequireModule>;
+      case 'financials-bill-detail':
+        return <RequireModule module="financials"><BillDetail /></RequireModule>;
+      case 'financials-purchase-orders':
+        return <RequireModule module="financials"><PurchaseOrdersAP /></RequireModule>;
+      case 'financials-vendor-payments':
+        return <RequireModule module="financials"><VendorPaymentsList /></RequireModule>;
+      case 'financials-vendor-payment-detail':
+        return <RequireModule module="financials"><VendorPaymentDetail /></RequireModule>;
       case 'partners':
         return <RequireModule module="settings"><Partners /></RequireModule>;
       case 'partners-dealers':

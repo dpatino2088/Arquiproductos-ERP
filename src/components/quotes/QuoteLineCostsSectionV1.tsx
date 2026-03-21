@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatDateTime } from '../../lib/utils';
 import { useQuoteLineCosts, useUpdateQuoteLineCosts, useRecalculateQuoteLineCosts } from '../../hooks/useCosts';
 import { useCostSettings } from '../../hooks/useCosts';
 import { useImportTaxBreakdown } from '../../hooks/useImportTaxBreakdown';
@@ -504,7 +505,7 @@ export default function QuoteLineCostsSectionV1({
 
           {costs.calculated_at && (
             <div className="text-xs text-gray-500 mt-2">
-              Last calculated: {new Date(costs.calculated_at).toLocaleString()}
+              Last calculated: {formatDateTime(costs.calculated_at)}
             </div>
           )}
         </div>

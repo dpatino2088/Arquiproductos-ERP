@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { formatDateTime } from '../../lib/utils';
 import { supabase } from '../../lib/supabase/client';
 import { router } from '../../lib/router';
 import { useAuthStore } from '../../stores/auth-store';
@@ -290,7 +291,7 @@ export default function PortalQuoteDetail() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Created At</label>
             <p className="text-sm text-gray-900">
               {quote.created_at
-                ? new Date(quote.created_at).toLocaleString()
+                ? formatDateTime(quote.created_at)
                 : 'N/A'}
             </p>
           </div>

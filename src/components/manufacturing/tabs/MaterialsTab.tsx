@@ -6,9 +6,11 @@ import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useWarehouses } from '../../../hooks/useWarehouses';
 import { useInventoryAvailability } from '../../../hooks/useInventoryAvailability';
 import { InventoryAvailabilityBadge } from '../../inventory/InventoryAvailabilityBadge';
-import { useMOAllocations, useAllocateToMO, useReleaseMOAllocation } from '../../../hooks/useInventoryAllocations';
+import { useMOAllocations, useAllocateToMO, useReleaseMOAllocation, useAllMOAllocationsForItem, useTransferAllocation } from '../../../hooks/useInventoryAllocations';
+import type { InventoryAvailabilityRow } from '../../../types/inventory';
 import { useUIStore } from '../../../stores/ui-store';
-import { Package, XCircle, Loader2 } from 'lucide-react';
+import StatusBadge from '../../shared/StatusBadge';
+import { Package, XCircle, Loader2, ArrowRightLeft, ChevronRight, ChevronDown, Search, AlertTriangle, Calendar, ShieldAlert, ShoppingCart } from 'lucide-react';
 
 interface MaterialsTabProps {
   moId: string;
@@ -71,6 +73,11 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
   const { allocations, loading: allocLoading, refetch: refetchAllocations } = useMOAllocations(moId);
   const { allocate, isAllocating } = useAllocateToMO();
   const { release, isReleasing } = useReleaseMOAllocation();
+  const [showReleaseConfirm, setShowReleaseConfirm] = useState(false);
+  const [allocSearch, setAllocSearch] = useState('');
+  const [allocFilter, setAllocFilter] = useState<'all' | 'shortages' | 'ok'>('all');
+  const [expandedSkuId, setExpandedSkuId] = useState<string | null>(null);
+  const [materialSubTab, setMaterialSubTab] = useState<'materials' | 'allocation'>('materials');
 
   const allocationMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -106,17 +113,35 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
     return [...map.values()].sort((a, b) => a.sku.localeCompare(b.sku));
   }, [materials]);
 
+  const allocStats = useMemo(() => {
+    return aggregatedBySku.reduce((acc, agg) => {
+      const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
+      const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
+      acc.totalRequired += agg.totalQty;
+      acc.totalAllocated += allocated;
+      if (gap <= 0) acc.ok++;
+      else if (allocated > 0) acc.partial++;
+      else acc.shortage++;
+      return acc;
+    }, { totalRequired: 0, totalAllocated: 0, ok: 0, partial: 0, shortage: 0 });
+  }, [aggregatedBySku, allocationMap]);
+
+  const allocPct = useMemo(() => {
+    return allocStats.totalRequired > 0
+      ? Math.min(100, Math.round((allocStats.totalAllocated / allocStats.totalRequired) * 100))
+      : 0;
+  }, [allocStats]);
+
   const handleAllocateAll = useCallback(async () => {
     if (!activeOrganizationId || !defaultWarehouse) return;
+    const MIN_QTY = 0.0001;
     const items = aggregatedBySku
-      .filter(m => {
+      .map(m => {
         const alreadyAllocated = allocationMap.get(m.catalog_item_id) ?? 0;
-        return m.totalQty - alreadyAllocated > 0;
+        const gap = Math.round((m.totalQty - alreadyAllocated) * 10000) / 10000;
+        return { catalog_item_id: m.catalog_item_id, qty: gap };
       })
-      .map(m => ({
-        catalog_item_id: m.catalog_item_id,
-        qty: m.totalQty - (allocationMap.get(m.catalog_item_id) ?? 0),
-      }));
+      .filter(item => item.qty >= MIN_QTY);
     if (items.length === 0) {
       addNotification({ type: 'info', title: 'Allocation', message: 'All materials already allocated.' });
       return;
@@ -307,6 +332,43 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
 
   return (
     <div>
+      {/* Sub-tabs: Materials / Allocation */}
+      <div className="flex border-b border-gray-200 mb-4">
+        <button
+          type="button"
+          onClick={() => setMaterialSubTab('materials')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            materialSubTab === 'materials'
+              ? 'border-gray-900 text-gray-900'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Materials
+        </button>
+        <button
+          type="button"
+          onClick={() => setMaterialSubTab('allocation')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            materialSubTab === 'allocation'
+              ? 'border-gray-900 text-gray-900'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Allocation
+          {(allocStats.shortage + allocStats.partial > 0) && (
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+              allocStats.shortage > 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+            }`}>
+              {allocStats.shortage + allocStats.partial}
+            </span>
+          )}
+          {allocStats.shortage + allocStats.partial === 0 && allocPct === 100 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-100 text-green-700">OK</span>
+          )}
+        </button>
+      </div>
+
+      {materialSubTab === 'materials' && (<>
       {/* Controls */}
       <div className="mb-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -355,9 +417,9 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
               Material Summary — {aggregatedBySku.length} unique SKUs
             </h4>
           </div>
-          <div className="table-fit-wrapper">
-            <table className="table-fit">
-              <thead className="bg-gray-50 border-b border-gray-200">
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10 shadow-[0_1px_0_0_theme(colors.gray.200)]">
                 <tr>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">SKU</th>
                   <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Description</th>
@@ -508,93 +570,6 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
         </div>
       )}
 
-      {/* Inventory Allocation */}
-      {materials.length > 0 && ['draft', 'planned', 'in_production'].includes(moStatus) && (
-        <div className="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              Inventory Allocation
-              {allocations.length > 0 && (
-                <span className="text-xs font-normal text-gray-500">({allocations.length} item{allocations.length > 1 ? 's' : ''} allocated)</span>
-              )}
-            </h4>
-            <div className="flex items-center gap-2">
-              {allocations.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleReleaseAll}
-                  disabled={isReleasing}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
-                >
-                  {isReleasing ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
-                  Release All
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={handleAllocateAll}
-                disabled={isAllocating || !defaultWarehouse}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-              >
-                {isAllocating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
-                Allocate Available
-              </button>
-            </div>
-          </div>
-          {allocLoading ? (
-            <div className="px-4 py-6 text-center text-gray-400 text-sm">Loading allocations...</div>
-          ) : allocations.length === 0 ? (
-            <div className="px-4 py-6 text-center text-gray-400 text-sm">No inventory allocated to this MO yet. Click "Allocate Available" to reserve warehouse stock.</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-gray-700 text-xs">SKU</th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-700 text-xs">Item</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-700 text-xs">Required</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-700 text-xs">Allocated</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-700 text-xs">Gap</th>
-                  <th className="px-4 py-2 text-center font-medium text-gray-700 text-xs">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {aggregatedBySku.map(agg => {
-                  const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
-                  const gap = agg.totalQty - allocated;
-                  return (
-                    <tr key={agg.catalog_item_id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono text-gray-900">{agg.sku}</td>
-                      <td className="px-4 py-2 text-gray-700">{agg.item_name}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{agg.uom === 'm' ? agg.totalQty.toFixed(2) : agg.totalQty.toFixed(0)}</td>
-                      <td className="px-4 py-2 text-right tabular-nums font-medium text-green-700">
-                        {allocated > 0 ? (agg.uom === 'm' ? allocated.toFixed(2) : allocated.toFixed(0)) : '—'}
-                      </td>
-                      <td className={`px-4 py-2 text-right tabular-nums font-medium ${gap > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {gap > 0 ? `-${agg.uom === 'm' ? gap.toFixed(2) : gap.toFixed(0)}` : 'OK'}
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        {allocated > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => handleReleaseItem(agg.catalog_item_id)}
-                            disabled={isReleasing}
-                            className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
-                            title="Release allocation"
-                          >
-                            Unassign
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
       {/* Grand Total / Summary */}
       {(materials.length > 0 || bomTotals.totalCostWithLabor > 0) && (
         <div className="mt-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
@@ -644,7 +619,520 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
           </div>
         </div>
       )}
+      </>)}
 
+      {/* ===== INVENTORY ALLOCATION ===== */}
+      {materialSubTab === 'allocation' && materials.length > 0 && (() => {
+        const searchLc = allocSearch.toLowerCase();
+        const filteredSkus = aggregatedBySku.filter(agg => {
+          if (searchLc && !agg.sku.toLowerCase().includes(searchLc) && !agg.item_name.toLowerCase().includes(searchLc)) return false;
+          if (allocFilter === 'all') return true;
+          const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
+          const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
+          if (allocFilter === 'shortages') return gap > 0;
+          return gap <= 0;
+        });
+
+        return (
+          <div className="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
+            {/* Header with actions */}
+            <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Package className="w-4 h-4" />
+                Inventory Allocation
+              </h4>
+              <div className="flex items-center gap-2">
+                {allocations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowReleaseConfirm(true)}
+                    disabled={isReleasing}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
+                  >
+                    {isReleasing ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                    Release All
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleAllocateAll}
+                  disabled={isAllocating || !defaultWarehouse}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                >
+                  {isAllocating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
+                  Allocate Available
+                </button>
+              </div>
+            </div>
+
+            {/* Summary bar */}
+            <div className="px-4 py-3 border-b bg-gray-50/50">
+              <div className="flex items-center gap-4 mb-2">
+                <span className="text-xs font-medium text-gray-700">{aggregatedBySku.length} SKUs</span>
+                <span className="text-xs text-green-700 font-medium">{allocStats.ok} OK</span>
+                {allocStats.partial > 0 && (
+                  <span className="text-xs text-amber-700 font-medium">{allocStats.partial} Partial</span>
+                )}
+                {allocStats.shortage > 0 && (
+                  <span className="text-xs text-red-600 font-medium">{allocStats.shortage} Shortage{allocStats.shortage !== 1 ? 's' : ''}</span>
+                )}
+                <span className="ml-auto text-xs text-gray-500 tabular-nums">{allocPct}% allocated</span>
+              </div>
+              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${allocPct === 100 ? 'bg-green-500' : allocPct > 0 ? 'bg-amber-500' : 'bg-gray-300'}`}
+                  style={{ width: `${allocPct}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Search + Filter row */}
+            <div className="px-4 py-2.5 border-b flex items-center gap-3">
+              <div className="relative flex-1 max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  value={allocSearch}
+                  onChange={e => setAllocSearch(e.target.value)}
+                  placeholder="Search SKU or name..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-primary focus:border-primary"
+                />
+              </div>
+              <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+                {(['all', 'shortages', 'ok'] as const).map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setAllocFilter(f)}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${f !== 'all' ? 'border-l border-gray-300' : ''} ${
+                      allocFilter === f ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {f === 'all' ? `All (${aggregatedBySku.length})` : f === 'shortages' ? `Shortages (${allocStats.shortage + allocStats.partial})` : `OK (${allocStats.ok})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Unified table */}
+            {allocLoading ? (
+              <div className="px-4 py-8 text-center text-gray-400 text-sm">Loading allocations...</div>
+            ) : filteredSkus.length === 0 ? (
+              <div className="px-4 py-8 text-center text-gray-400 text-sm">
+                {allocSearch ? 'No items match your search.' : 'No items in this filter.'}
+              </div>
+            ) : (
+              <div className="max-h-[60vh] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b sticky top-0 z-10 shadow-[0_1px_0_0_theme(colors.gray.200)]">
+                    <tr>
+                      <th className="w-8 px-2 py-2"></th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">SKU</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">Item</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-700 text-xs">Required</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-700 text-xs">On Hand</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-700 text-xs">Allocated</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-700 text-xs">Gap</th>
+                      <th className="px-3 py-2 text-center font-medium text-gray-700 text-xs">Status</th>
+                      <th className="px-3 py-2 text-center font-medium text-gray-700 text-xs">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredSkus.map(agg => {
+                      const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
+                      const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
+                      const avail = availabilityMap[agg.catalog_item_id];
+                      const onHand = avail?.on_hand_qty ?? 0;
+                      const isExpanded = expandedSkuId === agg.catalog_item_id;
+                      const statusLabel = gap <= 0 ? 'OK' : allocated > 0 ? 'Partial' : 'Shortage';
+                      const statusColor = gap <= 0 ? 'bg-green-100 text-green-700' : allocated > 0 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
+                      const rowBg = gap <= 0 ? '' : 'bg-red-50/40';
+
+                      return (
+                        <AllocationRow
+                          key={agg.catalog_item_id}
+                          agg={agg}
+                          allocated={allocated}
+                          gap={gap}
+                          onHand={onHand}
+                          statusLabel={statusLabel}
+                          statusColor={statusColor}
+                          rowBg={rowBg}
+                          isExpanded={isExpanded}
+                          onToggle={() => setExpandedSkuId(isExpanded ? null : agg.catalog_item_id)}
+                          onRelease={() => handleReleaseItem(agg.catalog_item_id)}
+                          isReleasing={isReleasing}
+                          moId={moId}
+                          orgId={activeOrganizationId}
+                          warehouseId={defaultWarehouse?.id ?? null}
+                          availability={avail ?? null}
+                          onTransferred={refetchAllocations}
+                        />
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {showReleaseConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowReleaseConfirm(false)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Release All Allocations?</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              This will release <span className="font-semibold text-red-600">{allocations.length} allocated item{allocations.length > 1 ? 's' : ''}</span> back
+              to the warehouse, making them available for other MOs.
+            </p>
+            <p className="text-xs text-gray-500 mb-5">This action cannot be undone. You can re-allocate later if stock is still available.</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowReleaseConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowReleaseConfirm(false); handleReleaseAll(); }}
+                disabled={isReleasing}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {isReleasing ? 'Releasing...' : 'Yes, Release All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   AllocationRow — single SKU row + expandable detail panel
+   ================================================================ */
+
+const PRIORITY_CONFIG: Record<string, { label: string; color: string; warn: boolean }> = {
+  urgent: { label: 'Urgent', color: 'bg-red-100 text-red-700', warn: true },
+  high: { label: 'High', color: 'bg-orange-100 text-orange-700', warn: true },
+  normal: { label: 'Normal', color: 'bg-gray-100 text-gray-600', warn: false },
+  low: { label: 'Low', color: 'bg-green-100 text-green-700', warn: false },
+};
+
+function formatShortDate(d: string | null) {
+  if (!d) return null;
+  try {
+    const dt = new Date(d);
+    return `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
+  } catch { return null; }
+}
+
+interface AllocationRowProps {
+  agg: AggregatedMaterial;
+  allocated: number;
+  gap: number;
+  onHand: number;
+  statusLabel: string;
+  statusColor: string;
+  rowBg: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onRelease: () => void;
+  isReleasing: boolean;
+  moId: string;
+  orgId: string | null;
+  warehouseId: string | null;
+  availability: InventoryAvailabilityRow | null;
+  onTransferred: () => void;
+}
+
+function AllocationRow({
+  agg, allocated, gap, onHand, statusLabel, statusColor, rowBg,
+  isExpanded, onToggle, onRelease, isReleasing,
+  moId, orgId, warehouseId, availability, onTransferred,
+}: AllocationRowProps) {
+  const fmt = (qty: number) => agg.uom === 'm' ? qty.toFixed(2) : qty.toFixed(0);
+
+  return (
+    <>
+      <tr
+        className={`hover:bg-gray-50 cursor-pointer transition-colors ${rowBg}`}
+        onClick={onToggle}
+      >
+        <td className="px-2 py-2 text-center">
+          {isExpanded
+            ? <ChevronDown className="w-4 h-4 text-gray-500" />
+            : <ChevronRight className="w-4 h-4 text-gray-400" />
+          }
+        </td>
+        <td className="px-3 py-2 font-mono text-gray-900 text-xs">{agg.sku}</td>
+        <td className="px-3 py-2 text-gray-700 text-xs truncate max-w-[200px]" title={agg.item_name}>{agg.item_name}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(agg.totalQty)}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(onHand)}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-xs font-medium text-green-700">
+          {allocated > 0 ? fmt(allocated) : '—'}
+        </td>
+        <td className={`px-3 py-2 text-right tabular-nums text-xs font-medium ${gap > 0 ? 'text-red-600' : 'text-green-600'}`}>
+          {gap > 0 ? `-${fmt(gap)}` : 'OK'}
+        </td>
+        <td className="px-3 py-2 text-center">
+          <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColor}`}>{statusLabel}</span>
+        </td>
+        <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
+          {allocated > 0 && (
+            <button
+              type="button"
+              onClick={onRelease}
+              disabled={isReleasing}
+              className="text-[10px] text-red-600 hover:text-red-800 disabled:opacity-50"
+              title="Release allocation for this item"
+            >
+              Unassign
+            </button>
+          )}
+        </td>
+      </tr>
+      {isExpanded && (
+        <tr>
+          <td colSpan={9} className="p-0">
+            <AllocationDetailPanel
+              catalogItemId={agg.catalog_item_id}
+              sku={agg.sku}
+              itemName={agg.item_name}
+              uom={agg.uom}
+              requiredQty={agg.totalQty}
+              allocatedQty={allocated}
+              gap={gap}
+              availability={availability}
+              moId={moId}
+              orgId={orgId}
+              warehouseId={warehouseId}
+              onTransferred={onTransferred}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/* ================================================================
+   AllocationDetailPanel — inline expandable detail for a SKU
+   ================================================================ */
+
+interface AllocationDetailPanelProps {
+  catalogItemId: string;
+  sku: string;
+  itemName: string;
+  uom: string;
+  requiredQty: number;
+  allocatedQty: number;
+  gap: number;
+  availability: InventoryAvailabilityRow | null;
+  moId: string;
+  orgId: string | null;
+  warehouseId: string | null;
+  onTransferred: () => void;
+}
+
+function AllocationDetailPanel({
+  catalogItemId, sku, itemName, uom, requiredQty, allocatedQty, gap,
+  availability, moId, orgId, warehouseId, onTransferred,
+}: AllocationDetailPanelProps) {
+  const { moAllocations, loading } = useAllMOAllocationsForItem(catalogItemId, moId, orgId);
+  const { transfer, isTransferring } = useTransferAllocation();
+  const [transferAmounts, setTransferAmounts] = useState<Record<string, number>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const fmt = (qty: number) => uom === 'm' ? qty.toFixed(2) : qty.toFixed(0);
+
+  const onHand = availability?.on_hand_qty ?? 0;
+  const onOrder = availability?.on_order_qty ?? 0;
+  const nextEta = availability?.next_eta ?? null;
+  const totalReservedAllMOs = moAllocations.reduce((s, a) => s + a.allocated_qty, 0);
+  const freeStock = Math.max(0, onHand - totalReservedAllMOs);
+  const otherMOs = moAllocations.filter(a => !a.is_current);
+
+  const isInProduction = (status: string) => ['in_production', 'quality_check', 'ready_for_pickup'].includes(status);
+
+  const handleTransfer = useCallback(async (sourceMoId: string, sourceWarehouseId: string) => {
+    const qty = transferAmounts[sourceMoId];
+    if (!qty || qty <= 0 || !orgId) return;
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const result = await transfer(sourceMoId, moId, catalogItemId, qty, orgId, sourceWarehouseId);
+      setSuccessMsg(`Transferred ${fmt(result.transferred_qty ?? qty)} ${uom}`);
+      setTransferAmounts(prev => ({ ...prev, [sourceMoId]: 0 }));
+      onTransferred();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Transfer failed');
+    }
+  }, [transferAmounts, transfer, moId, catalogItemId, orgId, onTransferred, uom]);
+
+  return (
+    <div className="bg-slate-50 border-t border-b border-slate-200 px-6 py-4 space-y-4">
+      {/* Section A — Inventory Summary */}
+      <div>
+        <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Inventory Summary</h5>
+        <div className="grid grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg border border-gray-200 px-3 py-2">
+            <div className="text-[10px] text-gray-500 uppercase">On Hand</div>
+            <div className="text-sm font-semibold text-gray-900 tabular-nums">{fmt(onHand)} {uom}</div>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 px-3 py-2">
+            <div className="text-[10px] text-gray-500 uppercase">Total Reserved</div>
+            <div className="text-sm font-semibold text-amber-700 tabular-nums">{fmt(totalReservedAllMOs)} {uom}</div>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 px-3 py-2">
+            <div className="text-[10px] text-gray-500 uppercase">Free Stock</div>
+            <div className={`text-sm font-semibold tabular-nums ${freeStock > 0 ? 'text-green-700' : 'text-gray-400'}`}>{fmt(freeStock)} {uom}</div>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 px-3 py-2">
+            <div className="text-[10px] text-gray-500 uppercase">On Order (PO)</div>
+            <div className="text-sm font-semibold text-blue-700 tabular-nums">
+              {onOrder > 0 ? `${fmt(onOrder)} ${uom}` : '—'}
+            </div>
+            {nextEta && onOrder > 0 && (
+              <div className="text-[10px] text-blue-500 flex items-center gap-1 mt-0.5">
+                <Calendar className="w-2.5 h-2.5" /> ETA {formatShortDate(nextEta)}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Section B — Reservations by MO */}
+      <div>
+        <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Reserved by Manufacturing Orders</h5>
+
+        {error && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {error}
+          </div>
+        )}
+        {successMsg && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs">
+            <Package className="w-3.5 h-3.5 shrink-0" /> {successMsg}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+          </div>
+        ) : moAllocations.length === 0 ? (
+          <div className="text-xs text-gray-400 py-3">No MOs have this item reserved.</div>
+        ) : (
+          <div className="space-y-2">
+            {moAllocations.map(alloc => {
+              const prio = PRIORITY_CONFIG[alloc.priority] ?? PRIORITY_CONFIG.normal;
+              const inProd = isInProduction(alloc.mo_status);
+              const dueStr = formatShortDate(alloc.due_date);
+              const amt = transferAmounts[alloc.manufacturing_order_id] ?? 0;
+              const maxQty = Math.min(alloc.allocated_qty, gap > 0 ? gap : 0);
+
+              return (
+                <div
+                  key={alloc.manufacturing_order_id}
+                  className={`rounded-lg border px-3 py-2.5 ${
+                    alloc.is_current
+                      ? 'border-blue-200 bg-blue-50/50'
+                      : inProd || prio.warn
+                        ? 'border-amber-200 bg-amber-50/30'
+                        : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-semibold text-gray-900 shrink-0">{alloc.mo_number}</span>
+                      <StatusBadge status={alloc.mo_status} type="manufacturing" size="sm" />
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${prio.color}`}>{prio.label}</span>
+                      {alloc.is_current && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium shrink-0">← This order</span>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-gray-900 tabular-nums shrink-0 ml-2">
+                      {fmt(alloc.allocated_qty)} {uom}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[10px] text-gray-500 mt-1">
+                    <span className="truncate">{alloc.product_name}</span>
+                    <span className="text-gray-300">|</span>
+                    <span className="truncate">{alloc.customer_name}</span>
+                    {dueStr && (
+                      <>
+                        <span className="text-gray-300">|</span>
+                        <span className="flex items-center gap-0.5 shrink-0">
+                          <Calendar className="w-2.5 h-2.5" /> {dueStr}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Warnings */}
+                  {!alloc.is_current && inProd && (
+                    <div className="flex items-center gap-1 text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-0.5 mt-1.5">
+                      <ShieldAlert className="w-3 h-3 shrink-0" />
+                      In production — transferring may cause delays
+                    </div>
+                  )}
+                  {!alloc.is_current && prio.warn && !inProd && (
+                    <div className="flex items-center gap-1 text-[10px] text-amber-700 bg-amber-100 rounded px-2 py-0.5 mt-1.5">
+                      <ShieldAlert className="w-3 h-3 shrink-0" />
+                      {alloc.priority === 'urgent' ? 'Urgent' : 'High'} priority — transfer with caution
+                    </div>
+                  )}
+
+                  {/* Transfer controls (only for other MOs when there's a gap) */}
+                  {!alloc.is_current && gap > 0 && warehouseId && (
+                    <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
+                      <span className="text-[10px] text-gray-500 mr-auto">Take from this MO:</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={maxQty}
+                        step={uom === 'm' ? 0.01 : 1}
+                        value={amt || ''}
+                        onChange={e => {
+                          const val = Math.min(Number(e.target.value) || 0, maxQty);
+                          setTransferAmounts(prev => ({ ...prev, [alloc.manufacturing_order_id]: val }));
+                        }}
+                        placeholder={fmt(maxQty)}
+                        className="w-20 px-2 py-1 text-xs border border-gray-300 rounded-lg text-right focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleTransfer(alloc.manufacturing_order_id, alloc.warehouse_id)}
+                        disabled={isTransferring || !amt || amt <= 0}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {isTransferring ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRightLeft className="w-3 h-3" />}
+                        Transfer
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Section C — Action suggestion */}
+      {gap > 0 && freeStock <= 0 && otherMOs.length === 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+          <ShoppingCart className="w-4 h-4 shrink-0" />
+          <span>
+            <strong>{sku}</strong> needs {fmt(gap)} {uom} more. No warehouse stock or other MO reservations available — this material needs to be purchased.
+          </span>
+        </div>
+      )}
     </div>
   );
 }

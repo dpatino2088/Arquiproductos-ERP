@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useWorkCenters, type WorkCenter, type WorkCenterInput } from '../../hooks/useWorkCenters';
+import { usePermissions } from '../../hooks/usePermissions';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Plus, Edit2, Trash2, X, Check, Factory } from 'lucide-react';
@@ -25,6 +26,7 @@ function ruleToLabel(rule: Record<string, unknown>): string {
 
 export default function WorkCentersSettings() {
   const { centers, loading, error, upsert, remove } = useWorkCenters();
+  const { can } = usePermissions();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [form, setForm] = useState<WorkCenterInput>({ code: '', name: '', sequence: 0, is_active: true });
@@ -33,13 +35,13 @@ export default function WorkCentersSettings() {
   const startEdit = (wc: WorkCenter) => {
     setEditingId(wc.id);
     setIsAdding(false);
-    setForm({ code: wc.code, name: wc.name, description: wc.description, sequence: wc.sequence, is_active: wc.is_active, routing_rule: wc.routing_rule });
+    setForm({ code: wc.code, name: wc.name, description: wc.description, sequence: wc.sequence, is_active: wc.is_active, routing_rule: wc.routing_rule, capacity_hours_per_day: wc.capacity_hours_per_day ?? 8 });
   };
 
   const startAdd = () => {
     setEditingId(null);
     setIsAdding(true);
-    setForm({ code: '', name: '', description: '', sequence: (centers.length + 1) * 10, is_active: true, routing_rule: {} });
+    setForm({ code: '', name: '', description: '', sequence: (centers.length + 1) * 10, is_active: true, routing_rule: {}, capacity_hours_per_day: 8 });
   };
 
   const cancel = () => { setEditingId(null); setIsAdding(false); };
@@ -77,7 +79,7 @@ export default function WorkCentersSettings() {
           <h2 className="text-lg font-semibold text-gray-900">Work Centers</h2>
           <p className="text-sm text-gray-500 mt-1">Configure manufacturing workstations and routing rules.</p>
         </div>
-        {!isAdding && (
+        {!isAdding && can('settings.write') && (
           <button type="button" onClick={startAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:opacity-90">
             <Plus className="h-3.5 w-3.5" />
             Add Work Center
@@ -95,6 +97,7 @@ export default function WorkCentersSettings() {
               <th className="text-left px-4 py-2.5 font-medium text-gray-700">Name</th>
               <th className="text-left px-4 py-2.5 font-medium text-gray-700">Routing</th>
               <th className="text-center px-4 py-2.5 font-medium text-gray-700">Seq</th>
+              <th className="text-center px-4 py-2.5 font-medium text-gray-700">Capacity (h/day)</th>
               <th className="text-center px-4 py-2.5 font-medium text-gray-700">Active</th>
               <th className="text-right px-4 py-2.5 font-medium text-gray-700">Actions</th>
             </tr>
@@ -115,6 +118,7 @@ export default function WorkCentersSettings() {
                       </select>
                     </td>
                     <td className="px-4 py-2 text-center"><Input type="number" value={form.sequence} onChange={(e) => setForm((p) => ({ ...p, sequence: parseInt(e.target.value, 10) || 0 }))} className="text-xs w-16 text-center mx-auto" /></td>
+                    <td className="px-4 py-2 text-center"><Input type="number" step="1" min="1" max="24" value={form.capacity_hours_per_day ?? 8} onChange={(e) => setForm((p) => ({ ...p, capacity_hours_per_day: parseFloat(e.target.value) || 8 }))} className="text-xs w-16 text-center mx-auto" /></td>
                     <td className="px-4 py-2 text-center">
                       <input type="checkbox" checked={form.is_active} onChange={(e) => setForm((p) => ({ ...p, is_active: e.target.checked }))} />
                     </td>
@@ -135,13 +139,16 @@ export default function WorkCentersSettings() {
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{ruleToLabel(wc.routing_rule)}</span>
                   </td>
                   <td className="px-4 py-2.5 text-center text-gray-500">{wc.sequence}</td>
+                  <td className="px-4 py-2.5 text-center text-gray-500">{wc.capacity_hours_per_day ?? 8}h</td>
                   <td className="px-4 py-2.5 text-center">
                     {wc.is_active ? <span className="text-green-600 font-medium">Yes</span> : <span className="text-gray-400">No</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <div className="inline-flex gap-1">
                       <button type="button" onClick={() => startEdit(wc)} className="p-1 rounded hover:bg-gray-200 text-gray-500"><Edit2 className="h-3.5 w-3.5" /></button>
-                      <button type="button" onClick={() => handleDelete(wc.id)} className="p-1 rounded hover:bg-red-50 text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                      {can('settings.write') && (
+                        <button type="button" onClick={() => handleDelete(wc.id)} className="p-1 rounded hover:bg-red-50 text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -160,6 +167,7 @@ export default function WorkCentersSettings() {
                   </select>
                 </td>
                 <td className="px-4 py-2 text-center"><Input type="number" value={form.sequence} onChange={(e) => setForm((p) => ({ ...p, sequence: parseInt(e.target.value, 10) || 0 }))} className="text-xs w-16 text-center mx-auto" /></td>
+                <td className="px-4 py-2 text-center"><Input type="number" step="1" min="1" max="24" value={form.capacity_hours_per_day ?? 8} onChange={(e) => setForm((p) => ({ ...p, capacity_hours_per_day: parseFloat(e.target.value) || 8 }))} className="text-xs w-16 text-center mx-auto" /></td>
                 <td className="px-4 py-2 text-center">
                   <input type="checkbox" checked={form.is_active} onChange={(e) => setForm((p) => ({ ...p, is_active: e.target.checked }))} />
                 </td>
@@ -174,7 +182,7 @@ export default function WorkCentersSettings() {
 
             {centers.length === 0 && !isAdding && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                   <Factory className="h-8 w-8 mx-auto mb-2 text-gray-300" />
                   <p className="text-sm">No work centers configured.</p>
                 </td>

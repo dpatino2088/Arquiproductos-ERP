@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { formatDateTime } from '../../lib/utils';
 import { useForm, Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -2367,7 +2368,7 @@ export default function CatalogItemNew() {
                   )}
                   
                   <p className="text-xs text-gray-400 pt-2 border-t border-gray-200">
-                    Last calculated: {new Date(conversions.computed_at || '').toLocaleString()}
+                    Last calculated: {formatDateTime(conversions.computed_at)}
                   </p>
                 </div>
               )}

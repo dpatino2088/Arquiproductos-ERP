@@ -525,7 +525,10 @@ function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
     if (!s) return '—';
     try {
       const d = new Date(s);
-      return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+      if (isNaN(d.getTime())) return '—';
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${d.getFullYear()}`;
     } catch {
       return '—';
     }
@@ -3160,6 +3163,7 @@ export default function QuoteNew() {
           collection_name: line.collection_name,
           variant_name: line.variant_name,
           drive_type: line.drive_type,
+          operating_system_sku_name: line.drive_system_label ?? null,
           width_m: line.width_m,
           height_m: line.height_m,
           dimensions_source: {
@@ -3367,6 +3371,7 @@ export default function QuoteNew() {
           collection_name: line.collection_name,
           variant_name: line.variant_name,
           drive_type: line.drive_type,
+          operating_system_sku_name: line.drive_system_label ?? null,
           width_m: line.width_m,
           height_m: line.height_m,
           qty: n,
@@ -3950,9 +3955,9 @@ export default function QuoteNew() {
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '7%' }}>Area</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Position</th>
                     <th className="text-center py-3 pl-4 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Product type</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '22%' }}>Description</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>System Drive</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '11%' }}>Measurements</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '18%' }}>Description</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '13%' }}>System Drive</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Measurements</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '36px' }}>Qty</th>
                     <th className="text-right py-3 pl-2 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '88px' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
                     <th className="text-right py-3 pl-2 pr-6 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '88px' }}>Total</th>
@@ -3982,7 +3987,10 @@ export default function QuoteNew() {
                           ? `${line.collection_name} - ${line.variant_name}`
                           : line.collection_name || line.variant_name || 'N/A');
                     const driveType = line.drive_type;
-                    const driveDisplay = isCatalogLine ? '—' : (driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A');
+                    const driveLabel = line.drive_system_label
+                      ? line.drive_system_label
+                      : (driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A');
+                    const driveDisplay = isCatalogLine ? '—' : driveLabel;
 
                     const isDragging = draggedLineId === line.id;
                     const isDragOver = dragOverLineId === line.id;
@@ -4016,8 +4024,8 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-700 text-sm text-center overflow-hidden" title={collectionDisplay}>
                           <span className="block truncate text-center">{collectionDisplay}</span>
                         </td>
-                        <td className="py-4 px-2 text-gray-700 text-sm text-center whitespace-nowrap overflow-hidden text-ellipsis">
-                          {driveDisplay}
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center overflow-hidden" title={driveDisplay}>
+                          <span className="block truncate text-center">{driveDisplay}</span>
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center align-middle">
                           {isCatalogLine ? (

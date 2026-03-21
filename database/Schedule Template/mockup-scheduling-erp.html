@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arquiproductos - Production Scheduling Mockup</title>
+<style>
+  :root {
+    --bg: #f8f9fb; --card: #fff; --border: #e2e8f0;
+    --primary: #3b82f6; --primary-light: #dbeafe;
+    --danger: #ef4444; --danger-light: #fee2e2;
+    --warning: #f59e0b; --warning-light: #fef3c7;
+    --success: #10b981; --success-light: #d1fae5;
+    --info: #6366f1; --info-light: #e0e7ff;
+    --text: #1e293b; --text-secondary: #64748b;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); }
+
+  /* Layout */
+  .app { display: flex; height: 100vh; }
+  .sidebar { width: 60px; background: #1e293b; display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; }
+  .sidebar-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #94a3b8; cursor: pointer; font-size: 18px; transition: all .2s; }
+  .sidebar-icon:hover, .sidebar-icon.active { background: #334155; color: #fff; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Top bar */
+  .topbar { height: 56px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 24px; gap: 16px; }
+  .topbar h1 { font-size: 16px; font-weight: 600; }
+  .topbar .badge { font-size: 11px; background: var(--primary); color: #fff; padding: 2px 8px; border-radius: 10px; }
+
+  /* View tabs */
+  .view-tabs { display: flex; gap: 4px; background: #f1f5f9; border-radius: 8px; padding: 3px; margin-left: auto; }
+  .view-tab { padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; background: transparent; color: var(--text-secondary); font-weight: 500; transition: all .15s; }
+  .view-tab.active { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .view-tab:hover:not(.active) { color: var(--text); }
+
+  /* Content area */
+  .content { flex: 1; overflow: auto; padding: 20px 24px; }
+
+  /* ========== VIEW 1: DASHBOARD ========== */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+  .kpi-card { background: var(--card); border-radius: 12px; padding: 18px; border: 1px solid var(--border); }
+  .kpi-card .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .kpi-card .value { font-size: 28px; font-weight: 700; }
+  .kpi-card .change { font-size: 12px; margin-top: 4px; }
+  .kpi-card .change.up { color: var(--success); }
+  .kpi-card .change.down { color: var(--danger); }
+
+  .alerts-section { background: var(--card); border-radius: 12px; border: 1px solid var(--border); padding: 18px; margin-bottom: 20px; }
+  .alerts-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .alert-item { display: flex; align-items: center; padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; font-size: 13px; gap: 10px; cursor: pointer; transition: transform .1s; }
+  .alert-item:hover { transform: translateX(4px); }
+  .alert-item.critical { background: var(--danger-light); border-left: 3px solid var(--danger); }
+  .alert-item.warning { background: var(--warning-light); border-left: 3px solid var(--warning); }
+  .alert-item.info { background: var(--info-light); border-left: 3px solid var(--info); }
+  .alert-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .alert-item.critical .alert-dot { background: var(--danger); }
+  .alert-item.warning .alert-dot { background: var(--warning); }
+  .alert-item.info .alert-dot { background: var(--info); }
+  .alert-item .mo { font-weight: 600; }
+  .alert-item .detail { color: var(--text-secondary); }
+  .alert-item .action-btn { margin-left: auto; padding: 4px 10px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-weight: 500; white-space: nowrap; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Mini capacity bars */
+  .capacity-section { background: var(--card); border-radius: 12px; border: 1px solid var(--border); padding: 18px; }
+  .capacity-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+  .station-row { display: flex; align-items: center; margin-bottom: 10px; gap: 12px; }
+  .station-name { width: 120px; font-size: 13px; font-weight: 500; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 24px; background: #f1f5f9; border-radius: 6px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 6px; transition: width .5s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font-size: 11px; font-weight: 600; color: #fff; }
+  .bar-fill.ok { background: var(--success); }
+  .bar-fill.warn { background: var(--warning); }
+  .bar-fill.over { background: var(--danger); }
+  .bar-label { width: 45px; text-align: right; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+
+  /* Timeline mini */
+  .timeline-mini { background: var(--card); border-radius: 12px; border: 1px solid var(--border); padding: 18px; }
+  .timeline-mini h3 { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+  .tl-header { display: grid; grid-template-columns: 100px repeat(5, 1fr); gap: 2px; margin-bottom: 8px; }
+  .tl-header span { font-size: 11px; color: var(--text-secondary); text-align: center; }
+  .tl-row { display: grid; grid-template-columns: 100px repeat(5, 1fr); gap: 2px; margin-bottom: 4px; align-items: center; }
+  .tl-station { font-size: 12px; font-weight: 500; }
+  .tl-cell { height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: #fff; }
+  .tl-cell.empty { background: #f1f5f9; }
+  .tl-cell.normal { background: var(--success); opacity: .85; }
+  .tl-cell.busy { background: var(--warning); }
+  .tl-cell.over { background: var(--danger); }
+
+  /* ========== VIEW 2: DISPATCH BOARD ========== */
+  .dispatch-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .dispatch-col { background: var(--card); border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
+  .dispatch-col-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .dispatch-col-header h4 { font-size: 14px; font-weight: 600; }
+  .dispatch-col-header .count { font-size: 12px; background: #f1f5f9; padding: 2px 8px; border-radius: 10px; color: var(--text-secondary); }
+  .dispatch-col-body { padding: 10px; min-height: 300px; }
+
+  .dispatch-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 8px; cursor: grab; transition: all .15s; position: relative; }
+  .dispatch-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); transform: translateY(-1px); }
+  .dispatch-card.dragging { opacity: .5; }
+  .dispatch-card .mo-id { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .dispatch-card .mo-product { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .dispatch-card .mo-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+  .dispatch-card .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+  .tag.urgent { background: var(--danger-light); color: var(--danger); }
+  .tag.due-soon { background: var(--warning-light); color: #b45309; }
+  .tag.on-track { background: var(--success-light); color: #059669; }
+  .tag.blocked { background: #e0e7ff; color: var(--info); }
+  .dispatch-card .priority-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 10px 0 0 10px; }
+  .priority-bar.high { background: var(--danger); }
+  .priority-bar.medium { background: var(--warning); }
+  .priority-bar.low { background: var(--success); }
+  .dispatch-card .time-est { font-size: 11px; color: var(--text-secondary); margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+
+  /* ========== VIEW 3: CAPACITY TIMELINE ========== */
+  .timeline-container { background: var(--card); border-radius: 12px; border: 1px solid var(--border); overflow-x: auto; }
+  .timeline-header-bar { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  .timeline-header-bar h3 { font-size: 15px; font-weight: 600; }
+  .legend { display: flex; gap: 14px; margin-left: auto; font-size: 12px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+  .timeline-grid { padding: 16px 20px; min-width: 900px; }
+  .tg-header { display: grid; grid-template-columns: 140px repeat(10, 1fr); margin-bottom: 4px; }
+  .tg-header span { font-size: 11px; color: var(--text-secondary); text-align: center; font-weight: 500; }
+  .tg-row { display: grid; grid-template-columns: 140px repeat(10, 1fr); margin-bottom: 6px; align-items: center; }
+  .tg-label { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .tg-label .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tg-cell { height: 36px; margin: 0 1px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; cursor: pointer; transition: all .15s; position: relative; }
+  .tg-cell:hover { transform: scaleY(1.15); z-index: 1; }
+  .tg-cell.empty { background: #f8fafc; border: 1px dashed #e2e8f0; color: transparent; }
+  .tg-cell.empty:hover { background: #eef2ff; border-color: var(--primary); color: var(--primary); font-size: 16px; }
+  .tg-cell.light { background: #d1fae5; color: #065f46; }
+  .tg-cell.medium { background: #fef3c7; color: #92400e; }
+  .tg-cell.heavy { background: #fee2e2; color: #991b1b; }
+
+  .tg-capacity-line { position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: rgba(0,0,0,.15); }
+
+  /* ========== VIEW 4: KANBAN ========== */
+  .kanban-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .kanban-col { border-radius: 12px; overflow: hidden; }
+  .kanban-col-header { padding: 12px 16px; color: #fff; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+  .kanban-col-header .kcount { background: rgba(255,255,255,.25); padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .kanban-col.pending .kanban-col-header { background: #94a3b8; }
+  .kanban-col.in-progress .kanban-col-header { background: var(--primary); }
+  .kanban-col.quality .kanban-col-header { background: var(--warning); }
+  .kanban-col.done .kanban-col-header { background: var(--success); }
+  .kanban-col-body { background: #f8fafc; border: 1px solid var(--border); border-top: none; border-radius: 0 0 12px 12px; padding: 10px; min-height: 320px; }
+
+  .kanban-card { background: var(--card); border-radius: 10px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--border); cursor: grab; transition: all .15s; }
+  .kanban-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+  .kanban-card .kc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .kanban-card .kc-id { font-weight: 700; font-size: 13px; }
+  .kanban-card .kc-prio { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; font-weight: 700; }
+  .kanban-card .kc-product { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .kanban-card .kc-progress { height: 4px; background: #f1f5f9; border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
+  .kanban-card .kc-progress-fill { height: 100%; border-radius: 2px; }
+  .kanban-card .kc-footer { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+
+  /* Tooltip */
+  .tooltip { position: fixed; background: #1e293b; color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 12px; pointer-events: none; z-index: 100; max-width: 220px; box-shadow: 0 4px 12px rgba(0,0,0,.2); display: none; }
+
+  /* View container */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* Animations */
+  @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .view.active > * { animation: slideIn .3s ease forwards; }
+
+  /* Responsive */
+  @media (max-width: 1200px) {
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .dispatch-board, .kanban-board { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 10px; font-weight: 600; }
+
+  /* Comparison banner */
+  .comparison-banner { background: linear-gradient(135deg, #1e293b, #334155); color: #fff; border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
+  .comparison-banner h2 { font-size: 18px; margin-bottom: 4px; }
+  .comparison-banner p { font-size: 13px; color: #94a3b8; }
+  .tab-indicator { display: flex; gap: 4px; margin-top: 12px; }
+  .tab-dot { width: 8px; height: 8px; border-radius: 50%; background: #475569; }
+  .tab-dot.active { background: var(--primary); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-icon active" title="Production">📊</div>
+    <div class="sidebar-icon" title="Orders">📋</div>
+    <div class="sidebar-icon" title="Inventory">📦</div>
+    <div class="sidebar-icon" title="Settings">⚙️</div>
+  </div>
+
+  <div class="main">
+    <!-- Top bar -->
+    <div class="topbar">
+      <h1>🏭 Producción</h1>
+      <span class="badge">Semana 12 · Mar 16–20</span>
+      <div class="view-tabs">
+        <button class="view-tab active" data-view="dashboard">Dashboard</button>
+        <button class="view-tab" data-view="dispatch">Dispatch Board</button>
+        <button class="view-tab" data-view="timeline">Capacity Timeline</button>
+        <button class="view-tab" data-view="kanban">Kanban</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ======== DASHBOARD VIEW ======== -->
+      <div class="view active" id="dashboard">
+        <div class="comparison-banner">
+          <h2>NEW: Dashboard de Excepciones</h2>
+          <p>Capa nueva sobre el sistema existente. Responde "¿Qué necesita atención AHORA?" sin tocar Schedule ni Calendar. KPIs + alertas + heatmap global.</p>
+          <div class="tab-indicator">
+            <div class="tab-dot active"></div><div class="tab-dot"></div><div class="tab-dot"></div><div class="tab-dot"></div>
+          </div>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="label">Órdenes Activas</div>
+            <div class="value">9</div>
+            <div class="change up">↑ 2 nuevas esta semana</div>
+          </div>
+          <div class="kpi-card">
+            <div class="label">On-Time Rate</div>
+            <div class="value" style="color: var(--warning)">78%</div>
+            <div class="change down">↓ 5% vs semana anterior</div>
+          </div>
+          <div class="kpi-card">
+            <div class="label">Utilización Promedio</div>
+            <div class="value">87%</div>
+            <div class="change up">↑ 3% vs semana anterior</div>
+          </div>
+          <div class="kpi-card">
+            <div class="label">Órdenes en Riesgo</div>
+            <div class="value" style="color: var(--danger)">3</div>
+            <div class="change down">Requieren atención</div>
+          </div>
+        </div>
+
+        <div class="alerts-section">
+          <h3>⚡ Alertas — Requieren Acción</h3>
+          <div class="alert-item critical">
+            <div class="alert-dot"></div>
+            <span class="mo">MO-000009</span>
+            <span class="detail">Assembly sobrecargada Fri 6 (24h en turno de 8h) — 3 órdenes compitiendo</span>
+            <button class="action-btn">Reprogramar →</button>
+          </div>
+          <div class="alert-item critical">
+            <div class="alert-dot"></div>
+            <span class="mo">MO-000005</span>
+            <span class="detail">2 días de retraso — fecha compromiso era Mar 18</span>
+            <button class="action-btn">Ver Orden →</button>
+          </div>
+          <div class="alert-item warning">
+            <div class="alert-dot"></div>
+            <span class="mo">MO-000003</span>
+            <span class="detail">Profile Cut al 175% capacidad el Wed 4 — riesgo de cuello de botella</span>
+            <button class="action-btn">Redistribuir →</button>
+          </div>
+          <div class="alert-item info">
+            <div class="alert-dot"></div>
+            <span class="mo">MO-000001</span>
+            <span class="detail">Completada — pendiente validación de calidad</span>
+            <button class="action-btn">Aprobar →</button>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="capacity-section">
+            <h3>📊 Carga por Estación — Hoy</h3>
+            <div class="station-row">
+              <span class="station-name">Profile Cut</span>
+              <div class="bar-track"><div class="bar-fill ok" style="width: 75%">6h</div></div>
+              <span class="bar-label">75%</span>
+            </div>
+            <div class="station-row">
+              <span class="station-name">Roll Cut</span>
+              <div class="bar-track"><div class="bar-fill warn" style="width: 100%">8h</div></div>
+              <span class="bar-label">100%</span>
+            </div>
+            <div class="station-row">
+              <span class="station-name">Hardware</span>
+              <div class="bar-track"><div class="bar-fill ok" style="width: 38%">3h</div></div>
+              <span class="bar-label">38%</span>
+            </div>
+            <div class="station-row">
+              <span class="station-name">Assembly</span>
+              <div class="bar-track"><div class="bar-fill over" style="width: 130%; max-width: 100%">10.4h</div></div>
+              <span class="bar-label" style="color: var(--danger)">130%</span>
+            </div>
+          </div>
+
+          <div class="timeline-mini">
+            <h3>📅 Semana Actual — Vista Rápida</h3>
+            <div class="tl-header">
+              <span></span><span>Lun 16</span><span>Mar 17</span><span>Mié 18</span><span>Jue 19</span><span>Vie 20</span>
+            </div>
+            <div class="tl-row">
+              <span class="tl-station">Profile Cut</span>
+              <div class="tl-cell normal">6h</div>
+              <div class="tl-cell light">4h</div>
+              <div class="tl-cell empty"></div>
+              <div class="tl-cell empty"></div>
+              <div class="tl-cell empty"></div>
+            </div>
+            <div class="tl-row">
+              <span class="tl-station">Roll Cut</span>
+              <div class="tl-cell medium">8h</div>
+              <div class="tl-cell normal">6h</div>
+              <div class="tl-cell light">4h</div>
+              <div class="tl-cell empty"></div>
+              <div class="tl-cell empty"></div>
+            </div>
+            <div class="tl-row">
+              <span class="tl-station">Hardware</span>
+              <div class="tl-cell light">3h</div>
+              <div class="tl-cell empty"></div>
+              <div class="tl-cell empty"></div>
+              <div class="tl-cell empty"></div>
+              <div class="tl-cell empty"></div>
+            </div>
+            <div class="tl-row">
+              <span class="tl-station">Assembly</span>
+              <div class="tl-cell over">10h</div>
+              <div class="tl-cell medium">8h</div>
+              <div class="tl-cell normal">5h</div>
+              <div class="tl-cell light">2.5h</div>
+              <div class="tl-cell empty"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======== DISPATCH BOARD VIEW ======== -->
+      <div class="view" id="dispatch">
+        <div class="comparison-banner">
+          <h2>NEW: Dispatch Board por Estación</h2>
+          <p>Vista station-centric que NO existe hoy. Responde "¿Qué sigue en cada estación?" — la brecha entre Schedule (micro/MO) y Calendar (macro/global).</p>
+          <div class="tab-indicator">
+            <div class="tab-dot"></div><div class="tab-dot active"></div><div class="tab-dot"></div><div class="tab-dot"></div>
+          </div>
+        </div>
+
+        <div class="dispatch-board">
+          <div class="dispatch-col">
+            <div class="dispatch-col-header"><h4>✂️ Profile Cut</h4><span class="count">4 órdenes</span></div>
+            <div class="dispatch-col-body">
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar high"></div>
+                <div class="mo-id">MO-000009</div>
+                <div class="mo-product">Ventana Panorámica 2.4m</div>
+                <div class="mo-meta">
+                  <span class="tag urgent">🔴 Urgente</span>
+                  <span class="tag due-soon">Entrega: Mar 22</span>
+                </div>
+                <div class="time-est">⏱ 12h estimadas · 8h completadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar high"></div>
+                <div class="mo-id">MO-000008</div>
+                <div class="mo-product">Puerta Corrediza 1.8m</div>
+                <div class="mo-meta">
+                  <span class="tag urgent">🔴 Atrasada 1d</span>
+                </div>
+                <div class="time-est">⏱ 8h estimadas · 0h completadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar medium"></div>
+                <div class="mo-id">MO-000004</div>
+                <div class="mo-product">Marco Fijo 1.2m</div>
+                <div class="mo-meta">
+                  <span class="tag on-track">✓ En tiempo</span>
+                </div>
+                <div class="time-est">⏱ 6h estimadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar low"></div>
+                <div class="mo-id">MO-000001</div>
+                <div class="mo-product">Ventana Estándar 1.5m</div>
+                <div class="mo-meta">
+                  <span class="tag on-track">✓ En tiempo</span>
+                </div>
+                <div class="time-est">⏱ 4h estimadas</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dispatch-col">
+            <div class="dispatch-col-header"><h4>🔄 Roll Cut</h4><span class="count">3 órdenes</span></div>
+            <div class="dispatch-col-body">
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar high"></div>
+                <div class="mo-id">MO-000009</div>
+                <div class="mo-product">Ventana Panorámica 2.4m</div>
+                <div class="mo-meta">
+                  <span class="tag urgent">🔴 Urgente</span>
+                  <span class="tag blocked">🔵 Espera Profile Cut</span>
+                </div>
+                <div class="time-est">⏱ 8h estimadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar medium"></div>
+                <div class="mo-id">MO-000007</div>
+                <div class="mo-product">Ventana Proyectante</div>
+                <div class="mo-meta">
+                  <span class="tag due-soon">Entrega: Mar 25</span>
+                </div>
+                <div class="time-est">⏱ 6h estimadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar low"></div>
+                <div class="mo-id">MO-000004</div>
+                <div class="mo-product">Marco Fijo 1.2m</div>
+                <div class="mo-meta">
+                  <span class="tag on-track">✓ En tiempo</span>
+                </div>
+                <div class="time-est">⏱ 4h estimadas</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dispatch-col">
+            <div class="dispatch-col-header"><h4>🔩 Hardware & Parts</h4><span class="count">2 órdenes</span></div>
+            <div class="dispatch-col-body">
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar high"></div>
+                <div class="mo-id">MO-000009</div>
+                <div class="mo-product">Ventana Panorámica 2.4m</div>
+                <div class="mo-meta">
+                  <span class="tag due-soon">Preparar para Mié</span>
+                </div>
+                <div class="time-est">⏱ 3h estimadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar low"></div>
+                <div class="mo-id">MO-000005</div>
+                <div class="mo-product">Puerta Batiente 2.1m</div>
+                <div class="mo-meta">
+                  <span class="tag on-track">✓ En tiempo</span>
+                </div>
+                <div class="time-est">⏱ 2h estimadas</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dispatch-col">
+            <div class="dispatch-col-header"><h4>🏗 Assembly</h4><span class="count">3 órdenes</span></div>
+            <div class="dispatch-col-body">
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar high"></div>
+                <div class="mo-id">MO-000009</div>
+                <div class="mo-product">Ventana Panorámica 2.4m</div>
+                <div class="mo-meta">
+                  <span class="tag urgent">🔴 Sobrecarga 300%</span>
+                </div>
+                <div class="time-est">⏱ 24h estimadas · Capacidad: 8h</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar medium"></div>
+                <div class="mo-id">MO-000006</div>
+                <div class="mo-product">Ventana Abatible 1.6m</div>
+                <div class="mo-meta">
+                  <span class="tag due-soon">Entrega: Mar 23</span>
+                </div>
+                <div class="time-est">⏱ 5.3h estimadas</div>
+              </div>
+              <div class="dispatch-card" draggable="true">
+                <div class="priority-bar low"></div>
+                <div class="mo-id">MO-000002</div>
+                <div class="mo-product">Marco Doble 2.0m</div>
+                <div class="mo-meta">
+                  <span class="tag on-track">✓ En tiempo</span>
+                </div>
+                <div class="time-est">⏱ 5h estimadas</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======== CAPACITY TIMELINE VIEW ======== -->
+      <div class="view" id="timeline">
+        <div class="comparison-banner">
+          <h2>ENHANCEMENT: Capacity Planning Global</h2>
+          <p>El Workload Overview ya existe dentro de cada MO — esta es la versión GLOBAL. Muestra capacidad de TODAS las estaciones × TODAS las MOs. Responde "¿Puedo añadir una orden?"</p>
+          <div class="tab-indicator">
+            <div class="tab-dot"></div><div class="tab-dot"></div><div class="tab-dot active"></div><div class="tab-dot"></div>
+          </div>
+        </div>
+
+        <div class="timeline-container">
+          <div class="timeline-header-bar">
+            <h3>Capacidad por Estación</h3>
+            <span style="font-size:13px; color: var(--text-secondary)">Semana 10–12 · Febrero–Marzo 2026</span>
+            <div class="legend">
+              <div class="legend-item"><div class="legend-dot" style="background: #d1fae5"></div> &lt;50%</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #d1fae5; opacity:.8"></div> 50-80%</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #fef3c7"></div> 80-100%</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #fee2e2"></div> &gt;100%</div>
+              <div class="legend-item"><div class="legend-dot" style="background: #f8fafc; border: 1px dashed #e2e8f0"></div> Libre</div>
+            </div>
+          </div>
+          <div class="timeline-grid">
+            <div class="tg-header">
+              <span></span>
+              <span>Lun 2</span><span>Mar 3</span><span>Mié 4</span><span>Jue 5</span><span>Vie 6</span>
+              <span>Lun 9</span><span>Mar 10</span><span>Mié 11</span><span>Jue 12</span><span>Vie 13</span>
+            </div>
+
+            <div class="tg-row">
+              <span class="tg-label"><span class="status-dot" style="background: var(--warning)"></span> Profile Cut (8h)</span>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell heavy" title="12h / 8h = 150%">12h</div>
+              <div class="tg-cell heavy" title="14h / 8h = 175%">14h</div>
+              <div class="tg-cell light" title="2h / 8h = 25%">2h</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell medium" title="8h / 8h = 100%">8h</div>
+              <div class="tg-cell medium" title="8h / 8h = 100%">8h</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+            </div>
+
+            <div class="tg-row">
+              <span class="tg-label"><span class="status-dot" style="background: var(--danger)"></span> Roll Cut (8h)</span>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell medium" title="8h / 8h = 100%">8h</div>
+              <div class="tg-cell heavy" title="16h / 8h = 200%">16h</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell medium" title="8h / 8h = 100%">8h</div>
+              <div class="tg-cell light" title="6h / 8h = 75%">6h</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+            </div>
+
+            <div class="tg-row">
+              <span class="tg-label"><span class="status-dot" style="background: var(--success)"></span> Hardware (8h)</span>
+              <div class="tg-cell light" title="3h / 8h = 38%">3h</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+            </div>
+
+            <div class="tg-row">
+              <span class="tg-label"><span class="status-dot" style="background: var(--danger)"></span> Assembly (8h)</span>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell light" title="5.3h / 8h = 66%">5.3h</div>
+              <div class="tg-cell light" title="5.3h / 8h = 66%">5.3h</div>
+              <div class="tg-cell heavy" title="24h / 8h = 300%!">24h!</div>
+              <div class="tg-cell light" title="2.7h / 8h = 34%">2.7h</div>
+              <div class="tg-cell light" title="5.2h / 8h = 65%">5.2h</div>
+              <div class="tg-cell light" title="5h / 8h = 63%">5h</div>
+              <div class="tg-cell light" title="2.5h / 8h = 31%">2.5h</div>
+              <div class="tg-cell empty">+</div>
+              <div class="tg-cell empty">+</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px; padding: 16px 20px; background: var(--card); border-radius: 12px; border: 1px solid var(--border);">
+          <h4 style="font-size: 14px; margin-bottom: 8px;">🎯 ¿Qué cambia vs. Workload Overview actual?</h4>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px;">
+            <div style="padding: 10px; background: var(--warning-light); border-radius: 8px;">
+              <strong>Hoy:</strong> Heatmap existe pero SOLO dentro de cada MO — ves carga relativa a 1 orden
+            </div>
+            <div style="padding: 10px; background: var(--success-light); border-radius: 8px;">
+              <strong>Propuesta:</strong> Heatmap GLOBAL — carga de TODAS las MOs. Responde "¿dónde cabe una nueva orden?"
+            </div>
+            <div style="padding: 10px; background: var(--warning-light); border-radius: 8px;">
+              <strong>Hoy:</strong> Para saber capacidad global, Planner revisa cada MO (5-7 min)
+            </div>
+            <div style="padding: 10px; background: var(--success-light); border-radius: 8px;">
+              <strong>Propuesta:</strong> Celdas vacías = slots disponibles. Click "+" para asignar. Sistema sugiere mejor fecha.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======== KANBAN VIEW ======== -->
+      <div class="view" id="kanban">
+        <div class="comparison-banner">
+          <h2>ALTERNATIVA: Kanban de Producción</h2>
+          <p>Opcional — flujo visual por estado (Planificadas → Producción → QC → Completadas). Complementa el Calendar existente con vista de pipeline.</p>
+          <div class="tab-indicator">
+            <div class="tab-dot"></div><div class="tab-dot"></div><div class="tab-dot"></div><div class="tab-dot active"></div>
+          </div>
+        </div>
+
+        <div class="kanban-board">
+          <div class="kanban-col pending">
+            <div class="kanban-col-header"><span>📋 Planificadas</span><span class="kcount">3</span></div>
+            <div class="kanban-col-body">
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000001</span><span class="kc-prio" style="background: var(--success)">L</span></div>
+                <div class="kc-product">Ventana Estándar 1.5m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 0%; background: #94a3b8"></div></div>
+                <div class="kc-footer"><span>Inicio: Mar 17</span><span>4 ops</span></div>
+              </div>
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000002</span><span class="kc-prio" style="background: var(--success)">L</span></div>
+                <div class="kc-product">Marco Doble 2.0m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 0%; background: #94a3b8"></div></div>
+                <div class="kc-footer"><span>Inicio: Mar 18</span><span>3 ops</span></div>
+              </div>
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000003</span><span class="kc-prio" style="background: var(--warning)">M</span></div>
+                <div class="kc-product">Ventana Abatible XL</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 0%; background: #94a3b8"></div></div>
+                <div class="kc-footer"><span>Inicio: Mar 19</span><span>4 ops</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanban-col in-progress">
+            <div class="kanban-col-header"><span>🔨 En Producción</span><span class="kcount">4</span></div>
+            <div class="kanban-col-body">
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000009</span><span class="kc-prio" style="background: var(--danger)">H</span></div>
+                <div class="kc-product">Ventana Panorámica 2.4m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 35%; background: var(--danger)"></div></div>
+                <div class="kc-footer"><span style="color: var(--danger)">⚠ Atrasada</span><span>2/4 ops</span></div>
+              </div>
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000008</span><span class="kc-prio" style="background: var(--danger)">H</span></div>
+                <div class="kc-product">Puerta Corrediza 1.8m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 50%; background: var(--warning)"></div></div>
+                <div class="kc-footer"><span style="color: var(--warning)">⏰ Entrega pronto</span><span>2/4 ops</span></div>
+              </div>
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000007</span><span class="kc-prio" style="background: var(--warning)">M</span></div>
+                <div class="kc-product">Ventana Proyectante</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 60%; background: var(--primary)"></div></div>
+                <div class="kc-footer"><span>En tiempo</span><span>3/4 ops</span></div>
+              </div>
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000006</span><span class="kc-prio" style="background: var(--warning)">M</span></div>
+                <div class="kc-product">Ventana Abatible 1.6m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 70%; background: var(--primary)"></div></div>
+                <div class="kc-footer"><span>En tiempo</span><span>3/4 ops</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanban-col quality">
+            <div class="kanban-col-header"><span>🔍 Control Calidad</span><span class="kcount">1</span></div>
+            <div class="kanban-col-body">
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000005</span><span class="kc-prio" style="background: var(--warning)">M</span></div>
+                <div class="kc-product">Puerta Batiente 2.1m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 90%; background: var(--success)"></div></div>
+                <div class="kc-footer"><span>Pendiente QC</span><span>4/4 ops</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kanban-col done">
+            <div class="kanban-col-header"><span>✅ Completadas</span><span class="kcount">1</span></div>
+            <div class="kanban-col-body">
+              <div class="kanban-card" draggable="true">
+                <div class="kc-header"><span class="kc-id">MO-000004</span><span class="kc-prio" style="background: var(--success)">L</span></div>
+                <div class="kc-product">Marco Fijo 1.2m</div>
+                <div class="kc-progress"><div class="kc-progress-fill" style="width: 100%; background: var(--success)"></div></div>
+                <div class="kc-footer"><span>Completada Mar 14</span><span>4/4 ops</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// View switching
+document.querySelectorAll('.view-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.view).classList.add('active');
+  });
+});
+
+// Tooltip on timeline cells
+const tooltip = document.getElementById('tooltip');
+document.querySelectorAll('.tg-cell:not(.empty)').forEach(cell => {
+  cell.addEventListener('mouseenter', e => {
+    const text = cell.getAttribute('title');
+    if (text) {
+      tooltip.textContent = text;
+      tooltip.style.display = 'block';
+      tooltip.style.left = e.pageX + 12 + 'px';
+      tooltip.style.top = e.pageY - 30 + 'px';
+    }
+  });
+  cell.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+});
+
+// Simple drag visual for dispatch/kanban cards
+document.querySelectorAll('[draggable="true"]').forEach(card => {
+  card.addEventListener('dragstart', () => card.classList.add('dragging'));
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+});
+
+// Animate KPI values on load
+document.querySelectorAll('.bar-fill').forEach(bar => {
+  const width = bar.style.width;
+  bar.style.width = '0%';
+  setTimeout(() => { bar.style.width = width; }, 300);
+});
+</script>
+</body>
+</html>

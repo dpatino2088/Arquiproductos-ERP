@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSaleOrders, SaleOrderStatus } from '../../hooks/useSaleOrders';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
@@ -84,6 +86,7 @@ export default function SaleOrders() {
   }, [activeOrganizationId, activeOrganization, orgLoading]);
   
   const { saleOrders, loading, error, refetch } = useSaleOrders();
+  const { canArchive: canArchiveSO, canDelete: canDeleteSO } = useGranularAccess('salesorders');
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
@@ -553,7 +556,7 @@ export default function SaleOrders() {
                         {formatCurrency(order.total, order.currency)}
                       </td>
                       <td className="py-4 px-6 text-gray-700 text-sm">
-                        {new Date(order.orderDate).toLocaleDateString()}
+                        {formatDate(order.orderDate)}
                       </td>
                       <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
@@ -565,22 +568,26 @@ export default function SaleOrders() {
                           >
                             <Edit className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={(e) => handleArchiveSaleOrder(order, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Archivar ${order.saleOrderNo}`}
-                            title={`Archivar ${order.saleOrderNo}`}
-                          >
-                            <Archive className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={(e) => handleDeleteSaleOrder(order, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Eliminar ${order.saleOrderNo}`}
-                            title={`Eliminar ${order.saleOrderNo}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canArchiveSO && (
+                            <button 
+                              onClick={(e) => handleArchiveSaleOrder(order, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              aria-label={`Archivar ${order.saleOrderNo}`}
+                              title={`Archivar ${order.saleOrderNo}`}
+                            >
+                              <Archive className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDeleteSO && (
+                            <button 
+                              onClick={(e) => handleDeleteSaleOrder(order, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              aria-label={`Eliminar ${order.saleOrderNo}`}
+                              title={`Eliminar ${order.saleOrderNo}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

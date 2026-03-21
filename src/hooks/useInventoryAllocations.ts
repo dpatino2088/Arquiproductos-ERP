@@ -196,6 +196,127 @@ export function useReleaseMOAllocation() {
   return { release, isReleasing };
 }
 
+export interface MOAllocationDetail {
+  manufacturing_order_id: string;
+  mo_number: string;
+  mo_status: string;
+  priority: string;
+  product_name: string;
+  customer_name: string;
+  due_date: string | null;
+  allocated_qty: number;
+  warehouse_id: string;
+  is_current: boolean;
+}
+
+/** @deprecated Use useAllMOAllocationsForItem instead */
+export type OtherMOAllocation = MOAllocationDetail;
+
+export function useAllMOAllocationsForItem(catalogItemId: string | null, currentMoId: string | null, orgId: string | null) {
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: [ALLOCATIONS_KEY, 'all-mos-for-item', catalogItemId, currentMoId],
+    queryFn: async (): Promise<MOAllocationDetail[]> => {
+      if (!catalogItemId || !orgId) return [];
+      const { data: rows, error } = await supabase
+        .from('InventoryAllocations')
+        .select(`
+          manufacturing_order_id, allocated_qty, warehouse_id,
+          ManufacturingOrders:manufacturing_order_id (
+            manufacturing_order_no, status, priority, product_name,
+            SalesOrders:sales_order_id (
+              expected_delivery_date,
+              DirectoryCustomers:customer_id ( customer_name )
+            )
+          )
+        `)
+        .eq('catalog_item_id', catalogItemId)
+        .eq('organization_id', orgId)
+        .eq('status', 'reserved')
+        .not('manufacturing_order_id', 'is', null);
+
+      if (error) throw error;
+
+      const grouped = new Map<string, MOAllocationDetail>();
+      for (const r of (rows ?? []) as any[]) {
+        const moId = r.manufacturing_order_id as string;
+        const mo = r.ManufacturingOrders;
+        const existing = grouped.get(moId);
+        if (existing) {
+          existing.allocated_qty += Number(r.allocated_qty);
+        } else {
+          grouped.set(moId, {
+            manufacturing_order_id: moId,
+            mo_number: mo?.manufacturing_order_no ?? '—',
+            mo_status: mo?.status ?? 'unknown',
+            priority: mo?.priority ?? 'normal',
+            product_name: mo?.product_name ?? '—',
+            customer_name: mo?.SalesOrders?.DirectoryCustomers?.customer_name ?? '—',
+            due_date: mo?.SalesOrders?.expected_delivery_date ?? null,
+            allocated_qty: Number(r.allocated_qty),
+            warehouse_id: r.warehouse_id,
+            is_current: moId === currentMoId,
+          });
+        }
+      }
+      const priorityOrder: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+      return [...grouped.values()].sort((a, b) => {
+        if (a.is_current) return -1;
+        if (b.is_current) return 1;
+        return (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2);
+      });
+    },
+    enabled: !!catalogItemId && !!orgId,
+  });
+
+  return { moAllocations: data ?? [], loading: isLoading, refetch };
+}
+
+/** @deprecated Use useAllMOAllocationsForItem */
+export function useOtherMOAllocations(catalogItemId: string | null, excludeMoId: string | null, orgId: string | null) {
+  const { moAllocations, loading, refetch } = useAllMOAllocationsForItem(catalogItemId, excludeMoId, orgId);
+  return {
+    otherAllocations: moAllocations.filter(a => !a.is_current),
+    loading,
+    refetch,
+  };
+}
+
+export function useTransferAllocation() {
+  const [isTransferring, setIsTransferring] = useState(false);
+  const queryClient = useQueryClient();
+
+  const transfer = useCallback(async (
+    sourceMoId: string,
+    targetMoId: string,
+    catalogItemId: string,
+    qty: number,
+    orgId: string,
+    warehouseId: string
+  ) => {
+    setIsTransferring(true);
+    try {
+      const { data, error } = await supabase.rpc('transfer_mo_allocation', {
+        p_source_mo_id: sourceMoId,
+        p_target_mo_id: targetMoId,
+        p_catalog_item_id: catalogItemId,
+        p_qty: qty,
+        p_org_id: orgId,
+        p_warehouse_id: warehouseId,
+      });
+      if (error) throw error;
+      const result = data as { ok: boolean; transferred_qty?: number; error?: string };
+      if (!result.ok) throw new Error(result.error ?? 'Transfer failed');
+      queryClient.invalidateQueries({ queryKey: [ALLOCATIONS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [FULFILLMENT_KEY] });
+      return result;
+    } finally {
+      setIsTransferring(false);
+    }
+  }, [queryClient]);
+
+  return { transfer, isTransferring };
+}
+
 export function useSOFulfillmentSummary(salesOrderId: string | null) {
   const { fulfillment, loading } = useSOFulfillment(salesOrderId);
 

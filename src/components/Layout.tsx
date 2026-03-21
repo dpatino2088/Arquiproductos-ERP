@@ -97,24 +97,36 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Calendar', href: '/manufacturing/calendar' },
   ],
   '/financials': [
-    { label: 'Accounts', href: '/financials/accounts' },
-    { label: 'Invoices', href: '/financials/invoices' },
-    { label: 'Payments', href: '/financials/payments' },
-  ],
-  '/financials/invoices': [
-    { label: 'Accounts', href: '/financials/accounts' },
-    { label: 'Invoices', href: '/financials/invoices' },
-    { label: 'Payments', href: '/financials/payments' },
-  ],
-  '/financials/payments': [
-    { label: 'Accounts', href: '/financials/accounts' },
-    { label: 'Invoices', href: '/financials/invoices' },
-    { label: 'Payments', href: '/financials/payments' },
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
   ],
   '/financials/accounts': [
-    { label: 'Accounts', href: '/financials/accounts' },
-    { label: 'Invoices', href: '/financials/invoices' },
-    { label: 'Payments', href: '/financials/payments' },
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/financials/invoices': [
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/financials/payments': [
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/financials/vendor-accounts': [
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/financials/purchase-orders': [
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/financials/bills': [
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/financials/vendor-payments': [
+    { label: 'Accounts Receivable', href: '/financials/accounts' },
+    { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
   ],
   '/partners': [
     { label: 'Dealers', href: '/partners/dealers' },
@@ -1239,36 +1251,34 @@ function Layout({ children }: LayoutProps) {
             <div className="flex items-center h-full" style={{ paddingRight: '1.5rem' }}>
               {submoduleTabs.length > 0 ? (
                 <div id="secondary-navigation" className="flex items-stretch h-full" role="tablist">
-                  {submoduleTabs.map((tab) => {
-                    return (
-                      <button
-                        key={tab.id}
-                        onClick={tab.onClick}
-                        className={`transition-colors flex items-center justify-start border-r ${
-                          tab.isActive
-                            ? 'bg-white font-semibold'
-                            : 'hover:bg-white/50 font-normal'
-                        }`}
-                        style={{
-                          fontSize: '12px',
-                          padding: '0 48px',
-                          height: '100%',
-                          minWidth: '140px',
-                          width: 'auto',
-                          color: '#1c1f26',
-                          borderColor: 'var(--gray-250)',
-                          borderBottom: tab.isActive ? '2px solid var(--sidebar-base)' : 'none'
-                        }}
-                        role="tab"
-                        aria-selected={tab.isActive}
-                        aria-label={`${tab.label}${tab.isActive ? ' (current tab)' : ''}`}
-                        aria-controls={`${tab.id}-panel`}
-                        tabIndex={tab.isActive ? 0 : -1}
-                      >
-                        {tab.label}
-                      </button>
-                    );
-                  })}
+                  {submoduleTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={tab.onClick}
+                      className={`transition-colors flex items-center justify-start border-r ${
+                        tab.isActive
+                          ? 'bg-white font-semibold'
+                          : 'hover:bg-white/50 font-normal'
+                      }`}
+                      style={{
+                        fontSize: '12px',
+                        padding: '0 48px',
+                        height: '100%',
+                        minWidth: '140px',
+                        width: 'auto',
+                        color: '#1c1f26',
+                        borderColor: 'var(--gray-250)',
+                        borderBottom: tab.isActive ? '2px solid var(--sidebar-base)' : 'none'
+                      }}
+                      role="tab"
+                      aria-selected={tab.isActive}
+                      aria-label={`${tab.label}${tab.isActive ? ' (current tab)' : ''}`}
+                      aria-controls={`${tab.id}-panel`}
+                      tabIndex={tab.isActive ? 0 : -1}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
               ) : breadcrumbs.length > 0 ? (
                 <nav className="flex items-center h-full" style={{ paddingLeft: '3rem' }} aria-label="Breadcrumb">

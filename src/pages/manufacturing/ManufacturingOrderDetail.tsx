@@ -3,17 +3,18 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, useMoMaterialReadiness } from '../../hooks/useManufacturing';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useModuleAccess } from '../../hooks/usePermissions';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useIssueMaterials } from '../../hooks/useInventoryMovements';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import MaterialsTab from '../../components/manufacturing/tabs/MaterialsTab';
-import ProductionStepsTab from '../../components/manufacturing/tabs/ProductionStepsTab';
+import { CheckCircle, Circle, Clock } from 'lucide-react';
 import ScheduleTab from '../../components/manufacturing/tabs/ScheduleTab';
 import NotesTab from '../../components/manufacturing/tabs/NotesTab';
 import AttachmentsTab from '../../components/manufacturing/tabs/AttachmentsTab';
@@ -21,7 +22,7 @@ import WorkOrdersTab from './WorkOrdersTab';
 import TimelineView from '../../components/shared/TimelineView';
 import { ChevronDown } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatDate } from '../../lib/utils';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 
 interface ManufacturingOrderDetailProps {
@@ -46,13 +47,15 @@ interface MOLine {
     description: string | null;
     collection_name: string | null;
     variant_name: string | null;
+    product_type: string | null;
+    hardware_color: string | null;
+    area: string | null;
+    position: string | null;
     quantity: number;
     unit_price: number | null;
-    CatalogItems?: { name: string; sku: string } | null;
+    CatalogItems?: { name: string; sku: string; manufacturer: string | null } | null;
   } | null;
 }
-
-const MFG_SUBMODULES = MANUFACTURING_SUBMODULES;
 
 export default function ManufacturingOrderDetail({ moId: propMoId }: ManufacturingOrderDetailProps) {
   const normalizedPropMoId = propMoId ? normalizeUUID(propMoId) : null;
@@ -63,12 +66,14 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { transitionStatus, isTransitioning } = useTransitionMOStatus();
   const { issueMaterials } = useIssueMaterials();
   const { defaultWarehouse } = useWarehouses(mo?.organization_id ?? null);
+  const mfgSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
   const { isInternal } = useAccessContext();
   const { canEdit: canEditInventory } = useModuleAccess('inventory');
   const { canEdit: canEditManufacturing } = useModuleAccess('manufacturing');
   const { user } = useAuth();
+  const { role: orgRole } = useOrganizationContext();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -76,6 +81,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [moLines, setMoLines] = useState<MOLine[]>([]);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
+  const [financialSummary, setFinancialSummary] = useState<{ total_invoiced: number; total_paid: number; balance_due: number; invoice_status: string } | null>(null);
   const listPath = '/manufacturing/manufacturing-orders';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -94,7 +101,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     });
   }, [queryReturnTo]);
 
-  useEffect(() => { registerSubmodules('Manufacturing', [...MFG_SUBMODULES]); }, [registerSubmodules]);
+  useEffect(() => { registerSubmodules('Manufacturing', mfgSubmodules); }, [registerSubmodules, mfgSubmodules]);
 
   useEffect(() => {
     if (!moId) {
@@ -136,13 +143,13 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (solIds.length > 0) {
       const { data: solData } = await supabase
         .from('SaleOrderLines')
-        .select('id, description, collection_name, variant_name, quantity, unit_price, catalog_item_id')
+        .select('id, description, collection_name, variant_name, product_type, hardware_color, area, position, quantity, unit_price, catalog_item_id')
         .in('id', solIds);
       if (solData) {
         const catIds = [...new Set(solData.map((s: any) => s.catalog_item_id).filter(Boolean))];
         let catMap = new Map<string, any>();
         if (catIds.length > 0) {
-          const { data: catData } = await supabase.from('CatalogItems').select('id, name, sku').in('id', catIds);
+          const { data: catData } = await supabase.from('CatalogItems').select('id, name, sku, manufacturer').in('id', catIds);
           if (catData) catMap = new Map(catData.map((c: any) => [c.id, c]));
         }
         solMap = new Map(solData.map((s: any) => [s.id, { ...s, CatalogItems: s.catalog_item_id ? catMap.get(s.catalog_item_id) ?? null : null }]));
@@ -155,7 +162,34 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     })));
   }, [moId]);
 
-  useEffect(() => { fetchTimeline(); fetchMOLines(); }, [fetchTimeline, fetchMOLines]);
+  const fetchTaskProgress = useCallback(async () => {
+    if (!moId) return;
+    const { data } = await supabase
+      .from('WorkOrderTasks')
+      .select('status')
+      .eq('manufacturing_order_id', moId)
+      .eq('deleted', false);
+    if (data) {
+      setTaskProgress({
+        total: data.length,
+        completed: data.filter((t: any) => t.status === 'completed').length,
+        inProgress: data.filter((t: any) => t.status === 'in_progress').length,
+      });
+    }
+  }, [moId]);
+
+  const fetchFinancialSummary = useCallback(async () => {
+    if (!mo?.sales_order_id) { setFinancialSummary(null); return; }
+    const { data } = await supabase
+      .from('sales_order_financial_summary')
+      .select('total_invoiced, total_paid, balance_due, invoice_status')
+      .eq('sales_order_id', mo.sales_order_id)
+      .maybeSingle();
+    setFinancialSummary(data as typeof financialSummary ?? null);
+  }, [mo?.sales_order_id]);
+
+  useEffect(() => { fetchTimeline(); fetchMOLines(); fetchTaskProgress(); }, [fetchTimeline, fetchMOLines, fetchTaskProgress]);
+  useEffect(() => { fetchFinancialSummary(); }, [fetchFinancialSummary]);
 
   const handleTransition = useCallback(async (newStatus: string) => {
     if (!moId || !user?.id) return;
@@ -164,16 +198,45 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       await transitionStatus(moId, newStatus, user.id, user.name);
       addNotification({ type: 'success', title: 'Status Updated', message: `MO moved to ${newStatus.replace(/_/g, ' ')}.` });
 
-      if (newStatus === 'in_production' && defaultWarehouse) {
-        try {
-          const result = await issueMaterials(moId, defaultWarehouse.id);
-          if (result?.skipped) {
-            addNotification({ type: 'info', title: 'Materials', message: 'Materials were already issued for this MO.' });
-          } else if (result?.lines_count > 0) {
-            addNotification({ type: 'success', title: 'Materials Issued', message: `${result.lines_count} material(s) issued to production (${result.movement_no}).` });
+      if (newStatus === 'in_production') {
+        if (defaultWarehouse) {
+          try {
+            const result = await issueMaterials(moId, defaultWarehouse.id);
+            if (result?.skipped) {
+              addNotification({ type: 'info', title: 'Materials', message: 'Materials were already issued for this MO.' });
+            } else if (result?.lines_count > 0) {
+              addNotification({ type: 'success', title: 'Materials Issued', message: `${result.lines_count} material(s) issued to production (${result.movement_no}).` });
+            }
+          } catch (issueErr: unknown) {
+            addNotification({ type: 'warning', title: 'Materials Issue Warning', message: issueErr instanceof Error ? issueErr.message : 'Could not auto-issue materials.' });
           }
-        } catch (issueErr: unknown) {
-          addNotification({ type: 'warning', title: 'Materials Issue Warning', message: issueErr instanceof Error ? issueErr.message : 'Could not auto-issue materials.' });
+        }
+
+        try {
+          const { data: woTasks } = await supabase
+            .from('WorkOrderTasks')
+            .select('id, status, depends_on_task_ids')
+            .eq('manufacturing_order_id', moId)
+            .eq('deleted', false)
+            .eq('status', 'pending');
+
+          if (woTasks && woTasks.length > 0) {
+            const now = new Date().toISOString();
+            const firstTasks = woTasks.filter((t: any) => {
+              const deps = t.depends_on_task_ids ?? [];
+              return deps.length === 0;
+            });
+            if (firstTasks.length > 0) {
+              const ids = firstTasks.map((t: any) => t.id);
+              await supabase
+                .from('WorkOrderTasks')
+                .update({ status: 'in_progress', started_at: now, updated_at: now })
+                .in('id', ids);
+              addNotification({ type: 'info', title: 'Work Orders', message: `${firstTasks.length} task(s) auto-started.` });
+            }
+          }
+        } catch {
+          // non-critical
         }
       }
 
@@ -237,36 +300,76 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     { id: 'overview', label: 'Overview' },
     { id: 'lines', label: 'Lines', count: moLines.length },
     { id: 'materials', label: 'Materials', count: materials.length },
-    { id: 'schedule', label: 'Schedule' },
-    { id: 'steps', label: 'Production Steps' },
     { id: 'work-orders', label: 'Work Orders' },
+    { id: 'schedule', label: 'Schedule' },
     { id: 'notes', label: 'Notes' },
     { id: 'timeline', label: 'Timeline', count: timeline.length },
     { id: 'attachments', label: 'Attachments' },
   ];
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
+  const canAuthorizeRelease = orgRole === 'superadmin' || orgRole === 'admin';
+  const paymentComplete = financialSummary ? financialSummary.balance_due <= 0.005 : false;
+  const paymentStatus: 'not_invoiced' | 'unpaid' | 'partial' | 'paid' =
+    !financialSummary || financialSummary.invoice_status === 'none' ? 'not_invoiced' :
+    financialSummary.total_paid <= 0.005 ? 'unpaid' :
+    financialSummary.balance_due > 0.005 ? 'partial' : 'paid';
+
   const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
-  if (isInternal && status !== 'cancelled' && status !== 'delivered') {
-    if (status === 'draft') actionItems.push({
-      label: 'Advance to Planned',
-      onClick: () => handleTransition('planned'),
-      disabled: materialsIncomplete,
-      title: materialsIncomplete ? 'Materials incomplete. Cover material demand before advancing.' : undefined,
-    });
-    if (status === 'planned') actionItems.push({
-      label: 'Start Production',
-      onClick: () => handleTransition('in_production'),
-      disabled: materialsIncomplete,
-      title: materialsIncomplete ? 'Materials incomplete. Cover material demand before starting production.' : undefined,
-    });
-    if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
-    if (status === 'quality_check') actionItems.push({ label: 'Ready for Pickup', onClick: () => handleTransition('ready_for_pickup') });
-    if (status === 'ready_for_pickup') actionItems.push({ label: 'Mark Delivered', onClick: () => handleTransition('delivered') });
-    if (['draft', 'planned', 'in_production'].includes(status) && materials.length > 0 && canEditInventory) {
-      actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
+  if (isInternal && status !== 'cancelled' && status !== 'delivered' && status !== 'completed') {
+    if (status === 'draft') {
+      actionItems.push({
+        label: 'Mark as Reviewed',
+        onClick: () => handleTransition('confirmed'),
+      });
     }
-    if (['draft', 'planned', 'in_production'].includes(status)) {
+    if (status === 'confirmed') {
+      actionItems.push({
+        label: 'Buy Materials',
+        onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`),
+      });
+    }
+    if (status === 'procurement') {
+      actionItems.push({
+        label: 'Check Material Readiness',
+        onClick: () => handleTransition('materials_ready'),
+        disabled: materialsIncomplete,
+        title: materialsIncomplete ? 'Materials still incomplete. Receive pending Purchase Orders first.' : undefined,
+      });
+    }
+    if (status === 'materials_ready' || status === 'planned') {
+      actionItems.push({
+        label: 'Start Production',
+        onClick: () => handleTransition('in_production'),
+        disabled: materialsIncomplete,
+        title: materialsIncomplete ? 'Materials incomplete. Cannot start production.' : undefined,
+      });
+    }
+    if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
+    if (status === 'quality_check') {
+      const releaseBlocked = !paymentComplete && !canAuthorizeRelease;
+      actionItems.push({
+        label: 'Ready for Pickup',
+        onClick: () => handleTransition('ready_for_pickup'),
+        disabled: releaseBlocked,
+        title: releaseBlocked ? `Payment not complete ($${financialSummary?.balance_due?.toFixed(2) ?? '?'} balance due). Manager authorization required.` : undefined,
+      });
+    }
+    if (status === 'ready_for_pickup') {
+      const deliveryBlocked = !paymentComplete && !canAuthorizeRelease;
+      actionItems.push({
+        label: 'Mark Delivered',
+        onClick: () => handleTransition('delivered'),
+        disabled: deliveryBlocked,
+        title: deliveryBlocked ? `Payment not complete ($${financialSummary?.balance_due?.toFixed(2) ?? '?'} balance due). Manager authorization required.` : undefined,
+      });
+    }
+    if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status) && materials.length > 0 && canEditInventory) {
+      if (status !== 'confirmed') {
+        actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
+      }
+    }
+    if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
     }
   }
@@ -275,7 +378,20 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     <DetailPageLayout
       title={mo.manufacturing_order_no}
       subtitle="Manufacturing Order"
-      status={<StatusBadge status={status} type="manufacturing" />}
+      status={
+        <div className="flex items-center gap-2">
+          <StatusBadge status={status} type="manufacturing" />
+          {mo.sales_order_id && paymentStatus !== 'not_invoiced' && (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+              paymentStatus === 'paid' ? 'bg-green-100 text-green-800' :
+              paymentStatus === 'partial' ? 'bg-amber-100 text-amber-800' :
+              'bg-red-100 text-red-800'
+            }`}>
+              {paymentStatus === 'paid' ? 'Paid' : paymentStatus === 'partial' ? 'Partial Payment' : 'Unpaid'}
+            </span>
+          )}
+        </div>
+      }
       tabs={tabs}
       activeTab={activeTab}
       onTabChange={setActiveTab}
@@ -356,15 +472,98 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       )}
 
       {/* Materials incomplete — subtle inline notice */}
-      {materialsIncomplete && status !== 'cancelled' && ['draft', 'planned'].includes(status) && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-100 w-fit">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-          <span className="text-xs text-amber-700">Material shortage — cover demand before advancing.</span>
+      {materialsIncomplete && status !== 'cancelled' && ['draft', 'confirmed', 'procurement', 'planned'].includes(status) && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 w-full">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+          <span className="text-xs text-amber-700 flex-1">
+            Material shortage detected — purchase materials to advance this order.
+          </span>
+          <button
+            className="text-xs font-medium text-amber-800 hover:text-amber-900 underline underline-offset-2"
+            onClick={() => router.navigate(`/inventory/material-demand?mo_id=${moId}`)}
+          >
+            View Material Demand
+          </button>
         </div>
       )}
 
       {/* Overview tab */}
       {activeTab === 'overview' && (
+        <div className="space-y-6">
+        {/* Production Progress Bar */}
+        {(() => {
+          const STEPS = [
+            { key: 'draft', label: 'Draft' },
+            { key: 'confirmed', label: 'Reviewed' },
+            { key: 'procurement', label: 'Planned' },
+            { key: 'materials_ready', label: 'Material Ready' },
+            { key: 'in_production', label: 'In Production' },
+            { key: 'quality_check', label: 'QC' },
+            { key: 'ready_for_pickup', label: 'Ready' },
+            { key: 'delivered', label: 'Delivered' },
+          ];
+          const currentIdx = STEPS.findIndex((s) => s.key === status);
+          const isCancelled = status === 'cancelled';
+          const pct = taskProgress.total > 0 ? Math.round((taskProgress.completed / taskProgress.total) * 100) : 0;
+          return (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              {isCancelled ? (
+                <div className="flex items-center gap-2 text-sm text-red-600 font-medium">
+                  <Circle className="w-4 h-4" /> Cancelled
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1">
+                    {STEPS.map((step, idx) => {
+                      const isCompleted = idx < currentIdx;
+                      const isCurrent = idx === currentIdx;
+                      return (
+                        <div key={step.key} className="flex items-center flex-1 min-w-0">
+                          <div className="flex flex-col items-center flex-1 min-w-0">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                              isCompleted ? 'bg-green-500 text-white' :
+                              isCurrent ? 'bg-blue-500 text-white' :
+                              'bg-gray-200 text-gray-400'
+                            }`}>
+                              {isCompleted ? <CheckCircle className="w-4 h-4" /> :
+                               isCurrent ? <Clock className="w-4 h-4" /> :
+                               <Circle className="w-3 h-3" />}
+                            </div>
+                            <span className={`text-[10px] mt-1 text-center truncate w-full ${
+                              isCurrent ? 'font-semibold text-blue-700' :
+                              isCompleted ? 'text-green-700' :
+                              'text-gray-400'
+                            }`}>{step.label}</span>
+                          </div>
+                          {idx < STEPS.length - 1 && (
+                            <div className={`h-0.5 flex-1 mx-1 mt-[-14px] ${
+                              idx < currentIdx ? 'bg-green-400' : 'bg-gray-200'
+                            }`} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {taskProgress.total > 0 && status !== 'draft' && status !== 'delivered' && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-500 shrink-0 tabular-nums">
+                        {taskProgress.completed}/{taskProgress.total} tasks
+                        {taskProgress.inProgress > 0 && ` · ${taskProgress.inProgress} active`}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Info</h3>
@@ -416,42 +615,42 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Created</dt>
-                <dd className="text-gray-900">{new Date(mo.created_at).toLocaleDateString()}</dd>
+                <dd className="text-gray-900">{formatDate(mo.created_at)}</dd>
               </div>
               {mo.released_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Released (Planned)</dt>
-                  <dd className="text-gray-900">{new Date(mo.released_at).toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{formatDate(mo.released_at)}</dd>
                 </div>
               )}
               {mo.planned_start_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Planned Start</dt>
-                  <dd className="text-gray-900">{new Date(mo.planned_start_at).toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{formatDate(mo.planned_start_at)}</dd>
                 </div>
               )}
               {mo.planned_end_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Planned End</dt>
-                  <dd className="text-gray-900">{new Date(mo.planned_end_at).toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{formatDate(mo.planned_end_at)}</dd>
                 </div>
               )}
               {mo.production_started_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Production Started</dt>
-                  <dd className="text-gray-900">{new Date(mo.production_started_at).toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{formatDate(mo.production_started_at)}</dd>
                 </div>
               )}
               {mo.completed_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Completed</dt>
-                  <dd className="text-gray-900">{new Date(mo.completed_at).toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{formatDate(mo.completed_at)}</dd>
                 </div>
               )}
               {mo.delivered_at && (
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Delivered</dt>
-                  <dd className="text-gray-900">{new Date(mo.delivered_at).toLocaleDateString()}</dd>
+                  <dd className="text-gray-900">{formatDate(mo.delivered_at)}</dd>
                 </div>
               )}
               <div className="flex justify-between border-t pt-2">
@@ -465,6 +664,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
             </dl>
           </div>
         </div>
+        </div>
       )}
 
       {/* Lines tab */}
@@ -473,29 +673,56 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 w-10">#</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Product</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Location</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
               </tr>
             </thead>
             <tbody>
               {moLines.length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No manufacturing order lines</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No manufacturing order lines</td></tr>
               ) : (
                 moLines.map((line, idx) => {
                   const sol = line.SaleOrderLine;
-                  const name = sol?.CatalogItems?.name || sol?.description || sol?.collection_name || sol?.variant_name || 'Item';
+                  const ptLabels: Record<string, string> = { roller: 'Roller Shade', drapery: 'Drapery', catalog: 'Catalog', blind: 'Blind', curtain: 'Curtain' };
+                  const ptRaw = (sol?.product_type || '').toLowerCase();
+                  const ptLabel = ptLabels[ptRaw] || (ptRaw ? ptRaw.charAt(0).toUpperCase() + ptRaw.slice(1) : '');
+                  const fabricName = sol?.description || sol?.CatalogItems?.name || sol?.variant_name || 'Item';
+                  const manufacturer = sol?.CatalogItems?.manufacturer;
                   const sku = sol?.CatalogItems?.sku;
+                  const hwColor = sol?.hardware_color;
+                  const area = sol?.area;
+                  const position = sol?.position;
+
                   return (
                     <tr key={line.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-4 text-gray-400 tabular-nums">{idx + 1}</td>
-                      <td className="px-4 py-4">
-                        <div className="font-medium text-gray-900">{name}</div>
-                        {sku && <div className="text-xs text-gray-500">{sku}</div>}
+                      <td className="px-4 py-3 text-gray-400 tabular-nums">{idx + 1}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">
+                          {ptLabel}{ptLabel && ' — '}{fabricName}
+                          {manufacturer && <span className="text-gray-500 font-normal"> | {manufacturer}</span>}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {sku && <span className="text-xs text-gray-500 font-mono">{sku}</span>}
+                          {hwColor && (
+                            <span className="text-xs text-gray-400">
+                              · {hwColor}
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-4 text-right tabular-nums">{line.quantity ?? sol?.quantity ?? '—'}</td>
-                      <td className="px-4 py-4 text-center">
+                      <td className="px-4 py-3 text-gray-600">
+                        {area || position ? (
+                          <div>
+                            {area && <div className="text-sm">{area}</div>}
+                            {position && <div className="text-xs text-gray-400">{position}</div>}
+                          </div>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">{line.quantity ?? sol?.quantity ?? '—'}</td>
+                      <td className="px-4 py-3 text-center">
                         <StatusBadge status={line.status ?? 'planned'} type="moLineStatus" size="sm" />
                       </td>
                     </tr>
@@ -519,11 +746,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
       {activeTab === 'schedule' && (
         <ScheduleTab moId={moId} canEdit={canEditManufacturing} />
-      )}
-
-      {/* Production Steps tab */}
-      {activeTab === 'steps' && (
-        <ProductionStepsTab moId={moId} />
       )}
 
       {activeTab === 'work-orders' && moId && (

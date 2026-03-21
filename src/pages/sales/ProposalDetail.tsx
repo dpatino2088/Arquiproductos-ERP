@@ -949,6 +949,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           collection_name: snapFrozen?.collection_name ?? qlInfo?.collection_name ?? null,
           variant_name: snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null,
           drive_type: snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null,
+          drive_system_label: snapFrozen?.drive_system_label ?? qlInfo?.drive_system_label ?? null,
           description: snapFrozen?.name || snapFrozen?.sku || qlInfo?.name || qlInfo?.sku || null,
           sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
           dimensions: dimensions ?? null,
@@ -1661,7 +1662,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                             <div className="flex flex-col gap-0.5 mt-0.5">
                               {(() => {
                                 const driveRaw = snap?.drive_type ?? qlInfo?.drive_type ?? null;
-                                const driveLabel = driveRaw === 'motor' ? 'Motorized' : driveRaw === 'manual' ? 'Manual' : null;
+                                const driveLabel = (snap?.drive_system_label ?? qlInfo?.drive_system_label)
+                                  ?? (driveRaw === 'motor' ? 'Motorized' : driveRaw === 'manual' ? 'Manual' : null);
                                 return driveLabel ? (
                                   <span className="text-xs text-gray-500">{driveLabel}</span>
                                 ) : null;

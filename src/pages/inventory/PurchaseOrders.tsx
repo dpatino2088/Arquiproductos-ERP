@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { usePurchaseOrders, PurchaseOrderStatus } from '../../hooks/usePurchaseOrders';
@@ -18,9 +19,12 @@ const INVENTORY_SUBMODULES = [
 ];
 
 const STATUS_COLORS: Record<string, string> = {
+  DRAFT: 'bg-gray-100 text-gray-600',
   OPEN: 'bg-blue-50 text-blue-700',
   PARTIAL: 'bg-yellow-50 text-yellow-700',
   CLOSED: 'bg-green-50 text-green-700',
+  CANCELLED: 'bg-red-50 text-red-600',
+  ARCHIVED: 'bg-slate-100 text-slate-500',
 };
 
 function fmtCurrency(v: number, currency = 'USD'): string {
@@ -123,9 +127,12 @@ export default function PurchaseOrders() {
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
         >
           <option value="">All Status</option>
+          <option value="DRAFT">Draft</option>
           <option value="OPEN">Open</option>
           <option value="PARTIAL">Partial</option>
           <option value="CLOSED">Closed</option>
+          <option value="CANCELLED">Cancelled</option>
+          <option value="ARCHIVED">Archived</option>
         </select>
         {warehouses.length > 1 && (
           <select
@@ -174,11 +181,12 @@ export default function PurchaseOrders() {
                 <th className="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer" onClick={() => handleSort('status')}>
                   Status <SortIcon col="status" />
                 </th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">Billing</th>
               </tr>
             </thead>
             <tbody>
               {paginated.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No purchase orders found</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500">No purchase orders found</td></tr>
               ) : paginated.map(po => (
                 <tr
                   key={po.id}
@@ -189,7 +197,7 @@ export default function PurchaseOrders() {
                   <td className="px-4 py-3 text-gray-700">{po.DirectoryVendors?.name ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-700">{po.Warehouses?.name ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-700">
-                    {po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '—'}
+                    {formatDate(po.expected_date)}
                   </td>
                   <td className="px-4 py-3 text-center text-gray-600">{lineCount(po)}</td>
                   <td className="px-4 py-3 text-right font-mono tabular-nums text-gray-900">
@@ -206,6 +214,14 @@ export default function PurchaseOrders() {
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[po.status] ?? 'bg-gray-50 text-gray-700'}`}>
                       {po.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {(() => {
+                      const bs = (po as Record<string, unknown>).billing_status as string | undefined;
+                      if (!bs || bs === 'unbilled') return <span className="text-xs text-gray-400">Unbilled</span>;
+                      const colors: Record<string, string> = { partial: 'bg-amber-100 text-amber-700', billed: 'bg-green-100 text-green-700' };
+                      return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[bs] ?? 'bg-gray-100 text-gray-700'}`}>{bs.charAt(0).toUpperCase() + bs.slice(1)}</span>;
+                    })()}
                   </td>
                 </tr>
               ))}

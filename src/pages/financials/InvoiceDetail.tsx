@@ -7,16 +7,16 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { FileText, DollarSign, ChevronDown } from 'lucide-react';
+import { ChevronDown, DollarSign } from 'lucide-react';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFLine, InvoicePDFData, InvoicePDFDealer, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 import { generateNextSequentialNumber } from '../../lib/sequential-numbers';
 import { getSupabaseErrorMessageDetailed } from '../../lib/supabase-error-utils';
-
-const FINANCIAL_SUBMODULES = [
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
+import { formatDate } from '../../lib/utils';
+import { useAuth } from '../../hooks/useAuth';
+import { useGranularAccess } from '../../hooks/usePermissions';
+import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 
 interface DealerBilling {
   dealer_name: string;
@@ -50,6 +50,7 @@ interface InvoiceHeader {
   tax_total: number;
   total: number;
   notes: string | null;
+  void_reason?: string | null;
   sales_order_id: string | null;
   dealer_id: string | null;
   created_at: string;
@@ -110,6 +111,8 @@ export default function InvoiceDetail() {
   const { activeOrganizationId } = useOrganizationContext();
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
+  const { user } = useAuth();
+  const { canDelete: canDeleteFin, canVoid: canVoidFin } = useGranularAccess('financials');
 
   const [invoice, setInvoice] = useState<InvoiceHeader | null>(null);
   const [lines, setLines] = useState<InvoiceLine[]>([]);
@@ -131,6 +134,10 @@ export default function InvoiceDetail() {
   const [creditAmount, setCreditAmount] = useState('');
   const [creditReason, setCreditReason] = useState('');
   const [creatingCredit, setCreatingCredit] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [voidCreditTarget, setVoidCreditTarget] = useState<CreditNote | null>(null);
+  const [voidCreditReason, setVoidCreditReason] = useState('');
+  const [voidingCredit, setVoidingCredit] = useState(false);
   const hasAutoOpenedPdfRef = useRef(false);
   const listPath = '/financials/invoices';
   const queryReturnTo = getReturnToFromCurrentQuery();
@@ -143,7 +150,7 @@ export default function InvoiceDetail() {
   const hasRedirectBack =
     !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
+  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
 
   const fmt = (v: number, currency = 'USD') =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
@@ -166,7 +173,7 @@ export default function InvoiceDetail() {
       const [invRes, linesRes, appsRes, creditsRes] = await Promise.all([
         supabase
           .from('DealerInvoices')
-          .select('id, invoice_number, status, issue_date, due_date, currency_code, subtotal, tax_total, total, notes, sales_order_id, dealer_id, created_at')
+          .select('id, invoice_number, status, issue_date, due_date, currency_code, subtotal, tax_total, total, notes, void_reason, sales_order_id, dealer_id, created_at')
           .eq('id', invoiceId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
@@ -210,13 +217,22 @@ export default function InvoiceDetail() {
         const payIds = [...new Set(apps.map((a) => a.payment_id))];
         const { data: payData } = await supabase
           .from('Payments')
-          .select('id, payment_date, payment_method, reference_number, recorded_by_name')
+          .select('id, payment_date, payment_method, reference_number, recorded_by, recorded_by_name')
           .in('id', payIds);
-        type PayRow = { id: string; payment_date: string; payment_method: string; reference_number: string | null; recorded_by_name: string | null };
-        const payMap = new Map<string, PayRow>((payData ?? []).map((p: PayRow) => [p.id, p]));
+        type PayRow = { id: string; payment_date: string; payment_method: string; reference_number: string | null; recorded_by: string | null; recorded_by_name: string | null };
+        const payRows = (payData ?? []) as PayRow[];
+        const recorderIds = payRows.map(p => p.recorded_by).filter(Boolean) as string[];
+        const nameMap = await getAppUsersDisplayNames(recorderIds);
+        const payMap = new Map<string, PayRow>(payRows.map((p) => [p.id, p]));
         setApplications(apps.map((a) => ({
           ...a,
-          Payments: (() => { const p = payMap.get(a.payment_id); return p ? { payment_date: p.payment_date, method: p.payment_method, reference: p.reference_number, recorded_by_name: p.recorded_by_name } : null; })(),
+          Payments: (() => {
+            const p = payMap.get(a.payment_id);
+            if (!p) return null;
+            const resolvedName = (p.recorded_by ? nameMap.get(p.recorded_by) : undefined);
+            const displayName = resolvedName && resolvedName !== 'Legacy / Imported' ? resolvedName : p.recorded_by_name;
+            return { payment_date: p.payment_date, method: p.payment_method, reference: p.reference_number, recorded_by_name: displayName };
+          })(),
         })));
       } else {
         setApplications([]);
@@ -259,7 +275,22 @@ export default function InvoiceDetail() {
         .update({ deleted: true })
         .eq('id', invoiceId);
       if (err) throw err;
-      addNotification({ type: 'success', title: 'Deleted', message: 'Invoice deleted.' });
+
+      if (activeOrganizationId) {
+        await supabase.from('FinancialAuditLog').insert({
+          organization_id: activeOrganizationId,
+          action: 'delete_invoice',
+          entity_type: 'invoice',
+          entity_id: invoiceId,
+          amount: invoice?.total ?? null,
+          performed_by: user?.id ?? null,
+          performed_by_name: user?.name ?? user?.email ?? null,
+          metadata: { invoice_number: invoice?.invoice_number },
+        });
+      }
+
+      setDeleteConfirmOpen(false);
+      addNotification({ type: 'success', title: 'Deleted', message: 'Invoice draft deleted.' });
       handleBack();
     } catch (e: unknown) {
       addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to delete invoice' });
@@ -280,12 +311,32 @@ export default function InvoiceDetail() {
       if (currentApplied > 0.005) {
         throw new Error('Invoice has applied payments. Unapply payments before voiding.');
       }
-      const appendedNotes = [invoice.notes, `VOID REASON: ${voidReason.trim()}`].filter(Boolean).join('\n');
+      const now = new Date().toISOString();
       const { error: err } = await supabase
         .from('DealerInvoices')
-        .update({ status: 'void', notes: appendedNotes })
+        .update({
+          status: 'void',
+          void_reason: voidReason.trim(),
+          voided_by: user?.id ?? null,
+          voided_at: now,
+        })
         .eq('id', invoiceId);
       if (err) throw err;
+
+      if (activeOrganizationId) {
+        await supabase.from('FinancialAuditLog').insert({
+          organization_id: activeOrganizationId,
+          action: 'void_invoice',
+          entity_type: 'invoice',
+          entity_id: invoiceId,
+          amount: invoice?.total ?? null,
+          reason: voidReason.trim(),
+          performed_by: user?.id ?? null,
+          performed_by_name: user?.name ?? user?.email ?? null,
+          metadata: { invoice_number: invoice?.invoice_number },
+        });
+      }
+
       setVoidDialogOpen(false);
       setVoidReason('');
       addNotification({ type: 'success', title: 'Invoice Voided', message: 'Invoice status updated to void.' });
@@ -355,14 +406,60 @@ export default function InvoiceDetail() {
     }
   };
 
+  const handleVoidCreditNote = async () => {
+    if (!voidCreditTarget || !invoiceId || !activeOrganizationId) return;
+    if (voidCreditReason.trim().length < 3) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Please provide a void reason.' });
+      return;
+    }
+    setVoidingCredit(true);
+    try {
+      const now = new Date().toISOString();
+      const { error: err } = await supabase
+        .from('DealerCreditNotes')
+        .update({
+          status: 'void',
+          void_reason: voidCreditReason.trim(),
+          voided_by: user?.id ?? null,
+          voided_at: now,
+        })
+        .eq('id', voidCreditTarget.id);
+      if (err) throw err;
+
+      await supabase.from('FinancialAuditLog').insert({
+        organization_id: activeOrganizationId,
+        action: 'void_credit_note',
+        entity_type: 'credit_note',
+        entity_id: voidCreditTarget.id,
+        related_entity_type: 'invoice',
+        related_entity_id: invoiceId,
+        amount: voidCreditTarget.amount,
+        reason: voidCreditReason.trim(),
+        performed_by: user?.id ?? null,
+        performed_by_name: user?.name ?? user?.email ?? null,
+        metadata: { credit_note_number: voidCreditTarget.credit_note_number },
+      });
+
+      setVoidCreditTarget(null);
+      setVoidCreditReason('');
+      addNotification({ type: 'success', title: 'Credit Voided', message: 'Credit note has been voided.' });
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setVoidingCredit(false);
+    }
+  };
+
   const loadAvailablePayments = useCallback(async () => {
     if (!invoice?.dealer_id || !activeOrganizationId) return;
     const { data: payments } = await supabase
       .from('Payments')
-      .select('id, amount, payment_date, reference_number, payment_method')
+      .select('id, amount, payment_date, reference_number, payment_method, status')
       .eq('organization_id', activeOrganizationId)
       .eq('dealer_id', invoice.dealer_id)
       .eq('deleted', false)
+      .neq('status', 'void')
       .order('payment_date', { ascending: false });
     if (!payments || payments.length === 0) { setAvailablePayments([]); return; }
 
@@ -582,12 +679,12 @@ export default function InvoiceDetail() {
   actionItems.push({ label: 'Download PDF', onClick: handleDownloadPDF });
   if (status === 'draft') {
     actionItems.push({ label: 'Issue Invoice', onClick: () => updateStatus('issued') });
-    if (totalApplied <= 0.005 && totalCredited <= 0.005) {
-      actionItems.push({ label: 'Delete Draft', onClick: deleteInvoice, danger: true });
+    if (totalApplied <= 0.005 && totalCredited <= 0.005 && canDeleteFin) {
+      actionItems.push({ label: 'Delete Draft', onClick: () => setDeleteConfirmOpen(true), danger: true });
     }
   }
   if (status === 'issued' || status === 'partial' || status === 'paid') {
-    actionItems.push({ label: 'Void Invoice', onClick: () => setVoidDialogOpen(true), danger: true });
+    if (canVoidFin) actionItems.push({ label: 'Void Invoice', onClick: () => setVoidDialogOpen(true), danger: true });
     const creditableRemaining = Math.max(Number(invoice.total) - totalCredited, 0);
     if (creditableRemaining > 0.005) {
       actionItems.push({
@@ -654,6 +751,21 @@ export default function InvoiceDetail() {
         </div>
       ) : undefined}
     >
+      {/* Void banner */}
+      {invoice.status === 'void' && (() => {
+        const reason = invoice.void_reason
+          || (invoice.notes?.match(/VOID REASON:\s*(.+)/)?.[1]?.trim())
+          || null;
+        return (
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-4">
+            <p className="text-sm font-semibold text-red-800">This invoice has been voided</p>
+            {reason && (
+              <p className="mt-1 text-sm text-red-700">Reason: {reason}</p>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Row 1: Bill To + Invoice Details */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {/* Bill To card */}
@@ -709,12 +821,12 @@ export default function InvoiceDetail() {
             </div>
             <div className="flex justify-between">
               <dt className="text-gray-500">Issue Date</dt>
-              <dd className="text-gray-900">{new Date(invoice.issue_date).toLocaleDateString()}</dd>
+              <dd className="text-gray-900">{formatDate(invoice.issue_date)}</dd>
             </div>
             {invoice.due_date && (
               <div className="flex justify-between">
                 <dt className="text-gray-500">Due Date</dt>
-                <dd className="text-gray-900">{new Date(invoice.due_date).toLocaleDateString()}</dd>
+                <dd className="text-gray-900">{formatDate(invoice.due_date)}</dd>
               </div>
             )}
             {invoice.SalesOrders && (
@@ -848,7 +960,7 @@ export default function InvoiceDetail() {
                     <option value="">-- Select --</option>
                     {availablePayments.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {new Date(p.payment_date).toLocaleDateString()} - {p.payment_method} - {fmt(p.unapplied, currency)} available
+                        {formatDate(p.payment_date)} - {p.payment_method} - {fmt(p.unapplied, currency)} available
                         {p.reference_number ? ` (${p.reference_number})` : ''}
                       </option>
                     ))}
@@ -909,7 +1021,7 @@ export default function InvoiceDetail() {
                       className="border-t hover:bg-gray-50 cursor-pointer"
                       onClick={() => router.navigate(withReturnTo(`/financials/payments/${a.payment_id}`))}
                     >
-                      <td className="px-4 py-4">{a.Payments?.payment_date ? new Date(a.Payments.payment_date).toLocaleDateString() : '—'}</td>
+                      <td className="px-4 py-4">{formatDate(a.Payments?.payment_date)}</td>
                       <td className="px-4 py-4 capitalize">{a.Payments?.method ?? '—'}</td>
                       <td className="px-4 py-4 text-gray-500">{a.Payments?.reference ?? '—'}</td>
                       <td className="px-4 py-4 text-gray-500">{a.Payments?.recorded_by_name ?? '—'}</td>
@@ -972,21 +1084,33 @@ export default function InvoiceDetail() {
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Reason</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Amount</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700">Actions</th>
               </tr>
             </thead>
             <tbody>
               {creditNotes.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No credit notes</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No credit notes</td></tr>
               ) : (
                 creditNotes.map((cn) => (
-                  <tr key={cn.id} className="border-t hover:bg-gray-50">
-                    <td className="px-4 py-4 font-medium text-primary">{cn.credit_note_number}</td>
-                    <td className="px-4 py-4">{cn.issue_date ? new Date(cn.issue_date).toLocaleDateString() : '—'}</td>
+                  <tr key={cn.id} className={`border-t hover:bg-gray-50 ${cn.status === 'void' ? 'opacity-60' : ''}`}>
+                    <td className={`px-4 py-4 font-medium text-primary ${cn.status === 'void' ? 'line-through' : ''}`}>{cn.credit_note_number}</td>
+                    <td className="px-4 py-4">{formatDate(cn.issue_date)}</td>
                     <td className="px-4 py-4 text-gray-600">{cn.reason ?? '—'}</td>
                     <td className="px-4 py-4 text-center">
                       <StatusBadge status={cn.status} type="invoice" size="sm" />
                     </td>
-                    <td className="px-4 py-4 text-right font-mono text-amber-700">{fmt(cn.amount, currency)}</td>
+                    <td className={`px-4 py-4 text-right font-mono text-amber-700 ${cn.status === 'void' ? 'line-through' : ''}`}>{fmt(cn.amount, currency)}</td>
+                    <td className="px-4 py-4 text-right">
+                      {cn.status !== 'void' && canVoidFin && (
+                        <button
+                          type="button"
+                          onClick={() => { setVoidCreditTarget(cn); setVoidCreditReason(''); }}
+                          className="px-2 py-1 text-xs font-medium text-red-700 border border-red-200 rounded hover:bg-red-50"
+                        >
+                          Void
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
@@ -999,6 +1123,12 @@ export default function InvoiceDetail() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-4 w-full max-w-md">
             <h4 className="text-sm font-semibold text-gray-900 mb-2">Void Invoice</h4>
+            {status === 'paid' && (
+              <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+                <p className="text-xs font-semibold text-amber-800">This invoice is fully paid.</p>
+                <p className="text-xs text-amber-700">Voiding it will not refund applied payments. Consider creating a Credit Note instead.</p>
+              </div>
+            )}
             <p className="text-xs text-gray-600 mb-3">
               This keeps the audit trail. If the invoice has payments applied, unapply them first.
             </p>
@@ -1070,6 +1200,70 @@ export default function InvoiceDetail() {
                 className="px-3 py-1.5 text-sm text-white bg-primary rounded-lg disabled:opacity-50"
               >
                 {creatingCredit ? 'Creating...' : 'Create Credit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Delete Draft Invoice</h4>
+            <p className="text-sm text-gray-600 mb-3">
+              Are you sure you want to delete <span className="font-semibold">{invoice?.invoice_number}</span>? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void deleteInvoice(); }}
+                disabled={updatingStatus}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg disabled:opacity-50"
+              >
+                {updatingStatus ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {voidCreditTarget && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Void Credit Note</h4>
+            <p className="text-sm text-gray-600 mb-3">
+              Void credit <span className="font-semibold">{voidCreditTarget.credit_note_number}</span> ({fmt(voidCreditTarget.amount, currency)})?
+              The credit will remain on record but will no longer reduce the invoice balance.
+            </p>
+            <textarea
+              value={voidCreditReason}
+              onChange={(e) => setVoidCreditReason(e.target.value)}
+              placeholder="Reason for void..."
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => { setVoidCreditTarget(null); setVoidCreditReason(''); }}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleVoidCreditNote(); }}
+                disabled={voidingCredit}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg disabled:opacity-50"
+              >
+                {voidingCredit ? 'Voiding...' : 'Void Credit'}
               </button>
             </div>
           </div>

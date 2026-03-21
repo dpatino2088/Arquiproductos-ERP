@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useInventoryMovements, MovementType, MovementStatus } from '../../hooks/useInventoryMovements';
 import { supabase } from '../../lib/supabase/client';
@@ -222,7 +223,7 @@ export default function Transactions({ defaultTypeFilter, title }: TransactionsP
                       <span className="text-gray-600">{m.reference_type}</span>
                     ) : '—'}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{m.movement_date ? new Date(m.movement_date).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-3 text-gray-700">{formatDate(m.movement_date)}</td>
                   <td className="px-4 py-3 text-center">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.status === 'confirmed' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
                       {m.status === 'confirmed' ? 'Confirmed' : 'Draft'}

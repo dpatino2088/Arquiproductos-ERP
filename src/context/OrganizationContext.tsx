@@ -72,7 +72,8 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [activeOrganizationId, setActiveOrganizationIdState] = useState<string | null>(null);
 
-  const [orgLoading, setOrgLoading] = useState(false);
+  // Start true to prevent "No organizations" flash before first load completes
+  const [orgLoading, setOrgLoading] = useState(true);
   const [orgError, setOrgError] = useState<string | null>(null);
 
   // evita race conditions
@@ -365,7 +366,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
     // Si no hay userId -> limpiar
     if (!userId) {
       setOrgError(null);
-      setOrgLoading(false);
+      setOrgLoading(false); // clear the initial true so unauthenticated users don't spin forever
       setMemberships([]);
       setOrganizations([]);
       setActiveOrganizationId(null);

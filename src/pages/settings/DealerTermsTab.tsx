@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'react';
+import { formatDate } from '../../lib/utils';
 import { FileText, Plus, Pencil, Copy, Check } from 'lucide-react';
 import { useTermsTemplates } from '../../hooks/useTermsTemplates';
 import { useDealerTermsDefault } from '../../hooks/useDealerTermsDefault';
@@ -269,7 +270,7 @@ export default function DealerTermsTab({ dealerId, mode = 'admin' }: DealerTerms
                         <td className="py-2 px-3">{t.title}</td>
                         <td className="py-2 px-3">{t.dealer_id ? 'Dealer' : 'Global'}</td>
                         <td className="py-2 px-3 text-gray-600">
-                          {t.updated_at ? new Date(t.updated_at).toLocaleDateString() : '—'}
+                          {formatDate(t.updated_at)}
                         </td>
                         <td className="py-2 px-3">{t.is_active ? 'Yes' : 'No'}</td>
                         <td className="py-2 px-3 text-right">

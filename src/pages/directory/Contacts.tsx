@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo, useDeferredValue } from 'react';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { router } from '../../lib/router';
 import { useDirectoryContacts } from '../../hooks/useDirectoryContacts';
 import { useDeleteContact } from '../../hooks/useDirectory';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useUIStore } from '../../stores/ui-store';
 import { getSupabaseErrorMessage } from '../../lib/supabase-error-utils';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
@@ -142,6 +144,7 @@ export default function Contacts() {
   });
 
   const { deleteContact, isDeleting } = useDeleteContact();
+  const { canCreate, canArchive, canDelete } = useGranularAccess('directory');
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
   const initialLoading = isFirstLoad || orgLoading || !contactsScopeReady;
@@ -620,14 +623,16 @@ export default function Contacts() {
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
           </button>
-          <button 
-            onClick={() => router.navigate('/directory/contacts/new')}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-          >
-            <Plus style={{ width: '14px', height: '14px' }} />
-            New Contact
-          </button>
+          {canCreate && (
+            <button 
+              onClick={() => router.navigate('/directory/contacts/new')}
+              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            >
+              <Plus style={{ width: '14px', height: '14px' }} />
+              New Contact
+            </button>
+          )}
         </div>
       </div>
 
@@ -1126,11 +1131,7 @@ export default function Contacts() {
                         </span>
                       </td>
                       <td className="py-4 px-4 text-gray-600 text-sm text-center">
-                        {(contact as any).created_at 
-                          ? new Date((contact as any).created_at).toLocaleDateString() 
-                          : contact.dateAdded 
-                            ? new Date(contact.dateAdded).toLocaleDateString() 
-                            : 'N/A'}
+                      {formatDate((contact as any).created_at ?? contact.dateAdded)}
                       </td>
                       <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
@@ -1150,23 +1151,27 @@ export default function Contacts() {
                           >
                             <Copy className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={(e) => handleArchiveContact(contact, e)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            aria-label={`Archivar ${contact.firstName}`}
-                            title={`Archivar ${contact.firstName}`}
-                          >
-                            <Archive className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={(e) => handleDeleteContact(contact, e)}
-                            disabled={isDeleting}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                            aria-label={`Eliminar ${contact.firstName}`}
-                            title={`Eliminar ${contact.firstName}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canArchive && (
+                            <button 
+                              onClick={(e) => handleArchiveContact(contact, e)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              aria-label={`Archivar ${contact.firstName}`}
+                              title={`Archivar ${contact.firstName}`}
+                            >
+                              <Archive className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button 
+                              onClick={(e) => handleDeleteContact(contact, e)}
+                              disabled={isDeleting}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                              aria-label={`Eliminar ${contact.firstName}`}
+                              title={`Eliminar ${contact.firstName}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1258,7 +1263,7 @@ export default function Contacts() {
                     </div>
                     <div className="flex items-center gap-2 text-xs text-gray-600">
                       <Calendar className="w-3 h-3 flex-shrink-0" />
-                      <span>Added {new Date(contact.dateAdded).toLocaleDateString()}</span>
+                      <span>Added {formatDate(contact.dateAdded)}</span>
                     </div>
                   </div>
 

@@ -1,14 +1,15 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useManufacturingOrders, ManufacturingOrderStatus } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import { usePermissions } from '../../hooks/usePermissions';
+import { usePermissions, useGranularAccess, useManufacturingAccess } from '../../hooks/usePermissions';
 import { Search, Eye, Archive, RotateCcw, SortAsc, SortDesc } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import StatusBadge from '../../components/shared/StatusBadge';
@@ -35,24 +36,6 @@ interface ManufacturingOrderItem {
 // UTILITIES
 // ============================================================================
 
-const getStatusBadgeColor = (status: ManufacturingOrderStatus | string | undefined) => {
-  if (!status) return 'bg-gray-50 text-gray-700';
-  switch (status) {
-    case 'draft': case 'Pending Review':
-      return 'bg-gray-50 text-gray-700';
-    case 'planned': case 'Planned':
-      return 'bg-blue-50 text-blue-700';
-    case 'in_production': case 'In Production':
-      return 'bg-yellow-50 text-yellow-700';
-    case 'completed': case 'Completed': case 'Ready for Pickup': case 'Delivered':
-      return 'bg-green-50 text-green-700';
-    case 'cancelled':
-      return 'bg-red-50 text-red-700';
-    default:
-      return 'bg-gray-50 text-gray-700';
-  }
-};
-
 const getPriorityBadgeColor = (priority: string) => {
   const p = (priority || '').toLowerCase();
   if (p === 'urgent' || p === 'rush') return 'bg-red-50 text-red-700';
@@ -66,6 +49,7 @@ const getPriorityBadgeColor = (priority: string) => {
 // ============================================================================
 
 export default function ManufacturingOrders() {
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
@@ -76,7 +60,6 @@ export default function ManufacturingOrders() {
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [sortBy, setSortBy] = useState<'manufacturing_order_no' | 'status' | 'sale_order_no' | 'planned_start_at' | 'priority'>('manufacturing_order_no');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [statusTab, setStatusTab] = useState('all');
   const [materialReadinessMap, setMaterialReadinessMap] = useState<Record<string, { status: string; has_shortage: boolean }>>({});
 
@@ -103,25 +86,30 @@ export default function ManufacturingOrders() {
 
   const moStatusTabs = useMemo(() => [
     { label: 'All', value: 'all', count: moStatusCounts.all || 0 },
-    { label: 'Inbox', value: 'planned', count: moStatusCounts.planned || 0 },
-    { label: 'Active', value: 'in_production', count: moStatusCounts.in_production || 0 },
-    { label: 'QC', value: 'quality_check', count: moStatusCounts.quality_check || 0 },
-    { label: 'Ready', value: 'ready_for_pickup', count: moStatusCounts.ready_for_pickup || 0 },
+    { label: 'Draft', value: 'draft', count: moStatusCounts.draft || 0 },
+    { label: 'Reviewed', value: 'confirmed', count: moStatusCounts.confirmed || 0 },
+    { label: 'Planned', value: 'procurement', count: moStatusCounts.procurement || 0 },
+    { label: 'Material Ready', value: 'materials_ready', count: moStatusCounts.materials_ready || 0 },
+    { label: 'In Production', value: 'in_production', count: moStatusCounts.in_production || 0 },
+    { label: 'Quality Check', value: 'quality_check', count: moStatusCounts.quality_check || 0 },
+    { label: 'Ready for Delivery', value: 'ready_for_pickup', count: moStatusCounts.ready_for_pickup || 0 },
     { label: 'Delivered', value: 'delivered', count: (moStatusCounts.delivered || 0) + (moStatusCounts.completed || 0) },
     { label: 'Cancelled', value: 'cancelled', count: moStatusCounts.cancelled || 0 },
     { label: 'Archived', value: 'archived', count: moStatusCounts.archived || 0 },
   ], [moStatusCounts]);
 
   // Permission checks
-  const canRead = can('manufacturing.read');
+  const { canViewMOs, canViewCosts } = useManufacturingAccess();
+  const canRead = canViewMOs;
   const canWrite = can('manufacturing.write');
+  const { canCreate: canCreateMO, canArchive: canArchiveMO, canDelete: canDeleteMO } = useGranularAccess('manufacturing');
 
   // Register Manufacturing submodules
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
       // Always register submodules to ensure tabs are visible
-      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
+      registerSubmodules('Manufacturing', filteredSubmodules);
     }
     
     return () => {
@@ -130,7 +118,7 @@ export default function ManufacturingOrders() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
   // Transform manufacturing orders to display format - INCLUDE all statuses including 'planned'
   const displayOrders: ManufacturingOrderItem[] = useMemo(() => {
@@ -147,8 +135,8 @@ export default function ManufacturingOrders() {
         saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
         customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? 'N/A',
         archived: !!mo.archived,
-        scheduledStartDate: null as string | null,
-        scheduledEndDate: null as string | null,
+        scheduledStartDate: mo.planned_start_at ?? null,
+        scheduledEndDate: mo.planned_end_at ?? null,
         priority: mo.priority ?? 'normal',
         createdAt: mo.created_at,
       }));
@@ -189,11 +177,6 @@ export default function ManufacturingOrders() {
       );
     }
 
-    // Status filter
-    if (selectedStatus.length > 0 && statusTab !== 'archived') {
-      filtered = filtered.filter(mo => mo.status != null && selectedStatus.includes(mo.status));
-    }
-
     // Sort
     filtered = [...filtered].sort((a, b) => {
       let aVal: any = sortBy === 'sale_order_no' ? a.saleOrderNo : sortBy === 'manufacturing_order_no' ? a.manufacturingOrderNo : (a as unknown as Record<string, unknown>)[sortBy];
@@ -217,7 +200,7 @@ export default function ManufacturingOrders() {
     });
 
     return filtered;
-  }, [displayOrders, searchTerm, selectedStatus, sortBy, sortOrder, statusTab]);
+  }, [displayOrders, searchTerm, sortBy, sortOrder, statusTab]);
 
   // Pagination
   const paginated = useMemo(() => {
@@ -405,38 +388,6 @@ export default function ManufacturingOrders() {
         </div>
       </div>
 
-      {/* Status Filters */}
-      <div className="mb-4 flex items-center gap-2 flex-wrap">
-        <span className="text-sm text-gray-700">Filter by status:</span>
-        {(['draft', 'planned', 'in_production', 'quality_check', 'ready_for_pickup', 'delivered', 'cancelled'] as ManufacturingOrderStatus[]).map(status => (
-          <button
-            key={status}
-            onClick={() => {
-              setSelectedStatus(prev =>
-                prev.includes(status)
-                  ? prev.filter(s => s !== status)
-                  : [...prev, status]
-              );
-            }}
-            className={`px-3 py-1 text-xs rounded-full transition-colors ${
-              selectedStatus.includes(status)
-                ? getStatusBadgeColor(status)
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {status}
-          </button>
-        ))}
-        {selectedStatus.length > 0 && (
-          <button
-            onClick={() => setSelectedStatus([])}
-            className="px-3 py-1 text-xs text-gray-600 hover:text-gray-900"
-          >
-            Clear
-          </button>
-        )}
-      </div>
-
       {/* Error State */}
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -456,8 +407,8 @@ export default function ManufacturingOrders() {
         <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
           <p className="text-gray-500 mb-2">No manufacturing orders found</p>
           <p className="text-sm text-gray-400">
-            {searchTerm || selectedStatus.length > 0
-              ? 'Try adjusting your search or filters'
+            {searchTerm
+              ? 'Try adjusting your search'
               : 'Create your first manufacturing order to get started'}
           </p>
         </div>
@@ -545,7 +496,7 @@ export default function ManufacturingOrders() {
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.customerName}</td>
                     <td className="py-4 px-6 text-sm text-gray-700">
                       {mo.scheduledStartDate
-                        ? new Date(mo.scheduledStartDate).toLocaleDateString()
+                        ? formatDate(mo.scheduledStartDate)
                         : 'Not scheduled'}
                     </td>
                     <td className="py-4 px-6">
@@ -562,7 +513,7 @@ export default function ManufacturingOrders() {
                         >
                           <Eye className="w-4 h-4 text-gray-600" />
                         </button>
-                        {canWrite && (
+                        {canWrite && canArchiveMO && (
                           <button
                             onClick={() => mo.archived
                               ? handleRestore(mo.id, mo.manufacturingOrderNo)

@@ -45,11 +45,11 @@ export default function OrganizationsRecords({ onSelectOrganization, selectedOrg
   const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return 'N/A';
     try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      });
+      const d = new Date(dateString);
+      if (isNaN(d.getTime())) return 'N/A';
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${d.getFullYear()}`;
     } catch {
       return 'N/A';
     }

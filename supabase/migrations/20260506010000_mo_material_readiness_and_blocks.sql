@@ -145,7 +145,7 @@ BEGIN
   END IF;
 
   UPDATE "ManufacturingOrders"
-  SET status = trim(p_new_status)::text,
+  SET status = trim(p_new_status)::manufacturing_order_status,
       updated_at = now(),
       production_started_at = CASE WHEN lower(trim(p_new_status)) = 'in_production' AND (production_started_at IS NULL) THEN now() ELSE production_started_at END
   WHERE id = p_mo_id AND deleted = false;

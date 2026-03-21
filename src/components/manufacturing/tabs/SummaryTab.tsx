@@ -1,5 +1,5 @@
 import { useManufacturingOrder, useManufacturingMaterials } from '../../../hooks/useManufacturing';
-import { formatCurrency } from '../../../lib/utils';
+import { formatCurrency, formatDate } from '../../../lib/utils';
 import StatusBadge from '../../shared/StatusBadge';
 
 interface SummaryTabProps {
@@ -61,30 +61,30 @@ export default function SummaryTab({ moId }: SummaryTabProps) {
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <label className="text-xs font-medium text-gray-500">Created</label>
-            <div className="mt-1 text-gray-900">{new Date(mo.created_at).toLocaleDateString()}</div>
+            <div className="mt-1 text-gray-900">{formatDate(mo.created_at)}</div>
           </div>
           {mo.released_at && (
             <div>
               <label className="text-xs font-medium text-gray-500">Released</label>
-              <div className="mt-1 text-gray-900">{new Date(mo.released_at).toLocaleDateString()}</div>
+              <div className="mt-1 text-gray-900">{formatDate(mo.released_at)}</div>
             </div>
           )}
           {mo.production_started_at && (
             <div>
               <label className="text-xs font-medium text-gray-500">Production Started</label>
-              <div className="mt-1 text-gray-900">{new Date(mo.production_started_at).toLocaleDateString()}</div>
+              <div className="mt-1 text-gray-900">{formatDate(mo.production_started_at)}</div>
             </div>
           )}
           {mo.completed_at && (
             <div>
               <label className="text-xs font-medium text-gray-500">Completed</label>
-              <div className="mt-1 text-gray-900">{new Date(mo.completed_at).toLocaleDateString()}</div>
+              <div className="mt-1 text-gray-900">{formatDate(mo.completed_at)}</div>
             </div>
           )}
           {mo.delivered_at && (
             <div>
               <label className="text-xs font-medium text-gray-500">Delivered</label>
-              <div className="mt-1 text-gray-900">{new Date(mo.delivered_at).toLocaleDateString()}</div>
+              <div className="mt-1 text-gray-900">{formatDate(mo.delivered_at)}</div>
             </div>
           )}
         </div>

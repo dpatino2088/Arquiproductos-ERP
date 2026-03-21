@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useApprovedQuotesWithProgress } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -424,7 +425,7 @@ export default function QuoteApproved() {
                           {quote.customerName}
                         </td>
                         <td className="py-4 px-6 text-gray-700 text-sm">
-                          {new Date(quote.createdAt).toLocaleDateString()}
+                          {formatDate(quote.createdAt)}
                         </td>
                         <td className="py-4 px-6 text-gray-900 text-sm font-medium">
                           {formatCurrency(quote.total, quote.currency)}

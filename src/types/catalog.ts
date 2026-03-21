@@ -173,6 +173,8 @@ export interface QuoteLine {
   collection_name?: string | null; // Text field - collection name stored directly (no FK)
   variant_id?: string | null;
   operating_system_drive_id?: string | null; // FK to CatalogItems for operating system drives
+  /** Resolved drive system label (e.g. "Manual Vertilux", "Motorize Lutron") from CatalogItems */
+  drive_system_label?: string | null;
   product_type?: string | null;
   operating_system?: string | null;
   operating_system_manufacturer?: string | null;

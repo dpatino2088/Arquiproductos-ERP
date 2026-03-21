@@ -158,3 +158,105 @@ export function dealerFinancialDetailKey(scopeKey: string, dealerId: string): un
 export function dealerFinancialTimelineKey(scopeKey: string, dealerId: string): unknown[] {
   return ['financials', 'dealer-accounts', 'timeline', LIST_QUERY_VERSION, scopeKey, dealerId];
 }
+
+/** Vendor Bills list */
+export function vendorBillsListKey(
+  scopeKey: string,
+  filters: { q: string; status: string; sortKey: string; page: number; pageSize: number }
+): unknown[] {
+  return [
+    'financials',
+    'vendor-bills',
+    'list',
+    LIST_QUERY_VERSION,
+    scopeKey,
+    filters.q,
+    filters.status,
+    filters.sortKey,
+    filters.page,
+    filters.pageSize,
+  ];
+}
+
+/** Vendor Bill detail */
+export function vendorBillDetailKey(scopeKey: string, billId: string): unknown[] {
+  return ['financials', 'vendor-bills', 'detail', DETAIL_QUERY_VERSION, scopeKey, billId];
+}
+
+/** Vendor Payments list */
+export function vendorPaymentsListKey(
+  scopeKey: string,
+  filters: { q: string; status: string; sortKey: string; page: number; pageSize: number }
+): unknown[] {
+  return [
+    'financials',
+    'vendor-payments',
+    'list',
+    LIST_QUERY_VERSION,
+    scopeKey,
+    filters.q,
+    filters.status,
+    filters.sortKey,
+    filters.page,
+    filters.pageSize,
+  ];
+}
+
+/** Vendor Payment detail */
+export function vendorPaymentDetailKey(scopeKey: string, paymentId: string): unknown[] {
+  return ['financials', 'vendor-payments', 'detail', DETAIL_QUERY_VERSION, scopeKey, paymentId];
+}
+
+/** Vendor financial accounts list (AP cockpit) */
+export function vendorFinancialAccountsListKey(
+  scopeKey: string,
+  filters: { q: string; risk: string; sortKey: string; page: number; pageSize: number }
+): unknown[] {
+  return [
+    'financials',
+    'vendor-accounts',
+    'list',
+    LIST_QUERY_VERSION,
+    scopeKey,
+    filters.q,
+    filters.risk,
+    filters.sortKey,
+    filters.page,
+    filters.pageSize,
+  ];
+}
+
+/** Vendor financial detail summary */
+export function vendorFinancialDetailKey(scopeKey: string, vendorId: string): unknown[] {
+  return ['financials', 'vendor-accounts', 'detail', DETAIL_QUERY_VERSION, scopeKey, vendorId];
+}
+
+/** Vendor financial timeline */
+export function vendorFinancialTimelineKey(scopeKey: string, vendorId: string): unknown[] {
+  return ['financials', 'vendor-accounts', 'timeline', LIST_QUERY_VERSION, scopeKey, vendorId];
+}
+
+/** Manufacturing Dashboard overview */
+export function dashboardOverviewKey(scopeKey: string): unknown[] {
+  return ['manufacturing', 'dashboard', 'overview', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Manufacturing Dispatch Board */
+export function dispatchBoardKey(scopeKey: string, days: number): unknown[] {
+  return ['manufacturing', 'dispatch', LIST_QUERY_VERSION, scopeKey, days];
+}
+
+/** Manufacturing Global Capacity */
+export function globalCapacityKey(scopeKey: string, days: number, from: string): unknown[] {
+  return ['manufacturing', 'capacity', LIST_QUERY_VERSION, scopeKey, days, from];
+}
+
+/** Bottleneck analysis */
+export function bottleneckKey(scopeKey: string): unknown[] {
+  return ['manufacturing', 'bottleneck', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Schedule changelog for a task */
+export function scheduleChangelogKey(taskId: string): unknown[] {
+  return ['manufacturing', 'schedule-changelog', LIST_QUERY_VERSION, taskId];
+}

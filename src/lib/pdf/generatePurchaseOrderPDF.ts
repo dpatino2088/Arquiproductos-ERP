@@ -11,6 +11,7 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate } from '../utils';
 
 export interface POPDFLine {
   sku: string;
@@ -158,7 +159,7 @@ export function generatePurchaseOrderPDF(
 
   const detailItems = [
     { label: 'Status', value: po.status.charAt(0).toUpperCase() + po.status.slice(1).toLowerCase() },
-    ...(po.expected_date ? [{ label: 'Expected Date', value: new Date(po.expected_date).toLocaleDateString() }] : []),
+    ...(po.expected_date ? [{ label: 'Expected Date', value: formatDate(po.expected_date) }] : []),
     { label: 'Currency', value: po.currency },
     ...(po.allocation_summary ? [{ label: 'Allocation', value: po.allocation_summary }] : []),
   ];

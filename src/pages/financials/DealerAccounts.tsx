@@ -1,17 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Building2, DollarSign, FileText, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useDealerFinancialAccounts, type DealerFinancialRisk } from '../../hooks/useDealerFinancialAccounts';
 import StatusTabs from '../../components/shared/StatusTabs';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatDate } from '../../lib/utils';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
-
-const FINANCIAL_SUBMODULES = [
-  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import FinancialSubTabs from './FinancialSubTabs';
 
 const RISK_TABS: Array<{ value: DealerFinancialRisk; label: string }> = [
   { value: 'all', label: 'All' },
@@ -36,7 +32,7 @@ export default function DealerAccounts() {
   const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
-    registerSubmodules('Financials', FINANCIAL_SUBMODULES);
+    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
   }, [registerSubmodules]);
 
   const { rows, total, isInitialLoading, error } = useDealerFinancialAccounts({
@@ -52,6 +48,7 @@ export default function DealerAccounts() {
 
   return (
     <div className="py-6 px-6">
+      <FinancialSubTabs />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Accounts</h1>
@@ -125,7 +122,7 @@ export default function DealerAccounts() {
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(row.unapplied_amount, 'USD')}</td>
                   <td className="px-4 py-4 text-center">{row.open_invoices_count}</td>
                   <td className="px-4 py-4 text-right">
-                    {row.last_payment_date ? new Date(row.last_payment_date).toLocaleDateString() : '—'}
+                    {formatDate(row.last_payment_date)}
                   </td>
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(row.aging_90_plus, 'USD')}</td>
                 </tr>

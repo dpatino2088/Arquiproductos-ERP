@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Edit } from 'lucide-react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -423,7 +424,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
                 <tr key={r.lineId} className="border-t">
                   <td className="px-4 py-2 font-medium text-gray-900">{r.poNumber}</td>
                   <td className="px-4 py-2 text-gray-700">{r.vendor}</td>
-                  <td className="px-4 py-2 text-gray-600">{r.date ? new Date(r.date).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-2 text-gray-600">{formatDate(r.date)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{fmtQty(r.quantity)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{fmtCurrency(r.unitCost)}</td>
                   <td className="px-4 py-2 text-gray-600">{r.warehouse}</td>
@@ -460,7 +461,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
             ) : (
               movementLedgerRows.map((r) => (
                 <tr key={r.lineId} className="border-t">
-                  <td className="px-4 py-2 text-gray-600">{r.date ? new Date(r.date).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-2 text-gray-600">{formatDate(r.date)}</td>
                   <td className="px-4 py-2 text-gray-700">{r.movementType}</td>
                   <td className="px-4 py-2 text-gray-700">{r.reference}</td>
                   <td className={`px-4 py-2 text-right tabular-nums ${r.qty < 0 ? 'text-red-600' : 'text-green-700'}`}>{fmtQty(r.qty)}</td>

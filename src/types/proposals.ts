@@ -101,6 +101,8 @@ export interface QuoteLineSnapshot {
   collection_name?: string | null;
   variant_name?: string | null;
   drive_type?: string | null;
+  /** Drive system brand/type label (e.g. "Manual Vertilux", "Motorize Lutron") */
+  drive_system_label?: string | null;
   measurements?: Record<string, unknown> | null;
   accessories?: unknown;
   base_price_mode?: 'msrp' | 'unit_msrp';

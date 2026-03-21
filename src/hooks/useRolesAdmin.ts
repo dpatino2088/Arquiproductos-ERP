@@ -31,6 +31,7 @@ export type AppUserRoleListItem = {
   sort_order: number;
   is_system: boolean;
   permission_count: number;
+  user_count: number;
 };
 
 const ROLES_QUERY_KEY = ['roles-admin'];
@@ -71,6 +72,20 @@ export function useRoleList(
         const c = (row as { role_code: string }).role_code;
         if (c in countByRole) countByRole[c] += 1;
       }
+
+      const { data: userRows, error: userErr } = await supabase
+        .from('AppUsers')
+        .select('role_code')
+        .in('role_code', roleCodes)
+        .eq('deleted', false);
+      if (userErr) throw userErr;
+      const userCountByRole: Record<string, number> = {};
+      for (const code of roleCodes) userCountByRole[code] = 0;
+      for (const row of userRows ?? []) {
+        const c = (row as { role_code: string }).role_code;
+        if (c in userCountByRole) userCountByRole[c] += 1;
+      }
+
       return list.map((r) => ({
         code: r.code,
         name: r.name,
@@ -79,6 +94,7 @@ export function useRoleList(
         sort_order: r.sort_order ?? 9999,
         is_system: !!r.is_system,
         permission_count: countByRole[r.code] ?? 0,
+        user_count: userCountByRole[r.code] ?? 0,
       }));
     },
   });
@@ -193,7 +209,54 @@ export function useUpdateRoleName() {
   });
 }
 
-/** F) useSyncRolePermissions(): diff current vs desired; delete toRemove, insert toAdd (NO upsert); invalidate rolePermissionCodes + roleList. */
+/** F) useDeleteRole(): only non-system roles with 0 users. Removes permissions first, then the role. */
+export function useDeleteRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: ['delete-role'],
+    mutationFn: async (payload: { code: string }) => {
+      const { code } = payload;
+
+      const { data: role, error: roleErr } = await supabase
+        .from('AppUserRoles')
+        .select('code, is_system')
+        .eq('code', code)
+        .single();
+      if (roleErr) throw roleErr;
+      if ((role as AppUserRoleRow).is_system) throw new Error('System roles cannot be deleted.');
+
+      const { count, error: countErr } = await supabase
+        .from('AppUsers')
+        .select('id', { count: 'exact', head: true })
+        .eq('role_code', code)
+        .eq('deleted', false);
+      if (countErr) throw countErr;
+      if ((count ?? 0) > 0) {
+        throw new Error(`Cannot delete role "${code}" — ${count} user(s) are still assigned to it. Reassign them first.`);
+      }
+
+      const { error: delPermsErr } = await supabase
+        .from('AppUserRolePermissions')
+        .delete()
+        .eq('role_code', code);
+      if (delPermsErr) throw delPermsErr;
+
+      const { error: delRoleErr } = await supabase
+        .from('AppUserRoles')
+        .delete()
+        .eq('code', code);
+      if (delRoleErr) throw delRoleErr;
+
+      invalidateRolePermissionsCache(code);
+      return { code };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ROLES_QUERY_KEY });
+    },
+  });
+}
+
+/** G) useSyncRolePermissions(): diff current vs desired; delete toRemove, insert toAdd (NO upsert); invalidate rolePermissionCodes + roleList. */
 export function useSyncRolePermissions() {
   const queryClient = useQueryClient();
   return useMutation({

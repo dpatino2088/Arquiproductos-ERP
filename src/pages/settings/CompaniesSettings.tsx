@@ -6,6 +6,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { Building, Plus, X, Edit, Trash2, Mail, Phone, RotateCw, Archive, Search, Filter, List, Grid3X3 } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
@@ -474,7 +475,7 @@ export default function CompaniesSettings() {
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
                       {company.created_at 
-                        ? new Date(company.created_at).toLocaleDateString()
+                        ? formatDate(company.created_at)
                         : '-'}
                     </td>
                     {canManageCompanies && !roleLoading && (

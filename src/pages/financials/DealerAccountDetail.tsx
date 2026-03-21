@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Building2, DollarSign, FileText, FileDown } from 'lucide-react';
+import { ArrowLeft, FileDown } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useDealerFinancialDetail } from '../../hooks/useDealerFinancialDetail';
 import { useDealerFinancialTimeline } from '../../hooks/useDealerFinancialTimeline';
 import { supabase } from '../../lib/supabase/client';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatDate } from '../../lib/utils';
 import TimelineView from '../../components/shared/TimelineView';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
@@ -19,12 +19,7 @@ import type {
 } from '../../lib/pdf/generateAccountStatementPDF';
 import type { DealerFinancialTimelineEvent } from '../../hooks/useDealerFinancialTimeline';
 import { useUIStore } from '../../stores/ui-store';
-
-const FINANCIAL_SUBMODULES = [
-  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 
 interface DealerInvoiceRow {
   invoice_id: string;
@@ -114,7 +109,7 @@ export default function DealerAccountDetail() {
   const hasRedirectBack = !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
 
   useEffect(() => {
-    registerSubmodules('Financials', FINANCIAL_SUBMODULES);
+    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
   }, [registerSubmodules]);
 
   const { detail, isInitialLoading, error: detailError } = useDealerFinancialDetail(dealerId);
@@ -501,8 +496,8 @@ export default function DealerAccountDetail() {
               ) : invoices.map((inv) => (
                 <tr key={inv.invoice_id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => router.navigate(withReturnTo(`/financials/invoices/${inv.invoice_id}`))}>
                   <td className="px-4 py-4 font-medium text-primary">{inv.invoice_number}</td>
-                  <td className="px-4 py-4">{inv.issue_date ? new Date(inv.issue_date).toLocaleDateString() : '—'}</td>
-                  <td className="px-4 py-4">{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-4">{formatDate(inv.issue_date)}</td>
+                  <td className="px-4 py-4">{formatDate(inv.due_date)}</td>
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(inv.invoice_total, 'USD')}</td>
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(inv.applied_total, 'USD')}</td>
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(inv.balance_due, 'USD')}</td>
@@ -529,7 +524,7 @@ export default function DealerAccountDetail() {
                 <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No payments</td></tr>
               ) : payments.map((pay) => (
                 <tr key={pay.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => router.navigate(withReturnTo(`/financials/payments/${pay.id}`))}>
-                  <td className="px-4 py-4">{pay.payment_date ? new Date(pay.payment_date).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-4">{formatDate(pay.payment_date)}</td>
                   <td className="px-4 py-4">{pay.payment_method ?? '—'}</td>
                   <td className="px-4 py-4">{pay.reference_number ?? '—'}</td>
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(pay.amount, 'USD')}</td>
@@ -556,7 +551,7 @@ export default function DealerAccountDetail() {
                 <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No applications</td></tr>
               ) : applicationMap.map((app) => (
                 <tr key={app.id} className="border-t hover:bg-gray-50">
-                  <td className="px-4 py-4">{app.created_at ? new Date(app.created_at).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-4">{formatDate(app.created_at)}</td>
                   <td className="px-4 py-4">{app.invoice_number}</td>
                   <td className="px-4 py-4">{app.payment_reference}</td>
                   <td className="px-4 py-4 text-right font-mono">{formatCurrency(app.applied_amount, 'USD')}</td>

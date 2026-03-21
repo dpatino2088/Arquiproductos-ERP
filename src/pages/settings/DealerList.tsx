@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useDealers, type Dealer } from '../../hooks/useDealers';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -303,7 +304,7 @@ export default function DealerList({ basePath = '/settings/dealer-profile', modu
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
                       {dealer.created_at 
-                        ? new Date(dealer.created_at).toLocaleDateString()
+                        ? formatDate(dealer.created_at)
                         : '-'}
                     </td>
                     {(basePath === '/partners/dealers' || canManageDealers) && !roleLoading && (

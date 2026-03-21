@@ -10,6 +10,7 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate } from '../utils';
 
 export interface InvoicePDFLine {
   description: string;
@@ -162,8 +163,8 @@ export function generateInvoicePDF(
   doc.setFontSize(9);
 
   const detailItems = [
-    { label: 'Issue Date', value: new Date(invoice.issue_date).toLocaleDateString() },
-    ...(invoice.due_date ? [{ label: 'Due Date', value: new Date(invoice.due_date).toLocaleDateString() }] : []),
+    { label: 'Issue Date', value: formatDate(invoice.issue_date) },
+    ...(invoice.due_date ? [{ label: 'Due Date', value: formatDate(invoice.due_date) }] : []),
     ...(invoice.sales_order_no ? [{ label: 'Sales Order', value: invoice.sales_order_no }] : []),
     { label: 'Status', value: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1) },
   ];

@@ -66,8 +66,11 @@ interface InventoryAvailabilityBadgeProps {
 export function InventoryAvailabilityBadge({ row }: InventoryAvailabilityBadgeProps) {
   if (row == null) {
     return (
-      <span className="text-xs text-muted-foreground" title="No availability data">
-        —
+      <span
+        className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${STYLES.OUT_OF_STOCK}`}
+        title="No inventory record"
+      >
+        {LABELS.OUT_OF_STOCK}
       </span>
     );
   }

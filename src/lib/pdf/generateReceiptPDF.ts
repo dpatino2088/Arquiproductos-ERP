@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate } from '../utils';
 
 export interface ReceiptPDFHeader {
   receipt_no: string;
@@ -37,7 +38,7 @@ export function generateReceiptPDF(header: ReceiptPDFHeader, lines: ReceiptPDFLi
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   const details = [
-    ['Date', new Date(header.movement_date).toLocaleDateString()],
+    ['Date', formatDate(header.movement_date)],
     ['PO #', header.po_number || '—'],
     ['Vendor', header.vendor_name || '—'],
     ['Warehouse', header.warehouse_name || '—'],

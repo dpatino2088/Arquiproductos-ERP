@@ -5,7 +5,7 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 import { purchaseOrdersListKey, purchaseOrderDetailKey } from '../lib/queryKeys';
 import { generateNextPurchaseOrderNumber } from '../lib/sequential-numbers';
 
-export type PurchaseOrderStatus = 'OPEN' | 'PARTIAL' | 'CLOSED';
+export type PurchaseOrderStatus = 'DRAFT' | 'OPEN' | 'PARTIAL' | 'CLOSED' | 'CANCELLED' | 'ARCHIVED';
 
 export interface PurchaseOrder {
   id: string;
@@ -15,6 +15,7 @@ export interface PurchaseOrder {
   po_number: string | null;
   expected_date: string | null;
   status: PurchaseOrderStatus;
+  billing_status: string | null;
   notes: string | null;
   subtotal: number;
   total: number;
@@ -79,7 +80,7 @@ function safeLineSubtotal(lines: { ordered_qty: number; unit_cost: number }[] | 
   return subtotal;
 }
 
-async function resolvePurchaseTaxPct(params: {
+export async function resolvePurchaseTaxPct(params: {
   organizationId: string;
   vendorId: string | null | undefined;
 }): Promise<number> {
@@ -250,6 +251,7 @@ export function useCreatePurchaseOrder() {
     po_number?: string | null;
     notes?: string | null;
     currency?: string;
+    status?: PurchaseOrderStatus;
     lines?: CreatePOLineInput[];
     manufacturing_order_ids?: string[];
   }) => {
@@ -272,7 +274,7 @@ export function useCreatePurchaseOrder() {
           vendor_id: params.vendor_id ?? null,
           expected_date: params.expected_date ?? null,
           po_number: poNumber,
-          status: 'OPEN',
+          status: params.status ?? 'DRAFT',
           notes: params.notes ?? null,
           currency: params.currency ?? 'USD',
           subtotal,
@@ -591,6 +593,10 @@ export function useReceivePurchaseOrder() {
       if (result && !result.ok) throw new Error(result.error || 'Receipt failed: unknown RPC error');
       queryClient.invalidateQueries({ queryKey: ['inventory', 'purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
+
+      // Auto-advance linked MOs to materials_ready if all demand is covered
+      supabase.rpc('check_mo_readiness_after_po_receive', { p_po_id: purchaseOrderId }).catch(() => {});
+
       return result;
     } finally {
       setIsReceiving(false);
@@ -644,6 +650,53 @@ export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogI
     units_per_purchase_unit: Number(data.units_per_purchase_unit ?? 1),
     unit_of_measure: data.unit_of_measure ?? 'ea',
   };
+}
+
+const VALID_PO_TRANSITIONS: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
+  DRAFT: ['OPEN', 'CANCELLED'],
+  OPEN: ['CANCELLED'],
+  PARTIAL: ['CANCELLED'],
+  CLOSED: ['ARCHIVED'],
+  CANCELLED: [],
+  ARCHIVED: [],
+};
+
+export function useUpdatePurchaseOrderStatus() {
+  const [isUpdating, setIsUpdating] = useState(false);
+  const { activeOrganizationId } = useOrganizationContext();
+  const queryClient = useQueryClient();
+
+  const updateStatus = useCallback(async (poId: string, newStatus: PurchaseOrderStatus) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
+    setIsUpdating(true);
+    try {
+      const { data: po, error: fetchErr } = await supabase
+        .from('PurchaseOrders')
+        .select('status')
+        .eq('id', poId)
+        .single();
+      if (fetchErr) throw fetchErr;
+
+      const current = po.status as PurchaseOrderStatus;
+      const allowed = VALID_PO_TRANSITIONS[current] ?? [];
+      if (!allowed.includes(newStatus)) {
+        throw new Error(`Cannot transition PO from ${current} to ${newStatus}`);
+      }
+
+      const { error } = await supabase
+        .from('PurchaseOrders')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', poId);
+      if (error) throw error;
+
+      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId) });
+      queryClient.invalidateQueries({ queryKey: purchaseOrderDetailKey(activeOrganizationId, poId) });
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [activeOrganizationId, queryClient]);
+
+  return { updateStatus, isUpdating };
 }
 
 /** @deprecated Use fetchCatalogItemCostInfo instead */

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useCatalogVariants, useCatalogCollections } from '../../hooks/useCatalog';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
@@ -22,6 +23,7 @@ import {
 
 export default function Variants() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { canDelete: canDeleteCat } = useGranularAccess('catalog');
   const { collections } = useCatalogCollections();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
@@ -376,14 +378,16 @@ export default function Variants() {
                             >
                               <Edit className="w-4 h-4" />
                             </button>
-                            <button 
-                              onClick={() => handleDelete(variant.id, variant.name)}
-                              disabled={isDeleting}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                              title={`Delete ${variant.name}`}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canDeleteCat && (
+                              <button 
+                                onClick={() => handleDelete(variant.id, variant.name)}
+                                disabled={isDeleting}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                                title={`Delete ${variant.name}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

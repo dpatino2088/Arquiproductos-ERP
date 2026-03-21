@@ -5,11 +5,13 @@ import { withReturnTo } from '../../lib/navigation/returnTo';
 import { useQuotes, type QuoteListItem } from '../../hooks/useQuotes';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { getSupabaseErrorMessage, isRLSError, safeError } from '../../lib/supabase-error-utils';
+import { formatDate } from '../../lib/utils';
 import { 
   Search, Plus, List, Grid3X3, Edit, Trash2, Archive, RotateCcw,
   FileText, RefreshCw,
@@ -32,6 +34,7 @@ const formatCurrency = (amount: number) => {
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isInternal } = useAccessContext();
+  const { canCreate: canCreateQuote, canArchive: canArchiveQuote, canDelete: canDeleteQuote } = useGranularAccess('quotes');
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
 
   // Una sola fuente de verdad: filtro por dealer y enriquecimiento en useQuotes
@@ -82,7 +85,7 @@ export default function Quotes() {
   }, []);
 
   const [proposalByQuoteMap, setProposalByQuoteMap] = useState<Record<string, { id: string; no: string }>>({});
-  const [soNumberMap, setSONumberMap] = useState<Record<string, { id: string; no: string }>>({});
+  const [soNumberMap, setSONumberMap] = useState<Record<string, { id: string; no: string; status: string }>>({});
 
   useEffect(() => {
     if (!quotes.length || !activeOrganizationId) return;
@@ -107,13 +110,13 @@ export default function Quotes() {
 
     supabase
       .from('SalesOrders')
-      .select('id, quote_id, sales_order_no')
+      .select('id, quote_id, sales_order_no, status')
       .in('quote_id', ids)
       .eq('deleted', false)
       .then(({ data }: { data: any }) => {
         if (!data) return;
-        const m: Record<string, { id: string; no: string }> = {};
-        data.forEach((so: any) => { if (so.quote_id) m[so.quote_id] = { id: so.id, no: so.sales_order_no }; });
+        const m: Record<string, { id: string; no: string; status: string }> = {};
+        data.forEach((so: any) => { if (so.quote_id) m[so.quote_id] = { id: so.id, no: so.sales_order_no, status: so.status ?? 'confirmed' }; });
         setSONumberMap(m);
       });
   }, [quotes, activeOrganizationId]);
@@ -482,7 +485,7 @@ export default function Quotes() {
           <h1 className="text-xl font-semibold text-foreground">Quotes</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
-          {selectedIds.size > 0 && (
+          {canDeleteQuote && selectedIds.size > 0 && (
             <button
               onClick={handleDeleteSelected}
               className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
@@ -491,14 +494,16 @@ export default function Quotes() {
               Eliminar seleccionados ({selectedIds.size})
             </button>
           )}
-          <button
-            onClick={() => router.navigate('/sales/quotes/new')}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white text-sm hover:opacity-90 transition-colors"
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-          >
-            <Plus style={{ width: 14, height: 14 }} />
-            Add Quote
-          </button>
+          {canCreateQuote && (
+            <button
+              onClick={() => router.navigate('/sales/quotes/new')}
+              className="flex items-center gap-2 px-2 py-1 rounded text-white text-sm hover:opacity-90 transition-colors"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            >
+              <Plus style={{ width: 14, height: 14 }} />
+              Add Quote
+            </button>
+          )}
         </div>
       </div>
 
@@ -664,11 +669,16 @@ export default function Quotes() {
                     </td>
                     <td className="py-4 px-4 text-sm text-center">
                       {soNumberMap[quote.id]
-                        ? <button onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }} className="text-primary hover:underline font-medium">{soNumberMap[quote.id].no}</button>
+                        ? (
+                          <div className="flex items-center gap-2 justify-center">
+                            <button onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }} className="text-primary hover:underline font-medium">{soNumberMap[quote.id].no}</button>
+                            <StatusBadge status={soNumberMap[quote.id].status} type="salesOrder" />
+                          </div>
+                        )
                         : <span className="text-gray-400">—</span>}
                     </td>
                     <td className="py-4 px-4 text-gray-600 text-sm text-center">
-                      {new Date(quote.created_at).toLocaleDateString()}
+                      {formatDate(quote.created_at)}
                     </td>
                     <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
                       {formatCurrency(quote.total)}
@@ -712,22 +722,26 @@ export default function Quotes() {
                             >
                               <Edit style={{ width: 14, height: 14 }} />
                             </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleArchive(quote, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Archive"
-                            >
-                              <Archive style={{ width: 14, height: 14 }} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleDelete(quote, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 style={{ width: 14, height: 14 }} />
-                            </button>
+                            {canArchiveQuote && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleArchive(quote, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Archive"
+                              >
+                                <Archive style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                            {canDeleteQuote && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDelete(quote, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
                           </>
                         )}
                       </div>

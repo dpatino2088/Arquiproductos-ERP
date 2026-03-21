@@ -5,6 +5,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 export interface ManufacturersRef {
   openNewModal: () => void;
 }
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useManufacturersCRUD } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
@@ -36,6 +37,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { manufacturers, loading, error, createManufacturer, updateManufacturer, deleteManufacturer, isCreating, isDeleting } = useManufacturersCRUD();
+  const { canCreate: canCreateCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
 
   // Show all manufacturers (no filter by is_roll)
@@ -404,7 +406,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                           >
                             <Edit className="w-4 h-4" />
                           </button>
-                          {!readOnly && (
+                          {!readOnly && canDeleteCat && (
                             <button 
                               onClick={() => handleDelete(manufacturer.id, manufacturer.name)}
                               disabled={isDeleting}

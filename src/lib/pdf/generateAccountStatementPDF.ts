@@ -10,6 +10,7 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate } from '../utils';
 
 export interface StatementPDFDealer {
   dealer_name: string;
@@ -100,7 +101,7 @@ export function generateAccountStatementPDF(
   doc.text('ACCOUNT STATEMENT', headerRightX, yPos, { align: 'right' });
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`As of ${new Date(statementDate).toLocaleDateString()}`, headerRightX, yPos + 5, { align: 'right' });
+  doc.text(`As of ${formatDate(statementDate)}`, headerRightX, yPos + 5, { align: 'right' });
   if (dealer?.dealer_name) {
     doc.text(`Dealer: ${dealer.dealer_name}`, headerRightX, yPos + 10, { align: 'right' });
   }
@@ -164,7 +165,7 @@ export function generateAccountStatementPDF(
   doc.setFont('helvetica', 'bold');
   doc.text('Statement Date:', rightLabelX, rightY);
   doc.setFont('helvetica', 'normal');
-  doc.text(new Date(statementDate).toLocaleDateString(), rightValueX, rightY, { align: 'right' });
+  doc.text(formatDate(statementDate), rightValueX, rightY, { align: 'right' });
   rightY += lineH + gap;
 
   yPos = Math.max(leftY, rightY) + 4;
@@ -239,7 +240,7 @@ export function generateAccountStatementPDF(
   ];
 
   const tableRows = lines.map((l) => ({
-    date: new Date(l.date).toLocaleDateString(),
+    date: formatDate(l.date),
     type: l.type,
     reference_no: l.reference_no || '—',
     debit: l.debit > 0 ? fmtCurrency(l.debit, cur) : '',

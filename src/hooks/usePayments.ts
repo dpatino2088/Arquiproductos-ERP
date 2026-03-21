@@ -18,6 +18,7 @@ export interface Payment {
   notes: string | null;
   recorded_by: string | null;
   created_at: string;
+  status?: string;
   recorded_by_name?: string | null;
   recorded_by_display_name?: string;
   invoice_refs?: PaymentInvoiceRef[];
@@ -40,7 +41,7 @@ export function usePayments(salesOrderId: string | null) {
       // 1) Payments directly linked to this SO
       const { data: directData, error: directError } = await supabase
         .from('Payments')
-        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at')
+        .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at, status')
         .eq('organization_id', activeOrganizationId)
         .eq('sales_order_id', salesOrderId)
         .eq('deleted', false)
@@ -75,7 +76,7 @@ export function usePayments(salesOrderId: string | null) {
           if (relatedPaymentIds.length > 0) {
             const { data: relatedData, error: relatedError } = await supabase
               .from('Payments')
-              .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at')
+              .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, created_at, status')
               .eq('organization_id', activeOrganizationId)
               .in('id', relatedPaymentIds)
               .eq('deleted', false)

@@ -14,11 +14,12 @@ import {
   useRolePermissionCodes,
   useCreateRole,
   useUpdateRoleName,
+  useDeleteRole,
   useSyncRolePermissions,
   type AppUserRoleListItem,
 } from '../../hooks/useRolesAdmin';
 import { RolePermissionsEditor } from '../../components/permissions/RolePermissionsEditor';
-import { Shield, Plus, Loader2, ChevronRight } from 'lucide-react';
+import { Shield, Plus, Loader2, ChevronRight, Trash2, Users } from 'lucide-react';
 
 type TabUserType = 'org' | 'dealer' | 'all';
 
@@ -49,8 +50,11 @@ export default function Roles() {
     refetch: refetchAssigned,
   } = useRolePermissionCodes(selectedRoleCode, canManageRoles);
 
+  const [confirmDeleteCode, setConfirmDeleteCode] = useState<string | null>(null);
+
   const createRole = useCreateRole();
   const updateRoleName = useUpdateRoleName();
+  const deleteRoleMutation = useDeleteRole();
   const syncPermissions = useSyncRolePermissions();
 
   const selectedRole = useMemo(
@@ -182,6 +186,26 @@ export default function Roles() {
     setCreateUserType(activeTabUserType === 'all' ? 'org' : activeTabUserType);
   };
 
+  const handleDeleteRole = async () => {
+    if (!confirmDeleteCode) return;
+    try {
+      await deleteRoleMutation.mutateAsync({ code: confirmDeleteCode });
+      addNotification({ type: 'success', title: 'Deleted', message: `Role "${confirmDeleteCode}" deleted.` });
+      if (selectedRoleCode === confirmDeleteCode) setSelectedRoleCode(null);
+      setConfirmDeleteCode(null);
+      refetchRoles();
+    } catch (e: unknown) {
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: e instanceof Error ? e.message : 'Failed to delete role.',
+      });
+      setConfirmDeleteCode(null);
+    }
+  };
+
+  const confirmDeleteRole = roles.find(r => r.code === confirmDeleteCode) ?? null;
+
   if (!canManageRoles) {
     return (
       <div className="p-6 max-w-2xl mx-auto">
@@ -284,6 +308,9 @@ export default function Roles() {
                       <span className="flex-shrink-0 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
                         {r.user_type}
                       </span>
+                      <span className="text-xs text-gray-400 flex-shrink-0 flex items-center gap-0.5" title={`${r.user_count} user(s)`}>
+                        <Users className="w-3 h-3" />{r.user_count}
+                      </span>
                       <span className="text-xs text-gray-400 flex-shrink-0">{r.permission_count}</span>
                       {r.is_system && (
                         <span className="flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
@@ -364,8 +391,22 @@ export default function Roles() {
             </div>
           ) : selectedRole ? (
             <div className="p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-1">{selectedRole.name}</h2>
-              <p className="text-sm text-gray-500 mb-4">{selectedRole.code}</p>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-medium text-gray-900 mb-1">{selectedRole.name}</h2>
+                  <p className="text-sm text-gray-500">{selectedRole.code}</p>
+                </div>
+                {!selectedRole.is_system && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteCode(selectedRole.code)}
+                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-red-600 border border-red-200 rounded hover:bg-red-50"
+                    title={selectedRole.user_count > 0 ? `${selectedRole.user_count} user(s) assigned — reassign before deleting` : 'Delete this role'}
+                  >
+                    <Trash2 className="w-4 h-4" /> Delete
+                  </button>
+                )}
+              </div>
 
               <div className="space-y-4 mb-6">
                 <div>
@@ -393,9 +434,15 @@ export default function Roles() {
                     </div>
                   )}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">User type</label>
-                  <p className="text-sm text-gray-500">{selectedRole.user_type}</p>
+                <div className="flex gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">User type</label>
+                    <p className="text-sm text-gray-500">{selectedRole.user_type}</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Users assigned</label>
+                    <p className="text-sm text-gray-500">{selectedRole.user_count}</p>
+                  </div>
                 </div>
               </div>
 
@@ -428,6 +475,46 @@ export default function Roles() {
           )}
         </div>
       </div>
+
+      {/* Delete confirmation dialog */}
+      {confirmDeleteCode && confirmDeleteRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Role</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Are you sure you want to delete the role <strong>{confirmDeleteRole.name}</strong> (<code className="text-xs">{confirmDeleteRole.code}</code>)?
+            </p>
+            {confirmDeleteRole.user_count > 0 && (
+              <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                This role has <strong>{confirmDeleteRole.user_count} user(s)</strong> assigned. You must reassign them before deleting.
+              </div>
+            )}
+            {confirmDeleteRole.permission_count > 0 && (
+              <p className="mt-2 text-xs text-gray-500">
+                {confirmDeleteRole.permission_count} permission(s) will also be removed.
+              </p>
+            )}
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteCode(null)}
+                className="px-4 py-2 text-sm text-gray-700 border border-gray-200 rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteRole}
+                disabled={deleteRoleMutation.isPending || confirmDeleteRole.user_count > 0}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50 flex items-center gap-1"
+              >
+                {deleteRoleMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                Delete Role
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

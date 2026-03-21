@@ -11,6 +11,7 @@ export interface WorkCenter {
   sequence: number;
   routing_rule: Record<string, unknown>;
   is_active: boolean;
+  capacity_hours_per_day: number;
   deleted: boolean;
   created_at: string;
   updated_at: string;
@@ -19,6 +20,7 @@ export interface WorkCenter {
 export type WorkCenterInput = Pick<WorkCenter, 'code' | 'name' | 'sequence' | 'is_active'> & {
   description?: string | null;
   routing_rule?: Record<string, unknown>;
+  capacity_hours_per_day?: number;
 };
 
 export function useWorkCenters() {

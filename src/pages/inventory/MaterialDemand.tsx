@@ -78,6 +78,11 @@ export default function MaterialDemand() {
   const [needToBuyOnly, setNeedToBuyOnly] = useState(true);
   const [showMODropdown, setShowMODropdown] = useState(false);
   const [moFilterSearch, setMoFilterSearch] = useState('');
+  const [confirmPO, setConfirmPO] = useState<{
+    groups: Map<string, { manufacturer_name: string | null; vendor_name: string | null; lineCount: number; itemNames: string[] }>;
+    totalLines: number;
+    totalPOs: number;
+  } | null>(null);
 
   useEffect(() => {
     registerSubmodules('Inventory', INVENTORY_SUBMODULES);
@@ -100,7 +105,7 @@ export default function MaterialDemand() {
         .from('manufacturing_order_material_demand')
         .select('*')
         .eq('organization_id', activeOrganizationId)
-        .in('mo_status', ['draft', 'planned', 'in_production', 'quality_check']);
+        .in('mo_status', ['draft', 'planned']);
       if (error) throw error;
       if (!demand?.length) return [];
 
@@ -289,7 +294,9 @@ export default function MaterialDemand() {
   const moOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const r of demandRows ?? []) {
-      if (!map.has(r.manufacturing_order_id)) map.set(r.manufacturing_order_id, r.manufacturing_order_no);
+      if (r.need_to_buy > 0 && !map.has(r.manufacturing_order_id)) {
+        map.set(r.manufacturing_order_id, r.manufacturing_order_no);
+      }
     }
     return Array.from(map.entries())
       .map(([id, no]) => ({ id, manufacturing_order_no: no }))
@@ -377,20 +384,10 @@ export default function MaterialDemand() {
     setSelectedRows(new Set());
   }, [filterMoId, needToBuyOnly, searchTerm]);
 
-  const handleCreatePOFromSelected = useCallback(async () => {
-    if (!defaultWarehouse) {
-      addNotification({ type: 'error', title: 'Error', message: 'No warehouse configured. Please set up a default warehouse first.' });
-      return;
-    }
-
+  const buildPOGroups = useCallback(() => {
     const allRows = demandRows ?? [];
     const selected = allRows.filter(r => selectedRows.has(rowKey(r)));
     const withNeedToBuy = selected.filter(r => r.need_to_buy > 0);
-
-    if (withNeedToBuy.length === 0) {
-      addNotification({ type: 'warning', title: 'Nothing to Buy', message: 'Selected items do not require additional purchase.' });
-      return;
-    }
 
     const groups = new Map<string, {
       manufacturer_id: string | null;
@@ -412,12 +409,53 @@ export default function MaterialDemand() {
       }
       groups.get(key)!.rows.push(r);
     }
+    return groups;
+  }, [demandRows, selectedRows]);
+
+  const handleRequestCreatePO = useCallback(() => {
+    if (!defaultWarehouse) {
+      addNotification({ type: 'error', title: 'Error', message: 'No warehouse configured. Please set up a default warehouse first.' });
+      return;
+    }
+    const allRows = demandRows ?? [];
+    const selected = allRows.filter(r => selectedRows.has(rowKey(r)));
+    const withNeedToBuy = selected.filter(r => r.need_to_buy > 0);
+    if (withNeedToBuy.length === 0) {
+      addNotification({ type: 'warning', title: 'Nothing to Buy', message: 'Selected items do not require additional purchase.' });
+      return;
+    }
+
+    const groups = buildPOGroups();
+    const summary = new Map<string, { manufacturer_name: string | null; vendor_name: string | null; lineCount: number; itemNames: string[] }>();
+    let totalLines = 0;
+    for (const [key, group] of groups) {
+      const uniqueItems = new Map<string, string>();
+      for (const r of group.rows) {
+        if (r.need_to_buy > 0 && !uniqueItems.has(r.catalog_item_id)) {
+          uniqueItems.set(r.catalog_item_id, r.item_name ?? r.sku ?? 'Item');
+        }
+      }
+      summary.set(key, {
+        manufacturer_name: group.manufacturer_name,
+        vendor_name: group.vendor_name,
+        lineCount: uniqueItems.size,
+        itemNames: [...uniqueItems.values()].slice(0, 5),
+      });
+      totalLines += uniqueItems.size;
+    }
+    setConfirmPO({ groups: summary, totalLines, totalPOs: groups.size });
+  }, [demandRows, selectedRows, defaultWarehouse, addNotification, buildPOGroups]);
+
+  const handleConfirmCreatePO = useCallback(async () => {
+    setConfirmPO(null);
+    if (!defaultWarehouse) return;
+
+    const groups = buildPOGroups();
 
     const results: CreatedPO[] = [];
     for (const [, group] of groups) {
       const lines: CreatePOLineInput[] = [];
 
-      // De-duplicate by catalog_item_id: only one PO line per item
       const itemLineMap = new Map<string, DemandRow>();
       for (const r of group.rows) {
         if (r.need_to_buy <= 0) continue;
@@ -479,6 +517,7 @@ export default function MaterialDemand() {
         const po = await createPurchaseOrder({
           warehouse_id: defaultWarehouse.id,
           vendor_id: group.vendor_id,
+          status: 'DRAFT',
           lines,
           manufacturing_order_ids: allMoIds,
         });
@@ -498,6 +537,28 @@ export default function MaterialDemand() {
     if (results.length > 0) {
       setCreatedPOs(results);
       setSelectedRows(new Set());
+
+      // Auto-advance linked MOs from draft/confirmed → procurement
+      const groupValues = Array.from(groups.values());
+      const allLinkedMoIds = [...new Set(groupValues.flatMap(g => g.rows.map(r => r.manufacturing_order_id)))];
+      for (const moId of allLinkedMoIds) {
+        try {
+          const { data: mo } = await supabase
+            .from('ManufacturingOrders')
+            .select('status')
+            .eq('id', moId)
+            .single();
+          if (mo && ['draft', 'confirmed'].includes(mo.status)) {
+            await supabase.rpc('transition_mo_status', {
+              p_mo_id: moId,
+              p_new_status: 'procurement',
+              p_user_id: '00000000-0000-0000-0000-000000000000',
+              p_user_name: 'System (PO created)',
+            });
+          }
+        } catch { /* non-critical */ }
+      }
+
       const noVendor = results.filter(r => !r.vendor_name);
       if (noVendor.length > 0) {
         const names = noVendor.map(r => r.manufacturer_name ?? 'Unknown').join(', ');
@@ -507,10 +568,10 @@ export default function MaterialDemand() {
           message: `${noVendor.length} PO(s) created without a vendor for: ${names}. Assign vendors in Partners > Vendors.`,
         });
       }
-      addNotification({ type: 'success', title: 'Purchase Orders Created', message: `${results.length} PO(s) created successfully.` });
+      addNotification({ type: 'success', title: 'Purchase Orders Created', message: `${results.length} Draft PO(s) created. Review and approve them to start ordering.` });
       await queryClient.invalidateQueries({ queryKey: ['material-demand', activeOrganizationId] });
     }
-  }, [demandRows, selectedRows, defaultWarehouse, createPurchaseOrder, addNotification, queryClient, activeOrganizationId]);
+  }, [defaultWarehouse, buildPOGroups, createPurchaseOrder, addNotification, queryClient, activeOrganizationId]);
 
   return (
     <div className="py-6 px-6">
@@ -519,7 +580,7 @@ export default function MaterialDemand() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Material Demand</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Materials required by open Manufacturing Orders
+            Materials required by Draft &amp; Planned Manufacturing Orders
           </p>
         </div>
         {selectedRows.size > 0 && (
@@ -527,7 +588,7 @@ export default function MaterialDemand() {
             <span className="text-sm text-gray-500">{selectedRows.size} selected</span>
             <button
               type="button"
-              onClick={handleCreatePOFromSelected}
+              onClick={handleRequestCreatePO}
               disabled={isCreating}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -696,10 +757,34 @@ export default function MaterialDemand() {
             </thead>
             <tbody>
               {filteredDemand.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">
-                  {needToBuyOnly && (demandRows ?? []).length > 0
-                    ? 'All materials are covered (on hand + on order). Uncheck "Need to Buy" to see all items.'
-                    : 'No material demand found'}
+                <tr><td colSpan={10} className="px-4 py-12 text-center">
+                  {needToBuyOnly && (demandRows ?? []).length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-green-50 mb-1">
+                        <span className="text-green-600 text-lg">✓</span>
+                      </div>
+                      <p className="text-sm font-medium text-gray-700">
+                        All materials covered
+                        {selectedMOLabel ? ` for ${selectedMOLabel}` : ''}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {(() => {
+                          const allRows = demandRows ?? [];
+                          const moRows = filterMoId ? allRows.filter(r => r.manufacturing_order_id === filterMoId) : allRows;
+                          return `${moRows.length} item${moRows.length === 1 ? '' : 's'} fully covered by on hand + on order.`;
+                        })()}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setNeedToBuyOnly(false)}
+                        className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      >
+                        Show all materials
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No material demand found{selectedMOLabel ? ` for ${selectedMOLabel}` : ''}</p>
+                  )}
                 </td></tr>
               ) : filteredDemand.map((r, i) => {
                 const needToBuy = r.need_to_buy;
@@ -755,6 +840,59 @@ export default function MaterialDemand() {
         {filteredDemand.length} item{filteredDemand.length === 1 ? '' : 's'}
         {selectedRows.size > 0 && ` · ${selectedRows.size} selected`}
       </div>
+
+      {/* Confirmation Dialog */}
+      {confirmPO && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setConfirmPO(null)}>
+          <div
+            className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Purchase Orders</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                This will create <span className="font-semibold text-gray-700">{confirmPO.totalPOs} Draft PO{confirmPO.totalPOs > 1 ? 's' : ''}</span> with <span className="font-semibold text-gray-700">{confirmPO.totalLines} line{confirmPO.totalLines > 1 ? 's' : ''}</span> total. You can review and approve them before ordering.
+              </p>
+            </div>
+            <div className="px-6 py-4 max-h-64 overflow-y-auto space-y-3">
+              {[...confirmPO.groups.entries()].map(([key, g]) => (
+                <div key={key} className="rounded-lg border border-gray-200 p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-medium text-gray-900">{g.manufacturer_name ?? 'Unknown Manufacturer'}</span>
+                    <span className="text-xs text-gray-500">{g.lineCount} item{g.lineCount > 1 ? 's' : ''}</span>
+                  </div>
+                  {g.vendor_name ? (
+                    <div className="text-xs text-gray-500 mb-1.5">Vendor: {g.vendor_name}</div>
+                  ) : (
+                    <div className="text-xs text-amber-600 mb-1.5">⚠ No vendor assigned</div>
+                  )}
+                  <div className="text-xs text-gray-400">
+                    {g.itemNames.join(', ')}
+                    {g.lineCount > 5 && ` +${g.lineCount - 5} more`}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmPO(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCreatePO}
+                disabled={isCreating}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              >
+                {isCreating ? 'Creating...' : `Create ${confirmPO.totalPOs} PO${confirmPO.totalPOs > 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

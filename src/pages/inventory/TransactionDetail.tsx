@@ -1,14 +1,21 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { router } from '../../lib/router';
+import { formatDate, formatDateTime } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useInventoryMovementDetail, useConfirmMovement, useCreateMovement, MovementType } from '../../hooks/useInventoryMovements';
+import {
+  useInventoryMovementDetail,
+  useConfirmMovement,
+  useCreateMovement,
+  MovementType,
+  AdjustmentReason,
+  ADJUSTMENT_REASON_LABELS,
+} from '../../hooks/useInventoryMovements';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
-import { ArrowLeft, CheckCircle, Plus, Trash2, Save, Search, FileDown, Eye, ChevronDown } from 'lucide-react';
-import Input from '../../components/ui/Input';
+import { ArrowLeft, CheckCircle, Plus, Trash2, Save, Search, FileDown, Eye, ChevronDown, AlertTriangle, MessageSquare } from 'lucide-react';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
@@ -41,16 +48,26 @@ interface DraftLine {
   name: string;
   quantity: number;
   unit: string;
+  currentStock: number | null;
+  lineNotes: string;
 }
 
 interface CatalogSearchResult {
   id: string;
   sku: string;
   name: string;
+  measure_basis: string | null;
+  stockOnHand: number | null;
 }
 
 function normalizeSearchText(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function defaultUnitForBasis(basis: string | null): string {
+  if (basis === 'linear') return 'm';
+  if (basis === 'area') return 'm2';
+  return 'ea';
 }
 
 interface TransactionDetailProps {
@@ -73,6 +90,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
   const [movementType, setMovementType] = useState<MovementType>('adjustment');
   const [movementDate, setMovementDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
+  const [adjustmentReason, setAdjustmentReason] = useState<AdjustmentReason | ''>('');
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -80,9 +98,13 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
   const [searchResults, setSearchResults] = useState<CatalogSearchResult[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
   const isAdjustmentContext = window.location.pathname.startsWith('/inventory/adjustments');
   const listPath = isAdjustmentContext ? '/inventory/adjustments' : '/inventory/transactions';
   const detailBasePath = isAdjustmentContext ? '/inventory/adjustments' : '/inventory/transactions';
+  const effectiveType = isCreateMode ? (isAdjustmentContext ? 'adjustment' : movementType) : (movement?.movement_type ?? movementType);
+  const isAdjustmentType = effectiveType === 'adjustment';
 
   useEffect(() => {
     registerSubmodules('Inventory', INVENTORY_SUBMODULES);
@@ -93,7 +115,6 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
   }, [defaultWarehouse, warehouseId]);
 
   useEffect(() => {
-    // Adjustments flow must always create adjustment movements.
     if (isCreateMode && isAdjustmentContext && movementType !== 'adjustment') {
       setMovementType('adjustment');
     }
@@ -105,6 +126,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
       setMovementType(movement.movement_type);
       setMovementDate(movement.movement_date ?? new Date().toISOString().slice(0, 10));
       setNotes(movement.notes ?? '');
+      setAdjustmentReason((movement.adjustment_reason as AdjustmentReason) ?? '');
       setDraftLines(lines.map(l => ({
         tempId: l.id,
         catalog_item_id: l.catalog_item_id,
@@ -112,9 +134,34 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
         name: l.CatalogItems?.name ?? '',
         quantity: l.quantity,
         unit: l.unit ?? 'ea',
+        currentStock: null,
+        lineNotes: l.notes ?? '',
       })));
     }
   }, [movement, lines]);
+
+  // Fetch current stock for all draft lines whenever warehouseId or draftLines change
+  useEffect(() => {
+    if (!activeOrganizationId || !warehouseId || draftLines.length === 0) return;
+    const itemIds = draftLines.map(l => l.catalog_item_id);
+    supabase
+      .from('InventoryBalances')
+      .select('catalog_item_id, quantity')
+      .eq('organization_id', activeOrganizationId)
+      .eq('warehouse_id', warehouseId)
+      .in('catalog_item_id', itemIds)
+      .then(({ data }) => {
+        if (!data) return;
+        const balanceMap = new Map<string, number>();
+        for (const row of data as { catalog_item_id: string; quantity: number }[]) {
+          balanceMap.set(row.catalog_item_id, Number(row.quantity));
+        }
+        setDraftLines(prev => prev.map(l => ({
+          ...l,
+          currentStock: balanceMap.get(l.catalog_item_id) ?? 0,
+        })));
+      });
+  }, [activeOrganizationId, warehouseId, draftLines.length]);
 
   const searchCatalogItems = useCallback(async (query: string) => {
     if (!activeOrganizationId || query.length < 2) { setSearchResults([]); return; }
@@ -126,7 +173,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
     try {
       const { data, error } = await supabase
         .from('CatalogItems')
-        .select('id, sku, name')
+        .select('id, sku, name, measure_basis')
         .eq('organization_id', activeOrganizationId)
         .eq('is_active', true)
         .or(`sku.ilike.%${firstToken}%,name.ilike.%${firstToken}%`)
@@ -134,9 +181,9 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
 
       if (error) throw error;
 
-      const rows = (data ?? []) as CatalogSearchResult[];
+      const rawRows = (data ?? []) as Omit<CatalogSearchResult, 'stockOnHand'>[];
       const normalizedNeedle = normalizeSearchText(trimmed);
-      const filtered = rows.filter((item) => {
+      const filtered = rawRows.filter((item) => {
         const sku = (item.sku ?? '').toLowerCase();
         const name = (item.name ?? '').toLowerCase();
         const hay = `${sku} ${name}`;
@@ -157,7 +204,28 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
         return aSku.localeCompare(bSku);
       });
 
-      setSearchResults(filtered.slice(0, 10));
+      const top = filtered.slice(0, 10);
+
+      // Enrich with on-hand stock from InventoryBalances
+      let stockMap = new Map<string, number>();
+      if (warehouseId && top.length > 0) {
+        const { data: balances } = await supabase
+          .from('InventoryBalances')
+          .select('catalog_item_id, quantity')
+          .eq('organization_id', activeOrganizationId)
+          .eq('warehouse_id', warehouseId)
+          .in('catalog_item_id', top.map(i => i.id));
+        if (balances) {
+          for (const b of balances as { catalog_item_id: string; quantity: number }[]) {
+            stockMap.set(b.catalog_item_id, Number(b.quantity));
+          }
+        }
+      }
+
+      setSearchResults(top.map(item => ({
+        ...item,
+        stockOnHand: stockMap.get(item.id) ?? 0,
+      })));
     } catch {
       setSearchResults([]);
       addNotification({
@@ -166,30 +234,45 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
         message: 'Could not search catalog items. Please try again.',
       });
     }
-  }, [activeOrganizationId, addNotification]);
+  }, [activeOrganizationId, warehouseId, addNotification]);
 
   useEffect(() => {
     const timer = setTimeout(() => { if (itemSearch.length >= 2) searchCatalogItems(itemSearch); else setSearchResults([]); }, 300);
     return () => clearTimeout(timer);
   }, [itemSearch, searchCatalogItems]);
 
-  const addItem = (item: CatalogSearchResult) => {
+  const addItem = useCallback(async (item: CatalogSearchResult) => {
     if (draftLines.some(l => l.catalog_item_id === item.id)) {
       addNotification({ type: 'warning', title: 'Duplicate', message: 'Item already added.' });
       return;
     }
+
+    let currentStock: number | null = null;
+    if (activeOrganizationId && warehouseId) {
+      const { data } = await supabase
+        .from('InventoryBalances')
+        .select('quantity')
+        .eq('organization_id', activeOrganizationId)
+        .eq('warehouse_id', warehouseId)
+        .eq('catalog_item_id', item.id)
+        .maybeSingle();
+      currentStock = data ? Number((data as { quantity: number }).quantity) : 0;
+    }
+
     setDraftLines(prev => [...prev, {
       tempId: crypto.randomUUID(),
       catalog_item_id: item.id,
       sku: item.sku,
       name: item.name,
-      quantity: 1,
-      unit: 'ea',
+      quantity: 0,
+      unit: defaultUnitForBasis(item.measure_basis),
+      currentStock,
+      lineNotes: '',
     }]);
     setItemSearch('');
     setSearchResults([]);
     setShowSearch(false);
-  };
+  }, [draftLines, activeOrganizationId, warehouseId, addNotification]);
 
   const updateLineQty = (tempId: string, qty: number) => {
     setDraftLines(prev => prev.map(l => l.tempId === tempId ? { ...l, quantity: qty } : l));
@@ -199,13 +282,33 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
     setDraftLines(prev => prev.map(l => l.tempId === tempId ? { ...l, unit } : l));
   };
 
+  const updateLineNotes = (tempId: string, lineNotes: string) => {
+    setDraftLines(prev => prev.map(l => l.tempId === tempId ? { ...l, lineNotes } : l));
+  };
+
   const removeLine = (tempId: string) => {
     setDraftLines(prev => prev.filter(l => l.tempId !== tempId));
   };
 
+  const hasNegativeResult = useMemo(() => {
+    if (!isAdjustmentType) return false;
+    return draftLines.some(l => {
+      const current = l.currentStock ?? 0;
+      const newQty = current + l.quantity;
+      return newQty < 0;
+    });
+  }, [draftLines, isAdjustmentType]);
+
   const handleSaveDraft = async () => {
     if (!warehouseId) { addNotification({ type: 'error', title: 'Error', message: 'Select a warehouse.' }); return; }
     if (draftLines.length === 0) { addNotification({ type: 'error', title: 'Error', message: 'Add at least one item.' }); return; }
+    if (isAdjustmentType && !adjustmentReason) { addNotification({ type: 'error', title: 'Error', message: 'Select an adjustment reason.' }); return; }
+
+    const zeroLines = draftLines.filter(l => l.quantity === 0);
+    if (zeroLines.length > 0) {
+      addNotification({ type: 'warning', title: 'Warning', message: `${zeroLines.length} line(s) have zero quantity and will have no effect.` });
+    }
+
     setIsSaving(true);
     try {
       const movId = isCreateMode
@@ -214,6 +317,8 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
             movement_type: isAdjustmentContext ? 'adjustment' : movementType,
             movement_date: movementDate,
             notes: notes || undefined,
+            adjustment_reason: isAdjustmentType && adjustmentReason ? adjustmentReason as AdjustmentReason : undefined,
+            created_by: user?.id,
           })).id
         : transactionId!;
 
@@ -223,6 +328,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
           warehouse_id: warehouseId,
           movement_date: movementDate,
           notes: notes || null,
+          adjustment_reason: isAdjustmentType && adjustmentReason ? adjustmentReason : null,
           updated_at: new Date().toISOString(),
         }).eq('id', movId);
       }
@@ -239,6 +345,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
           catalog_item_id: line.catalog_item_id,
           quantity: signedQty,
           unit: line.unit,
+          notes: line.lineNotes || null,
         });
       }
 
@@ -258,6 +365,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
 
   const handleConfirm = async () => {
     if (!transactionId) return;
+    setShowConfirmDialog(false);
     try {
       await confirmMovement(transactionId);
       addNotification({ type: 'success', title: 'Confirmed', message: 'Movement confirmed and inventory updated.' });
@@ -353,12 +461,16 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
     name: l.name,
     quantity: l.quantity,
     unit: l.unit,
+    currentStock: l.currentStock,
+    lineNotes: l.lineNotes,
   })) : lines.map(l => ({
     id: l.id,
     sku: l.CatalogItems?.sku ?? '—',
     name: l.CatalogItems?.name ?? '—',
     quantity: l.quantity,
     unit: l.unit ?? 'ea',
+    currentStock: null as number | null,
+    lineNotes: l.notes ?? '',
   }));
 
   const referenceLabel = movement?.reference_type === 'manufacturing_order'
@@ -453,7 +565,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
             {!isCreateMode && isDraft && (
               <button
                 type="button"
-                onClick={handleConfirm}
+                onClick={() => setShowConfirmDialog(true)}
                 disabled={isConfirming}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
               >
@@ -510,6 +622,21 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
+                  {isAdjustmentType && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Reason *</label>
+                      <select
+                        value={adjustmentReason}
+                        onChange={e => setAdjustmentReason(e.target.value as AdjustmentReason | '')}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        <option value="">Select reason...</option>
+                        {(Object.entries(ADJUSTMENT_REASON_LABELS) as [AdjustmentReason, string][]).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <dl className="space-y-2 text-sm">
@@ -523,12 +650,35 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                   </div>
                   <div className="flex justify-between">
                     <dt className="text-gray-500">Date</dt>
-                    <dd className="font-medium text-gray-900">{movement!.movement_date ? new Date(movement!.movement_date).toLocaleDateString() : '—'}</dd>
+                    <dd className="font-medium text-gray-900">{formatDate(movement!.movement_date)}</dd>
                   </div>
+                  {movement!.movement_type === 'adjustment' && movement!.adjustment_reason && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Reason</dt>
+                      <dd className="font-medium text-gray-900">
+                        {ADJUSTMENT_REASON_LABELS[movement!.adjustment_reason as AdjustmentReason] ?? movement!.adjustment_reason}
+                      </dd>
+                    </div>
+                  )}
+                  {isDraft && isAdjustmentType && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 mt-2">Reason *</label>
+                      <select
+                        value={adjustmentReason}
+                        onChange={e => setAdjustmentReason(e.target.value as AdjustmentReason | '')}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        <option value="">Select reason...</option>
+                        {(Object.entries(ADJUSTMENT_REASON_LABELS) as [AdjustmentReason, string][]).map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {movement!.confirmed_at && (
                     <div className="flex justify-between border-t pt-2">
                       <dt className="text-gray-500">Confirmed at</dt>
-                      <dd className="font-medium text-gray-900">{new Date(movement!.confirmed_at).toLocaleString()}</dd>
+                      <dd className="font-medium text-gray-900">{formatDateTime(movement!.confirmed_at)}</dd>
                     </div>
                   )}
                 </dl>
@@ -538,14 +688,14 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
             {/* Reference & Notes card */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Reference & Notes</h3>
-              {isDraft && isCreateMode ? (
+              {isDraft ? (
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
                   <textarea
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
-                    rows={4}
-                    placeholder="Optional notes..."
+                    rows={isAdjustmentType ? 5 : 4}
+                    placeholder={isAdjustmentType ? 'Describe the reason for this adjustment...' : 'Optional notes...'}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
                   />
                 </div>
@@ -578,7 +728,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                   {movement!.notes && (
                     <div className="border-t pt-2">
                       <dt className="text-gray-500 text-xs mb-0.5">Notes</dt>
-                      <dd className="text-gray-700 text-xs">{movement!.notes}</dd>
+                      <dd className="text-gray-700 text-xs whitespace-pre-wrap">{movement!.notes}</dd>
                     </div>
                   )}
                 </dl>
@@ -586,9 +736,22 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
             </div>
           </div>
 
+          {/* Warning for negative stock */}
+          {isDraft && hasNegativeResult && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-800">Negative stock warning</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  One or more items will have a negative balance after this adjustment. Review the "New Qty" column below.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Items table */}
-          {isDraft && (isCreateMode ? movementType : movement?.movement_type) === 'adjustment' && (
-            <p className="text-xs text-gray-500 -mb-4">Positive qty = add stock, negative qty = remove stock (write-off)</p>
+          {isDraft && isAdjustmentType && (
+            <p className="text-xs text-gray-500 -mb-4">Positive qty = add stock &middot; Negative qty = remove stock (write-off)</p>
           )}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
             <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
@@ -623,11 +786,20 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => addItem(item)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-b-0"
+                        onClick={() => void addItem(item)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-b-0 flex items-center justify-between gap-2"
                       >
-                        <span className="font-medium text-gray-900">{item.sku}</span>
-                        <span className="text-gray-500 ml-2">{item.name}</span>
+                        <div className="min-w-0">
+                          <span className="font-medium text-gray-900">{item.sku}</span>
+                          <span className="text-gray-500 ml-2">{item.name}</span>
+                        </div>
+                        <span className={`shrink-0 text-xs tabular-nums px-2 py-0.5 rounded-full ${
+                          (item.stockOnHand ?? 0) > 0
+                            ? 'bg-green-50 text-green-700'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {(item.stockOnHand ?? 0).toFixed(2)} {defaultUnitForBasis(item.measure_basis)}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -642,65 +814,173 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
               </div>
             )}
 
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">SKU</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Item</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">Unit</th>
-                  {isDraft && <th className="px-4 py-3 w-12"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {displayLines.length === 0 ? (
-                  <tr><td colSpan={isDraft ? 5 : 4} className="px-4 py-8 text-center text-gray-500">No items{isDraft ? '. Click "Add Item" to start.' : ''}</td></tr>
-                ) : displayLines.map(line => (
-                  <tr key={line.id} className="border-t hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">{line.sku}</td>
-                    <td className="px-4 py-3 text-gray-700">{line.name}</td>
-                    <td className="px-4 py-3 text-right">
-                      {isDraft ? (
-                        <input
-                          type="number"
-                          value={line.quantity}
-                          onChange={e => updateLineQty(line.id, Number(e.target.value))}
-                          className="w-24 px-2 py-1 border border-gray-200 rounded text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          step="any"
-                        />
-                      ) : (
-                        <span className={`tabular-nums font-medium ${line.quantity < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          {line.quantity > 0 ? '+' : ''}{Number(line.quantity).toFixed(2)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isDraft ? (
-                        <input
-                          type="text"
-                          value={line.unit}
-                          onChange={e => updateLineUnit(line.id, e.target.value)}
-                          className="w-16 px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                        />
-                      ) : (
-                        <span className="text-gray-600">{line.unit}</span>
-                      )}
-                    </td>
-                    {isDraft && (
-                      <td className="px-4 py-3">
-                        <button type="button" onClick={() => removeLine(line.id)} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium text-gray-700">SKU</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-700">Item</th>
+                    {isAdjustmentType && <th className="px-4 py-3 text-right font-medium text-gray-700">On Hand</th>}
+                    <th className="px-4 py-3 text-right font-medium text-gray-700">{isAdjustmentType ? 'Adj Qty' : 'Qty'}</th>
+                    {isAdjustmentType && isDraft && <th className="px-4 py-3 text-right font-medium text-gray-700">New Qty</th>}
+                    <th className="px-4 py-3 text-left font-medium text-gray-700">Unit</th>
+                    {isDraft && <th className="px-4 py-3 text-center font-medium text-gray-700 w-20">Notes</th>}
+                    {isDraft && <th className="px-4 py-3 w-12"></th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {displayLines.length === 0 ? (
+                    <tr>
+                      <td colSpan={isAdjustmentType ? (isDraft ? 8 : 5) : (isDraft ? 6 : 4)} className="px-4 py-8 text-center text-gray-500">
+                        No items{isDraft ? '. Click "Add Item" to start.' : ''}
+                      </td>
+                    </tr>
+                  ) : displayLines.map(line => {
+                    const currentStock = line.currentStock ?? 0;
+                    const newQty = currentStock + line.quantity;
+                    const isNegativeResult = newQty < 0;
+                    return (
+                      <tr key={line.id} className="border-t hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{line.sku}</td>
+                        <td className="px-4 py-3 text-gray-700">{line.name}</td>
+                        {isAdjustmentType && (
+                          <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                            {line.currentStock !== null ? Number(line.currentStock).toFixed(2) : '—'}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-right">
+                          {isDraft ? (
+                            <input
+                              type="number"
+                              value={line.quantity}
+                              onChange={e => updateLineQty(line.id, Number(e.target.value))}
+                              className="w-24 px-2 py-1 border border-gray-200 rounded text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/20"
+                              step="any"
+                            />
+                          ) : (
+                            <span className={`tabular-nums font-medium ${line.quantity < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                              {line.quantity > 0 ? '+' : ''}{Number(line.quantity).toFixed(2)}
+                            </span>
+                          )}
+                        </td>
+                        {isAdjustmentType && isDraft && (
+                          <td className={`px-4 py-3 text-right tabular-nums font-medium ${isNegativeResult ? 'text-red-600' : 'text-gray-900'}`}>
+                            {line.currentStock !== null ? newQty.toFixed(2) : '—'}
+                            {isNegativeResult && <AlertTriangle className="w-3.5 h-3.5 inline ml-1 text-red-500" />}
+                          </td>
+                        )}
+                        <td className="px-4 py-3">
+                          {isDraft ? (
+                            <select
+                              value={line.unit}
+                              onChange={e => updateLineUnit(line.id, e.target.value)}
+                              className="w-16 px-1 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            >
+                              <option value="ea">ea</option>
+                              <option value="m">m</option>
+                              <option value="m2">m2</option>
+                            </select>
+                          ) : (
+                            <span className="text-gray-600">{line.unit}</span>
+                          )}
+                        </td>
+                        {isDraft && (
+                          <td className="px-4 py-3 text-center">
+                            {line.lineNotes ? (
+                              <button
+                                type="button"
+                                title={line.lineNotes}
+                                onClick={() => {
+                                  const val = prompt('Line note:', line.lineNotes);
+                                  if (val !== null) updateLineNotes(line.id, val);
+                                }}
+                                className="p-1 text-primary hover:text-primary/80 rounded"
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                title="Add note"
+                                onClick={() => {
+                                  const val = prompt('Line note:');
+                                  if (val) updateLineNotes(line.id, val);
+                                }}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        )}
+                        {isDraft && (
+                          <td className="px-4 py-3">
+                            <button type="button" onClick={() => removeLine(line.id)} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Line notes display for confirmed */}
+            {isConfirmed && displayLines.some(l => l.lineNotes) && (
+              <div className="px-4 py-3 border-t bg-gray-50">
+                <h4 className="text-xs font-medium text-gray-500 mb-2">Line Notes</h4>
+                <div className="space-y-1">
+                  {displayLines.filter(l => l.lineNotes).map(l => (
+                    <p key={l.id} className="text-xs text-gray-600">
+                      <span className="font-medium">{l.sku}:</span> {l.lineNotes}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Confirm Movement</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              This will apply the {isAdjustmentType ? 'adjustment' : 'movement'} to inventory balances. This action cannot be undone.
+            </p>
+            {hasNegativeResult && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 my-3">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700">
+                  Warning: Some items will have negative stock after this adjustment.
+                </p>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setShowConfirmDialog(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={isConfirming}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {isConfirming ? 'Confirming...' : 'Confirm & Apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

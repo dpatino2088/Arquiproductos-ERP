@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useWorkOrderTasks, type WorkOrderTask } from '../../hooks/useWorkOrderTasks';
 import StatusBadge from '../../components/shared/StatusBadge';
+import AssemblyDetail from '../../components/manufacturing/assembly/AssemblyDetail';
 import { generateWorkOrderPDF } from '../../lib/pdf/workOrderPdf';
 import { generatePartLabelsPDF, type PartLabel } from '../../lib/pdf/partLabelPdf';
+
 import {
   ArrowLeft,
   Play,
@@ -21,6 +24,9 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  Scissors,
+  Box,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface MOInfo {
@@ -35,11 +41,12 @@ interface WorkOrderDetailProps {
   moId: string;
 }
 
-function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
+function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks }: {
   task: WorkOrderTask;
   onToggleLine: (lineId: string, completed: boolean) => void;
   onStatusChange: (taskId: string, status: 'pending' | 'in_progress' | 'completed') => void;
   moMeta: MOInfo;
+  siblingTasks?: WorkOrderTask[];
 }) {
   const [expanded, setExpanded] = useState(true);
   const completedCount = task.lines.filter(l => l.completed).length;
@@ -48,6 +55,19 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
 
   const stationName = task.work_center?.name ?? 'Station';
   const stationCode = task.work_center?.code ?? '';
+
+  const isAssembly = stationCode === 'ASSEMBLY';
+  const upstreamTasks = isAssembly && siblingTasks
+    ? siblingTasks.filter(t => t.work_center?.code !== 'ASSEMBLY')
+    : [];
+  const allUpstreamReady = upstreamTasks.length === 0 || upstreamTasks.every(t => t.status === 'completed');
+
+  // Generic dependency guard: check depends_on_task_ids
+  const depIds = task.depends_on_task_ids ?? [];
+  const depsBlocked = depIds.length > 0 && siblingTasks
+    ? !depIds.every(depId => siblingTasks.find(s => s.id === depId)?.status === 'completed')
+    : false;
+  const canStart = !depsBlocked && (isAssembly ? allUpstreamReady : true);
 
   return (
     <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
@@ -61,6 +81,11 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
             <span className="ml-2 text-xs text-gray-400 font-mono">{stationCode}</span>
           </div>
           <StatusBadge status={task.status} type="workOrder" size="sm" />
+          {task.assigned_to && (
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
+              <User className="w-3 h-3" /> {task.assigned_to}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -72,12 +97,17 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
             />
           </div>
 
-          {task.status === 'pending' && (
+          {task.status === 'pending' && canStart && (
             <button type="button" onClick={() => onStatusChange(task.id, 'in_progress')} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">
               <Play className="h-3 w-3" /> Start
             </button>
           )}
-          {task.status === 'in_progress' && completedCount === totalCount && totalCount > 0 && (
+          {task.status === 'pending' && !canStart && (
+            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Upstream tasks must be completed first">
+              <AlertTriangle className="h-3 w-3" /> Blocked
+            </span>
+          )}
+          {task.status === 'in_progress' && completedCount === totalCount && totalCount > 0 && canStart && (
             <button type="button" onClick={() => onStatusChange(task.id, 'completed')} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-600 text-white hover:bg-green-700">
               <CheckCircle2 className="h-3 w-3" /> Complete
             </button>
@@ -91,7 +121,7 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
               customerName: moMeta.customer_name,
               productName: moMeta.product_name,
               salesOrderNo: moMeta.so_number,
-              date: new Date().toLocaleDateString(),
+              date: formatDate(new Date()),
               lines: task.lines.map(l => ({ sku: l.sku ?? '', description: l.item_name ?? '', role: l.component_role ?? '', qty: l.qty, uom: l.uom, cutLength: l.cut_length_mm != null ? Number(l.cut_length_mm) : null, cutWidth: l.cut_width_mm != null ? Number(l.cut_width_mm) : null })),
             });
             pdf.save(`WO-${moMeta.mo_number}-${stationCode}.pdf`);
@@ -103,7 +133,7 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
               moNumber: moMeta.mo_number,
               soNumber: moMeta.so_number,
               customerName: moMeta.customer_name,
-              date: new Date().toLocaleDateString(),
+              date: formatDate(new Date()),
               sku: l.sku ?? '',
               itemName: l.item_name ?? '',
               cutDimension: l.cut_length_mm != null ? `X ${Math.round(Number(l.cut_length_mm))} mm` : (l.cut_width_mm != null ? `Y ${Math.round(Number(l.cut_width_mm))} mm` : '—'),
@@ -115,10 +145,74 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
           }} className="p-1.5 rounded hover:bg-gray-200 text-gray-500" title="Print labels">
             <Tag className="h-3.5 w-3.5" />
           </button>
+          {(stationCode === 'CUT-PROFILE' || stationCode === 'CUT-ROLL') && (
+            <button
+              type="button"
+              onClick={() => router.navigate('/manufacturing/cut-optimization')}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+              title="Optimize cuts across MOs"
+            >
+              <Scissors className="h-3 w-3" /> Optimize
+            </button>
+          )}
         </div>
       </div>
 
-      {expanded && (
+      {expanded && isAssembly && upstreamTasks.length > 0 && (
+        <div className="px-4 py-2.5 border-b border-gray-100 bg-white flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Readiness:</span>
+          {upstreamTasks.map(ut => {
+            const utName = ut.work_center?.name ?? ut.work_center?.code ?? 'Task';
+            const isReady = ut.status === 'completed';
+            const isActive = ut.status === 'in_progress';
+            return (
+              <span
+                key={ut.id}
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
+                  isReady ? 'bg-green-100 text-green-700' : isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+                }`}
+              >
+                {isReady ? <CheckCircle2 className="w-3 h-3" /> : isActive ? <Play className="w-3 h-3" /> : <Package className="w-3 h-3" />}
+                {utName}
+              </span>
+            );
+          })}
+          {allUpstreamReady && (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+              <CheckCircle2 className="w-3.5 h-3.5" /> All Ready
+            </span>
+          )}
+        </div>
+      )}
+
+      {expanded && isAssembly && (
+        <div className="p-3">
+          <AssemblyDetail
+            manufacturingOrderId={task.manufacturing_order_id}
+            moNumber={moMeta.mo_number}
+            productName={moMeta.product_name}
+            lines={task.lines.map(l => ({
+              id: l.id,
+              sku: l.sku,
+              item_name: l.item_name,
+              component_role: l.component_role,
+              qty: l.qty,
+              uom: l.uom,
+              cut_length_mm: l.cut_length_mm != null ? Number(l.cut_length_mm) : null,
+              cut_width_mm: l.cut_width_mm != null ? Number(l.cut_width_mm) : null,
+              completed: l.completed,
+              bom_instance_line_id: l.bom_instance_line_id,
+            }))}
+            onToggleLine={onToggleLine}
+            siblingTasks={siblingTasks?.map(t => ({
+              code: t.work_center?.code ?? '',
+              status: t.status,
+            })).filter(t => t.code !== 'ASSEMBLY')}
+          />
+        </div>
+      )}
+
+      {expanded && !isAssembly && (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-gray-500 text-xs">
@@ -173,18 +267,19 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta }: {
 }
 
 export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { tasks, loading: tasksLoading, toggleLineCompleted, updateTaskStatus } = useWorkOrderTasks(moId);
   const [moInfo, setMoInfo] = useState<MOInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
+    registerSubmodules('Manufacturing', filteredSubmodules);
     return () => {
       const path = window.location.pathname;
       if (!path.startsWith('/manufacturing')) clearSubmoduleNav();
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
   const fetchMOInfo = useCallback(async () => {
     setLoading(true);
@@ -244,8 +339,8 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
   if (!moInfo) {
     return (
       <div className="py-6 px-6">
-        <button onClick={() => router.navigate('/manufacturing/work-orders')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4">
-          <ArrowLeft className="w-4 h-4" /> Back to Work Orders
+        <button onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${moId}`)} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4">
+          <ArrowLeft className="w-4 h-4" /> Back to Manufacturing Order
         </button>
         <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
           <p className="text-gray-500">Work order not found</p>
@@ -269,10 +364,10 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
   return (
     <div className="py-6 px-6">
       <button
-        onClick={() => router.navigate('/manufacturing/work-orders')}
+        onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${moId}`)}
         className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4"
       >
-        <ArrowLeft className="w-4 h-4" /> Back to Work Orders
+        <ArrowLeft className="w-4 h-4" /> ← {moInfo?.mo_number ?? 'Manufacturing Order'}
       </button>
 
       {/* Header */}
@@ -319,7 +414,7 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
             <Calendar className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
             <div>
               <p className="text-xs text-gray-400">Due Date</p>
-              <p className="text-sm font-medium text-gray-900">{moInfo.due_date ? new Date(moInfo.due_date).toLocaleDateString() : '—'}</p>
+              <p className="text-sm font-medium text-gray-900">{formatDate(moInfo.due_date)}</p>
             </div>
           </div>
         </div>
@@ -348,6 +443,7 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
             onToggleLine={toggleLineCompleted}
             onStatusChange={updateTaskStatus}
             moMeta={moInfo}
+            siblingTasks={tasks}
           />
         ))}
         {tasks.length === 0 && (

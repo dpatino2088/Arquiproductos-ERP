@@ -62,6 +62,11 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'inventory.read',
     'manufacturing.read',
     'manufacturing.write',
+    'manufacturing.wo.read',
+    'manufacturing.wo.write',
+    'manufacturing.workstation.read',
+    'manufacturing.cutopt.read',
+    // Operator does NOT get: manufacturing.mo.read/write, .calendar.read, .costs.read
     // NO directory.*, NO sales.*, NO settings.*, NO finance.*, NO org.*
   ],
   procurement: [

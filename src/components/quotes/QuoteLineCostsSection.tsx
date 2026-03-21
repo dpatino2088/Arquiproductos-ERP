@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatDateTime } from '../../lib/utils';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -234,7 +235,7 @@ export default function QuoteLineCostsSection({
             </div>
             {costs.calculated_at && (
               <div className="text-xs text-gray-500 mt-2">
-                Last calculated: {new Date(costs.calculated_at).toLocaleString()}
+                Last calculated: {formatDateTime(costs.calculated_at)}
               </div>
             )}
           </div>

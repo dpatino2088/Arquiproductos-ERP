@@ -8,6 +8,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { buildDirectoryScopeKey } from '../../lib/directoryScopeKey';
 import { proposalDetailKey } from '../../lib/queryKeys';
 import { warmDetailIfNeeded } from '../../lib/zeroLoading';
@@ -29,10 +30,7 @@ import { supabase } from '../../lib/supabase/client';
 import { getSupabaseErrorMessage } from '../../lib/supabase-error-utils';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString();
-}
+import { formatDate } from '../../lib/utils';
 
 function formatCurrency(amount: number | null | undefined) {
   if (amount == null) return '—';
@@ -51,6 +49,7 @@ export default function Proposals() {
   const { activeOrganizationId } = useOrganizationContext();
   const { activeDealerId } = useActiveDealer();
   const { userType } = useAccessContext();
+  const { canCreate: canCreateProp, canArchive: canArchiveProp, canDelete: canDeleteProp } = useGranularAccess('proposals');
   const queryClient = useQueryClient();
 
   const scopeKey = useMemo(
@@ -365,7 +364,7 @@ export default function Proposals() {
           <h1 className="text-xl font-semibold text-foreground">Proposals</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
-          {selectedIds.size > 0 && (
+          {canDeleteProp && selectedIds.size > 0 && (
             <button
               onClick={handleDeleteSelected}
               className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
@@ -582,22 +581,26 @@ export default function Proposals() {
                             >
                               <Edit style={{ width: 14, height: 14 }} />
                             </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleArchive(p, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Archive"
-                            >
-                              <Archive style={{ width: 14, height: 14 }} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteOne(p, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 style={{ width: 14, height: 14 }} />
-                            </button>
+                            {canArchiveProp && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleArchive(p, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Archive"
+                              >
+                                <Archive style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
+                            {canDeleteProp && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteOne(p, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
                           </>
                         )}
                       </div>

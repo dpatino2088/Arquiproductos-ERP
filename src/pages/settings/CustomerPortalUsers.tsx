@@ -9,8 +9,10 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { usePermissions } from '../../hooks/usePermissions';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
@@ -927,6 +929,7 @@ export default function DealerUsers() {
   const { user: currentUser } = useAuthStore();
   const { addNotification, setGlobalLoading } = useUIStore();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
+  const { can } = usePermissions();
 
   useEffect(() => {
     setGlobalLoading(loading);
@@ -1259,7 +1262,7 @@ export default function DealerUsers() {
                     {/* Created */}
                     <td className="py-4 px-6 text-gray-600 text-sm">
                       {user.created_at 
-                        ? new Date(user.created_at).toLocaleDateString()
+                        ? formatDate(user.created_at)
                         : '—'}
                     </td>
                     
@@ -1324,23 +1327,27 @@ export default function DealerUsers() {
                           <Edit className="w-4 h-4" />
                         </button>
 
-                        <button
-                          onClick={() => handleArchive(user)}
-                          disabled={archivingId === user.id || user.status === 'disabled'}
-                          className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                          title="Archive user"
-                        >
-                          <Archive className="w-4 h-4" />
-                        </button>
+                        {can('org.users.manage') && (
+                          <button
+                            onClick={() => handleArchive(user)}
+                            disabled={archivingId === user.id || user.status === 'disabled'}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                            title="Archive user"
+                          >
+                            <Archive className="w-4 h-4" />
+                          </button>
+                        )}
 
-                        <button
-                          onClick={() => handleDelete(user)}
-                          disabled={deletingId === user.id}
-                          className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50"
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {can('org.users.manage') && (
+                          <button
+                            onClick={() => handleDelete(user)}
+                            disabled={deletingId === user.id}
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50"
+                            title="Delete user"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

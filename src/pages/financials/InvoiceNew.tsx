@@ -8,12 +8,9 @@ import { useCostSettings } from '../../hooks/useCosts';
 import { generateNextInvoiceNumber } from '../../lib/sequential-numbers';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { ArrowLeft, Plus, Trash2, FileText, DollarSign } from 'lucide-react';
-
-const FINANCIAL_SUBMODULES = [
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
+import { useGranularAccess } from '../../hooks/usePermissions';
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 
 interface DealerOption {
   id: string;
@@ -96,6 +93,7 @@ export default function InvoiceNew() {
   const { user } = useAuth();
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
+  const { canCreate: canCreateFin } = useGranularAccess('financials');
   const { settings: costSettings } = useCostSettings();
   const defaultTaxPct = costSettings?.tax_pct ?? 0.07;
   const [taxExempt, setTaxExempt] = useState(false);
@@ -139,7 +137,7 @@ export default function InvoiceNew() {
   const listPath = '/financials/invoices';
   const queryReturnTo = getReturnToFromCurrentQuery();
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
+  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
 
   useEffect(() => {
     if (!activeOrganizationId) return;
@@ -182,7 +180,7 @@ export default function InvoiceNew() {
           .single(),
         supabase
           .from('SaleOrderLines')
-          .select('description, collection_name, variant_name, quantity, unit_price, line_total, CatalogItems:catalog_item_id (name, sku)')
+          .select('description, collection_name, variant_name, product_type, quantity, unit_price, line_total, CatalogItems:catalog_item_id (name, sku, manufacturer)')
           .eq('sales_order_id', soId)
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
@@ -229,16 +227,28 @@ export default function InvoiceNew() {
       const mappedLines: InvoiceLine[] = [];
       if (!linesRes.error && linesRes.data && linesRes.data.length > 0) {
         const soLines = linesRes.data as Array<Record<string, unknown>>;
+        const productTypeLabels: Record<string, string> = {
+          roller: 'Roller Shade',
+          drapery: 'Drapery',
+          catalog: 'Catalog',
+          blind: 'Blind',
+          curtain: 'Curtain',
+          shutter: 'Shutter',
+        };
         for (const l of soLines) {
-          const item = l.CatalogItems as { name?: string; sku?: string } | null | undefined;
+          const item = l.CatalogItems as { name?: string; sku?: string; manufacturer?: string } | null | undefined;
           const name = item?.name || String(l.description || l.collection_name || l.variant_name || 'Item');
           const sku = item?.sku ? ` (${item.sku})` : '';
+          const ptRaw = String(l.product_type || '').toLowerCase();
+          const ptLabel = productTypeLabels[ptRaw] || (ptRaw ? ptRaw.charAt(0).toUpperCase() + ptRaw.slice(1) : '');
+          const mfr = item?.manufacturer ? ` | ${item.manufacturer}` : '';
+          const descParts = [ptLabel, `${name}${mfr}${sku}`].filter(Boolean);
           const qty = Math.max(1, safeNumber(l.quantity, 1));
           const unit = Math.max(0, safeNumber(l.unit_price, 0));
           const lineSubtotal = Math.max(0, safeNumber(l.line_total, qty * unit));
           mappedLines.push({
             key: newLineKey(),
-            description: `${String(name)}${sku}`,
+            description: descParts.join(' - '),
             qty,
             unit_price: unit,
             base_subtotal: lineSubtotal,
@@ -263,23 +273,26 @@ export default function InvoiceNew() {
       }
 
       const soSubtotalBase = mappedLines.reduce((sum, line) => sum + Math.max(0, line.base_subtotal), 0);
+      const effectiveTarget = (soSubtotalBase > 0 && targetInvoiceAmount > 0 && targetInvoiceAmount >= soSubtotalBase * 0.99)
+        ? soSubtotalBase
+        : targetInvoiceAmount;
       let allocated = 0;
       const lastIndex = mappedLines.length - 1;
       const rebalancedLines = mappedLines.map((line, idx) => {
         const qty = Math.max(1, safeNumber(line.qty, 1));
         let billingAmount = 0;
-        if (targetInvoiceAmount > 0) {
+        if (effectiveTarget > 0) {
           if (soSubtotalBase > 0) {
             if (idx === lastIndex) {
-              billingAmount = roundToCents(Math.max(0, targetInvoiceAmount - allocated));
+              billingAmount = roundToCents(Math.max(0, effectiveTarget - allocated));
             } else {
-              const weightedAmount = roundToCents((targetInvoiceAmount * Math.max(0, line.base_subtotal)) / soSubtotalBase);
-              const available = roundToCents(Math.max(0, targetInvoiceAmount - allocated));
+              const weightedAmount = roundToCents((effectiveTarget * Math.max(0, line.base_subtotal)) / soSubtotalBase);
+              const available = roundToCents(Math.max(0, effectiveTarget - allocated));
               billingAmount = Math.min(weightedAmount, available);
               allocated = roundToCents(allocated + billingAmount);
             }
           } else if (idx === 0) {
-            billingAmount = roundToCents(targetInvoiceAmount);
+            billingAmount = roundToCents(effectiveTarget);
           }
         }
 
@@ -581,7 +594,7 @@ export default function InvoiceNew() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !selectedDealerId}
+              disabled={saving || !selectedDealerId || !canCreateFin}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Saving...' : 'Save as Draft'}
@@ -811,7 +824,7 @@ export default function InvoiceNew() {
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs w-8">#</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs">Description</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-24">%</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">%</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">Amount</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-20">Qty</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">Unit Price</th>

@@ -145,6 +145,17 @@ export function convertInternalToPurchaseQty(input: ConversionToExternalInput): 
 
   if (input.purchaseMode === 'linear_direct') {
     const converted = fromMeters(qty, input.purchaseUnit);
+    const unitsPerPiece = Math.max(1, Number(input.unitsPerPurchaseUnit ?? 1));
+    if (unitsPerPiece > 1) {
+      // Round up to full pieces (e.g. tubes of 19ft → order in multiples of 19)
+      const pieces = Math.max(1, Math.ceil(converted / unitsPerPiece));
+      const orderQty = pieces * unitsPerPiece;
+      return {
+        orderQty,
+        lineUnit: input.purchaseUnit || 'm',
+        unitCost: (costPerUnit) => costPerUnit,
+      };
+    }
     const orderQty = Math.ceil(converted * 100) / 100;
     return {
       orderQty,

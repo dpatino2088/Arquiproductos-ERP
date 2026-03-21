@@ -6,14 +6,13 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useUIStore } from '../../stores/ui-store';
+import { useAuth } from '../../hooks/useAuth';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { FileText, DollarSign } from 'lucide-react';
 import { getSupabaseErrorMessageDetailed } from '../../lib/supabase-error-utils';
-
-const FINANCIAL_SUBMODULES = [
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
+import { formatDate } from '../../lib/utils';
+import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
+import { useGranularAccess } from '../../hooks/usePermissions';
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 
 interface DealerInfo {
   dealer_name: string;
@@ -43,6 +42,7 @@ interface PaymentHeader {
   reference_number: string | null;
   payment_date: string;
   notes: string | null;
+  recorded_by: string | null;
   recorded_by_name: string | null;
   status: string;
   dealer_id: string | null;
@@ -50,6 +50,7 @@ interface PaymentHeader {
   created_at: string;
   bank_name?: string | null;
   description?: string | null;
+  void_reason?: string | null;
   Dealer?: DealerInfo | null;
   SalesOrder?: { id: string; sales_order_no: string } | null;
 }
@@ -110,6 +111,8 @@ export default function PaymentDetail() {
   const { registerSubmodules } = useSubmoduleNav();
 
   const addNotification = useUIStore((s) => s.addNotification);
+  const { user } = useAuth();
+  const { canVoid: canVoidFin } = useGranularAccess('financials');
 
   const [payment, setPayment] = useState<PaymentHeader | null>(null);
   const [applications, setApplications] = useState<InvoiceApplication[]>([]);
@@ -128,6 +131,7 @@ export default function PaymentDetail() {
   const [voidDialogOpen, setVoidDialogOpen] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [voidingPayment, setVoidingPayment] = useState(false);
+  const [unapplyTarget, setUnapplyTarget] = useState<InvoiceApplication | null>(null);
   const listPath = '/financials/payments';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -146,7 +150,7 @@ export default function PaymentDetail() {
     });
   }, [queryReturnTo]);
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
+  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
 
   const fmt = (v: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
@@ -156,7 +160,7 @@ export default function PaymentDetail() {
     setLoading(true);
     setError(null);
     try {
-      const baseSelect = 'id, amount, payment_method, reference_number, payment_date, notes, recorded_by_name, dealer_id, sales_order_id, created_at';
+      const baseSelect = 'id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, dealer_id, sales_order_id, created_at, status, void_reason';
       const extendedSelect = `${baseSelect}, bank_name, description`;
 
       let pay: PaymentHeader;
@@ -165,7 +169,6 @@ export default function PaymentDetail() {
         .select(extendedSelect)
         .eq('id', paymentId)
         .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
         .single();
 
       if (!primary.error) {
@@ -173,15 +176,14 @@ export default function PaymentDetail() {
       } else {
         const msg = getErrorMessage(primary.error).toLowerCase();
         const isMissingOptionalColumn =
-          msg.includes('column') && (msg.includes('bank_name') || msg.includes('description'));
+          msg.includes('column') && (msg.includes('bank_name') || msg.includes('description') || msg.includes('void_reason'));
         if (!isMissingOptionalColumn) throw primary.error;
 
         const fallback = await supabase
           .from('Payments')
-          .select(baseSelect)
+          .select('id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, dealer_id, sales_order_id, created_at, status, void_reason')
           .eq('id', paymentId)
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
           .single();
         if (fallback.error) throw fallback.error;
         pay = { ...(fallback.data as PaymentHeader), bank_name: null, description: null };
@@ -203,11 +205,18 @@ export default function PaymentDetail() {
 
       pay.Dealer = (dealerRes.data as DealerInfo) ?? null;
       pay.SalesOrder = soRes.data ?? null;
-      // Derive status from applications
-      const totalApplied = (appsRes.data ?? []).reduce((s: number, a: any) => s + Number(a.applied_amount), 0);
-      if (totalApplied >= pay.amount) pay.status = 'applied';
-      else if (totalApplied > 0) pay.status = 'partial';
-      else pay.status = 'unapplied';
+      // If payment is void, preserve that status; otherwise derive from applications
+      if (pay.status !== 'void') {
+        const totalApplied = (appsRes.data ?? []).reduce((s: number, a: any) => s + Number(a.applied_amount), 0);
+        if (totalApplied >= pay.amount) pay.status = 'applied';
+        else if (totalApplied > 0) pay.status = 'partial';
+        else pay.status = 'unapplied';
+      }
+      if (pay.recorded_by) {
+        const nameMap = await getAppUsersDisplayNames([pay.recorded_by]);
+        const resolved = nameMap.get(pay.recorded_by);
+        if (resolved && resolved !== 'Legacy / Imported') pay.recorded_by_name = resolved;
+      }
       setPayment(pay);
 
       const apps = (appsRes.data ?? []) as InvoiceApplication[];
@@ -404,13 +413,28 @@ export default function PaymentDetail() {
     }
   };
 
-  const handleUnapply = async (application: InvoiceApplication) => {
+  const confirmUnapply = async () => {
+    if (!unapplyTarget || !paymentId || !activeOrganizationId) return;
     try {
       const { error: delErr } = await supabase
         .from('PaymentApplications')
         .delete()
-        .eq('id', application.id);
+        .eq('id', unapplyTarget.id);
       if (delErr) throw delErr;
+
+      await supabase.from('FinancialAuditLog').insert({
+        organization_id: activeOrganizationId,
+        action: 'unapply_payment',
+        entity_type: 'payment',
+        entity_id: paymentId,
+        related_entity_type: 'invoice',
+        related_entity_id: unapplyTarget.invoice_id,
+        amount: unapplyTarget.applied_amount,
+        performed_by: user?.id ?? null,
+        performed_by_name: user?.name ?? user?.email ?? null,
+      });
+
+      setUnapplyTarget(null);
       addNotification({ type: 'success', title: 'Unapplied', message: 'Application removed successfully.' });
       await refetch();
     } catch (e: unknown) {
@@ -434,16 +458,36 @@ export default function PaymentDetail() {
     }
     setVoidingPayment(true);
     try {
-      const notes = [payment.notes, `VOID REASON: ${voidReason.trim()}`].filter(Boolean).join('\n');
+      const now = new Date().toISOString();
       const { error: updErr } = await supabase
         .from('Payments')
-        .update({ deleted: true, notes, updated_at: new Date().toISOString() })
+        .update({
+          status: 'void',
+          void_reason: voidReason.trim(),
+          voided_by: user?.id ?? null,
+          voided_at: now,
+          updated_at: now,
+        })
         .eq('id', paymentId);
       if (updErr) throw updErr;
+
+      if (activeOrganizationId) {
+        await supabase.from('FinancialAuditLog').insert({
+          organization_id: activeOrganizationId,
+          action: 'void_payment',
+          entity_type: 'payment',
+          entity_id: paymentId,
+          amount: payment.amount,
+          reason: voidReason.trim(),
+          performed_by: user?.id ?? null,
+          performed_by_name: user?.name ?? user?.email ?? null,
+        });
+      }
+
       setVoidDialogOpen(false);
       setVoidReason('');
-      addNotification({ type: 'success', title: 'Payment Voided', message: 'Payment removed from active ledger.' });
-      onBack();
+      addNotification({ type: 'success', title: 'Payment Voided', message: 'Payment has been voided and remains on record.' });
+      await refetch();
     } catch (e: unknown) {
       addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
     } finally {
@@ -505,7 +549,7 @@ export default function PaymentDetail() {
               Back
             </button>
           )}
-          {unapplied >= payment.amount - 0.005 && (
+          {payment.status !== 'void' && unapplied >= payment.amount - 0.005 && canVoidFin && (
             <button
               type="button"
               onClick={() => setVoidDialogOpen(true)}
@@ -517,6 +561,21 @@ export default function PaymentDetail() {
         </div>
       )}
     >
+      {/* Void banner */}
+      {payment.status === 'void' && (() => {
+        const reason = payment.void_reason
+          || (payment.notes?.match(/VOID REASON:\s*(.+)/)?.[1]?.trim())
+          || null;
+        return (
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-4">
+            <p className="text-sm font-semibold text-red-800">This payment has been voided</p>
+            {reason && (
+              <p className="mt-1 text-sm text-red-700">Reason: {reason}</p>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {/* Payment Info card */}
@@ -537,7 +596,7 @@ export default function PaymentDetail() {
             </div>
             <div className="flex justify-between">
               <dt className="text-gray-500">Date</dt>
-              <dd className="text-gray-900">{new Date(payment.payment_date).toLocaleDateString()}</dd>
+              <dd className="text-gray-900">{formatDate(payment.payment_date)}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-gray-500">Recorded By</dt>
@@ -656,7 +715,7 @@ export default function PaymentDetail() {
 
       {activeTab === 'invoices' && (
         <div className="space-y-4">
-          {unapplied > 0.005 && payment.dealer_id && !applyFormOpen && (
+          {unapplied > 0.005 && payment.dealer_id && payment.status !== 'void' && !applyFormOpen && (
             <div className="flex justify-end">
               <button
                 type="button"
@@ -758,15 +817,17 @@ export default function PaymentDetail() {
                     <td className="px-4 py-4 text-center">
                       {a.Invoice ? <StatusBadge status={a.Invoice.status} type="invoice" size="sm" /> : '—'}
                     </td>
-                    <td className="px-4 py-4 text-gray-500">{new Date(a.created_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-4 text-gray-500">{formatDate(a.created_at)}</td>
                     <td className="px-4 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); void handleUnapply(a); }}
-                        className="px-2 py-1 text-xs font-medium text-red-700 border border-red-200 rounded hover:bg-red-50"
-                      >
-                        Unapply
-                      </button>
+                      {payment.status !== 'void' && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setUnapplyTarget(a); }}
+                          className="px-2 py-1 text-xs font-medium text-red-700 border border-red-200 rounded hover:bg-red-50"
+                        >
+                          Unapply
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -816,6 +877,37 @@ export default function PaymentDetail() {
                 className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg disabled:opacity-50"
               >
                 {voidingPayment ? 'Voiding...' : 'Void Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unapplyTarget && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Unapply Payment</h4>
+            <p className="text-sm text-gray-600 mb-3">
+              Remove <span className="font-semibold">{fmt(unapplyTarget.applied_amount)}</span> from invoice{' '}
+              <span className="font-semibold">{unapplyTarget.Invoice?.invoice_number ?? '—'}</span>?
+            </p>
+            <p className="text-xs text-gray-500 mb-3">
+              The payment will return to unapplied status and can be re-applied to another invoice.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUnapplyTarget(null)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { void confirmUnapply(); }}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg"
+              >
+                Confirm Unapply
               </button>
             </div>
           </div>

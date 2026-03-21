@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { usePermissions } from '../../hooks/usePermissions';
+import { usePermissions, useManufacturingAccess } from '../../hooks/usePermissions';
 import { NoOrganizationMessage } from '../../components/NoOrganizationMessage';
 import { useOrganizationContext } from '../../context/OrganizationContext';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 
 export default function Manufacturing() {
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { can, loading: permissionsLoading } = usePermissions();
   const { activeOrganizationId, hasOrganizations, loading: orgLoading } = useOrganizationContext();
@@ -17,10 +18,11 @@ export default function Manufacturing() {
     if (currentPath.startsWith('/manufacturing')) {
       // Register submodules without clearing first (let individual components handle it)
       // This ensures tabs are visible when navigating directly to sub-routes
-      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
+      registerSubmodules('Manufacturing', filteredSubmodules);
       
       if (currentPath === '/manufacturing' || currentPath === '/manufacturing/') {
-        router.navigate('/manufacturing/manufacturing-orders');
+        const firstTab = filteredSubmodules[0];
+        router.navigate(firstTab?.href ?? '/manufacturing/work-orders');
       }
     }
     
@@ -30,10 +32,10 @@ export default function Manufacturing() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
-  // Check permissions
-  if (!permissionsLoading && !can('manufacturing.read')) {
+  // Check permissions — allow if user has legacy or any granular manufacturing permission
+  if (!permissionsLoading && filteredSubmodules.length === 0 && !can('manufacturing.read')) {
     return (
       <div className="p-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">

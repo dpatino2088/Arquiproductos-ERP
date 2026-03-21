@@ -536,7 +536,7 @@ export function useQuoteLines(quoteId: string | null) {
         if (catalogItemIdsFromLines.length > 0) {
           const { data: catalogItemsData } = await supabase
             .from('CatalogItems')
-            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, metadata, item_role')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, item_role')
             .in('id', catalogItemIdsFromLines)
             .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
             .eq('is_active', true);
@@ -649,6 +649,43 @@ export function useQuoteLines(quoteId: string | null) {
           }
         });
 
+        // 4.9. Drive system label: collect drive_item_id (manual) and motor_item_id (motorized) from config_snapshot, fetch CatalogItems for manufacturer
+        const driveItemIds = new Set<string>();
+        data.forEach((line: any) => {
+          const id = line.operating_system_drive_id;
+          if (id) driveItemIds.add(id);
+        });
+        configuredProductsMap.forEach((cp: ConfiguredProductData) => {
+          const snap = cp.config_snapshot;
+          const driveId = snap?.drive_item_id;
+          const motorId = snap?.motor_item_id;
+          if (driveId) driveItemIds.add(driveId);
+          if (motorId) driveItemIds.add(motorId);
+        });
+        let driveItemsMap = new Map<string, { name?: string; manufacturer_name?: string | null }>();
+        if (driveItemIds.size > 0) {
+          const { data: driveItemsData, error: driveErr } = await supabase
+            .from('CatalogItems')
+            .select('id, name, sku, manufacturer_id, manufacturer, Manufacturers(name)')
+            .in('id', Array.from(driveItemIds))
+            .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
+            .eq('is_active', true);
+          if (driveErr) {
+            console.warn('[useQuoteLines] Error fetching drive items:', driveErr.message);
+          }
+          if (driveItemsData?.length) {
+            driveItemsData.forEach((item: any) => {
+              const fromJoin = (item.Manufacturers as { name?: string } | null)?.name ?? (item.manufacturers as { name?: string } | null)?.name;
+              const fromColumn = item.manufacturer ? String(item.manufacturer).trim() : null;
+              const mfrName = fromJoin || fromColumn || null;
+              driveItemsMap.set(item.id, {
+                name: item.name,
+                manufacturer_name: mfrName,
+              });
+            });
+          }
+        }
+
         // 5. Enriquecer líneas con todos los datos
         const enrichedLines = data.map((line: any) => {
           const components = componentsByLineId.get(line.id) || { fabric: [], accessories: [] };
@@ -695,6 +732,21 @@ export function useQuoteLines(quoteId: string | null) {
             }
           }
           
+          const driveType = line.drive_type || options.drive_type || null;
+          const snap = configuredProduct?.config_snapshot;
+          const driveItemId = line.operating_system_drive_id ?? snap?.drive_item_id ?? (driveType === 'motor' ? snap?.motor_item_id : snap?.drive_item_id);
+          const motorItemId = snap?.motor_item_id;
+          const systemItemId = driveType === 'motor' ? (motorItemId ?? driveItemId) : (driveItemId ?? motorItemId);
+          const driveItem = systemItemId ? driveItemsMap.get(systemItemId) : null;
+          const driveTypeLabel = driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : null;
+          const manufacturerName = driveItem?.manufacturer_name ?? null;
+          const drive_system_label =
+            driveTypeLabel && manufacturerName
+              ? `${driveTypeLabel} | ${manufacturerName}`
+              : manufacturerName
+                ? `${driveTypeLabel ?? 'Drive'} | ${manufacturerName}`
+                : driveTypeLabel;
+
           const enriched = {
             ...line,
             msrp: finalMsrp,
@@ -703,6 +755,7 @@ export function useQuoteLines(quoteId: string | null) {
             area: line.area || options.area || null,
             position: line.position || options.position || null,
             drive_type: line.drive_type || options.drive_type || null,
+            drive_system_label: drive_system_label ?? null,
             ProductType: line.product_type_id ? productTypesMap.get(line.product_type_id) || null : null,
             collection_name: line.collection_name || fabricItem?.collection_name || null,
             variant_name: line.variant_name || fabricItem?.variant_name || null,

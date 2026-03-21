@@ -79,6 +79,14 @@ export async function generateNextInvoiceNumber(organizationId: string): Promise
   return generateNextSequentialNumber('INV', 'DealerInvoices', 'invoice_number', organizationId);
 }
 
+export async function generateNextBillNumber(organizationId: string): Promise<string> {
+  return generateNextSequentialNumber('BILL', 'VendorBills', 'bill_number', organizationId);
+}
+
+export async function generateNextVendorCreditNumber(organizationId: string): Promise<string> {
+  return generateNextSequentialNumber('VCR', 'VendorCredits', 'credit_number', organizationId);
+}
+
 /**
  * Generates the next Purchase Order number (org-wide). Format: PO-NNNNN.
  * PurchaseOrders table has no deleted column; query all rows with po_number.

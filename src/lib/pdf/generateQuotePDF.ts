@@ -9,6 +9,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatDimensionsForProposalPDF, type DimensionsSource } from '../formatDimensions';
+import { formatDate } from '../utils';
 
 export type PDFVariant = 'dealer' | 'client';
 
@@ -186,7 +187,7 @@ export function generateQuotePDF(
   doc.text(quote.quote_no, headerRightX, headerY + quoteBlockOffsetMm, { align: 'right' });
   headerY += headerLineStep + 5; // bajar bloque Dealer No / Date / Valid until / Salesperson 5 mm
   const validUntilStr = '30 days';
-  const dateStr = new Date(quote.created_at).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const dateStr = formatDate(quote.created_at);
   const headerFontSize = 9; // etiquetas en negrita, valores mismo tamaño que antes
 
   const drawHeaderRow = (label: string, value: string) => {
@@ -332,11 +333,14 @@ export function generateQuotePDF(
       line.collection_name && line.variant_name
         ? `${line.collection_name} - ${line.variant_name}`
         : line.collection_name ?? line.variant_name ?? '';
-    const osLabel = line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '';
     const operatingSystem =
-      osLabel && line.operating_system_sku_name
-        ? `${osLabel} - ${line.operating_system_sku_name}`
-        : osLabel || (line.operating_system_sku_name ?? '');
+      line.operating_system_sku_name && line.operating_system_sku_name.trim()
+        ? line.operating_system_sku_name.trim()
+        : line.drive_type === 'motor'
+          ? 'Motorized'
+          : line.drive_type === 'manual'
+            ? 'Manual'
+            : '';
     const lines: string[] = [];
     if (collectionVariant) lines.push(collectionVariant);
     if (operatingSystem) lines.push(operatingSystem);

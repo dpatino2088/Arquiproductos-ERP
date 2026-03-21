@@ -8,7 +8,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatDate, formatDateTime } from '../../lib/utils';
 import { createProposalFromQuote } from '../../hooks/useProposals';
 import { useSOActions } from '../../hooks/useSOActions';
 import { useAuth } from '../../hooks/useAuth';
@@ -639,7 +639,7 @@ export default function QuoteDetail() {
             </p>
             {quote.measures_confirmed_at && (
               <p className="text-xs text-emerald-600">
-                Confirmed on {new Date(quote.measures_confirmed_at).toLocaleString()}
+                Confirmed on {formatDateTime(quote.measures_confirmed_at)}
               </p>
             )}
           </div>
@@ -767,7 +767,7 @@ export default function QuoteDetail() {
               <dl className="space-y-2 text-sm">
                 <div>
                   <dt className="text-gray-500">Created</dt>
-                  <dd className="font-medium text-gray-900 mt-0.5">{new Date(quote.created_at).toLocaleDateString()}</dd>
+                  <dd className="font-medium text-gray-900 mt-0.5">{formatDate(quote.created_at)}</dd>
                 </div>
               </dl>
             </div>
@@ -776,7 +776,7 @@ export default function QuoteDetail() {
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Delivery Expected</h3>
               <p className="font-medium text-gray-900 mt-0.5">
                 {salesOrder?.expected_delivery_date
-                  ? new Date(salesOrder.expected_delivery_date).toLocaleDateString()
+                  ? formatDate(salesOrder.expected_delivery_date)
                   : '—'}
               </p>
             </div>
@@ -962,8 +962,8 @@ export default function QuoteDetail() {
                     <td className="px-4 py-4">
                       <StatusBadge status={p.status} type="proposal" size="sm" />
                     </td>
-                    <td className="px-4 py-4">{p.sent_at ? new Date(p.sent_at).toLocaleDateString() : '—'}</td>
-                    <td className="px-4 py-4">{p.valid_until ? new Date(p.valid_until).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-4">{formatDate(p.sent_at)}</td>
+                    <td className="px-4 py-4">{formatDate(p.valid_until)}</td>
                     <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(p.total_amount)}</td>
                   </tr>
                 ))}

@@ -5,6 +5,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { Plus, Edit, Trash2, Search, Filter, Wrench, Copy, GripVertical, Package, Shield, Ruler } from 'lucide-react';
 import BOMTemplateModal from './bom-templates/BOMTemplateModal';
 import BOMRolesTab from './bom-templates/BOMRolesTab';
@@ -59,6 +60,7 @@ function normalizeSearchText(value: string): string {
 export default function BOMTemplates() {
   const { activeOrganizationId } = useOrganizationContext();
   const { registerSubmodules } = useSubmoduleNav();
+  const { canCreate: canCreateCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
   const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
 
   const [templates, setTemplates] = useState<BOMTemplateRow[]>([]);
@@ -388,7 +390,7 @@ export default function BOMTemplates() {
         <div>
           <h1 className="text-title font-semibold text-foreground">BOM</h1>
         </div>
-        {activeTab === 'templates' && (
+        {activeTab === 'templates' && canCreateCat && (
           <button onClick={handleNewTemplate} className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded hover:bg-primary/90 transition-colors">
             <Plus className="w-4 h-4" />
             New BOM Template
@@ -614,7 +616,9 @@ export default function BOMTemplates() {
                   <div className="flex items-center gap-2">
                     <button onClick={() => handleEditTemplate(template.id)} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="Edit"><Edit className="w-4 h-4" /></button>
                     <button onClick={() => handleDuplicateTemplate(template)} className="p-2 hover:bg-gray-100 rounded text-gray-600" title="Duplicate"><Copy className="w-4 h-4" /></button>
-                    <button onClick={() => handleDeleteTemplate(template.id)} className="p-2 hover:bg-red-100 rounded text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                    {canDeleteCat && (
+                      <button onClick={() => handleDeleteTemplate(template.id)} className="p-2 hover:bg-red-100 rounded text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                    )}
                   </div>
                 </div>
                 {tc.length > 0 && (

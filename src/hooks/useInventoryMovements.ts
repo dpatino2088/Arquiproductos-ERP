@@ -5,6 +5,18 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 
 export type MovementType = 'receipt' | 'issue_to_production' | 'transfer' | 'adjustment' | 'return';
 export type MovementStatus = 'draft' | 'confirmed';
+export type AdjustmentReason = 'physical_count' | 'damaged' | 'theft_shrinkage' | 'write_off' | 'opening_stock' | 'correction' | 'return_to_stock' | 'other';
+
+export const ADJUSTMENT_REASON_LABELS: Record<AdjustmentReason, string> = {
+  physical_count: 'Physical Count',
+  damaged: 'Damaged Goods',
+  theft_shrinkage: 'Theft / Shrinkage',
+  write_off: 'Write-off',
+  opening_stock: 'Opening Stock',
+  correction: 'Correction / Error',
+  return_to_stock: 'Return to Stock',
+  other: 'Other',
+};
 
 export interface InventoryMovement {
   id: string;
@@ -17,6 +29,7 @@ export interface InventoryMovement {
   movement_date: string;
   status: MovementStatus;
   notes: string | null;
+  adjustment_reason: AdjustmentReason | null;
   confirmed_at: string | null;
   created_by: string | null;
   created_at: string;
@@ -128,6 +141,8 @@ export function useCreateMovement() {
     reference_id?: string;
     movement_date?: string;
     notes?: string;
+    adjustment_reason?: AdjustmentReason;
+    created_by?: string;
   }) => {
     if (!activeOrganizationId) throw new Error('No organization selected');
     setIsCreating(true);
@@ -142,6 +157,8 @@ export function useCreateMovement() {
           reference_id: params.reference_id ?? null,
           movement_date: params.movement_date ?? new Date().toISOString().slice(0, 10),
           notes: params.notes ?? null,
+          adjustment_reason: params.adjustment_reason ?? null,
+          created_by: params.created_by ?? null,
           status: 'draft',
           deleted: false,
         })

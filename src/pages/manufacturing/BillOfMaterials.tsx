@@ -1,15 +1,16 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import ApprovedBOMList from '../catalog/ApprovedBOMList';
 
 export default function BillOfMaterials() {
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
 
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/manufacturing')) {
-      registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
+      registerSubmodules('Manufacturing', filteredSubmodules);
     }
     
     return () => {
@@ -18,7 +19,7 @@ export default function BillOfMaterials() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
   return <ApprovedBOMList />;
 }

@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase/client';
+import { formatDate } from '../../lib/utils';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
 import { 
@@ -230,7 +231,7 @@ export default function PortalQuotesList() {
                   <h3 className="text-lg font-semibold text-gray-900">{quote.quote_no}</h3>
                   <p className="text-xs text-gray-500 mt-1">
                     {quote.created_at
-                      ? new Date(quote.created_at).toLocaleDateString()
+                      ? formatDate(quote.created_at)
                       : 'N/A'}
                   </p>
                 </div>

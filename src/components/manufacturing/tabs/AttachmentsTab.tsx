@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { formatDateTime } from '../../../lib/utils';
 import { Upload, Trash2, Download, FileText } from 'lucide-react';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
@@ -185,7 +186,7 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
                     </a>
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600 tabular-nums">{formatFileSize(att.file_size)}</td>
-                  <td className="px-4 py-3 text-gray-600">{att.created_at ? new Date(att.created_at).toLocaleString() : '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">{att.created_at ? formatDateTime(att.created_at) : '—'}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <a

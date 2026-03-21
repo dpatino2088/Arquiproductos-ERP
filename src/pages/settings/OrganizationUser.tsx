@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
@@ -906,7 +907,7 @@ export default function OrganizationUser() {
                         })()}
                       </td>
                       <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap">
-                        {new Date(orgUser.created_at).toLocaleDateString()}
+                        {formatDate(orgUser.created_at)}
                       </td>
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-end gap-2">
@@ -1090,7 +1091,7 @@ export default function OrganizationUser() {
                     )}
                     <div className="flex items-center gap-2 text-xs text-gray-600">
                       <Calendar className="w-3 h-3 flex-shrink-0" />
-                      <span>Joined {new Date(orgUser.created_at).toLocaleDateString()}</span>
+                      <span>Joined {formatDate(orgUser.created_at)}</span>
                     </div>
                   </div>
                 </div>

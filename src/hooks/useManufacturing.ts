@@ -721,14 +721,19 @@ export function useUpdateManufacturingOrder() {
       if (updates.planned_start_at !== undefined) payload.planned_start_at = updates.planned_start_at;
       if (updates.planned_end_at !== undefined) payload.planned_end_at = updates.planned_end_at;
 
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from('ManufacturingOrders')
         .update(payload)
         .eq('id', moId)
-        .eq('organization_id', activeOrganizationId);
+        .eq('organization_id', activeOrganizationId)
+        .select('id', { count: 'exact', head: true });
 
       if (error) {
         throw error;
+      }
+
+      if (count === 0) {
+        throw new Error('Update failed: no rows matched (check RLS permissions)');
       }
 
       return { id: moId, ...updates };

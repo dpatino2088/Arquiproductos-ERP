@@ -8,17 +8,15 @@ import { router } from '../../lib/router';
 import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { Search, FileText, DollarSign, Plus, ArrowLeft, Building2 } from 'lucide-react';
+import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
+import { Search, Plus, ArrowLeft, DollarSign } from 'lucide-react';
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { formatDate } from '../../lib/utils';
+import FinancialSubTabs from './FinancialSubTabs';
 
-const FINANCIAL_SUBMODULES = [
-  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
-
-const STATUS_VALUES = ['all', 'unassigned', 'unapplied', 'partial', 'applied'] as const;
+const STATUS_VALUES = ['all', 'unassigned', 'unapplied', 'partial', 'applied', 'void'] as const;
 const STATUS_LABELS: Record<string, string> = {
-  all: 'All', unassigned: 'Unassigned', unapplied: 'Unapplied', partial: 'Partial', applied: 'Applied',
+  all: 'All', unassigned: 'Unassigned', unapplied: 'Unapplied', partial: 'Partial', applied: 'Applied', void: 'Void',
 };
 const PAYMENT_PREFILL_KEY = 'financials_payment_prefill';
 
@@ -85,7 +83,7 @@ export default function FinancialPayments() {
     });
   }, [queryReturnTo]);
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_SUBMODULES); }, [registerSubmodules]);
+  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
 
   // Open "Record New Payment" form when navigating from SO (e.g. /financials/payments?new=1)
   useEffect(() => {
@@ -121,7 +119,7 @@ export default function FinancialPayments() {
     setLoading(true);
     setError(null);
     try {
-      const baseSelect = 'id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, dealer_id, created_at';
+      const baseSelect = 'id, amount, payment_method, reference_number, payment_date, notes, recorded_by, recorded_by_name, dealer_id, created_at, status';
       const extendedSelect = `${baseSelect}, description`;
       let rows: (Payment & { dealer_id: string })[] = [];
 
@@ -170,22 +168,8 @@ export default function FinancialPayments() {
         }
       }
 
-      // Resolve recorder display name from AppUsers (prefer display_name over stored email/name).
-      let appUserMap = new Map<string, { display_name: string | null; email: string | null }>();
-      if (rows.length > 0) {
-        const userIds = [...new Set(rows.map((r) => r.recorded_by).filter(Boolean))] as string[];
-        if (userIds.length > 0) {
-          const { data: appUsers, error: appUsersError } = await supabase
-            .from('AppUsers')
-            .select('user_id, display_name, email')
-            .in('user_id', userIds);
-          if (!appUsersError) {
-            appUserMap = new Map(
-              (appUsers ?? []).map((u: { user_id: string; display_name: string | null; email: string | null }) => [u.user_id, u])
-            );
-          }
-        }
-      }
+      const recorderIds = rows.map((r) => r.recorded_by).filter(Boolean) as string[];
+      const appUserNameMap = await getAppUsersDisplayNames(recorderIds);
 
       // Fetch payment applications to derive status
       let appMap = new Map<string, number>();
@@ -203,13 +187,18 @@ export default function FinancialPayments() {
       }
 
       setPayments(rows.map((r) => {
-        const applied = appMap.get(r.id) ?? 0;
-        let status = 'unapplied';
-        if (!r.dealer_id) status = 'unassigned';
-        else if (applied >= r.amount) status = 'applied';
-        else if (applied > 0) status = 'partial';
-        const appUser = r.recorded_by ? appUserMap.get(r.recorded_by) : null;
-        const resolvedRecorder = appUser?.display_name || appUser?.email || r.recorded_by_name;
+        let status: string;
+        if (r.status === 'void') {
+          status = 'void';
+        } else {
+          const applied = appMap.get(r.id) ?? 0;
+          if (!r.dealer_id) status = 'unassigned';
+          else if (applied >= r.amount) status = 'applied';
+          else if (applied > 0) status = 'partial';
+          else status = 'unapplied';
+        }
+        const appUserName = r.recorded_by ? appUserNameMap.get(r.recorded_by) : undefined;
+        const resolvedRecorder = appUserName && appUserName !== 'Legacy / Imported' ? appUserName : r.recorded_by_name;
         return {
           ...r,
           recorded_by_name: resolvedRecorder ?? null,
@@ -317,10 +306,11 @@ export default function FinancialPayments() {
   const fmt = (v: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
 
-  const total = filtered.reduce((s, p) => s + Number(p.amount), 0);
+  const total = filtered.reduce((s, p) => p.status === 'void' ? s : s + Number(p.amount), 0);
 
   return (
     <div className="py-6 px-6">
+      <FinancialSubTabs />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Payments</h1>
@@ -473,24 +463,27 @@ export default function FinancialPayments() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(withReturnTo(`/financials/payments/${p.id}`))}
-                  >
-                    <td className="px-4 py-4">{new Date(p.payment_date).toLocaleDateString()}</td>
-                    <td className="px-4 py-4 text-gray-700">{p.Dealers?.dealer_name ?? '—'}</td>
-                    <td className="px-4 py-4 capitalize text-gray-700">{p.payment_method ?? '—'}</td>
-                    <td className="px-4 py-4 text-gray-500">{p.reference_number || '—'}</td>
-                    <td className="px-4 py-4 text-gray-500">{p.description || '—'}</td>
-                    <td className="px-4 py-4 text-gray-500">{p.recorded_by_name ?? '—'}</td>
-                    <td className="px-4 py-4 text-right font-mono font-medium text-gray-900">{fmt(p.amount)}</td>
-                    <td className="px-4 py-4 text-center">
-                      <StatusBadge status={p.status} type="payment" size="sm" />
-                    </td>
-                  </tr>
-                ))
+                filtered.map((p) => {
+                  const isVoid = p.status === 'void';
+                  return (
+                    <tr
+                      key={p.id}
+                      className={`border-t hover:bg-gray-50 cursor-pointer ${isVoid ? 'opacity-60' : ''}`}
+                      onClick={() => router.navigate(withReturnTo(`/financials/payments/${p.id}`))}
+                    >
+                      <td className={`px-4 py-4 ${isVoid ? 'line-through' : ''}`}>{formatDate(p.payment_date)}</td>
+                      <td className={`px-4 py-4 text-gray-700 ${isVoid ? 'line-through' : ''}`}>{p.Dealers?.dealer_name ?? '—'}</td>
+                      <td className="px-4 py-4 capitalize text-gray-700">{p.payment_method ?? '—'}</td>
+                      <td className="px-4 py-4 text-gray-500">{p.reference_number || '—'}</td>
+                      <td className="px-4 py-4 text-gray-500">{p.description || '—'}</td>
+                      <td className="px-4 py-4 text-gray-500">{p.recorded_by_name ?? '—'}</td>
+                      <td className={`px-4 py-4 text-right font-mono font-medium text-gray-900 ${isVoid ? 'line-through' : ''}`}>{fmt(p.amount)}</td>
+                      <td className="px-4 py-4 text-center">
+                        <StatusBadge status={p.status} type="payment" size="sm" />
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
             {filtered.length > 0 && (

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
+import { advanceMOOnTaskStart, advanceMOOnAllTasksComplete } from '../lib/moLifecycle';
 
 export interface WorkOrderTaskLine {
   id: string;
@@ -25,6 +26,8 @@ export interface WorkOrderTask {
   sequence: number;
   status: 'pending' | 'in_progress' | 'completed';
   assigned_to: string | null;
+  assigned_to_user_id: string | null;
+  completed_by_user_id: string | null;
   started_at: string | null;
   completed_at: string | null;
   estimated_duration_hours: number;
@@ -51,7 +54,8 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         .from('WorkOrderTasks')
         .select(`
           id, organization_id, manufacturing_order_id, work_center_id,
-          sequence, status, assigned_to, started_at, completed_at,
+          sequence, status, assigned_to, assigned_to_user_id, completed_by_user_id,
+          started_at, completed_at,
           estimated_duration_hours, planned_start_at, planned_end_at,
           depends_on_task_ids, dependency_type,
           WorkCenters:work_center_id (id, code, name, sequence)
@@ -86,6 +90,8 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         sequence: t.sequence,
         status: t.status,
         assigned_to: t.assigned_to,
+        assigned_to_user_id: t.assigned_to_user_id ?? null,
+        completed_by_user_id: t.completed_by_user_id ?? null,
         started_at: t.started_at,
         completed_at: t.completed_at,
         estimated_duration_hours: t.estimated_duration_hours ?? 8,
@@ -131,19 +137,55 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
       patchLine(lineId, { completed: !completed, completed_at: null });
       throw new Error(err.message);
     }
+
+    if (!completed) return;
+
+    const { data: siblingLines } = await supabase
+      .from('WorkOrderTaskLines')
+      .select('id, completed, task_id')
+      .eq('task_id', (await supabase
+        .from('WorkOrderTaskLines')
+        .select('task_id')
+        .eq('id', lineId)
+        .single()
+      ).data?.task_id ?? '')
+      .order('created_at');
+
+    if (!siblingLines || siblingLines.length === 0) return;
+
+    const taskId = siblingLines[0].task_id;
+    const allLinesCompleted = siblingLines.every((l) => l.id === lineId ? true : l.completed);
+    if (!allLinesCompleted) return;
+
+    const { data: taskRow } = await supabase
+      .from('WorkOrderTasks')
+      .select('status')
+      .eq('id', taskId)
+      .single();
+
+    if (taskRow?.status === 'in_progress') {
+      await updateTaskStatusInternal(taskId, 'completed');
+    }
   }, [patchLine]);
 
-  const updateTaskStatus = useCallback(async (taskId: string, status: 'pending' | 'in_progress' | 'completed') => {
+  const updateTaskStatusInternal = useCallback(async (taskId: string, status: 'pending' | 'in_progress' | 'completed') => {
     const now = new Date().toISOString();
-    const task = tasks.find((t) => t.id === taskId);
-    const prevStatus = task?.status;
-    const prevStarted = task?.started_at;
-    const prevCompleted = task?.completed_at;
+
+    const { data: currentTask } = await supabase
+      .from('WorkOrderTasks')
+      .select('status, started_at, completed_at, manufacturing_order_id')
+      .eq('id', taskId)
+      .single();
+
+    const prevStatus = currentTask?.status;
+    const prevStarted = currentTask?.started_at;
+    const prevCompleted = currentTask?.completed_at;
+    const effectiveMoId = moId ?? currentTask?.manufacturing_order_id;
 
     const optimistic: Partial<WorkOrderTask> = { status };
     const dbUpdates: Record<string, unknown> = { status, updated_at: now };
 
-    if (status === 'in_progress' && !task?.started_at) {
+    if (status === 'in_progress' && !currentTask?.started_at) {
       optimistic.started_at = now;
       dbUpdates.started_at = now;
     }
@@ -162,7 +204,56 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
       patchTask(taskId, { status: prevStatus, started_at: prevStarted, completed_at: prevCompleted });
       throw new Error(err.message);
     }
-  }, [tasks, patchTask]);
+
+    if (status === 'in_progress' && effectiveMoId) {
+      await advanceMOOnTaskStart(effectiveMoId);
+    }
+
+    if (status === 'completed' && effectiveMoId) {
+      const { data: allTasks } = await supabase
+        .from('WorkOrderTasks')
+        .select('id, status, depends_on_task_ids')
+        .eq('manufacturing_order_id', effectiveMoId)
+        .eq('deleted', false);
+
+      if (allTasks) {
+        const completedIds = new Set(
+          allTasks.filter((t: any) => t.id === taskId || t.status === 'completed').map((t: any) => t.id)
+        );
+
+        const toAutoStart = allTasks.filter((t: any) => {
+          if (t.id === taskId) return false;
+          if (t.status !== 'pending') return false;
+          const deps = t.depends_on_task_ids ?? [];
+          if (deps.length === 0) return false;
+          return deps.every((depId: string) => completedIds.has(depId));
+        });
+
+        if (toAutoStart.length > 0) {
+          const autoStartIds = toAutoStart.map((t: any) => t.id);
+          for (const t of toAutoStart) {
+            patchTask(t.id, { status: 'in_progress', started_at: now });
+          }
+          await supabase
+            .from('WorkOrderTasks')
+            .update({ status: 'in_progress', started_at: now, updated_at: now })
+            .in('id', autoStartIds)
+            .catch(() => {});
+        }
+
+        const allCompleted = allTasks.every((t: any) =>
+          t.id === taskId ? true : t.status === 'completed'
+        );
+        if (allCompleted && effectiveMoId) {
+          await advanceMOOnAllTasksComplete(effectiveMoId);
+        }
+      }
+
+      await fetchAll();
+    }
+  }, [patchTask, moId, fetchAll]);
+
+  const updateTaskStatus = updateTaskStatusInternal;
 
   const updateTaskScheduling = useCallback(async (
     taskId: string,
@@ -229,9 +320,30 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     return data;
   }, [moId, fetchAll]);
 
+  const updateTaskPlannedDates = useCallback(async (
+    taskId: string,
+    planned_start_at: string,
+    planned_end_at: string
+  ) => {
+    const task = tasks.find((t) => t.id === taskId);
+    const prevStart = task?.planned_start_at ?? null;
+    const prevEnd = task?.planned_end_at ?? null;
+
+    patchTask(taskId, { planned_start_at, planned_end_at });
+
+    const { error: err } = await supabase
+      .from('WorkOrderTasks')
+      .update({ planned_start_at, planned_end_at, updated_at: new Date().toISOString() })
+      .eq('id', taskId);
+    if (err) {
+      patchTask(taskId, { planned_start_at: prevStart, planned_end_at: prevEnd });
+      throw new Error(err.message);
+    }
+  }, [tasks, patchTask]);
+
   return {
     tasks, loading, error, refetch: fetchAll,
     toggleLineCompleted, updateTaskStatus, updateTaskScheduling,
-    bulkUpdatePlannedDates, generateWorkOrders,
+    bulkUpdatePlannedDates, updateTaskPlannedDates, generateWorkOrders,
   };
 }

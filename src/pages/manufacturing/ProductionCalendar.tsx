@@ -2,14 +2,18 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, CalendarDays, Filter, AlertCircle, Package, GanttChart, Calendar, Zap } from 'lucide-react';
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useManufacturingOrders, useUpdateManufacturingOrder } from '../../hooks/useManufacturing';
 import type { ManufacturingOrder } from '../../hooks/useManufacturing';
 import { supabase } from '../../lib/supabase/client';
 import { useDealers } from '../../hooks/useDealers';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
+import { useWorkCenterWorkload } from '../../hooks/useWorkCenterWorkload';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { MANUFACTURING_SUBMODULES } from './manufacturingSubmodules';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
+import WorkloadHeatmap from '../../components/manufacturing/WorkloadHeatmap';
 
 function toMonthStart(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -59,6 +63,12 @@ function moveMoToDay(mo: ManufacturingOrder, targetDay: Date): { planned_start_a
 }
 
 // Draggable block: id = mo.id
+const URGENCY_BADGE_MAP: Record<string, { icon: string; color: string }> = {
+  critical: { icon: '!', color: 'bg-red-500 text-white' },
+  at_risk: { icon: '⚠', color: 'bg-orange-400 text-white' },
+  blocked: { icon: '🔒', color: 'bg-blue-400 text-white' },
+};
+
 function DraggableBlock({
   mo,
   variant,
@@ -67,6 +77,8 @@ function DraggableBlock({
   materialIncomplete,
   onNavigate,
   justDroppedRef,
+  urgency,
+  dimmed,
 }: {
   mo: ManufacturingOrder;
   variant: string;
@@ -75,6 +87,8 @@ function DraggableBlock({
   materialIncomplete: boolean;
   onNavigate: (id: string) => void;
   justDroppedRef: React.MutableRefObject<boolean>;
+  urgency?: string;
+  dimmed?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: mo.id, data: { mo } });
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null);
@@ -99,11 +113,16 @@ function DraggableBlock({
       }}
       className={`text-left rounded border px-1.5 py-1 text-xs truncate cursor-pointer hover:opacity-90 ${variant} ${
         showDeadline ? 'border-r-4 border-r-orange-500' : ''
-      } ${isDragging ? 'opacity-60 shadow-md' : ''}`}
-      title={`${mo.manufacturing_order_no} · ${mo.status}`}
+      } ${isDragging ? 'opacity-60 shadow-md' : ''} ${dimmed ? 'opacity-20' : ''}`}
+      title={`${mo.manufacturing_order_no} · ${mo.status}${urgency ? ` · ${urgency}` : ''}`}
     >
       <div className="flex items-center gap-1 font-medium truncate">
-        {isLate && <AlertCircle className="w-3 h-3 shrink-0 text-red-600" aria-label="Overdue" />}
+        {urgency && URGENCY_BADGE_MAP[urgency] && (
+          <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] flex-shrink-0 ${URGENCY_BADGE_MAP[urgency].color}`}>
+            {URGENCY_BADGE_MAP[urgency].icon}
+          </span>
+        )}
+        {isLate && !urgency && <AlertCircle className="w-3 h-3 shrink-0 text-red-600" aria-label="Overdue" />}
         {materialIncomplete && <Package className="w-3 h-3 shrink-0 text-amber-600" aria-label="Waiting material" />}
         <span className="truncate">{mo.manufacturing_order_no}</span>
       </div>
@@ -150,20 +169,22 @@ function DroppableDay({
 
 type StatusFilterOpt = { key: string; label: string; statuses?: readonly string[]; virtual?: boolean };
 const STATUS_FILTER_OPTIONS: StatusFilterOpt[] = [
-  { key: 'planned', label: 'Planned', statuses: ['draft', 'planned'] },
+  { key: 'planned', label: 'Planned', statuses: ['draft', 'confirmed', 'procurement', 'materials_ready', 'planned'] },
   { key: 'in_production', label: 'In Production', statuses: ['in_production', 'quality_check', 'ready_for_pickup'] },
   { key: 'completed', label: 'Completed', statuses: ['delivered', 'completed'] },
   { key: 'late', label: 'Late', virtual: true },
 ];
 
 export default function ProductionCalendar() {
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const addNotification = useUIStore((s) => s.addNotification);
   const { registerSubmodules } = useSubmoduleNav();
   const { dealers } = useDealers();
+  const { activeOrganizationId } = useOrganizationContext();
 
   useEffect(() => {
-    registerSubmodules('Manufacturing', [...MANUFACTURING_SUBMODULES]);
-  }, [registerSubmodules]);
+    registerSubmodules('Manufacturing', filteredSubmodules);
+  }, [registerSubmodules, filteredSubmodules]);
   const [dealerFilter, setDealerFilter] = useState<string | null>(null);
   const [statusFilters, setStatusFilters] = useState<Set<string>>(new Set(['planned', 'in_production', 'completed', 'late']));
   const { manufacturingOrders, loading, error, refetch } = useManufacturingOrders(dealerFilter ?? undefined);
@@ -175,12 +196,24 @@ export default function ProductionCalendar() {
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'gantt'>('month');
   const { centers: workCenters } = useWorkCenters();
   const [wcToMoIds, setWcToMoIds] = useState<Record<string, Set<string>>>({});
+  const [ganttTasks, setGanttTasks] = useState<Record<string, { id: string; wc_name: string; wc_code: string; status: string; planned_start_at: string | null; planned_end_at: string | null }[]>>({});
+  const [urgencyFilter, setUrgencyFilter] = useState<string | null>(null);
 
   const monthStart = useMemo(() => toMonthStart(monthCursor), [monthCursor]);
   const monthEnd = useMemo(() => {
     const d = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
     return d;
   }, [monthStart]);
+
+  const calendarWorkloadRange = useMemo(() => ({
+    from: monthStart,
+    to: monthEnd,
+  }), [monthStart, monthEnd]);
+
+  const {
+    workCenters: wlWorkCenters,
+    workload: calendarWorkload,
+  } = useWorkCenterWorkload(activeOrganizationId, calendarWorkloadRange);
 
   const calendarDays = useMemo(() => {
     const start = toMonthStart(monthCursor);
@@ -235,6 +268,22 @@ export default function ProductionCalendar() {
     });
     return list;
   }, [manufacturingOrders, statusFilters, today]);
+
+  const moUrgencyMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const mo of scheduledMOs) {
+      if (['completed', 'delivered', 'cancelled'].includes(mo.status)) continue;
+      const dueDate = mo.SalesOrders?.expected_delivery_date
+        ? new Date(mo.SalesOrders.expected_delivery_date) : null;
+      if (dueDate && today > dueDate) {
+        map.set(mo.id, 'critical');
+      } else if (dueDate) {
+        const daysLeft = (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+        if (daysLeft <= 2) map.set(mo.id, 'at_risk');
+      }
+    }
+    return map;
+  }, [scheduledMOs, today]);
 
   const getMOsForDay = (day: Date) =>
     scheduledMOs.filter((mo) =>
@@ -303,6 +352,50 @@ export default function ProductionCalendar() {
       });
   }, [viewMode, moIdsInMonth.join(',')]);
 
+  useEffect(() => {
+    if (calendarViewMode !== 'gantt' || moIdsInMonth.length === 0) {
+      setGanttTasks({});
+      return;
+    }
+    (async () => {
+      const { data: taskData, error: tErr } = await supabase
+        .from('WorkOrderTasks')
+        .select('id, manufacturing_order_id, work_center_id, status, planned_start_at, planned_end_at, sequence')
+        .in('manufacturing_order_id', moIdsInMonth)
+        .eq('deleted', false)
+        .order('sequence');
+      if (tErr || !taskData) { setGanttTasks({}); return; }
+
+      const wcIds = [...new Set(taskData.map((t: any) => t.work_center_id).filter(Boolean))];
+      let wcLookup: Record<string, { name: string; code: string }> = {};
+      if (wcIds.length > 0) {
+        const { data: wcData } = await supabase
+          .from('WorkCenters')
+          .select('id, name, code')
+          .in('id', wcIds);
+        if (wcData) {
+          for (const wc of wcData) wcLookup[wc.id] = { name: wc.name, code: wc.code };
+        }
+      }
+
+      const map: Record<string, typeof ganttTasks[string]> = {};
+      for (const t of taskData as any[]) {
+        const moId = t.manufacturing_order_id;
+        if (!map[moId]) map[moId] = [];
+        const wc = wcLookup[t.work_center_id];
+        map[moId].push({
+          id: t.id,
+          wc_name: wc?.name ?? 'Station',
+          wc_code: wc?.code ?? '',
+          status: t.status,
+          planned_start_at: t.planned_start_at,
+          planned_end_at: t.planned_end_at,
+        });
+      }
+      setGanttTasks(map);
+    })();
+  }, [calendarViewMode, moIdsInMonth.join(',')]);
+
   const unscheduledMOs = useMemo(() => {
     return manufacturingOrders.filter(
       (mo) =>
@@ -343,7 +436,7 @@ export default function ProductionCalendar() {
       setTimeout(() => { justDroppedRef.current = false; }, 300);
       try {
         await updateManufacturingOrder(moId, { planned_start_at, planned_end_at });
-        addNotification({ type: 'success', title: 'Schedule updated', message: `${mo.manufacturing_order_no} moved to ${targetDay.toLocaleDateString()}.` });
+        addNotification({ type: 'success', title: 'Schedule updated', message: `${mo.manufacturing_order_no} moved to ${formatDate(targetDay)}.` });
         refetch();
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to update schedule';
@@ -408,6 +501,8 @@ export default function ProductionCalendar() {
     const variant = getBlockVariant(mo, isLate, materialIncomplete);
     const expectedDelivery = mo.SalesOrders?.expected_delivery_date ? new Date(mo.SalesOrders.expected_delivery_date) : null;
     const showDeadline = expectedDelivery && isSameDay(day, expectedDelivery);
+    const moUrgency = moUrgencyMap.get(mo.id);
+    const dimmed = urgencyFilter ? moUrgency !== urgencyFilter : false;
     return (
       <DraggableBlock
         key={mo.id}
@@ -418,6 +513,8 @@ export default function ProductionCalendar() {
         materialIncomplete={!!materialIncomplete}
         onNavigate={(id) => router.navigate(`/manufacturing/manufacturing-orders/${id}`)}
         justDroppedRef={justDroppedRef}
+        urgency={moUrgency}
+        dimmed={dimmed}
       />
     );
   };
@@ -488,6 +585,26 @@ export default function ProductionCalendar() {
                   />
                   {opt.label}
                 </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-gray-600">Urgency</span>
+              {[
+                { key: 'critical', label: 'Critical', color: 'text-red-600' },
+                { key: 'at_risk', label: 'At Risk', color: 'text-orange-600' },
+              ].map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setUrgencyFilter(urgencyFilter === opt.key ? null : opt.key)}
+                  className={`px-2 py-1 text-xs font-medium rounded-md border transition-colors ${
+                    urgencyFilter === opt.key
+                      ? `bg-gray-100 border-gray-300 ${opt.color}`
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
               ))}
             </div>
             <div className="flex items-center gap-3">
@@ -571,50 +688,125 @@ export default function ProductionCalendar() {
         </div>
 
         <DndContext onDragEnd={handleDragEnd}>
-          {calendarViewMode === 'gantt' ? (
-            <div className="rounded-lg border border-gray-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <div className="min-w-[600px] py-2">
-                  {scheduledMOs.map((mo) => {
-                    const start = mo.planned_start_at ? new Date(mo.planned_start_at) : null;
-                    const end = mo.planned_end_at ? new Date(mo.planned_end_at) : null;
-                    const isLate = end && end < today && !['delivered', 'completed'].includes(mo.status);
-                    const readiness = materialReadinessMap[mo.id];
-                    const materialIncomplete = readiness?.status === 'incomplete' || readiness?.has_shortage;
-                    const variant = getBlockVariant(mo, !!isLate, !!materialIncomplete);
-                    const rangeStart = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1, 0, 0, 0);
-                    const rangeEnd = new Date(monthEnd.getTime() + 24 * 60 * 60 * 1000);
-                    const totalMs = rangeEnd.getTime() - rangeStart.getTime();
-                    const leftPct = start && totalMs > 0 ? ((start.getTime() - rangeStart.getTime()) / totalMs) * 100 : 0;
-                    const widthPct = start && end && totalMs > 0 ? ((end.getTime() - start.getTime()) / totalMs) * 100 : 10;
-                    return (
-                      <div key={mo.id} className="flex items-center gap-2 py-1 border-b border-gray-100 last:border-0">
-                        <button
-                          type="button"
-                          onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
-                          className="w-32 text-left text-xs font-medium text-blue-600 hover:underline truncate shrink-0"
-                        >
-                          {mo.manufacturing_order_no}
-                        </button>
-                        <div className="flex-1 h-6 relative bg-gray-100 rounded overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
-                            className={`absolute inset-y-0 rounded ${variant}`}
-                            style={{ left: `${Math.max(0, leftPct)}%`, width: `${Math.min(100 - leftPct, widthPct)}%` }}
-                            title={`${mo.planned_start_at ? new Date(mo.planned_start_at).toLocaleDateString() : ''} – ${mo.planned_end_at ? new Date(mo.planned_end_at).toLocaleDateString() : ''}`}
-                          />
-                        </div>
+          {calendarViewMode === 'gantt' ? (() => {
+            const rangeStart = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1, 0, 0, 0);
+            const rangeEnd = new Date(monthEnd.getTime() + 24 * 60 * 60 * 1000);
+            const totalMs = rangeEnd.getTime() - rangeStart.getTime();
+            const daysInRange = Math.ceil(totalMs / 86_400_000);
+            const dayHeaders = Array.from({ length: daysInRange }, (_, i) => {
+              const d = new Date(rangeStart);
+              d.setDate(d.getDate() + i);
+              return d;
+            });
+
+            const TASK_BAR_COLORS: Record<string, string> = {
+              completed: 'bg-green-400',
+              in_progress: 'bg-blue-400',
+              pending: 'bg-gray-300',
+            };
+
+            return (
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <div className="min-w-[800px]">
+                    {/* Day column headers */}
+                    <div className="flex border-b border-gray-200">
+                      <div className="w-36 shrink-0 bg-gray-50 px-2 py-1 text-[10px] font-medium text-gray-500 border-r border-gray-200" />
+                      <div className="flex-1 flex">
+                        {dayHeaders.map((d, i) => {
+                          const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                          const isTodayCol = isSameDay(d, today);
+                          return (
+                            <div
+                              key={i}
+                              className={`flex-1 text-center text-[9px] leading-tight py-1 border-r border-gray-100 last:border-r-0 ${isWeekend ? 'bg-gray-50 text-gray-300' : isTodayCol ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-gray-500'}`}
+                              style={{ minWidth: 20 }}
+                            >
+                              <div>{d.toLocaleDateString(undefined, { weekday: 'narrow' })}</div>
+                              <div>{d.getDate()}</div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                  {scheduledMOs.length === 0 && (
-                    <p className="text-sm text-gray-500 py-4 text-center">No scheduled orders in this month.</p>
-                  )}
+                    </div>
+
+                    {/* MO rows with WO task sub-rows */}
+                    {scheduledMOs.map((mo) => {
+                      const start = mo.planned_start_at ? new Date(mo.planned_start_at) : null;
+                      const end = mo.planned_end_at ? new Date(mo.planned_end_at) : null;
+                      const isLate = end && end < today && !['delivered', 'completed'].includes(mo.status);
+                      const readiness = materialReadinessMap[mo.id];
+                      const materialIncomplete = readiness?.status === 'incomplete' || readiness?.has_shortage;
+                      const variant = getBlockVariant(mo, !!isLate, !!materialIncomplete);
+                      const leftPct = start && totalMs > 0 ? ((start.getTime() - rangeStart.getTime()) / totalMs) * 100 : 0;
+                      const widthPct = start && end && totalMs > 0 ? ((end.getTime() - start.getTime()) / totalMs) * 100 : 10;
+                      const tasks = ganttTasks[mo.id] ?? [];
+                      const hasScheduledTasks = tasks.some((t) => t.planned_start_at && t.planned_end_at);
+
+                      return (
+                        <div key={mo.id} className="border-b border-gray-100 last:border-0">
+                          {/* MO bar */}
+                          <div className="flex items-center gap-0">
+                            <button
+                              type="button"
+                              onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
+                              className="w-36 shrink-0 text-left text-xs font-medium text-blue-600 hover:underline truncate px-2 py-1.5 border-r border-gray-200"
+                            >
+                              {mo.manufacturing_order_no}
+                            </button>
+                            <div className="flex-1 h-6 relative bg-gray-50 rounded-sm">
+                              <button
+                                type="button"
+                                onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
+                                className={`absolute inset-y-0 rounded-sm ${variant} opacity-70`}
+                                style={{ left: `${Math.max(0, leftPct)}%`, width: `${Math.min(100 - leftPct, widthPct)}%` }}
+                                title={`${mo.planned_start_at ? formatDate(mo.planned_start_at) : ''} – ${mo.planned_end_at ? formatDate(mo.planned_end_at) : ''}`}
+                              />
+                            </div>
+                          </div>
+
+                          {/* WO task sub-bars */}
+                          {hasScheduledTasks && tasks.map((task) => {
+                            if (!task.planned_start_at || !task.planned_end_at) return null;
+                            const tStart = new Date(task.planned_start_at);
+                            const tEnd = new Date(task.planned_end_at);
+                            const tLeftPct = totalMs > 0 ? ((tStart.getTime() - rangeStart.getTime()) / totalMs) * 100 : 0;
+                            const tWidthPct = totalMs > 0 ? ((tEnd.getTime() - tStart.getTime()) / totalMs) * 100 : 2;
+                            return (
+                              <div key={task.id} className="flex items-center gap-0">
+                                <div className="w-36 shrink-0 text-right text-[10px] text-gray-400 truncate px-2 py-0.5 border-r border-gray-200">
+                                  {task.wc_name}
+                                </div>
+                                <div className="flex-1 h-4 relative">
+                                  <div
+                                    className={`absolute top-0.5 bottom-0.5 rounded-sm ${TASK_BAR_COLORS[task.status] ?? 'bg-gray-300'}`}
+                                    style={{ left: `${Math.max(0, tLeftPct)}%`, width: `${Math.max(0.5, Math.min(100 - tLeftPct, tWidthPct))}%` }}
+                                    title={`${task.wc_name}: ${formatDate(task.planned_start_at)} – ${formatDate(task.planned_end_at)} (${task.status})`}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+
+                    {scheduledMOs.length === 0 && (
+                      <p className="text-sm text-gray-500 py-4 text-center">No scheduled orders in this month.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Gantt legend */}
+                <div className="flex items-center gap-4 px-4 py-2 border-t border-gray-100 text-[10px] text-gray-500">
+                  <div className="flex items-center gap-1"><div className="w-3 h-2 rounded bg-gray-300" /> Pending</div>
+                  <div className="flex items-center gap-1"><div className="w-3 h-2 rounded bg-blue-400" /> In Progress</div>
+                  <div className="flex items-center gap-1"><div className="w-3 h-2 rounded bg-green-400" /> Completed</div>
                 </div>
               </div>
-            </div>
-          ) : viewMode === 'order' ? (
+            );
+          })()
+          : viewMode === 'order' ? (
             <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-hidden border border-gray-200">
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((wd) => (
                 <div key={wd} className="bg-gray-50 p-1.5 text-center text-xs font-medium text-gray-600">
@@ -676,6 +868,15 @@ export default function ProductionCalendar() {
           )}
         </DndContext>
       </div>
+
+      {wlWorkCenters.length > 0 && (
+        <WorkloadHeatmap
+          workCenters={wlWorkCenters}
+          workload={calendarWorkload}
+          startDate={monthStart}
+          days={Math.ceil((monthEnd.getTime() - monthStart.getTime()) / 86_400_000) + 1}
+        />
+      )}
 
       {unscheduledMOs.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-4">

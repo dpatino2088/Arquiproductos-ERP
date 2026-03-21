@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../../lib/supabase/client';
+import { formatDate } from '../../../lib/utils';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useBOMCRUD } from '../../../hooks/useBOM';
 import { Search, ChevronRight, LayoutTemplate, Save, Pencil, CheckCircle2, Circle, AlertCircle } from 'lucide-react';
@@ -56,7 +57,7 @@ function formatRelativeTime(iso: string | null): string | null {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
 export default function BOMEngineeringTab() {

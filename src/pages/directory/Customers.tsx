@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo, useCallback, useDeferredValue } from 'react';
 import { router } from '../../lib/router';
+import { formatDate } from '../../lib/utils';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useDeleteCustomer } from '../../hooks/useDirectory';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { getSupabaseErrorMessage } from '../../lib/supabase-error-utils';
@@ -105,6 +107,7 @@ export default function Customers() {
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
+  const { canCreate: canCreateDir, canArchive: canArchiveDir, canDelete: canDeleteDir } = useGranularAccess('directory');
   const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
   const { canEditCustomers, canViewQuotes, loading: roleLoading, isSuperAdmin, isAdmin, isOwner } = useCurrentOrgRole();
   const canEditCustomersFinal = userType === "portal"
@@ -521,16 +524,16 @@ export default function Customers() {
             <Upload style={{ width: '14px', height: '14px' }} />
             Import
           </button>
-          <button
-            onClick={() => canEditCustomersFinal && router.navigate('/directory/customers/new')}
-            disabled={!canEditCustomersFinal}
-            className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" 
-            style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-            title={!canEditCustomersFinal ? "You don't have permission to create customers" : undefined}
-          >
-            <Plus style={{ width: '14px', height: '14px' }} />
-            Add Customer
-          </button>
+          {canEditCustomersFinal && canCreateDir && (
+            <button
+              onClick={() => router.navigate('/directory/customers/new')}
+              className="flex items-center gap-2 px-2 py-1 rounded text-white transition-colors text-sm hover:opacity-90" 
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+            >
+              <Plus style={{ width: '14px', height: '14px' }} />
+              Add Customer
+            </button>
+          )}
         </div>
       </div>
 
@@ -931,7 +934,7 @@ export default function Customers() {
                           return getCustomerTypeBadge(formatCustomerTypeLabel(type));
                         })()}
                       </td>
-                      <td className="py-4 px-4 text-gray-600 text-sm text-center">{customer.dateAdded ? new Date(customer.dateAdded).toLocaleDateString() : 'N/A'}</td>
+                      <td className="py-4 px-4 text-gray-600 text-sm text-center">{formatDate(customer.dateAdded)}</td>
                       <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1 justify-end">
                           {canEditCustomersFinal && (
@@ -952,23 +955,27 @@ export default function Customers() {
                               >
                                 <Copy className="w-4 h-4" />
                               </button>
-                              <button 
-                                onClick={(e) => handleArchiveCustomer(customer, e)}
-                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                                aria-label={`Archivar ${customer.companyName}`}
-                                title={`Archivar ${customer.companyName}`}
-                              >
-                                <Archive className="w-4 h-4" />
-                              </button>
-                              <button 
-                                onClick={(e) => handleDeleteCustomer(customer, e)}
-                                disabled={isDeleting}
-                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
-                                aria-label={`Eliminar ${customer.companyName}`}
-                                title={`Eliminar ${customer.companyName}`}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {canArchiveDir && (
+                                <button 
+                                  onClick={(e) => handleArchiveCustomer(customer, e)}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                  aria-label={`Archivar ${customer.companyName}`}
+                                  title={`Archivar ${customer.companyName}`}
+                                >
+                                  <Archive className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canDeleteDir && (
+                                <button 
+                                  onClick={(e) => handleDeleteCustomer(customer, e)}
+                                  disabled={isDeleting}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
+                                  aria-label={`Eliminar ${customer.companyName}`}
+                                  title={`Eliminar ${customer.companyName}`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -1076,7 +1083,7 @@ export default function Customers() {
                     </div>
                     <div className="flex items-center gap-2 text-xs text-gray-600">
                       <Calendar className="w-3 h-3 flex-shrink-0" />
-                      <span>Added {new Date(customer.dateAdded).toLocaleDateString()}</span>
+                      <span>Added {formatDate(customer.dateAdded)}</span>
                     </div>
                     {customer.totalRevenue && (
                       <div className="flex items-center gap-2 text-xs text-gray-600">

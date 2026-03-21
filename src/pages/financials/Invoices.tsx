@@ -7,13 +7,10 @@ import StatusTabs from '../../components/shared/StatusTabs';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
-import { Search, FileText, DollarSign, Plus, Building2 } from 'lucide-react';
-
-const FINANCIAL_SUBMODULES = [
-  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments', href: '/financials/payments', icon: DollarSign },
-];
+import { Search, Plus } from 'lucide-react';
+import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { formatDate } from '../../lib/utils';
+import FinancialSubTabs from './FinancialSubTabs';
 
 const STATUS_VALUES = ['all', 'draft', 'issued', 'partial', 'paid', 'void'] as const;
 const STATUS_LABELS: Record<string, string> = {
@@ -53,7 +50,7 @@ export default function Invoices() {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    registerSubmodules('Financials', FINANCIAL_SUBMODULES);
+    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
   }, [registerSubmodules]);
 
   const fetchInvoices = useCallback(async () => {
@@ -128,6 +125,7 @@ export default function Invoices() {
 
   return (
     <div className="py-6 px-6">
+      <FinancialSubTabs />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Invoices</h1>
@@ -206,8 +204,8 @@ export default function Invoices() {
                             className="text-primary hover:underline">{inv.SalesOrders.sales_order_no}</button>
                         : '—'}
                     </td>
-                    <td className="px-4 py-4 text-gray-700">{new Date(inv.issue_date).toLocaleDateString()}</td>
-                    <td className="px-4 py-4 text-gray-700">{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-4 text-gray-700">{formatDate(inv.issue_date)}</td>
+                    <td className="px-4 py-4 text-gray-700">{formatDate(inv.due_date)}</td>
                     <td className="px-4 py-4 text-right font-mono text-gray-900">{fmt(inv.total, inv.currency_code)}</td>
                     <td className="px-4 py-4 text-center">
                       <StatusBadge status={inv.status} type="invoice" size="sm" />

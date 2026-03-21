@@ -33,6 +33,8 @@ export interface FabricRule {
   heatseal_price_per_m: number;
   bottom_bar_wrap_pct: number;
   confection_pct: number;
+  allow_rotation: boolean;
+  heatseal_direction: 'horizontal' | 'vertical' | 'none';
   is_active: boolean;
   created_at: string;
   updated_at: string;

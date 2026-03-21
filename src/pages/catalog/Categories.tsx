@@ -7,6 +7,7 @@ export interface CategoriesRef {
 interface CategoriesProps {
   itemsForCounts?: Array<{ category_id?: string | null }>;
 }
+import { useGranularAccess } from '../../hooks/usePermissions';
 import { useItemCategoriesCRUD } from '../../hooks/useCatalog';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { supabase } from '../../lib/supabase/client';
@@ -28,6 +29,7 @@ const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categorie
   const { categories, loading, error, createCategory, updateCategory, deleteCategory, isCreating, isDeleting } = useItemCategoriesCRUD();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const { activeOrganizationId } = useOrganizationContext();
+  const { canCreate: canCreateCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [showNewModal, setShowNewModal] = useState(false);
@@ -366,13 +368,15 @@ const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categorie
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-900">Categories</h3>
-              <button
-                onClick={() => openCategoryModal('category')}
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-gray-200 hover:bg-gray-50"
-              >
-                <Plus className="w-3 h-3" />
-                Add
-              </button>
+              {canCreateCat && (
+                <button
+                  onClick={() => openCategoryModal('category')}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-gray-200 hover:bg-gray-50"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add
+                </button>
+              )}
             </div>
             {filteredParents.length === 0 ? (
               <div className="py-10 text-center text-sm text-gray-500">No categories found</div>
@@ -392,13 +396,15 @@ const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categorie
                         {(subcategoryCountByParent.get(category.id) || 0)} subcategories · {(itemsCountByParent.get(category.id) || 0)} items
                       </div>
                     </button>
-                    <button
-                      onClick={() => openCategoryModal('subcategory', category.id)}
-                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
-                      title="Add subcategory"
-                    >
-                      <Plus className="w-3 h-3" />
-                    </button>
+                    {canCreateCat && (
+                      <button
+                        onClick={() => openCategoryModal('subcategory', category.id)}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
+                        title="Add subcategory"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    )}
                     <button
                       onClick={() => handleEdit(category)}
                       className="p-1.5 hover:bg-gray-100 rounded text-gray-600"
@@ -406,14 +412,16 @@ const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categorie
                     >
                       <Edit className="w-3 h-3" />
                     </button>
-                    <button
-                      onClick={() => handleDelete(category.id, category.name)}
-                      disabled={isDeleting}
-                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
-                      title="Delete category"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    {canDeleteCat && (
+                      <button
+                        onClick={() => handleDelete(category.id, category.name)}
+                        disabled={isDeleting}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
+                        title="Delete category"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -423,14 +431,16 @@ const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categorie
           <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-900">Subcategories</h3>
-              <button
-                onClick={() => openCategoryModal('subcategory', selectedParentId)}
-                disabled={!selectedParentId}
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
-              >
-                <Plus className="w-3 h-3" />
-                Add
-              </button>
+              {canCreateCat && (
+                <button
+                  onClick={() => openCategoryModal('subcategory', selectedParentId)}
+                  disabled={!selectedParentId}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add
+                </button>
+              )}
             </div>
             {!selectedParentId ? (
               <div className="py-10 text-center text-sm text-gray-500">Select a category to see subcategories</div>
@@ -479,14 +489,16 @@ const Categories = forwardRef<CategoriesRef, CategoriesProps>(function Categorie
                     >
                       <Edit className="w-3 h-3" />
                     </button>
-                    <button
-                      onClick={() => handleDelete(sub.id, sub.name)}
-                      disabled={isDeleting}
-                      className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
-                      title="Delete subcategory"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    {canDeleteCat && (
+                      <button
+                        onClick={() => handleDelete(sub.id, sub.name)}
+                        disabled={isDeleting}
+                        className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
+                        title="Delete subcategory"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

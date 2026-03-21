@@ -221,6 +221,8 @@ export interface QuoteLineInfoForPDF {
   collection_name?: string | null;
   variant_name?: string | null;
   drive_type?: string | null;
+  /** Drive system brand/type (e.g. "Manual Vertilux", "Motorize Lutron") */
+  drive_system_label?: string | null;
   width_m?: number | null;
   height_m?: number | null;
   configured_product_id?: string | null;
@@ -339,6 +341,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
         collection_name: ql.collection_name ?? null,
         variant_name: ql.variant_name ?? null,
         drive_type: ql.drive_type ?? null,
+        drive_system_label: null,
         width_m: ql.width_m != null ? Number(ql.width_m) : null,
         height_m: ql.height_m != null ? Number(ql.height_m) : null,
         configured_product_id: ql.configured_product_id ?? null,
@@ -387,6 +390,58 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
       });
     }
 
+    const driveItemIds = new Set<string>();
+    configuredProductsMap && Object.values(configuredProductsMap).forEach((cp: { config_snapshot: Record<string, unknown> | null }) => {
+      const snap = cp.config_snapshot;
+      const driveId = snap?.drive_item_id;
+      const motorId = snap?.motor_item_id;
+      if (driveId) driveItemIds.add(driveId as string);
+      if (motorId) driveItemIds.add(motorId as string);
+    });
+    let driveItemsMap = new Map<string, { manufacturer_name?: string | null }>();
+    if (driveItemIds.size > 0) {
+      const { data: driveItemsData, error: driveErr } = await supabase
+        .from('CatalogItems')
+        .select('id, name, sku, manufacturer_id, manufacturer, Manufacturers(name)')
+        .in('id', Array.from(driveItemIds))
+        .or(`organization_id.eq.${proposal.organization_id},organization_id.is.null`)
+        .eq('is_active', true);
+      if (driveErr) {
+        console.warn('[useProposals] Error fetching drive items:', driveErr.message);
+      }
+      if (driveItemsData?.length) {
+        driveItemsData.forEach((item: any) => {
+          const fromJoin = (item.Manufacturers as { name?: string } | null)?.name ?? (item.manufacturers as { name?: string } | null)?.name;
+          const fromColumn = item.manufacturer ? String(item.manufacturer).trim() : null;
+          const mfrName = fromJoin || fromColumn || null;
+          driveItemsMap.set(item.id, { manufacturer_name: mfrName });
+        });
+      }
+      quoteLinesMap.forEach((ql, qlId) => {
+        const snap = (ql.config_snapshot as Record<string, unknown> | null);
+        const driveType = ql.drive_type ?? null;
+        const driveId = snap?.drive_item_id as string | undefined;
+        const motorId = snap?.motor_item_id as string | undefined;
+        const systemItemId = driveType === 'motor' ? (motorId ?? driveId) : (driveId ?? motorId);
+        const driveItem = systemItemId ? driveItemsMap.get(systemItemId) : null;
+        const manufacturerName = driveItem?.manufacturer_name ?? null;
+        const driveTypeLabel = driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : null;
+        const label =
+          driveTypeLabel && manufacturerName
+            ? `${driveTypeLabel} | ${manufacturerName}`
+            : manufacturerName
+              ? `${driveTypeLabel ?? 'Drive'} | ${manufacturerName}`
+              : driveTypeLabel;
+        if (label != null) quoteLinesMap.set(qlId, { ...ql, drive_system_label: label });
+      });
+    }
+    quoteLinesMap.forEach((ql, qlId) => {
+      if (ql.drive_system_label != null) return;
+      const driveType = ql.drive_type ?? null;
+      const driveTypeLabel = driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : null;
+      if (driveTypeLabel != null) quoteLinesMap.set(qlId, { ...ql, drive_system_label: driveTypeLabel });
+    });
+
     const { data: accData } = await supabase
       .from('QuoteLineComponents')
       .select('quote_line_id, catalog_item_id, qty')
@@ -407,17 +462,16 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
       .map((r: any) => r.catalog_item_id)
       .filter(Boolean) as string[];
     const uniqueAccIds = [...new Set(allAccItemIds)];
-    let catalogItemMap = new Map<string, { name?: string; item_name?: string; sku?: string }>();
+    let catalogItemMap = new Map<string, { name?: string; sku?: string }>();
     if (uniqueAccIds.length > 0) {
       const { data: ciData } = await supabase
         .from('CatalogItems')
-        .select('id, name, item_name, sku')
+        .select('id, name, sku')
         .in('id', uniqueAccIds)
         .eq('organization_id', proposal.organization_id);
       (ciData || []).forEach((ci: any) => {
         catalogItemMap.set(ci.id, {
           name: ci.name ?? undefined,
-          item_name: ci.item_name ?? undefined,
           sku: ci.sku ?? undefined,
         });
       });
@@ -430,7 +484,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
       if (components.length === 0) return;
       const accessories = components.map((c) => {
         const ci = catalogItemMap.get(c.catalog_item_id);
-        const name = (ci?.item_name || ci?.name || ci?.sku || '—').trim();
+        const name = (ci?.name || ci?.sku || '—').trim();
         return { name, qty: c.qty };
       });
       const nextSnapshot = snap && typeof snap === 'object' ? { ...snap } : {};
