@@ -3,6 +3,12 @@ import autoTable from 'jspdf-autotable';
 import type { CutPlan1DResult } from '../cutOptimizer';
 import type { CutPlan2DResult } from '../cutOptimizer2D';
 
+/** jsPDF typings omit some runtime APIs (plugins / newer builds). */
+type JsPDFExtras = jsPDF & {
+  setLineDashPattern(dashArray: number[], dashPhase: number): void;
+  getNumberOfPages(): number;
+};
+
 interface CutPlanPDFOptions {
   type: '1d' | '2d';
   title: string;
@@ -480,9 +486,9 @@ export function generateStickersPDF(
 
     doc.setDrawColor(180);
     doc.setLineWidth(0.3);
-    doc.setLineDashPattern([1, 1], 0);
+    (doc as JsPDFExtras).setLineDashPattern([1, 1], 0);
     doc.rect(x, y, stickerW, stickerH);
-    doc.setLineDashPattern([], 0);
+    (doc as JsPDFExtras).setLineDashPattern([], 0);
 
     const rgb = PIECE_COLORS[piece.colorIdx];
     doc.setFillColor(rgb[0], rgb[1], rgb[2]);
@@ -731,7 +737,7 @@ export function generateConsolidated1DPDF(
   }
 
   // Footer on each page
-  const totalPages = doc.getNumberOfPages();
+  const totalPages = (doc as JsPDFExtras).getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
     doc.setFont('helvetica', 'normal');

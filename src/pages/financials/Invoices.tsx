@@ -7,7 +7,7 @@ import StatusTabs from '../../components/shared/StatusTabs';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, FileText } from 'lucide-react';
 import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 import { formatDate } from '../../lib/utils';
 import FinancialSubTabs from './FinancialSubTabs';

@@ -172,7 +172,7 @@ export default function CutOptimization() {
       const bilMetaMap: Record<string, { product_type: string | null; width_m: number | null; height_m: number | null }> = {};
 
       if (mode === 'fabric') {
-        const bilIds = [...new Set((lines ?? []).map((l: any) => l.bom_instance_line_id).filter(Boolean))];
+        const bilIds = [...new Set((lines ?? []).map((l: any) => l.bom_instance_line_id).filter(Boolean))] as string[];
 
         if (bilIds.length > 0) {
           const { data: bilRows } = await supabase
@@ -293,8 +293,8 @@ export default function CutOptimization() {
       .eq('organization_id', activeOrganizationId)
       .eq('deleted', false)
       .order('sort_order')
-      .then(({ data }) => {
-        if (data) setFabricSpecs(data as FabricSpec[]);
+      .then(({ data }: { data: FabricSpec[] | null }) => {
+        if (data) setFabricSpecs(data);
       });
   }, [activeOrganizationId]);
 

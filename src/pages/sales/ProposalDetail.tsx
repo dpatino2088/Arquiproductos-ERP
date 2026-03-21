@@ -1584,6 +1584,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   name?: string | null;
                   sku?: string | null;
                   drive_type?: string | null;
+                  drive_system_label?: string | null;
                 } | null;
                 const dimsSource = {
                   measurements: snap?.measurements ?? (qlInfo?.config_snapshot as { measurements?: { panels?: unknown[]; height_mm?: number } } | undefined)?.measurements,

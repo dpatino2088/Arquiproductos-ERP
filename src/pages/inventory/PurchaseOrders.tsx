@@ -217,7 +217,7 @@ export default function PurchaseOrders() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     {(() => {
-                      const bs = (po as Record<string, unknown>).billing_status as string | undefined;
+                      const bs = (po as unknown as Record<string, unknown>).billing_status as string | undefined;
                       if (!bs || bs === 'unbilled') return <span className="text-xs text-gray-400">Unbilled</span>;
                       const colors: Record<string, string> = { partial: 'bg-amber-100 text-amber-700', billed: 'bg-green-100 text-green-700' };
                       return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[bs] ?? 'bg-gray-100 text-gray-700'}`}>{bs.charAt(0).toUpperCase() + bs.slice(1)}</span>;

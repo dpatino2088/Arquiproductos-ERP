@@ -18,7 +18,7 @@ export default function FinishedGoods() {
   const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules } = useSubmoduleNav();
   const { groups, loading, error, refetch } = useFinishedGoods();
-  const { orgRole } = useOrganizationContext();
+  const { role: orgRole } = useOrganizationContext();
   const [filter, setFilter] = useState<FilterMode>('ready');
   const [search, setSearch] = useState('');
   const [expandedMOs, setExpandedMOs] = useState<Set<string>>(new Set());
@@ -33,9 +33,9 @@ export default function FinishedGoods() {
       .from('sales_order_financial_summary')
       .select('sales_order_id, balance_due, total_paid, invoice_status')
       .in('sales_order_id', soIds)
-      .then(({ data }) => {
+      .then(({ data }: { data: { sales_order_id: string; balance_due?: number | null; total_paid?: number | null; invoice_status?: string | null }[] | null }) => {
         const m: Record<string, FinancialInfo> = {};
-        (data ?? []).forEach((r: any) => {
+        (data ?? []).forEach((r) => {
           m[r.sales_order_id] = { balance_due: r.balance_due ?? 0, total_paid: r.total_paid ?? 0, invoice_status: r.invoice_status ?? 'none' };
         });
         setFinancialBySoId(m);

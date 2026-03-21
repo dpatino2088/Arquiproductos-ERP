@@ -154,7 +154,9 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     if (!siblingLines || siblingLines.length === 0) return;
 
     const taskId = siblingLines[0].task_id;
-    const allLinesCompleted = siblingLines.every((l) => l.id === lineId ? true : l.completed);
+    const allLinesCompleted = siblingLines.every((l: { id: string; completed: boolean }) =>
+      l.id === lineId ? true : l.completed,
+    );
     if (!allLinesCompleted) return;
 
     const { data: taskRow } = await supabase

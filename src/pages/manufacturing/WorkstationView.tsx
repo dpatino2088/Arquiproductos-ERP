@@ -167,7 +167,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       const catDimMap: Record<string, number | null> = {};
 
       if (fabricLines.length > 0) {
-        const bilIds = [...new Set(fabricLines.map((l: any) => l.bom_instance_line_id).filter(Boolean))];
+        const bilIds = [...new Set(fabricLines.map((l: any) => l.bom_instance_line_id).filter(Boolean))] as string[];
         if (bilIds.length > 0) {
           const { data: bilRows } = await supabase
             .from('BOMInstanceLines')
@@ -341,7 +341,9 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           .select('id, completed')
           .eq('task_id', lineRow.task_id);
 
-        const allDone = siblings?.every((l) => l.id === lineId ? true : l.completed);
+        const allDone = siblings?.every((l: { id: string; completed: boolean }) =>
+          l.id === lineId ? true : l.completed,
+        );
         if (allDone) {
           const { data: taskRow } = await supabase
             .from('WorkOrderTasks')

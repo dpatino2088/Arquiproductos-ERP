@@ -56,7 +56,7 @@ export default function VendorAccounts() {
 
       <StatusTabs
         tabs={tabs}
-        activeValue={risk}
+        activeTab={risk}
         onChange={v => { setRisk(v as VendorFinancialRisk); setPage(1); }}
       />
 

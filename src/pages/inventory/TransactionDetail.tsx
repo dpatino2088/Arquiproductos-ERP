@@ -150,10 +150,10 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
       .eq('organization_id', activeOrganizationId)
       .eq('warehouse_id', warehouseId)
       .in('catalog_item_id', itemIds)
-      .then(({ data }) => {
+      .then(({ data }: { data: { catalog_item_id: string; quantity: number }[] | null }) => {
         if (!data) return;
         const balanceMap = new Map<string, number>();
-        for (const row of data as { catalog_item_id: string; quantity: number }[]) {
+        for (const row of data) {
           balanceMap.set(row.catalog_item_id, Number(row.quantity));
         }
         setDraftLines(prev => prev.map(l => ({

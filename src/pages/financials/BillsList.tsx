@@ -62,7 +62,7 @@ export default function BillsList() {
 
       <StatusTabs
         tabs={tabs}
-        activeValue={status}
+        activeTab={status}
         onChange={v => { setStatus(v); setPage(1); }}
       />
 

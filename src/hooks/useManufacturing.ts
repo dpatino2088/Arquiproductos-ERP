@@ -8,7 +8,18 @@ import { normalizeUUID } from '../utils/uuid';
 // TYPES
 // ============================================================================
 
-export type ManufacturingOrderStatus = 'draft' | 'planned' | 'in_production' | 'quality_check' | 'ready_for_pickup' | 'delivered' | 'completed' | 'cancelled';
+export type ManufacturingOrderStatus =
+  | 'draft'
+  | 'confirmed'
+  | 'procurement'
+  | 'materials_ready'
+  | 'planned'
+  | 'in_production'
+  | 'quality_check'
+  | 'ready_for_pickup'
+  | 'delivered'
+  | 'completed'
+  | 'cancelled';
 export type ManufacturingOrderPriority = 'low' | 'normal' | 'high' | 'urgent';
 
 export interface ManufacturingOrder {
