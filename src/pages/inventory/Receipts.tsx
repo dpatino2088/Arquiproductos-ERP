@@ -3,7 +3,7 @@ import { router } from '../../lib/router';
 import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useInventoryMovements } from '../../hooks/useInventoryMovements';
-import { usePurchaseOrders, useReceivePurchaseOrder } from '../../hooks/usePurchaseOrders';
+import { usePurchaseOrders, useReceivePurchaseOrder, type PurchaseOrderStatus } from '../../hooks/usePurchaseOrders';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
@@ -74,8 +74,10 @@ export default function Receipts() {
   const [receiveQtyMap, setReceiveQtyMap] = useState<Record<string, number>>({});
   const [loadingPOLines, setLoadingPOLines] = useState(false);
 
-  const { purchaseOrders: openPOs, refetch: refetchPOs } = usePurchaseOrders({ status: undefined });
-  const receivablePOs = useMemo(() => openPOs.filter(po => po.status === 'OPEN' || po.status === 'PARTIAL'), [openPOs]);
+  const { purchaseOrders: openPOs, refetch: refetchOpenPOs } = usePurchaseOrders({ status: 'OPEN' as PurchaseOrderStatus });
+  const { purchaseOrders: partialPOs, refetch: refetchPartialPOs } = usePurchaseOrders({ status: 'PARTIAL' as PurchaseOrderStatus });
+  const refetchPOs = useCallback(() => { refetchOpenPOs(); refetchPartialPOs(); }, [refetchOpenPOs, refetchPartialPOs]);
+  const receivablePOs = useMemo(() => [...openPOs, ...partialPOs], [openPOs, partialPOs]);
   const { receivePurchaseOrder, isReceiving } = useReceivePurchaseOrder();
 
   useEffect(() => {
