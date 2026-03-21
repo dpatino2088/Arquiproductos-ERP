@@ -396,10 +396,18 @@ export default function Receipts() {
                         <th className="px-4 py-3 text-right font-medium text-gray-700">Already Rcvd</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-700">Remaining</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-700">Receive Qty</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-700">Stock Qty</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {poLines.map(l => (
+                      {poLines.map(l => {
+                        const uppu = Number(l.units_per_purchase_unit_snapshot ?? 1);
+                        const puNorm = (l.purchase_unit_snapshot ?? l.unit ?? '').toLowerCase();
+                        const isPackaged = uppu > 1 && !l.is_roll_snapshot
+                          && !['each','ea','unit','units','pc','pcs'].includes(puNorm);
+                        const rcvQty = receiveQtyMap[l.id] ?? l.remaining;
+                        const stockQty = isPackaged ? rcvQty * uppu : null;
+                        return (
                         <tr key={l.id} className="border-t hover:bg-gray-50">
                           <td className="px-4 py-3">
                             {l.is_one_off ? (
@@ -429,7 +437,7 @@ export default function Receipts() {
                               min={0}
                               max={l.remaining}
                               step="0.01"
-                              value={receiveQtyMap[l.id] ?? l.remaining}
+                              value={rcvQty}
                               onChange={e => {
                                 const v = Math.min(l.remaining, Math.max(0, parseFloat(e.target.value) || 0));
                                 setReceiveQtyMap(prev => ({ ...prev, [l.id]: v }));
@@ -437,8 +445,18 @@ export default function Receipts() {
                               className="w-24 px-2 py-1 border border-gray-200 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/20"
                             />
                           </td>
+                          <td className="px-4 py-3 text-right tabular-nums">
+                            {stockQty != null ? (
+                              <span className="text-green-700 font-medium">
+                                {stockQty.toFixed(0)} ea
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
