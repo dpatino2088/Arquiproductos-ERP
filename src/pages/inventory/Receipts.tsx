@@ -105,12 +105,19 @@ export default function Receipts() {
     setLoadingPOLines(true);
     setPoLoadError(null);
     try {
-      const { count: poExists } = await supabase
+      const { data: poRow } = await supabase
         .from('PurchaseOrders')
-        .select('id', { count: 'exact', head: true })
-        .eq('id', poId);
-      if (!poExists) {
+        .select('id, status')
+        .eq('id', poId)
+        .maybeSingle();
+      if (!poRow) {
         setPoLoadError('This purchase order no longer exists. The list will refresh.');
+        setPoLines([]);
+        refetchPOs();
+        return;
+      }
+      if (poRow.status !== 'OPEN' && poRow.status !== 'PARTIAL') {
+        setPoLoadError(`This purchase order is ${poRow.status}. Only OPEN or PARTIAL orders can receive goods.`);
         setPoLines([]);
         refetchPOs();
         return;
@@ -176,6 +183,17 @@ export default function Receipts() {
       return;
     }
     try {
+      const { data: freshPO } = await supabase
+        .from('PurchaseOrders')
+        .select('id, status')
+        .eq('id', selectedPOId)
+        .maybeSingle();
+      if (!freshPO || (freshPO.status !== 'OPEN' && freshPO.status !== 'PARTIAL')) {
+        addNotification({ type: 'error', title: 'Cannot receive', message: `Purchase order is ${freshPO?.status ?? 'missing'}. It may have been received or closed since you opened this page.` });
+        refetchPOs();
+        setPoLines([]);
+        return;
+      }
       const selectedPO = receivablePOs.find((po) => po.id === selectedPOId);
       const result = await receivePurchaseOrder(selectedPOId, toReceive);
       addNotification({
