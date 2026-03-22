@@ -681,6 +681,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           systemSize: undefined,
           system_size: undefined,
           fullness: undefined,
+          bottom_hem_cm: undefined,
+          bottom_hem_profile: undefined,
         } as any;
       case 'drapery-hardware':
         return {
@@ -1085,6 +1087,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             opening_direction: configAny.openingDirection || configAny.opening_direction || null,
             drive_side: configAny.driveSide || configAny.drive_side || null,
             force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
+            bottom_hem_cm: configAny.bottom_hem_cm ?? null,
+            bottom_hem_profile: configAny.bottom_hem_profile ?? null,
             accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
           };
 
@@ -1233,6 +1237,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       (finalNormalizedConfig as any).driveSide = (finalNormalizedConfig as any).drive_side;
       (finalNormalizedConfig as any).track_only = configAny.track_only ?? false;
       (finalNormalizedConfig as any).force_track_join = configAny.forceTrackJoin ?? configAny.force_track_join ?? false;
+      (finalNormalizedConfig as any).bottom_hem_cm = configAny.bottom_hem_cm ?? null;
+      (finalNormalizedConfig as any).bottom_hem_profile = configAny.bottom_hem_profile ?? null;
 
       // Fields stripped by normalizeConfig that apply to all product types
       (finalNormalizedConfig as any).cassette_type = configAny.cassette_type ?? configAny.cassetteType ?? null;

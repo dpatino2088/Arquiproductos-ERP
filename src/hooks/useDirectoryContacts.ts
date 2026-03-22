@@ -130,7 +130,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
 
   const fetchIdRef = useRef(0);
   const { activeOrganizationId: contextOrgId } = useOrganizationContext();
-  const { scopeKey, activeDealerId, effectiveDealerId, hasHydrated } = useDealerScope();
+  const { scopeKey, activeDealerId, hasHydrated } = useDealerScope();
   const { userType } = useAccessContext();
 
   const activeOrganizationId = params?.organizationId ?? contextOrgId;
@@ -251,6 +251,11 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
       return;
     }
     if (signal?.aborted) return;
+    if (!isScopeReady) {
+      setIsPending(true);
+      setScopeState('loading_scope');
+      return;
+    }
 
     const thisFetchId = ++fetchIdRef.current;
     const currentScopeKey = scopeKey;
@@ -293,7 +298,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
       const data = await safeSelectContacts(activeOrganizationId, {
         userType,
         dealerId,
-        selectedDealerId: userType === 'portal' ? null : (effectiveDealerId ?? null),
+        selectedDealerId: userType === 'portal' ? null : (activeDealerId ?? null),
       });
       if (signal?.aborted) return;
       const mapped = data.map(mapToContact);
@@ -305,7 +310,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         console.log('[useDirectoryContacts] Fetched contacts:', {
           count: mapped.length,
           userType,
-          dealerId: userType === 'portal' ? dealerId : effectiveDealerId ?? null,
+          dealerId: userType === 'portal' ? dealerId : activeDealerId ?? null,
           scopeKey: currentScopeKey,
         });
       }
@@ -328,7 +333,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         setHasResolvedOnce(true);
       }
     }
-  }, [enabled, activeOrganizationId, effectiveDealerId, userType, safeSelectContacts, mapToContact, scopeKey, hasResolvedOnce]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectContacts, mapToContact, scopeKey, hasResolvedOnce, isScopeReady]);
 
   const fetchContactsRef = useRef(fetchContacts);
   fetchContactsRef.current = fetchContacts;
@@ -435,7 +440,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
       }
       throw new Error(errorMessage);
     }
-  }, [enabled, activeOrganizationId, effectiveDealerId, userType, fetchContacts, mapToContact]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, fetchContacts, mapToContact]);
 
   /**
    * Update contact (SOLO columnas explícitas)

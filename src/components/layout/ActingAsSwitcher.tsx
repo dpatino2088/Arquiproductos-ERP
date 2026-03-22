@@ -49,7 +49,8 @@ export function ActingAsSwitcher({ onAfterSelect, labelAbove }: { onAfterSelect?
     setIsOpen(false);
 
     const path = window.location.pathname;
-    const salesDetailMatch = path.match(/^\/sales\/(quotes|proposals|orders)\/[^/]+/);
+    // Only redirect from read-only detail routes; keep new/edit forms intact.
+    const salesDetailMatch = path.match(/^\/sales\/(quotes|proposals|orders)\/[0-9a-f-]+$/i);
     if (salesDetailMatch) {
       router.navigate(`/sales/${salesDetailMatch[1]}`);
     }

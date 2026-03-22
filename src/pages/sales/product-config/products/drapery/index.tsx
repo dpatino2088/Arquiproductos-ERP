@@ -34,7 +34,8 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       const sc = cfg.styleCode || cfg.style_code;
       if (!pl || !sc) return false;
       const needsSize = pl === 'wave_drapery' || pl === 'ripple_fold';
-      return needsSize ? !!(cfg.systemSize || cfg.system_size) : true;
+      if (needsSize && !(cfg.systemSize || cfg.system_size)) return false;
+      return cfg.bottom_hem_cm != null;
     }
     case 'measurements':
       return !!(cfg.width_mm && cfg.height_mm);

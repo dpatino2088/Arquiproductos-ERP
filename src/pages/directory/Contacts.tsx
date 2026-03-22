@@ -114,14 +114,6 @@ const formatContactTypeLabel = (contactType: string) => {
 };
 
 export default function Contacts() {
-  // ✅ Estándar #8: Instrumentación - detectar remount
-  useEffect(() => {
-    if (import.meta.env.DEV) console.log('[MOUNT] Contacts');
-    return () => {
-      if (import.meta.env.DEV) console.log('[UNMOUNT] Contacts');
-    };
-  }, []);
-
   // ✅ ALL HOOKS MUST BE CALLED FIRST (before any conditional returns)
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
@@ -132,7 +124,6 @@ export default function Contacts() {
     isInitialLoading: contactsInitialLoading,
     isScopeReady: contactsScopeReady,
     error: contactsError,
-    scopeState,
     hasData,
     isFirstLoad,
     isRefreshing,
@@ -148,19 +139,6 @@ export default function Contacts() {
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
 
   const initialLoading = isFirstLoad || orgLoading || !contactsScopeReady;
-
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log('[Contacts] State:', {
-        scopeState,
-        hasData,
-        isFirstLoad,
-        isRefreshing,
-        isSwitchingDealer,
-        contactsCount: contacts.length,
-      });
-    }
-  }, [scopeState, hasData, isFirstLoad, isRefreshing, isSwitchingDealer, contacts.length]);
 
   useEffect(() => {
     setGlobalLoading(initialLoading);
@@ -192,21 +170,6 @@ export default function Contacts() {
   const [locationSearchTerm, setLocationSearchTerm] = useState('');
   
   const [contactsData, setContactsData] = useState<ContactItem[]>([]);
-
-  // Effect hooks
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log('✅ Contacts component is rendering');
-    }
-  }, []);
-
-  // Detect remount (si ves UNMOUNT/MOUNT al cambiar tab, hay remount escondido)
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log('[MOUNT] Contacts');
-      return () => console.log('[UNMOUNT] Contacts');
-    }
-  }, []);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -517,15 +480,9 @@ export default function Contacts() {
 
     try {
       if (!activeOrganizationId) return;
-      
-      setLoading(true);
-      const { error } = await supabase
-        .from('DirectoryContacts')
-        .update({ archived: true })
-        .eq('id', contact.id)
-        .eq('organization_id', activeOrganizationId);
 
-      if (error) throw error;
+      setLoading(true);
+      await deleteContact(contact.id);
 
       useUIStore.getState().addNotification({
         type: 'success',

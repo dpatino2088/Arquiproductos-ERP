@@ -219,6 +219,8 @@ function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string
     system_size: configAny.systemSize || configAny.system_size || null,
     style_code: configAny.styleCode || configAny.style_code || null,
     force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
+    bottom_hem_cm: configAny.bottom_hem_cm ?? null,
+    bottom_hem_profile: configAny.bottom_hem_profile ?? null,
     cassette_type: configAny.cassette_type ?? configAny.cassetteType ?? null,
     frontFabric: configAny.frontFabric && typeof configAny.frontFabric === 'object' ? configAny.frontFabric : null,
     accessories: Array.isArray(configAny.accessories) ? configAny.accessories : (finalNormalizedConfig.accessories || []),
@@ -422,6 +424,7 @@ type QuoteFormValues = z.infer<typeof quoteSchema>;
 interface Customer {
   id: string;
   organization_id: string;
+  dealer_id?: string | null;
   customer_name: string;
   customer_type_name?: string | null; // VIP, Partner, Reseller, Distributor
   primary_contact_id?: string | null;
@@ -461,12 +464,21 @@ interface QuoteLineWithRelations {
   CatalogItems?: { id: string; item_name: string; sku: string; uom: string } | null;
 }
 
-function CreateProposalButton({ quoteId }: { quoteId: string }) {
+function CreateProposalButton({ quoteId, quoteLineCount = 0 }: { quoteId: string; quoteLineCount?: number }) {
   const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
   const { activeDealerId } = useActiveDealer();
   const [creating, setCreating] = useState(false);
+  const hasQuoteLines = quoteLineCount > 0;
 
   const handleCreate = async () => {
+    if (!hasQuoteLines) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Missing quote lines',
+        message: 'Add at least one quote line before creating a proposal.',
+      });
+      return;
+    }
     setCreating(true);
     try {
       const result = await createProposalFromQuote(quoteId, { actingDealerId: activeDealerId ?? null });
@@ -488,6 +500,7 @@ function CreateProposalButton({ quoteId }: { quoteId: string }) {
         onClick={handleCreate}
         disabled={creating || loading}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
+        title={!hasQuoteLines ? 'Add at least one quote line first' : undefined}
       >
         <FileText className="w-4 h-4" />
         Create Proposal
@@ -497,12 +510,21 @@ function CreateProposalButton({ quoteId }: { quoteId: string }) {
 }
 
 /** Proposals for this Quote — lista y crear, dentro de la página del Quote */
-function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
+function QuoteProposalsSection({ quoteId, quoteLineCount = 0 }: { quoteId: string; quoteLineCount?: number }) {
   const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
   const { activeDealerId } = useActiveDealer();
   const [creating, setCreating] = useState(false);
+  const hasQuoteLines = quoteLineCount > 0;
 
   const handleCreate = async () => {
+    if (!hasQuoteLines) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Missing quote lines',
+        message: 'Add at least one quote line before creating a proposal.',
+      });
+      return;
+    }
     setCreating(true);
     try {
       const result = await createProposalFromQuote(quoteId, { actingDealerId: activeDealerId ?? null });
@@ -548,6 +570,7 @@ function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
           onClick={handleCreate}
           disabled={creating || loading}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
+          title={!hasQuoteLines ? 'Add at least one quote line first' : undefined}
         >
           <FileText className="w-4 h-4" />
           Create Proposal
@@ -600,24 +623,33 @@ function QuoteProposalsSection({ quoteId }: { quoteId: string }) {
 
 export default function QuoteNew() {
   const { activeOrganizationId } = useOrganizationContext();
-  const { userType, isPortal } = useAccessContext();
+  const { userType, isPortal, internalRole } = useAccessContext();
   const { activeDealerId: filterDealerId } = useActiveDealer();
   const { createQuote, isCreating } = useCreateQuote();
   const { updateQuote, isUpdating } = useUpdateQuote();
   const [quoteId, setQuoteId] = useState<string | null>(null);
   const [quoteData, setQuoteData] = useState<any>(null);
   const { customers: directoryCustomers } = useDirectoryCustomers({ organizationId: activeOrganizationId });
-  const customers: Customer[] = useMemo(
+  const [unassignedCustomers, setUnassignedCustomers] = useState<Customer[]>([]);
+  const scopedCustomers: Customer[] = useMemo(
     () =>
       directoryCustomers.map((c) => ({
         id: c.id,
         organization_id: c.organization_id,
+        dealer_id: c.dealer_id ?? null,
         customer_name: c.customer_name,
         customer_type_name: c.customer_type_name ?? null,
         primary_contact_id: c.primary_contact_id ?? null,
       })),
     [directoryCustomers]
   );
+  const customers: Customer[] = useMemo(() => {
+    if (userType !== 'internal' || !filterDealerId) return scopedCustomers;
+    const merged = new Map<string, Customer>();
+    for (const c of scopedCustomers) merged.set(c.id, c);
+    for (const c of unassignedCustomers) merged.set(c.id, c);
+    return Array.from(merged.values());
+  }, [scopedCustomers, unassignedCustomers, userType, filterDealerId]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContactId, setSelectedContactId] = useState<string>('');
   const contactsForCustomerIdRef = useRef<string | null>(null);
@@ -640,6 +672,10 @@ export default function QuoteNew() {
   const { lines: quoteLines, loading: loadingLines, error: errorLines, refetch: refetchLines } = useQuoteLines(quoteId);
   const { settings: costSettings } = useCostSettings();
   const { tiers: dealerTiers } = useDealerTiers();
+  const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
+  const requiresActingDealerSelection =
+    userType === 'internal' &&
+    ['superadmin', 'admin', 'sales', 'sales_coordinator'].includes(normalizedInternalRole);
 
   // Form setup
   const {
@@ -662,8 +698,51 @@ export default function QuoteNew() {
 
   const selectedCustomerId = watch('customer_id');
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+  const selectedCustomerDealerId = selectedCustomer?.dealer_id ?? null;
+  const effectiveDealerIdForCreate =
+    dealerInfo?.id ?? selectedCustomerDealerId ?? quoteData?.dealer_id ?? filterDealerId ?? null;
+  const missingRequiredDealerForCreate =
+    !quoteId &&
+    requiresActingDealerSelection &&
+    !effectiveDealerIdForCreate;
   const effectiveCustomerIdForContacts = selectedCustomerId || (quoteId && quoteData?.customer_id) || null;
   const effectiveOrgIdForContacts = selectedCustomer?.organization_id ?? activeOrganizationId;
+
+  useEffect(() => {
+    const loadUnassignedCustomersForDealerScope = async () => {
+      if (!activeOrganizationId || userType !== 'internal' || !filterDealerId) {
+        setUnassignedCustomers([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('DirectoryCustomers')
+        .select('id, organization_id, dealer_id, customer_name, customer_type_name, primary_contact_id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .is('dealer_id', null)
+        .order('customer_name');
+
+      if (error) {
+        console.error('[QuoteNew] Error loading unassigned customers:', error);
+        setUnassignedCustomers([]);
+        return;
+      }
+
+      setUnassignedCustomers(
+        (data ?? []).map((row: any) => ({
+          id: row.id,
+          organization_id: row.organization_id,
+          dealer_id: row.dealer_id ?? null,
+          customer_name: row.customer_name ?? '',
+          customer_type_name: row.customer_type_name ?? null,
+          primary_contact_id: row.primary_contact_id ?? null,
+        }))
+      );
+    };
+
+    loadUnassignedCustomersForDealerScope();
+  }, [activeOrganizationId, userType, filterDealerId]);
 
   // Load contacts for selected customer only (single query by customer_id + organization_id; RLS applies)
   useEffect(() => {
@@ -918,8 +997,13 @@ export default function QuoteNew() {
             }
           }
         } else {
-          // Internal user: use the acting-as dealer (filter) if set, otherwise first dealer
+          // Internal user: use acting-as dealer when selected.
+          // For roles that require explicit acting-as, never auto-pick a fallback dealer.
           const targetDealerId = filterDealerId;
+          if (!targetDealerId && requiresActingDealerSelection) {
+            setDealerInfo(null);
+            return;
+          }
           let query = supabase
             .from('Dealers')
             .select('id, dealer_name, dealer_no, dealer_tier_id')
@@ -956,7 +1040,7 @@ export default function QuoteNew() {
     };
 
     loadDealerInfo();
-  }, [isPortal, activeOrganizationId, filterDealerId]);
+  }, [isPortal, activeOrganizationId, filterDealerId, requiresActingDealerSelection, quoteId]);
 
   // Generate quote number for new quotes only (not when editing)
   useEffect(() => {
@@ -981,7 +1065,7 @@ export default function QuoteNew() {
       try {
         // Per-dealer sequence: QT-0100, QT-0101... (each dealer has independent QT sequence)
         const { generateNextQuoteNumber } = await import('../../lib/sequential-numbers');
-        const dealerIdForSeq = dealerInfo?.id ?? filterDealerId ?? null;
+        const dealerIdForSeq = dealerInfo?.id ?? selectedCustomerDealerId ?? filterDealerId ?? null;
         const quoteNo = await generateNextQuoteNumber(activeOrganizationId, dealerIdForSeq);
         setValue('quote_no', quoteNo, { shouldValidate: true });
       } catch (err) {
@@ -997,7 +1081,7 @@ export default function QuoteNew() {
     }, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [activeOrganizationId, quoteId, setValue, watch, quoteData, dealerInfo?.id, filterDealerId]);
+  }, [activeOrganizationId, quoteId, setValue, watch, quoteData, dealerInfo?.id, selectedCustomerDealerId, filterDealerId]);
 
   // Dealer tier discount: aplicado a Quote Lines (mostrar dealer price); Proposals siguen con MSRP
   const dealerDiscountPctForDisplay = useMemo(
@@ -3451,6 +3535,16 @@ export default function QuoteNew() {
       return;
     }
 
+    const effectiveDealerId = dealerInfo?.id ?? selectedCustomerDealerId ?? quoteData?.dealer_id ?? filterDealerId ?? null;
+    if (!quoteId && requiresActingDealerSelection && !effectiveDealerId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Dealer required',
+        message: 'Select a Dealer in Acting As before creating a Quote.',
+      });
+      return;
+    }
+
     setIsSaving(true);
     setSaveError(null);
 
@@ -3463,7 +3557,7 @@ export default function QuoteNew() {
         contact_id: selectedContactId || null,
         status: data.status,
         organization_id: activeOrganizationId,
-        dealer_id: dealerInfo?.id || quoteData?.dealer_id || null,
+        dealer_id: effectiveDealerId,
         description: data.description?.trim() || null,
         notes: data.notes?.trim() || null,
         po_number: data.po_number?.trim() || null,
@@ -3512,8 +3606,28 @@ export default function QuoteNew() {
             router.navigate('/sales/quotes');
           }
       } else {
-        // Create new quote
-        const created = await createQuote(quoteDataPayload);
+        // Create new quote with duplicate-number retry guard.
+        const createWithUniqueQuoteNo = async () => {
+          let payload = { ...quoteDataPayload };
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+              return await createQuote(payload);
+            } catch (e: any) {
+              const msg = String(e?.message ?? '');
+              const isQuoteNoDuplicate =
+                msg.toLowerCase().includes('quote number') &&
+                msg.toLowerCase().includes('already exists');
+              if (!isQuoteNoDuplicate || !activeOrganizationId) throw e;
+              const { generateNextQuoteNumber } = await import('../../lib/sequential-numbers');
+              const nextNo = await generateNextQuoteNumber(activeOrganizationId, effectiveDealerId);
+              setValue('quote_no', nextNo, { shouldValidate: true });
+              payload = { ...payload, quote_no: nextNo };
+            }
+          }
+          throw new Error('Could not generate a unique quote number. Please try again.');
+        };
+
+        const created = await createWithUniqueQuoteNo();
         if (created?.id) {
           // Update quoteId state so form knows it's now in edit mode
           setQuoteId(created.id);
@@ -3679,7 +3793,7 @@ export default function QuoteNew() {
           <button
             type="button"
             onClick={handleSubmit((data) => onSubmit(data, false))}
-            disabled={isSaving || isCreating || isUpdating}
+            disabled={isSaving || isCreating || isUpdating || missingRequiredDealerForCreate}
             className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save'}
@@ -3687,12 +3801,12 @@ export default function QuoteNew() {
           <button
             type="button"
             onClick={handleSubmit(handleSaveAndClose)}
-            disabled={isSaving || isCreating || isUpdating}
+            disabled={isSaving || isCreating || isUpdating || missingRequiredDealerForCreate}
             className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save and Close'}
           </button>
-          {quoteId && !dealerInfo && <CreateProposalButton quoteId={quoteId} />}
+          {quoteId && !dealerInfo && <CreateProposalButton quoteId={quoteId} quoteLineCount={quoteLines.length} />}
         </div>
       </div>
 
@@ -3782,6 +3896,11 @@ export default function QuoteNew() {
         {/* RIGHT CARD: Dealer / Quote Info + Summary */}
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm flex flex-col justify-end">
           <div className="space-y-3">
+            {missingRequiredDealerForCreate && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Dealer required
+              </div>
+            )}
             {dealerInfo && (
               <div className="flex items-center justify-between gap-4 pb-2">
                 <div className="flex items-center gap-2 text-sm">
@@ -3797,7 +3916,7 @@ export default function QuoteNew() {
                 </div>
                 {quoteId && (
                   <div className="flex-shrink-0">
-                    <CreateProposalButton quoteId={quoteId} />
+                    <CreateProposalButton quoteId={quoteId} quoteLineCount={quoteLines.length} />
                   </div>
                 )}
               </div>
@@ -4156,7 +4275,7 @@ export default function QuoteNew() {
         <>
           <div className="border-t border-gray-200 my-4" aria-hidden />
           <div className="bg-white border border-gray-200 rounded-lg mb-6">
-          <QuoteProposalsSection quoteId={quoteId} />
+          <QuoteProposalsSection quoteId={quoteId} quoteLineCount={quoteLines.length} />
         </div>
         </>
       )}

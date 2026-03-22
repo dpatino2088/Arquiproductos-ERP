@@ -797,6 +797,16 @@ export async function createProposalFromQuote(
     return { error: qlErr.message };
   }
 
+  // Guardrail: a proposal must come from at least one quote line.
+  if (!quoteLines || quoteLines.length === 0) {
+    // Best effort rollback so we do not leave empty proposal headers.
+    await supabase
+      .from('Proposals')
+      .update({ deleted: true })
+      .eq('id', proposalId);
+    return { error: 'Cannot create proposal: the quote has no lines.' };
+  }
+
   const lineRows = (quoteLines || []).map((ql: any, i: number) => ({
     organization_id: orgId,
     dealer_id: dealerId,

@@ -451,6 +451,7 @@ export default function SalesOrderDetail() {
 
   const currency = 'USD';
   const orderTotal = Math.max(0, Number(so?.total_amount ?? 0));
+  const isZeroValueOrder = orderTotal <= 0.005;
   const totalInvoiced = Math.max(0, Number(financialSummary?.total_invoiced ?? 0));
   const totalPaid = financialSummary?.total_paid ?? 0;
   const receivableBalance = Math.max(0, Number(financialSummary?.balance_due ?? orderTotal - totalPaid));
@@ -757,7 +758,7 @@ export default function SalesOrderDetail() {
 
   const soStatus = (so.status || 'draft').toLowerCase();
   const MIN_PAYMENT_PCT = 0.15;
-  const hasPaidAmount = orderTotal > 0 && totalPaid >= orderTotal * MIN_PAYMENT_PCT;
+  const hasPaidAmount = isZeroValueOrder || totalPaid >= orderTotal * MIN_PAYMENT_PCT;
   const manufacturingProgressCard = (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
       <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>

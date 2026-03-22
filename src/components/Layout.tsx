@@ -90,11 +90,14 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Receipts', href: '/inventory/receipts' },
     { label: 'Transactions', href: '/inventory/transactions' },
     { label: 'Adjustments', href: '/inventory/adjustments' },
+    { label: 'Material Demand', href: '/inventory/material-demand' },
   ],
   '/manufacturing': [
     { label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
     { label: 'Work Orders', href: '/manufacturing/work-orders' },
     { label: 'Calendar', href: '/manufacturing/calendar' },
+    { label: 'Finished Goods', href: '/manufacturing/finished-goods' },
+    { label: 'Cut Optimization', href: '/manufacturing/cut-optimization' },
   ],
   '/financials': [
     { label: 'Accounts Receivable', href: '/financials/accounts' },

@@ -33,6 +33,7 @@ const HARDWARE_COLOR_OPTIONS = [
   { id: 'Grey', name: 'Grey', color: '#6B7280', border: '#6B7280' },
 ];
 
+
 export default function DraperyHardwareStep({ config, onUpdate }: DraperyHardwareStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<string>>(new Set());

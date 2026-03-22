@@ -260,6 +260,12 @@ export async function getConfigFromQuoteLine(
         if (config.drive_side && !config.driveSide) config.driveSide = config.drive_side;
         if (config.driveSide && !config.drive_side) config.drive_side = config.driveSide;
 
+        // Bottom hem override from config_snapshot
+        if (snap.bottom_hem_cm != null && config.bottom_hem_cm == null)
+          config.bottom_hem_cm = snap.bottom_hem_cm;
+        if (snap.bottom_hem_profile && !config.bottom_hem_profile)
+          config.bottom_hem_profile = snap.bottom_hem_profile;
+
         // ── Normalize hardware_color to capitalized (White/Black/Silver) ──
         const hc = config.hardware_color;
         if (typeof hc === 'string' && hc.trim()) {

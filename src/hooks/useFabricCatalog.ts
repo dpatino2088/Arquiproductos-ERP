@@ -100,6 +100,29 @@ export function useFabricCollections(productTypeId?: string, manufacturerId?: st
 
         let data = dataWithProductType || [];
 
+        // Fallback 0: if manufacturer filter is too restrictive, retry without manufacturer.
+        if (data.length === 0 && manufacturerId) {
+          const { data: dataWithoutManufacturer, error: errorWithoutManufacturer } = await supabase
+            .from('CatalogItems')
+            .select(`
+              collection_name,
+              CatalogItemProductTypes!inner(product_type_id, organization_id)
+            `)
+            .eq('organization_id', activeOrganizationId)
+            .eq('is_roll', true)
+            .eq('is_active', true)
+            .eq('CatalogItemProductTypes.product_type_id', productTypeId)
+            .eq('CatalogItemProductTypes.organization_id', activeOrganizationId)
+            .not('collection_name', 'is', null)
+            .neq('collection_name', '');
+
+          if (errorWithoutManufacturer) {
+            console.error('useFabricCollections query error (no manufacturer fallback):', errorWithoutManufacturer);
+          } else {
+            data = dataWithoutManufacturer || [];
+          }
+        }
+
         // Fallback: if no results, fetch all roll collections (direct from CatalogItems)
         if (data.length === 0) {
           if (import.meta.env.DEV) {
@@ -255,6 +278,33 @@ export function useFabricVariants(
         }
 
         let data = dataWithProductType || [];
+
+        // Fallback 0: if manufacturer filter is too restrictive, retry without manufacturer.
+        if (data.length === 0 && manufacturerId) {
+          const { data: dataWithoutManufacturer, error: errorWithoutManufacturer } = await supabase
+            .from('CatalogItems')
+            .select(`
+              id, sku, name, collection_name, variant_name,
+              manufacturer_id, manufacturer, roll_width, color,
+              cost_exw, description, image_url,
+              CatalogItemProductTypes!inner(product_type_id, organization_id)
+            `)
+            .eq('organization_id', activeOrganizationId)
+            .eq('is_roll', true)
+            .eq('is_active', true)
+            .eq('collection_name', collectionName)
+            .eq('CatalogItemProductTypes.product_type_id', productTypeId)
+            .eq('CatalogItemProductTypes.organization_id', activeOrganizationId)
+            .not('variant_name', 'is', null)
+            .neq('variant_name', '')
+            .order('variant_name', { ascending: true });
+
+          if (errorWithoutManufacturer) {
+            console.error('useFabricVariants query error (no manufacturer fallback):', errorWithoutManufacturer);
+          } else {
+            data = dataWithoutManufacturer || [];
+          }
+        }
 
         // Fallback: if no results, fetch all roll variants for the collection
         if (data.length === 0) {

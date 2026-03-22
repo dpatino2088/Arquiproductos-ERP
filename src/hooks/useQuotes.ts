@@ -797,6 +797,7 @@ export function useQuoteLines(quoteId: string | null) {
 export function useCreateQuote() {
   const [isCreating, setIsCreating] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
+  const { userType, internalRole } = useAccessContext();
 
   const createQuote = async (quoteData: Omit<Quote, 'id' | 'organization_id' | 'dealer_id' | 'created_at' | 'updated_at' | 'deleted' | 'archived'> & { dealer_id?: string | null }) => {
     if (!activeOrganizationId) {
@@ -831,6 +832,29 @@ export function useCreateQuote() {
 
       if (!finalDealerId && quoteData.dealer_id) {
         finalDealerId = quoteData.dealer_id;
+      }
+
+      const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
+      const requiredDealerRoles = new Set(['superadmin', 'admin', 'sales', 'sales_coordinator']);
+      let dealerIsRequired = userType === 'internal' && requiredDealerRoles.has(normalizedInternalRole);
+
+      // Fallback for race conditions while access context is still resolving.
+      if (userType === 'internal' && !dealerIsRequired && !normalizedInternalRole) {
+        const { data: appUserRole } = await supabase
+          .from('AppUsers')
+          .select('role_code')
+          .eq('auth_user_id', user.id)
+          .eq('user_type', 'org')
+          .eq('deleted', false)
+          .in('status', ['active', 'invited'])
+          .limit(1)
+          .maybeSingle();
+        const roleCode = (appUserRole?.role_code ?? '').toString().trim().toLowerCase();
+        dealerIsRequired = requiredDealerRoles.has(roleCode);
+      }
+
+      if (dealerIsRequired && !finalDealerId) {
+        throw new Error('Dealer Acting As is required to create a Quote for your role.');
       }
 
       const { data, error } = await supabase

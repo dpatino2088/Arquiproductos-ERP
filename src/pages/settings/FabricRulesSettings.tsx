@@ -41,7 +41,7 @@ function inferDefaults(ptName: string): Partial<FabricRule> {
   if (n.includes('roller') || n.includes('zip'))
     return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08, allow_rotation: true, heatseal_direction: 'horizontal' as const };
   if (n.includes('drapery') || n.includes('curtain') || n.includes('wave') || n.includes('ripple') || n.includes('pinch'))
-    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10, allow_rotation: true, heatseal_direction: 'vertical' as const };
+    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10, allow_rotation: true, heatseal_direction: 'vertical' as const, bottom_hem_options: [0, 5, 10, 15] };
   return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15, allow_rotation: true, heatseal_direction: 'none' as const };
 }
 
@@ -344,8 +344,21 @@ export default function FabricRulesSettings() {
                 <Input type="number" step={0.5} value={draft.top_hem_cm ?? 0} onChange={e => setDraft({ ...draft, top_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
               </div>
               <div>
-                <Label className="text-xs">Bottom Hem (cm)</Label>
+                <Label className="text-xs">Bottom Hem Default (cm)</Label>
                 <Input type="number" step={0.5} value={draft.bottom_hem_cm ?? 0} onChange={e => setDraft({ ...draft, bottom_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+              </div>
+              <div className="md:col-span-2">
+                <Label className="text-xs">Bottom Hem Options (cm)</Label>
+                <Input
+                  value={(draft.bottom_hem_options ?? []).join(', ')}
+                  onChange={e => {
+                    const vals = e.target.value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+                    setDraft({ ...draft, bottom_hem_options: vals.length > 0 ? vals : null });
+                  }}
+                  placeholder="0, 5, 10, 15"
+                  className="text-xs"
+                />
+                <span className="text-[10px] text-gray-400">Comma-separated cm values shown as cards in configurator</span>
               </div>
               <div>
                 <Label className="text-xs">Side Hem (cm)</Label>
@@ -517,6 +530,9 @@ export default function FabricRulesSettings() {
                                   <>
                                     <span>Fullness: {rule.fullness_factor}x</span>
                                     <span>Hems T/B/S: {rule.top_hem_cm}/{rule.bottom_hem_cm}/{rule.side_hem_cm} cm</span>
+                                    {rule.bottom_hem_options && rule.bottom_hem_options.length > 0 && (
+                                      <span>Hem options: [{rule.bottom_hem_options.join(', ')}]</span>
+                                    )}
                                   </>
                                 )}
                                 <span>Waste: {(rule.waste_pct * 100).toFixed(0)}%</span>

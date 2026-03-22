@@ -74,10 +74,11 @@ export default function Receipts() {
   const [receiveQtyMap, setReceiveQtyMap] = useState<Record<string, number>>({});
   const [loadingPOLines, setLoadingPOLines] = useState(false);
 
+  const { purchaseOrders: draftPOs, refetch: refetchDraftPOs } = usePurchaseOrders({ status: 'DRAFT' as PurchaseOrderStatus });
   const { purchaseOrders: openPOs, refetch: refetchOpenPOs } = usePurchaseOrders({ status: 'OPEN' as PurchaseOrderStatus });
   const { purchaseOrders: partialPOs, refetch: refetchPartialPOs } = usePurchaseOrders({ status: 'PARTIAL' as PurchaseOrderStatus });
-  const refetchPOs = useCallback(() => { refetchOpenPOs(); refetchPartialPOs(); }, [refetchOpenPOs, refetchPartialPOs]);
-  const receivablePOs = useMemo(() => [...openPOs, ...partialPOs], [openPOs, partialPOs]);
+  const refetchPOs = useCallback(() => { refetchDraftPOs(); refetchOpenPOs(); refetchPartialPOs(); }, [refetchDraftPOs, refetchOpenPOs, refetchPartialPOs]);
+  const receivablePOs = useMemo(() => [...draftPOs, ...openPOs, ...partialPOs], [draftPOs, openPOs, partialPOs]);
   const { receivePurchaseOrder, isReceiving } = useReceivePurchaseOrder();
 
   useEffect(() => {
@@ -118,8 +119,8 @@ export default function Receipts() {
         refetchPOs();
         return;
       }
-      if (poRow.status !== 'OPEN' && poRow.status !== 'PARTIAL') {
-        setPoLoadError(`This purchase order is ${poRow.status}. Only OPEN or PARTIAL orders can receive goods.`);
+      if (poRow.status !== 'DRAFT' && poRow.status !== 'OPEN' && poRow.status !== 'PARTIAL') {
+        setPoLoadError(`This purchase order is ${poRow.status}. Only DRAFT, OPEN or PARTIAL orders can receive goods.`);
         setPoLines([]);
         refetchPOs();
         return;
@@ -190,11 +191,22 @@ export default function Receipts() {
         .select('id, status')
         .eq('id', selectedPOId)
         .maybeSingle();
-      if (!freshPO || (freshPO.status !== 'OPEN' && freshPO.status !== 'PARTIAL')) {
+      if (!freshPO || (freshPO.status !== 'DRAFT' && freshPO.status !== 'OPEN' && freshPO.status !== 'PARTIAL')) {
         addNotification({ type: 'error', title: 'Cannot receive', message: `Purchase order is ${freshPO?.status ?? 'missing'}. It may have been received or closed since you opened this page.` });
         refetchPOs();
         setPoLines([]);
         return;
+      }
+      if (freshPO.status === 'DRAFT') {
+        const { error: openErr } = await supabase
+          .from('PurchaseOrders')
+          .update({ status: 'OPEN', updated_at: new Date().toISOString() })
+          .eq('id', selectedPOId);
+        if (openErr) {
+          addNotification({ type: 'error', title: 'Cannot receive', message: `Failed to open draft purchase order before receiving: ${openErr.message}` });
+          refetchPOs();
+          return;
+        }
       }
       const selectedPO = receivablePOs.find((po) => po.id === selectedPOId);
       const result = await receivePurchaseOrder(selectedPOId, toReceive);

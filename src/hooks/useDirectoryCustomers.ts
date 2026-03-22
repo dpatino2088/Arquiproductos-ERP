@@ -128,7 +128,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
 
   const fetchIdRef = useRef(0);
   const { activeOrganizationId: contextOrgId } = useOrganizationContext();
-  const { scopeKey, activeDealerId, effectiveDealerId, hasHydrated } = useDealerScope();
+  const { scopeKey, activeDealerId, hasHydrated } = useDealerScope();
   const { userType } = useAccessContext();
 
   const activeOrganizationId = params?.organizationId ?? contextOrgId;
@@ -224,6 +224,11 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       return;
     }
     if (signal?.aborted) return;
+    if (!isScopeReady) {
+      setIsPending(true);
+      setScopeState('loading_scope');
+      return;
+    }
 
     const thisFetchId = ++fetchIdRef.current;
     const currentScopeKey = scopeKey;
@@ -262,7 +267,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
           return;
         }
       } else {
-        dealerId = effectiveDealerId ?? null;
+        dealerId = activeDealerId ?? null;
       }
 
       const data = await safeSelectCustomers(activeOrganizationId, dealerId);
@@ -299,7 +304,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
         setHasResolvedOnce(true);
       }
     }
-  }, [enabled, activeOrganizationId, effectiveDealerId, userType, safeSelectCustomers, mapToCustomer, scopeKey, hasResolvedOnce]);
+  }, [enabled, activeOrganizationId, activeDealerId, userType, safeSelectCustomers, mapToCustomer, scopeKey, hasResolvedOnce, isScopeReady]);
 
   const fetchCustomersRef = useRef(fetchCustomers);
   fetchCustomersRef.current = fetchCustomers;

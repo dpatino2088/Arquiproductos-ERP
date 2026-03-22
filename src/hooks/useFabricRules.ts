@@ -35,6 +35,7 @@ export interface FabricRule {
   confection_pct: number;
   allow_rotation: boolean;
   heatseal_direction: 'horizontal' | 'vertical' | 'none';
+  bottom_hem_options: number[] | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

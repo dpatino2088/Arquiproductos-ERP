@@ -958,6 +958,19 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                   const openingDir = c.opening_direction || c.openingDirection;
                   const driveSide = c.drive_side || c.driveSide;
                   const trackJoin = c.force_track_join ?? c.forceTrackJoin;
+                  const bottomHemCmRaw = c.bottom_hem_cm;
+                  const bottomHemFromProfile = (() => {
+                    const p = typeof c.bottom_hem_profile === 'string' ? c.bottom_hem_profile : '';
+                    const m = p.match(/^hem_(\d+(?:\.\d+)?)$/);
+                    return m ? Number(m[1]) : null;
+                  })();
+                  const bottomHemCm = bottomHemCmRaw != null
+                    ? Number(bottomHemCmRaw)
+                    : bottomHemFromProfile;
+                  const bottomHemDisplay =
+                    bottomHemCm == null || Number.isNaN(bottomHemCm)
+                      ? 'Not selected'
+                      : (bottomHemCm === 0 ? 'Serged (0 cm)' : `${bottomHemCm} cm`);
                   return (
                   <>
                     {productLine && (
@@ -978,6 +991,10 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                         <span className="ml-2 text-gray-900">{systemSize}</span>
                       </div>
                     )}
+                    <div className={specRow}>
+                      <span className="font-medium text-gray-700">Bottom Hem:</span>
+                      <span className="ml-2 text-gray-900">{bottomHemDisplay}</span>
+                    </div>
                     {openingDir && (
                       <div className={specRow}>
                         <span className="font-medium text-gray-700">Opening Direction:</span>

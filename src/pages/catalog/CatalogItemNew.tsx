@@ -1253,8 +1253,8 @@ export default function CatalogItemNew() {
             organization_id: activeOrganizationId,
             supply_type: supplyType,
             supply_origin: supplyOrigin,
-            lead_time_min_days: existing?.lead_time_min_days ?? 7,
-            lead_time_max_days: existing?.lead_time_max_days ?? 8,
+            lead_time_min_days: existing?.lead_time_min_days ?? (supplyOrigin === 'import' ? 45 : 8),
+            lead_time_max_days: existing?.lead_time_max_days ?? (supplyOrigin === 'import' ? 60 : 15),
             notes: existing?.notes ?? null,
           });
         } catch (supplyErr) {

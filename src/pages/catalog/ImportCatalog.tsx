@@ -762,8 +762,8 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
               organization_id: activeOrganizationId!,
               supply_type: supplyType,
               supply_origin: supplyOrigin,
-              lead_time_min_days: 0,
-              lead_time_max_days: 0,
+              lead_time_min_days: supplyOrigin === 'import' ? 45 : 8,
+              lead_time_max_days: supplyOrigin === 'import' ? 60 : 15,
               notes: null,
             });
 

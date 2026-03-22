@@ -214,6 +214,9 @@ export interface DraperyConfig extends BaseProductConfig {
     variantId?: string;
     rollWidthCm?: number;
   };
+  // Bottom hem override (user-selectable per quote line)
+  bottom_hem_cm?: number;
+  bottom_hem_profile?: 'serged' | 'hem_5' | 'hem_10' | 'hem_15' | string;
   // Legacy confection type
   confectionType?: 'standard' | 'pinch-pleat' | 'goblet' | 'euro-pleat';
   // Mounting

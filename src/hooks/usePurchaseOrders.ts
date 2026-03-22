@@ -594,8 +594,15 @@ export function useReceivePurchaseOrder() {
       queryClient.invalidateQueries({ queryKey: ['inventory', 'purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
 
-      // Auto-advance linked MOs to materials_ready if all demand is covered
-      supabase.rpc('check_mo_readiness_after_po_receive', { p_po_id: purchaseOrderId }).catch(() => {});
+      // Auto-advance linked MOs to materials_ready if all demand is covered.
+      // Wrap in async IIFE because supabase.rpc builder is not a native Promise at call-site.
+      void (async () => {
+        try {
+          await supabase.rpc('check_mo_readiness_after_po_receive', { p_po_id: purchaseOrderId });
+        } catch {
+          // Best-effort side effect; receipt success should not be blocked.
+        }
+      })();
 
       return result;
     } finally {

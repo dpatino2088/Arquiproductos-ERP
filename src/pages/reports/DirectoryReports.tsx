@@ -1,34 +1,49 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useContacts } from '../../hooks/useDirectory';
+import { CONTACT_TYPE_LABELS, useDirectoryContacts } from '../../hooks/useDirectoryContacts';
+import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { Contact, Building } from 'lucide-react';
 
 export default function DirectoryReports() {
   const { registerSubmodules } = useSubmoduleNav();
-  const { contacts, loading, error } = useContacts();
+  const { activeOrganizationId } = useOrganizationContext();
+  const { contacts, isLoading, error } = useDirectoryContacts({
+    organizationId: activeOrganizationId ?? null,
+    enabled: !!activeOrganizationId,
+  });
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
   const [selectedType, setSelectedType] = useState<'all' | 'customer'>('all');
 
   useEffect(() => {
-    setGlobalLoading(loading);
+    setGlobalLoading(isLoading);
     return () => setGlobalLoading(false);
-  }, [loading, setGlobalLoading]);
+  }, [isLoading, setGlobalLoading]);
 
   useEffect(() => {
     registerSubmodules('Reports', []);
   }, [registerSubmodules]);
 
-  const filteredContacts = contacts.filter(contact => {
+  const contactsRows = useMemo(() => contacts.map((contact) => ({
+    id: contact.id,
+    typeLabel: contact.contact_type ? CONTACT_TYPE_LABELS[contact.contact_type] : 'Contact',
+    name: contact.contact_name || 'N/A',
+    email: contact.contact_email || 'N/A',
+    phone: contact.contact_primary_phone || 'N/A',
+    location: [contact.contact_city, contact.contact_country].filter(Boolean).join(', ') || 'N/A',
+    status: contact.deleted ? 'Archived' : 'Active',
+    hasCustomer: !!contact.customer_id,
+  })), [contacts]);
+
+  const filteredContacts = contactsRows.filter(contact => {
     if (selectedType === 'all') return true;
-    // All contacts belong to customers now, so 'customer' filter shows all
-    if (selectedType === 'customer') return true;
+    if (selectedType === 'customer') return contact.hasCustomer;
     return true;
   });
 
-  const customerCount = contacts.length;
+  const customerCount = contactsRows.filter((c) => c.hasCustomer).length;
 
-  if (loading) return <div className="py-6 px-6" />;
+  if (isLoading) return <div className="py-6 px-6" />;
 
   if (error) {
     return (
@@ -124,15 +139,14 @@ export default function DirectoryReports() {
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700">
                         <Contact className="w-3 h-3" />
-                        {contact.category}
+                        {contact.typeLabel}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900">
-                      {contact.firstName} {contact.lastName}
-                      {contact.company && ` - ${contact.company}`}
+                      {contact.name}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{contact.email || 'N/A'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{contact.phone || 'N/A'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{contact.email}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{contact.phone}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{contact.location}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded text-xs font-medium ${

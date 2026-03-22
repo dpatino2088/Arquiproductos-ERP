@@ -16,6 +16,8 @@ interface FabricRuleOption {
   image_url: string | null;
   fabric_group: string | null;
   fullness_factor: number;
+  bottom_hem_options: number[] | null;
+  bottom_hem_cm: number;
 }
 
 const DISPLAY_NAMES: Record<string, string> = {
@@ -141,7 +143,7 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
     (async () => {
       const rulesQuery = supabase
         .from('FabricRules')
-        .select('id, style_code, display_name, image_url, fabric_group, fullness_factor')
+        .select('id, style_code, display_name, image_url, fabric_group, fullness_factor, bottom_hem_options, bottom_hem_cm')
         .eq('organization_id', activeOrganizationId)
         .eq('product_type_id', productTypeId)
         .eq('formula_code', 'DRAPERY_PANELS')
@@ -242,6 +244,37 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
   }, [styleRules]);
 
   const showWaveSizeSection = styleCards.length > 1;
+
+  const activeRule = useMemo(() => {
+    if (!selectedStyleCode) return null;
+    return styleRules.find(r => r.style_code === selectedStyleCode) ?? null;
+  }, [styleRules, selectedStyleCode]);
+
+  const bottomHemOptions = useMemo(() => {
+    if (!activeRule) return null;
+    const configured = Array.isArray(activeRule.bottom_hem_options)
+      ? activeRule.bottom_hem_options.filter((v) => Number.isFinite(Number(v)))
+      : [];
+    if (configured.length > 0) {
+      return [...configured].sort((a, b) => a - b);
+    }
+    // Backward compatibility: old rules may have only a default bottom_hem_cm.
+    if (activeRule.bottom_hem_cm != null && Number.isFinite(Number(activeRule.bottom_hem_cm))) {
+      return [Number(activeRule.bottom_hem_cm)];
+    }
+    return null;
+  }, [activeRule]);
+
+  const currentBottomHemCm = config.bottom_hem_cm;
+
+  useEffect(() => {
+    if (!activeRule || !bottomHemOptions) return;
+    if (currentBottomHemCm != null) return;
+    const defaultVal = activeRule.bottom_hem_cm ?? bottomHemOptions[0];
+    if (bottomHemOptions.includes(defaultVal)) {
+      onUpdate({ bottom_hem_cm: defaultVal, bottom_hem_profile: `hem_${defaultVal}` });
+    }
+  }, [activeRule, bottomHemOptions, currentBottomHemCm, onUpdate]);
 
   if (loading) {
     return (
@@ -402,6 +435,62 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
                     </h3>
                     <p className="text-xs text-gray-500 text-center mt-1">
                       Track profile
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Section 4: Bottom Hem — dynamic from FabricRule options */}
+      {selectedStyleCode && bottomHemOptions && bottomHemOptions.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <Label className="text-sm font-medium mb-2 block">BOTTOM HEM</Label>
+          <p className="text-xs text-gray-500 mb-4">Select the bottom hem (basta) for fabric confection.</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {bottomHemOptions.map((cm) => {
+              const isSelected = currentBottomHemCm === cm;
+              const label = cm === 0 ? 'Serged' : `${cm} cm`;
+              const subtitle = cm === 0 ? 'Fileteado' : 'Double fold';
+              const imgKey = `hem_${cm}`;
+              const imagePath = cm === 0 ? '/images/DR_Hem_Serged.png' : `/images/DR_Hem_${cm}cm.png`;
+              const hasImageError = imageErrors[imgKey];
+
+              return (
+                <div
+                  key={cm}
+                  onClick={() => {
+                    onUpdate({
+                      bottom_hem_cm: isSelected ? undefined : cm,
+                      bottom_hem_profile: isSelected ? undefined : `hem_${cm}`,
+                    });
+                  }}
+                  className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-2 border-gray-900 shadow-lg'
+                      : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                  }`}
+                >
+                  <div className="aspect-square bg-white flex items-center justify-center overflow-hidden p-4">
+                    {!hasImageError ? (
+                      <img
+                        src={imagePath}
+                        alt={label}
+                        className="max-h-full max-w-full object-contain"
+                        onError={() => setImageErrors((prev) => ({ ...prev, [imgKey]: true }))}
+                      />
+                    ) : (
+                      <Ruler className="w-16 h-16 text-gray-300" />
+                    )}
+                  </div>
+                  <div className="p-4 bg-gray-100 flex-1">
+                    <h3 className="font-semibold text-sm truncate text-center text-gray-900">
+                      {label}
+                    </h3>
+                    <p className="text-xs text-gray-500 text-center mt-1">
+                      {subtitle}
                     </p>
                   </div>
                 </div>

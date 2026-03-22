@@ -15,14 +15,6 @@ export function catalogItemDetailKey(scopeKey: string, id: string): unknown[] {
   return ['catalog', 'items', 'detail', DETAIL_QUERY_VERSION, scopeKey, id];
 }
 
-export function directoryContactsListKey(scopeKey: string): unknown[] {
-  return ['directory', 'contacts', LIST_QUERY_VERSION, scopeKey];
-}
-
-export function directoryCustomersListKey(scopeKey: string): unknown[] {
-  return ['directory', 'customers', LIST_QUERY_VERSION, scopeKey];
-}
-
 export function catalogItemsListKey(
   scopeKey: string,
   filters: { q: string; categoryId: string; status: string; sortKey: string; page: number; pageSize: number }
