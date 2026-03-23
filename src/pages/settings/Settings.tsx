@@ -21,7 +21,7 @@ export default function Settings() {
   const { role, isSuperAdmin, isAdmin } = useCurrentOrgRole();
   const { activeOrganization } = useOrganizationContext();
   const { activeDealer } = useActiveDealer();
-  const { can } = usePermissions();
+  const { can, loading } = usePermissions();
   const canViewSettings = can('settings.read') || can('settings.write');
   const [activeTab, setActiveTab] = useState<string>('organization-user');
 
@@ -30,8 +30,9 @@ export default function Settings() {
 
   // Handle ESC key to close settings and return to previous page
   useEffect(() => {
+    if (loading) return;
     if (!canViewSettings) {
-      router.navigate('/', false);
+      router.navigate('/dashboard', false);
       return;
     }
 
@@ -51,7 +52,7 @@ export default function Settings() {
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [getPreviousPage, canViewSettings]);
+  }, [getPreviousPage, canViewSettings, loading]);
 
   const handleCloseSettings = (): void => {
     const previousPage = getPreviousPage();

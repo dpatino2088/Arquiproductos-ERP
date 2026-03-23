@@ -17,19 +17,20 @@ type Props = {
  */
 export default function Directory({ activeTab }: Props) {
   const { registerSubmodules } = useSubmoduleNav();
-  const { can } = usePermissions();
+  const { can, loading } = usePermissions();
   const canViewDirectory = can('directory.read') || can('directory.write');
 
   useEffect(() => {
+    if (loading) return;
     if (!canViewDirectory) {
-      router.navigate('/', false);
+      router.navigate('/dashboard', false);
       return;
     }
     registerSubmodules('Directory', [
       { id: 'customers', label: 'Customers', href: '/directory/customers' },
       { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
     ]);
-  }, [registerSubmodules, canViewDirectory]);
+  }, [registerSubmodules, canViewDirectory, loading]);
 
   // Sin key en los paneles: evita remount al cambiar tab (culpable #1 del "segundo load").
   return (

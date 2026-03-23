@@ -12,17 +12,18 @@ const PARTNERS_SUBMODULES = [
 
 export default function Partners() {
   const { registerSubmodules } = useSubmoduleNav();
-  const { can } = usePermissions();
+  const { can, loading } = usePermissions();
   const canViewPartners = can('partners.read') || can('settings.read');
 
   useEffect(() => {
+    if (loading) return;
     if (!canViewPartners) {
-      router.navigate('/', false);
+      router.navigate('/dashboard', false);
       return;
     }
     registerSubmodules('Partners', PARTNERS_SUBMODULES);
     router.navigate('/partners/dealers');
-  }, [registerSubmodules, canViewPartners]);
+  }, [registerSubmodules, canViewPartners, loading]);
 
   return null;
 }

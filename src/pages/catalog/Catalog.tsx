@@ -6,12 +6,13 @@ import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Catalog() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
-  const { can } = usePermissions();
+  const { can, loading } = usePermissions();
   const canViewCatalog = can('catalog.read') || can('catalog.write');
 
   useEffect(() => {
+    if (loading) return;
     if (!canViewCatalog) {
-      router.navigate('/', false);
+      router.navigate('/dashboard', false);
       return;
     }
     // Register Catalog submodules whenever we're in the Catalog module
@@ -40,7 +41,7 @@ export default function Catalog() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog, loading]);
 
   return null;
 }

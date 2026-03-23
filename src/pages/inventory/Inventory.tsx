@@ -6,12 +6,13 @@ import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Inventory() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
-  const { can } = usePermissions();
+  const { can, loading } = usePermissions();
   const canViewInventory = can('inventory.read') || can('inventory.write');
 
   useEffect(() => {
+    if (loading) return;
     if (!canViewInventory) {
-      router.navigate('/', false);
+      router.navigate('/dashboard', false);
       return;
     }
     // Only register Inventory submodules if we're actually in the Inventory module
@@ -40,7 +41,7 @@ export default function Inventory() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav, canViewInventory]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewInventory, loading]);
 
   return null;
 }

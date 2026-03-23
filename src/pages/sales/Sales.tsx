@@ -5,12 +5,13 @@ import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Sales() {
   const { clearSubmoduleNav } = useSubmoduleNav();
-  const { can } = usePermissions();
+  const { can, loading } = usePermissions();
   const canViewSales = can('sales.read') || can('sales.write');
 
   useEffect(() => {
+    if (loading) return;
     if (!canViewSales) {
-      router.navigate('/', false);
+      router.navigate('/dashboard', false);
       return;
     }
     // Sales component is only rendered for /sales route
@@ -28,7 +29,7 @@ export default function Sales() {
         clearSubmoduleNav();
       }
     };
-  }, [clearSubmoduleNav, canViewSales]);
+  }, [clearSubmoduleNav, canViewSales, loading]);
 
   return null;
 }
