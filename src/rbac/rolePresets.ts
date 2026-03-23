@@ -37,8 +37,8 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'salesorders.edit',
     'manufacturing.read',
     'manufacturing.write',
-    'finance.read',
-    'finance.write',
+    'financials.read',
+    'financials.write',
     'settings.read',
     'settings.write',
     'org.users.manage',
@@ -57,8 +57,8 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'salesorders.edit',
     'manufacturing.read',
     'manufacturing.write',
-    'finance.read',
-    'finance.write',
+    'financials.read',
+    'financials.write',
     'settings.read',
     'settings.write',
     'org.users.manage',
@@ -74,7 +74,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'quotes.edit',
     'salesorders.edit',
     'manufacturing.read',
-    'finance.create',
+    'financials.invoices.create',
   ],
   operator_admin: [
     'dashboard.read',
@@ -111,7 +111,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'manufacturing.workstation.read',
     'manufacturing.cutopt.read',
     // Operator does NOT get: manufacturing.mo.read/write, .calendar.read, .costs.read
-    // NO directory.*, NO sales.*, NO settings.*, NO finance.*, NO org.*
+    // NO directory.*, NO sales.*, NO settings.*, NO financials.*, NO org.*
   ],
   procurement: [
     'dashboard.read',
@@ -122,16 +122,16 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'inventory.write',
     'sales.read',
     'manufacturing.read', // view only
-    'finance.read', // optional if needs costs; default ON
+    'financials.read', // optional if needs costs; default ON
     'settings.read',
-    // NO manufacturing.write, NO settings.write, NO org.users.manage, NO finance.write
+    // NO manufacturing.write, NO settings.write, NO org.users.manage, NO financials.write
   ],
   finance: [
     'dashboard.read',
     'sales.read',
     // quotes.edit is OPTIONAL - finance typically read-only on quotes; default OFF
-    'finance.read',
-    'finance.write',
+    'financials.read',
+    'financials.write',
     'manufacturing.read', // optional view
     'directory.read', // optional
     // NO manufacturing.write, NO org.users.manage, NO settings.write (unless finance should edit cost engine)

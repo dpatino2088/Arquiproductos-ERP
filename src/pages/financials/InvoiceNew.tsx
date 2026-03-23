@@ -9,7 +9,7 @@ import { generateNextInvoiceNumber } from '../../lib/sequential-numbers';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
-import { useGranularAccess } from '../../hooks/usePermissions';
+import { usePermissions } from '../../hooks/usePermissions';
 import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 
 interface DealerOption {
@@ -93,7 +93,12 @@ export default function InvoiceNew() {
   const { user } = useAuth();
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
-  const { canCreate: canCreateFin } = useGranularAccess('financials');
+  const { hasAnyPermission } = usePermissions();
+  const canCreateInvoice = hasAnyPermission([
+    'financials.invoices.create',
+    'financials.create',
+    'financials.write',
+  ]);
   const { settings: costSettings } = useCostSettings();
   const defaultTaxPct = costSettings?.tax_pct ?? 0.07;
   const [taxExempt, setTaxExempt] = useState(false);
@@ -594,7 +599,7 @@ export default function InvoiceNew() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !selectedDealerId || !canCreateFin}
+              disabled={saving || !selectedDealerId || !canCreateInvoice}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
               {saving ? 'Saving...' : 'Save as Draft'}

@@ -84,8 +84,8 @@ export const MODULE_PERMS = {
     edit: ['manufacturing.write'],
   },
   financials: {
-    view: ['finance.read', 'financials.read'], // Support both for backward compatibility
-    edit: ['finance.write', 'financials.write'],
+    view: ['financials.read'],
+    edit: ['financials.write'],
   },
   partners: {
     view: ['settings.read', 'partners.read'],
@@ -144,11 +144,11 @@ export const GRANULAR_PERMS = {
     delete:  ['inventory.delete'],
   },
   financials: {
-    create: ['financials.create', 'financials.write', 'finance.create', 'finance.write'],
-    edit:    ['financials.edit', 'financials.write', 'finance.edit', 'finance.write'],
-    archive: ['financials.archive', 'finance.archive'],
-    delete:  ['financials.delete', 'finance.delete'],
-    void:    ['financials.void', 'finance.void'],
+    create: ['financials.create', 'financials.write'],
+    edit:    ['financials.edit', 'financials.write'],
+    archive: ['financials.archive'],
+    delete:  ['financials.delete'],
+    void:    ['financials.void'],
   },
 } as const;
 
