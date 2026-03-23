@@ -57,6 +57,21 @@ function computeLineTotal(
   return 0;
 }
 
+function getProposalLineQty(
+  line: ProposalLine,
+  quoteLineInfo: { quantity: number; msrp: number | null; unit_msrp: number | null } | undefined,
+  snapshot?: QuoteLineSnapshot | null
+): number {
+  if (line.line_type === 'custom') return Math.max(0, Number(line.qty) || 0);
+  const snapQty = Number(snapshot?.qty);
+  if (snapQty > 0) return snapQty;
+  const quoteQty = Number(quoteLineInfo?.quantity);
+  if (quoteQty > 0) return quoteQty;
+  const lineQty = Number(line.qty);
+  if (lineQty > 0) return lineQty;
+  return 1;
+}
+
 function formatCurrency(amount: number, currency: string) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(amount || 0);
 }
@@ -166,8 +181,9 @@ export default function ProposalPrint() {
       const material = computeLineTotal(line, qlInfo, snap);
       lineTotals.push(material);
       totalProduct += material;
+      const lineQty = getProposalLineQty(line, qlInfo, snap);
       const installationAddons = (addonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
-      installationTotal += installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
+      installationTotal += installationAddons.reduce((s, a) => s + ((Number(a.sale_amount) || 0) * lineQty), 0);
     });
     const discountPct = proposal?.global_discount_pct ?? 0;
     const discountAmount = totalProduct * (discountPct / 100);

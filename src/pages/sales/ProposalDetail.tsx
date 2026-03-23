@@ -131,6 +131,20 @@ function computeLineTotal(
   return 0;
 }
 
+function getProposalLineQty(
+  line: ProposalLine,
+  quoteLineInfo: { quantity: number; msrp: number | null; unit_msrp: number | null } | undefined
+): number {
+  if (line.line_type === 'custom') return Math.max(0, Number(line.qty) || 0);
+  const snapshotQty = Number((line.quote_line_snapshot as { qty?: number } | null)?.qty);
+  if (snapshotQty > 0) return snapshotQty;
+  const quoteQty = Number(quoteLineInfo?.quantity);
+  if (quoteQty > 0) return quoteQty;
+  const lineQty = Number(line.qty);
+  if (lineQty > 0) return lineQty;
+  return 1;
+}
+
 function getProposalIdFromPath(): string | null {
   const path = window.location.pathname;
   const m = path.match(/\/sales\/proposals\/([^/]+)/);
@@ -722,8 +736,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       const material = rawMaterial * feeMul;
       lineTotals.push(material);
       totalProduct += material;
+      const lineQty = getProposalLineQty(line, qlInfo);
       const installationAddons = (displayAddonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
-      const rawInstall = installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
+      const rawInstall = installationAddons.reduce((s, a) => s + ((Number(a.sale_amount) || 0) * lineQty), 0);
       installationTotal += rawInstall * instFeeMul;
     });
 
