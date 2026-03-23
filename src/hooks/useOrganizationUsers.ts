@@ -8,7 +8,18 @@ export interface OrganizationUser {
   user_id: string | null;
   user_email: string;
   user_name: string | null;
-  role: 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance' | 'member' | 'owner' | 'viewer'; // Include new roles and legacy roles
+  role:
+    | 'superadmin'
+    | 'admin'
+    | 'sales_coordinator'
+    | 'operator_admin'
+    | 'operator_member'
+    | 'operator'
+    | 'procurement'
+    | 'finance'
+    | 'member'
+    | 'owner'
+    | 'viewer';
   status: 'invited' | 'active' | 'disabled';
   invited_by_user_id: string | null;
   invited_at: string | null;

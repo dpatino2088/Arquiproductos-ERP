@@ -81,6 +81,7 @@ export function OrganizationSwitcher() {
       superadmin: { label: 'SuperAdmin', color: 'text-purple-700', bgColor: 'bg-purple-50' },
       owner: { label: 'Owner', color: 'text-purple-700', bgColor: 'bg-purple-50' },
       admin: { label: 'Admin', color: 'text-blue-700', bgColor: 'bg-blue-50' },
+      sales_coordinator: { label: 'Sales Coordinator', color: 'text-sky-700', bgColor: 'bg-sky-50' },
       operator: { label: 'Operator', color: 'text-green-700', bgColor: 'bg-green-50' },
       procurement: { label: 'Procurement', color: 'text-indigo-700', bgColor: 'bg-indigo-50' },
       finance: { label: 'Finance', color: 'text-teal-700', bgColor: 'bg-teal-50' },

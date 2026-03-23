@@ -186,7 +186,7 @@ export function useCurrentOrgRole(
   const isSuperAdmin = role === 'superadmin';
   const isOwner = false; // Legacy 'owner' should be mapped to 'superadmin' by mapLegacyRole
   const isAdmin = role === 'admin' || isSuperAdmin; // Superadmin tiene permisos de admin
-  const isMember = role === 'operator'; // Legacy 'member' maps to 'operator'
+  const isMember = role === 'operator' || role === 'operator_member';
   const isViewer = false; // Legacy 'viewer' should be mapped by mapLegacyRole
 
   // permisos derivados — según especificación:
@@ -198,8 +198,22 @@ export function useCurrentOrgRole(
   const canCreateQuotes = !!role; // Todos los roles pueden crear quotes (si tienen permiso)
   const canEditQuotes = !!role; // Todos los roles pueden editar quotes (si tienen permiso)
   const canViewQuotes = !!role; // Todos los roles pueden ver quotes (si tienen permiso)
-  const canEditCustomers = isSuperAdmin || isAdmin || role === 'operator' || role === 'procurement' || role === 'finance'; // Depende de permisos
-  const canEditContacts = isSuperAdmin || isAdmin || role === 'operator' || role === 'procurement' || role === 'finance'; // Depende de permisos
+  const canEditCustomers =
+    isSuperAdmin ||
+    isAdmin ||
+    role === 'sales_coordinator' ||
+    role === 'operator_admin' ||
+    role === 'operator' ||
+    role === 'procurement' ||
+    role === 'finance';
+  const canEditContacts =
+    isSuperAdmin ||
+    isAdmin ||
+    role === 'sales_coordinator' ||
+    role === 'operator_admin' ||
+    role === 'operator' ||
+    role === 'procurement' ||
+    role === 'finance';
   const canViewOwnData = !!role; // Todos pueden ver sus propios datos
 
   return {

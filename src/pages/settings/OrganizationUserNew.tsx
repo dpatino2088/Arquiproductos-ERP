@@ -19,7 +19,17 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog';
 // Schema: Email + Role obligatorios
 const organizationUserSchema = z.object({
   email: z.string().email('Debes ingresar un email válido'),
-  role: z.enum(['superadmin', 'admin', 'operator', 'procurement', 'finance', 'member']), // Keep 'member' for backward compatibility
+  role: z.enum([
+    'superadmin',
+    'admin',
+    'sales_coordinator',
+    'operator_admin',
+    'operator_member',
+    'operator',
+    'procurement',
+    'finance',
+    'member',
+  ]),
   user_name: z.string().optional(),
 });
 
@@ -51,7 +61,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     resolver: zodResolver(organizationUserSchema),
     defaultValues: {
       email: '',
-      role: 'operator', // Default to operator instead of member
+      role: 'operator_member',
       user_name: '',
     },
   });
@@ -474,10 +484,13 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
               >
                 <option value="superadmin">{getRoleLabel('superadmin')}</option>
                 <option value="admin">{getRoleLabel('admin')}</option>
+                <option value="sales_coordinator">{getRoleLabel('sales_coordinator')}</option>
+                <option value="operator_admin">{getRoleLabel('operator_admin')}</option>
+                <option value="operator_member">{getRoleLabel('operator_member')}</option>
                 <option value="operator">{getRoleLabel('operator')}</option>
                 <option value="procurement">{getRoleLabel('procurement')}</option>
                 <option value="finance">{getRoleLabel('finance')}</option>
-                <option value="member">Member (Can only view/edit/delete own quotes)</option>
+                <option value="member">Member (legacy)</option>
               </select>
               {form.formState.errors.role && (
                 <p className="mt-1 text-xs text-red-600">

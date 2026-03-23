@@ -3,6 +3,9 @@
 export type OrgRole =
   | 'superadmin'
   | 'admin'
+  | 'sales_coordinator'
+  | 'operator_admin'
+  | 'operator_member'
   | 'operator'
   | 'procurement'
   | 'finance';

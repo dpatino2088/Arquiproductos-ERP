@@ -15,7 +15,16 @@ interface Permission {
 interface OrganizationUserPermissionsProps {
   /** When null, draft mode: permissions editable in React only, no DB save until user is created */
   organizationUserId: string | null;
-  userRole: 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance' | 'member';
+  userRole:
+    | 'superadmin'
+    | 'admin'
+    | 'sales_coordinator'
+    | 'operator_admin'
+    | 'operator_member'
+    | 'operator'
+    | 'procurement'
+    | 'finance'
+    | 'member';
   /** When switching from draft to saved user, pass the draft so first Save persists it */
   initialDraftPermissions?: Set<string>;
   /** In draft mode, called when draft permissions change so parent can persist them */

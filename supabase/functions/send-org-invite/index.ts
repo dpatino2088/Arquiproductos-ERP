@@ -17,7 +17,18 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-type OrgRole = "owner" | "admin" | "member" | "viewer" | "superadmin" | "operator" | "procurement" | "finance";
+type OrgRole =
+  | "owner"
+  | "admin"
+  | "member"
+  | "viewer"
+  | "superadmin"
+  | "sales_coordinator"
+  | "operator_admin"
+  | "operator_member"
+  | "operator"
+  | "procurement"
+  | "finance";
 
 type Payload = {
   organization_id: string;
@@ -135,7 +146,19 @@ Deno.serve(async (req) => {
   }
 
   // Validate role - allow all OrgRole types
-  const allowedRoles: OrgRole[] = ["owner", "admin", "member", "viewer", "superadmin", "operator", "procurement", "finance"];
+  const allowedRoles: OrgRole[] = [
+    "owner",
+    "admin",
+    "member",
+    "viewer",
+    "superadmin",
+    "sales_coordinator",
+    "operator_admin",
+    "operator_member",
+    "operator",
+    "procurement",
+    "finance",
+  ];
   if (!role || !allowedRoles.includes(role)) {
     return json(
       { error: `Invalid role. Must be one of: ${allowedRoles.join(", ")}` },

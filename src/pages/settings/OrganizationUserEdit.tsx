@@ -24,7 +24,17 @@ let debugBanner = '';
 const organizationUserEditSchema = z.object({
   email: z.string().email('Debes ingresar un email válido'),
   user_name: z.string().min(1, 'El nombre es requerido').optional().or(z.literal('')),
-  role: z.enum(['superadmin', 'admin', 'operator', 'procurement', 'finance', 'member']), // Keep 'member' for backward compatibility
+  role: z.enum([
+    'superadmin',
+    'admin',
+    'sales_coordinator',
+    'operator_admin',
+    'operator_member',
+    'operator',
+    'procurement',
+    'finance',
+    'member',
+  ]),
   status: z.enum(['invited', 'active', 'disabled']),
   customer_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
   contact_id: z.union([z.string().uuid(), z.null(), z.literal('')]).optional(),
@@ -67,7 +77,7 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
     defaultValues: {
       email: '',
       user_name: '',
-      role: 'operator',
+      role: 'operator_member',
       status: 'active',
       customer_id: null,
       contact_id: null,
@@ -609,10 +619,13 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
                 >
                   <option value="superadmin">{getRoleLabel('superadmin')}</option>
                   <option value="admin">{getRoleLabel('admin')}</option>
+                  <option value="sales_coordinator">{getRoleLabel('sales_coordinator')}</option>
+                  <option value="operator_admin">{getRoleLabel('operator_admin')}</option>
+                  <option value="operator_member">{getRoleLabel('operator_member')}</option>
                   <option value="operator">{getRoleLabel('operator')}</option>
                   <option value="procurement">{getRoleLabel('procurement')}</option>
                   <option value="finance">{getRoleLabel('finance')}</option>
-                  <option value="member">Member (Can only view/edit/delete their own quotes)</option>
+                  <option value="member">Member (legacy)</option>
                 </select>
                 {form.formState.errors.role && (
                   <p className="mt-1 text-xs text-red-600">

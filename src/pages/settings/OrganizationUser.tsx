@@ -41,7 +41,18 @@ interface OrganizationUser {
   user_id: string | null;
   user_email: string;
   user_name: string | null;
-  role: 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance' | 'member' | 'owner' | 'viewer'; // Include all roles
+  role:
+    | 'superadmin'
+    | 'admin'
+    | 'sales_coordinator'
+    | 'operator_admin'
+    | 'operator_member'
+    | 'operator'
+    | 'procurement'
+    | 'finance'
+    | 'member'
+    | 'owner'
+    | 'viewer';
   status: 'invited' | 'active' | 'disabled';
   invited_by_user_id: string | null;
   invited_at: string | null;
@@ -311,7 +322,19 @@ export default function OrganizationUser() {
 
   // Filter options based on search terms
   const getFilteredRoleOptions = () => {
-    const roleOptions = ['owner', 'admin', 'member', 'viewer'];
+    const roleOptions = [
+      'superadmin',
+      'admin',
+      'sales_coordinator',
+      'operator_admin',
+      'operator_member',
+      'operator',
+      'procurement',
+      'finance',
+      'member',
+      'owner',
+      'viewer',
+    ];
     if (!roleSearchTerm) return roleOptions;
     return roleOptions.filter(role => 
       role.toLowerCase().includes(roleSearchTerm.toLowerCase())
@@ -325,6 +348,12 @@ export default function OrganizationUser() {
         return 'bg-purple-100 text-purple-800';
       case 'admin':
         return 'bg-blue-100 text-blue-800';
+      case 'sales_coordinator':
+        return 'bg-sky-100 text-sky-800';
+      case 'operator_admin':
+        return 'bg-emerald-100 text-emerald-800';
+      case 'operator_member':
+        return 'bg-teal-100 text-teal-800';
       case 'operator':
         return 'bg-green-100 text-green-800';
       case 'procurement':

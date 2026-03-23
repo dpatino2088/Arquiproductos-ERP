@@ -6,7 +6,15 @@
  * to automatically configure their permissions.
  */
 
-export type OrgRole = 'superadmin' | 'admin' | 'operator' | 'procurement' | 'finance';
+export type OrgRole =
+  | 'superadmin'
+  | 'admin'
+  | 'sales_coordinator'
+  | 'operator_admin'
+  | 'operator_member'
+  | 'operator' // legacy alias
+  | 'procurement'
+  | 'finance';
 
 /**
  * Role permission presets
@@ -54,6 +62,41 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'settings.read',
     'settings.write',
     'org.users.manage',
+  ],
+  sales_coordinator: [
+    'dashboard.read',
+    'directory.read',
+    'directory.write',
+    'catalog.read',
+    'inventory.read',
+    'sales.read',
+    'sales.write',
+    'quotes.edit',
+    'salesorders.edit',
+    'manufacturing.read',
+  ],
+  operator_admin: [
+    'dashboard.read',
+    'catalog.read',
+    'inventory.read',
+    'manufacturing.read',
+    'manufacturing.write',
+    'manufacturing.mo.read',
+    'manufacturing.mo.write',
+    'manufacturing.wo.read',
+    'manufacturing.wo.write',
+    'manufacturing.workstation.read',
+    'manufacturing.cutopt.read',
+    'manufacturing.calendar.read',
+  ],
+  operator_member: [
+    'dashboard.read',
+    'catalog.read',
+    'inventory.read',
+    'manufacturing.wo.read',
+    'manufacturing.wo.write',
+    'manufacturing.workstation.read',
+    'manufacturing.cutopt.read',
   ],
   operator: [
     'dashboard.read',
@@ -125,6 +168,9 @@ export function getRoleLabel(role: OrgRole): string {
   const labels: Record<OrgRole, string> = {
     superadmin: 'Superadmin (Full access)',
     admin: 'Admin (Manage org users and settings)',
+    sales_coordinator: 'Sales Coordinator (Quotes, proposals, and order follow-up)',
+    operator_admin: 'Operator Admin (Assign and supervise operations)',
+    operator_member: 'Operator Member (Execute work orders)',
     operator: 'Operator (Manufacturing & sales operations)',
     procurement: 'Procurement (Purchasing & inventory)',
     finance: 'Finance (Financial control)',
@@ -139,6 +185,9 @@ export function getRoleDescription(role: OrgRole): string {
   const descriptions: Record<OrgRole, string> = {
     superadmin: 'Full system access with all permissions',
     admin: 'Can manage organization users and settings',
+    sales_coordinator: 'Coordinates sales flow from quote to order with customer follow-up',
+    operator_admin: 'Leads manufacturing operations, planning, and assignments',
+    operator_member: 'Runs assigned workstation and work order tasks',
     operator: 'Focused on manufacturing and sales operations',
     procurement: 'Focused on purchasing and inventory management',
     finance: 'Focused on financial control and reporting',
@@ -150,7 +199,16 @@ export function getRoleDescription(role: OrgRole): string {
  * Check if a role is valid
  */
 export function isValidOrgRole(role: string): role is OrgRole {
-  return ['superadmin', 'admin', 'operator', 'procurement', 'finance'].includes(role);
+  return [
+    'superadmin',
+    'admin',
+    'sales_coordinator',
+    'operator_admin',
+    'operator_member',
+    'operator',
+    'procurement',
+    'finance',
+  ].includes(role);
 }
 
 /**
@@ -165,9 +223,9 @@ export function mapLegacyRole(legacyRole: string): OrgRole {
     owner: 'superadmin',
     super_admin: 'superadmin',
     manager: 'admin',
-    member: 'operator',
-    viewer: 'operator',
-    user: 'operator',
+    member: 'operator_member',
+    viewer: 'operator_member',
+    user: 'operator_member',
   };
-  return mapping[r] ?? 'operator';
+  return mapping[r] ?? 'operator_member';
 }
