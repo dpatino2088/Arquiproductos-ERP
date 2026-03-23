@@ -375,10 +375,13 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
             if (!product) return null;
             
             const isComingSoon = product.status === 'coming_soon';
+            const selectedProductTypeId = (config as any).product_type_id || (config as any).productTypeId || null;
+            // Selection priority: if product_type_id exists, trust it as source of truth.
+            // This prevents dual-highlight when legacy productType text is out of sync in edit mode.
             const isSelected = !isComingSoon && (
-              (config as any).product_type_id === product.id || 
-              (config as any).productTypeId === product.id || 
-              config.productType === product.uiCode
+              selectedProductTypeId
+                ? selectedProductTypeId === product.id
+                : config.productType === product.uiCode
             );
             
             return (
