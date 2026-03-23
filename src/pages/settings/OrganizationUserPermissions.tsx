@@ -43,6 +43,7 @@ export interface OrganizationUserPermissionsRef {
 
 // Module order for consistent display
 const MODULE_ORDER = [
+  'dashboard',
   'catalog',
   'directory',
   'sales',
@@ -52,9 +53,11 @@ const MODULE_ORDER = [
   'financials',
   'reports',
   'settings',
+  'admin',
 ];
 
 const MODULE_LABELS: Record<string, string> = {
+  dashboard: 'Dashboard',
   directory: 'Directory',
   catalog: 'Catalog',
   sales: 'Sales',
@@ -64,6 +67,12 @@ const MODULE_LABELS: Record<string, string> = {
   financials: 'Financials',
   reports: 'Reports',
   settings: 'Settings',
+  admin: 'Admin',
+};
+
+const normalizeModuleKey = (moduleName: string): string => {
+  if (moduleName === 'finance') return 'financials';
+  return moduleName;
 };
 
 // Sort permissions: read before write, then alphabetical
@@ -82,10 +91,11 @@ const sortPermissions = (perms: Permission[]): Permission[] => {
 // Group permissions by module
 const groupPermissionsByModule = (permissions: Permission[]): Record<string, Permission[]> => {
   return permissions.reduce((acc, perm) => {
-    if (!acc[perm.module]) {
-      acc[perm.module] = [];
+    const normalizedModule = normalizeModuleKey(perm.module);
+    if (!acc[normalizedModule]) {
+      acc[normalizedModule] = [];
     }
-    const moduleArray = acc[perm.module];
+    const moduleArray = acc[normalizedModule];
     if (moduleArray) {
       moduleArray.push(perm);
     }
@@ -243,6 +253,7 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
   const isDraftMode = organizationUserId == null;
   const { activeOrganizationId } = useOrganizationContext();
   const { isSuperAdmin, isAdmin } = useCurrentOrgRole();
+  const [activeModule, setActiveModule] = useState<string>('');
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [assignedPermissions, setAssignedPermissions] = useState<Set<string>>(new Set()); // From DB
   const [originalPermissions, setOriginalPermissions] = useState<Set<string>>(new Set());
@@ -766,6 +777,28 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
     return sorted;
   }, [permissions]);
 
+  const orderedModules = useMemo(() => {
+    const keys = Object.keys(permissionsByModule);
+    if (keys.length === 0) return [];
+
+    const byOrder = MODULE_ORDER.filter((m) => keys.includes(m));
+    const extras = keys
+      .filter((m) => !MODULE_ORDER.includes(m))
+      .sort((a, b) => (MODULE_LABELS[a] || a).localeCompare(MODULE_LABELS[b] || b));
+
+    return [...byOrder, ...extras];
+  }, [permissionsByModule]);
+
+  useEffect(() => {
+    if (orderedModules.length === 0) {
+      if (activeModule !== '') setActiveModule('');
+      return;
+    }
+    if (!activeModule || !orderedModules.includes(activeModule)) {
+      setActiveModule(orderedModules[0] || '');
+    }
+  }, [orderedModules, activeModule]);
+
   if (loading) return <div className="p-6" />;
 
   return (
@@ -797,19 +830,44 @@ const OrganizationUserPermissions = forwardRef<OrganizationUserPermissionsRef, O
         )}
       </div>
 
-      {/* Grid of Module Cards */}
-      {Object.keys(permissionsByModule).length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-          {Object.entries(permissionsByModule).map(([module, modulePermissions]) => (
+      {/* Module-first experience: select one module, then edit permissions */}
+      {orderedModules.length > 0 ? (
+        <div className="space-y-4 mb-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-3">
+            <div className="text-xs text-gray-500 mb-2">Permisos por modulo</div>
+            <div className="flex flex-wrap gap-2">
+              {orderedModules.map((module) => {
+                const modulePermissions = permissionsByModule[module] || [];
+                const selectedCount = modulePermissions.filter((p) => effectivePermissions.has(p.code)).length;
+                const isActive = module === activeModule;
+                return (
+                  <button
+                    key={module}
+                    type="button"
+                    onClick={() => setActiveModule(module)}
+                    className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
+                      isActive
+                        ? 'bg-primary/10 border-primary/30 text-primary font-medium'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {MODULE_LABELS[module] || module} ({selectedCount}/{modulePermissions.length})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {activeModule && permissionsByModule[activeModule] ? (
             <PermissionModuleCard
-              key={module}
-              moduleName={module}
-              permissions={modulePermissions}
+              key={activeModule}
+              moduleName={activeModule}
+              permissions={permissionsByModule[activeModule] || []}
               selectedSet={effectivePermissions}
               onTogglePermission={handleTogglePermission}
               disabled={!canEdit || saving || userRole === 'superadmin'}
             />
-          ))}
+          ) : null}
         </div>
       ) : (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">

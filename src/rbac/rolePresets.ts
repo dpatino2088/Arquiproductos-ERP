@@ -74,6 +74,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'quotes.edit',
     'salesorders.edit',
     'manufacturing.read',
+    'finance.create',
   ],
   operator_admin: [
     'dashboard.read',

@@ -11,6 +11,7 @@ import { Search, Plus, FileText } from 'lucide-react';
 import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 import { formatDate } from '../../lib/utils';
 import FinancialSubTabs from './FinancialSubTabs';
+import { useGranularAccess } from '../../hooks/usePermissions';
 
 const STATUS_VALUES = ['all', 'draft', 'issued', 'partial', 'paid', 'void'] as const;
 const STATUS_LABELS: Record<string, string> = {
@@ -42,6 +43,7 @@ export default function Invoices() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
   const { isInternal } = useAccessContext();
+  const { canCreate: canCreateFin } = useGranularAccess('financials');
 
   const [invoices, setInvoices] = useState<DealerInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -131,7 +133,7 @@ export default function Invoices() {
           <h1 className="text-xl font-semibold text-foreground">Invoices</h1>
           <p className="text-sm text-gray-500 mt-0.5">Dealer invoices (AR)</p>
         </div>
-        {isInternal && (
+        {isInternal && canCreateFin && (
           <button
             type="button"
             onClick={() => router.navigate('/financials/invoices/new')}
