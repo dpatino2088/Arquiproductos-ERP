@@ -100,6 +100,16 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const canWriteSchedule = can('manufacturing.mo.schedule.write');
   const canWriteNotes = can('manufacturing.mo.notes.write');
   const canWriteAttachments = can('manufacturing.mo.attachments.write');
+  const tabs = [
+    canReadOverview ? { id: 'overview', label: 'Overview' } : null,
+    canReadLines ? { id: 'lines', label: 'Lines', count: moLines.length } : null,
+    canReadMaterials ? { id: 'materials', label: 'Materials', count: materials.length } : null,
+    canReadWorkOrders ? { id: 'work-orders', label: 'Work Orders' } : null,
+    canReadSchedule ? { id: 'schedule', label: 'Schedule' } : null,
+    canReadNotes ? { id: 'notes', label: 'Notes' } : null,
+    canReadTimeline ? { id: 'timeline', label: 'Timeline', count: timeline.length } : null,
+    canReadAttachments ? { id: 'attachments', label: 'Attachments' } : null,
+  ].filter(Boolean) as Array<{ id: string; label: string; count?: number }>;
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
     const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
@@ -118,6 +128,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   }, [queryReturnTo]);
 
   useEffect(() => { registerSubmodules('Manufacturing', mfgSubmodules); }, [registerSubmodules, mfgSubmodules]);
+  useEffect(() => {
+    if (tabs.length === 0) return;
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
 
   useEffect(() => {
     if (!moId) {
@@ -341,24 +357,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const status = mo.status;
   const so = mo.SalesOrders;
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
-
-  const tabs = [
-    canReadOverview ? { id: 'overview', label: 'Overview' } : null,
-    canReadLines ? { id: 'lines', label: 'Lines', count: moLines.length } : null,
-    canReadMaterials ? { id: 'materials', label: 'Materials', count: materials.length } : null,
-    canReadWorkOrders ? { id: 'work-orders', label: 'Work Orders' } : null,
-    canReadSchedule ? { id: 'schedule', label: 'Schedule' } : null,
-    canReadNotes ? { id: 'notes', label: 'Notes' } : null,
-    canReadTimeline ? { id: 'timeline', label: 'Timeline', count: timeline.length } : null,
-    canReadAttachments ? { id: 'attachments', label: 'Attachments' } : null,
-  ].filter(Boolean) as Array<{ id: string; label: string; count?: number }>;
-
-  useEffect(() => {
-    if (tabs.length === 0) return;
-    if (!tabs.some((tab) => tab.id === activeTab)) {
-      setActiveTab(tabs[0].id);
-    }
-  }, [tabs, activeTab]);
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
