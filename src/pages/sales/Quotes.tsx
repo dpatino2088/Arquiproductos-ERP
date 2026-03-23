@@ -31,6 +31,17 @@ const formatCurrency = (amount: number) => {
   }).format(amount || 0);
 };
 
+const getSOStatusLabel = (rawStatus: string | null | undefined) => {
+  const normalized = String(rawStatus ?? '').toLowerCase();
+  if (normalized === 'open') return 'SO Open';
+  if (normalized === 'completed') return 'SO Completed';
+  // Keep terminology aligned with Sales Orders list: confirmed == Open
+  if (normalized === 'confirmed') return 'SO Open';
+  if (normalized === 'in_progress') return 'SO In Progress';
+  if (!normalized) return 'SO';
+  return `SO ${normalized.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}`;
+};
+
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isInternal } = useAccessContext();
@@ -116,7 +127,7 @@ export default function Quotes() {
       .then(({ data }: { data: any }) => {
         if (!data) return;
         const m: Record<string, { id: string; no: string; status: string }> = {};
-        data.forEach((so: any) => { if (so.quote_id) m[so.quote_id] = { id: so.id, no: so.sales_order_no, status: so.status ?? 'confirmed' }; });
+        data.forEach((so: any) => { if (so.quote_id) m[so.quote_id] = { id: so.id, no: so.sales_order_no, status: so.status ?? 'open' }; });
         setSONumberMap(m);
       });
   }, [quotes, activeOrganizationId]);
@@ -538,25 +549,25 @@ export default function Quotes() {
             </div>
           </div>
         )}
-        <div className="table-fit-wrapper quotes-table-wrapper">
-          <table className="table-fit">
+        <div className="table-fit-wrapper quotes-table-wrapper overflow-x-auto">
+          <table className="table-fit w-full min-w-[1180px]">
             <colgroup>
-              <col style={{ width: '4%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '9%' }} />
+              <col style={{ width: '44px' }} />
+              <col style={{ width: '120px' }} />
+              <col style={{ width: '110px' }} />
               {isInternal ? (
                 <>
-                  <col style={{ width: '11%' }} />
-                  <col style={{ width: '7%' }} />
+                  <col style={{ width: '130px' }} />
+                  <col style={{ width: '90px' }} />
                 </>
               ) : (
-                <col style={{ width: '12%' }} />
+                <col style={{ width: '150px' }} />
               )}
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '10%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '9%' }} />
+              <col style={{ width: '100px' }} />
+              <col style={{ width: '130px' }} />
+              <col style={{ width: '110px' }} />
+              <col style={{ width: '95px' }} />
+              <col style={{ width: '130px' }} />
             </colgroup>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -670,9 +681,19 @@ export default function Quotes() {
                     <td className="py-4 px-4 text-sm text-center">
                       {soNumberMap[quote.id]
                         ? (
-                          <div className="flex items-center gap-2 justify-center">
-                            <button onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }} className="text-primary hover:underline font-medium">{soNumberMap[quote.id].no}</button>
-                            <StatusBadge status={soNumberMap[quote.id].status} type="salesOrder" />
+                          <div className="flex flex-col items-center gap-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }}
+                              className="text-primary hover:underline font-medium leading-none whitespace-nowrap"
+                            >
+                              {soNumberMap[quote.id].no}
+                            </button>
+                            <span
+                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-200 leading-none whitespace-nowrap"
+                              title={`Sales Order status: ${soNumberMap[quote.id].status}`}
+                            >
+                              {getSOStatusLabel(soNumberMap[quote.id].status)}
+                            </span>
                           </div>
                         )
                         : <span className="text-gray-400">—</span>}
