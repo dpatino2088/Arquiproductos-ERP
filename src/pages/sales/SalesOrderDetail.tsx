@@ -188,6 +188,7 @@ export default function SalesOrderDetail() {
   const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
   const [creatingMOForLines, setCreatingMOForLines] = useState(false);
   const [lineMoMap, setLineMoMap] = useState<Map<string, { mo_id: string; mo_no: string; status: string }>>(new Map());
+  const [moLineCounts, setMoLineCounts] = useState<Map<string, number>>(new Map());
 
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
@@ -302,7 +303,14 @@ export default function SalesOrderDetail() {
             .eq('deleted', false);
           const moMap = new Map(mosData.map(m => [m.id, m]));
           const newLineMoMap = new Map<string, { mo_id: string; mo_no: string; status: string }>();
+          const newMoLineCounts = new Map<string, number>();
           (molRows ?? []).forEach((r: any) => {
+            if (r.manufacturing_order_id) {
+              newMoLineCounts.set(
+                r.manufacturing_order_id,
+                (newMoLineCounts.get(r.manufacturing_order_id) ?? 0) + 1,
+              );
+            }
             if (r.sales_order_line_id && !newLineMoMap.has(r.sales_order_line_id)) {
               const mo = moMap.get(r.manufacturing_order_id);
               if (mo && mo.status !== 'cancelled') {
@@ -315,8 +323,10 @@ export default function SalesOrderDetail() {
             }
           });
           setLineMoMap(newLineMoMap);
+          setMoLineCounts(newMoLineCounts);
         } else {
           setLineMoMap(new Map());
+          setMoLineCounts(new Map());
         }
       }
       if (timelineRes.error) {
@@ -1252,7 +1262,7 @@ export default function SalesOrderDetail() {
                 <th className="px-4 py-3 text-left font-medium text-gray-700">MO #</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Type</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Product</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Product(s)</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Priority</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Date</th>
@@ -1272,12 +1282,20 @@ export default function SalesOrderDetail() {
                     className="border-t hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${mo.id}`))}
                   >
+                    {(() => {
+                      const lineCount = moLineCounts.get(mo.id) ?? 0;
+                      const productLabel =
+                        lineCount > 1
+                          ? `Multiple products (${lineCount} lines)`
+                          : (mo.product_name ?? '—');
+                      return (
+                        <>
                     <td className="px-4 py-4 font-medium text-primary">{mo.manufacturing_order_no}</td>
                     <td className="px-4 py-4">
                       {mo.mo_type && <StatusBadge status={mo.mo_type} type="moType" size="sm" />}
                     </td>
                     <td className="px-4 py-4"><StatusBadge status={mo.status} type="manufacturing" size="sm" /></td>
-                    <td className="px-4 py-4">{mo.product_name ?? '—'}</td>
+                    <td className="px-4 py-4">{productLabel}</td>
                     <td className="px-4 py-4 text-right">{mo.quantity}</td>
                     <td className="px-4 py-4">
                       {mo.priority && mo.priority !== 'normal' && (
@@ -1285,6 +1303,9 @@ export default function SalesOrderDetail() {
                       )}
                     </td>
                     <td className="px-4 py-4 text-gray-500 text-right">{formatDate(mo.created_at)}</td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 ))
               )}

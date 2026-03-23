@@ -40,31 +40,44 @@ logger.info('Application starting up', {
 
 // Recover from dynamic import chunk load failures (stale chunks after deploy, cache issues)
 const CHUNK_LOAD_KEY = 'adaptio_chunk_reload_attempted'
-window.addEventListener('error', async (ev: ErrorEvent) => {
-  const msg = ev?.message || ''
-  if (
-    (msg.includes('Failed to fetch dynamically imported module') ||
-      msg.includes('Importing a module script failed')) &&
-    !sessionStorage.getItem(CHUNK_LOAD_KEY)
-  ) {
-    sessionStorage.setItem(CHUNK_LOAD_KEY, '1')
-    try {
-      // Clear stale SW/caches so new deploy chunks can be fetched.
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations()
-        await Promise.all(regs.map((r) => r.unregister()))
-      }
-      if ('caches' in window) {
-        const cacheNames = await caches.keys()
-        await Promise.all(cacheNames.map((name) => caches.delete(name)))
-      }
-    } catch {
-      // Best-effort recovery; continue with reload.
+async function recoverFromChunkLoadFailure(message: string | null | undefined): Promise<void> {
+  const msg = message || ''
+  const isChunkFailure =
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed')
+
+  if (!isChunkFailure || sessionStorage.getItem(CHUNK_LOAD_KEY)) return
+
+  sessionStorage.setItem(CHUNK_LOAD_KEY, '1')
+  try {
+    // Clear stale SW/caches so new deploy chunks can be fetched.
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(regs.map((r) => r.unregister()))
     }
-    const url = new URL(window.location.href)
-    url.searchParams.set('__chunk_recover', String(Date.now()))
-    window.location.replace(url.toString())
+    if ('caches' in window) {
+      const cacheNames = await caches.keys()
+      await Promise.all(cacheNames.map((name) => caches.delete(name)))
+    }
+  } catch {
+    // Best-effort recovery; continue with reload.
   }
+  const url = new URL(window.location.href)
+  url.searchParams.set('__chunk_recover', String(Date.now()))
+  window.location.replace(url.toString())
+}
+
+window.addEventListener('error', (ev: ErrorEvent) => {
+  void recoverFromChunkLoadFailure(ev?.message)
+})
+
+window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
+  const reason = ev?.reason
+  const reasonMessage =
+    typeof reason === 'string'
+      ? reason
+      : reason?.message || String(reason ?? '')
+  void recoverFromChunkLoadFailure(reasonMessage)
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
