@@ -5,9 +5,10 @@ import { Save } from 'lucide-react';
 
 interface NotesTabProps {
   moId: string;
+  canEdit?: boolean;
 }
 
-export default function NotesTab({ moId }: NotesTabProps) {
+export default function NotesTab({ moId, canEdit = false }: NotesTabProps) {
   const { manufacturingOrder, loading, refetch } = useManufacturingOrder(moId);
   const { updateManufacturingOrder, isUpdating } = useUpdateManufacturingOrder();
   const [notes, setNotes] = useState('');
@@ -22,6 +23,7 @@ export default function NotesTab({ moId }: NotesTabProps) {
   }, [manufacturingOrder]);
 
   const handleSave = async () => {
+    if (!canEdit) return;
     try {
       await updateManufacturingOrder(moId, { notes: notes || null });
       setHasChanges(false);
@@ -65,7 +67,7 @@ export default function NotesTab({ moId }: NotesTabProps) {
         <h3 className="text-lg font-semibold text-gray-900">Notes</h3>
         <button
           onClick={handleSave}
-          disabled={!hasChanges || isUpdating}
+          disabled={!canEdit || !hasChanges || isUpdating}
           className="btn-save flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Save className="w-4 h-4" />
@@ -79,8 +81,9 @@ export default function NotesTab({ moId }: NotesTabProps) {
           setNotes(e.target.value);
           setHasChanges(e.target.value !== (manufacturingOrder.notes || ''));
         }}
+        disabled={!canEdit}
         rows={12}
-        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
+        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none disabled:bg-gray-50 disabled:text-gray-500"
         placeholder="Add notes, comments, or instructions for this manufacturing order..."
       />
 

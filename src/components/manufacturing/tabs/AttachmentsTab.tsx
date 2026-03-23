@@ -23,9 +23,10 @@ export interface MOAttachment {
 interface AttachmentsTabProps {
   moId: string;
   organizationId: string;
+  canEdit?: boolean;
 }
 
-export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabProps) {
+export default function AttachmentsTab({ moId, organizationId, canEdit = false }: AttachmentsTabProps) {
   const [attachments, setAttachments] = useState<MOAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -63,6 +64,7 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const files = e.target.files;
     if (!files?.length || !orgId || !moId || !user) return;
     setUploading(true);
@@ -103,6 +105,7 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
   };
 
   const handleDelete = async (att: MOAttachment) => {
+    if (!canEdit) return;
     try {
       await supabase.storage.from(STORAGE_BUCKET).remove([att.file_path]);
       const { error } = await supabase.from('manufacturing_order_attachments').delete().eq('id', att.id);
@@ -142,12 +145,12 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
             className="hidden"
             ref={fileInputRef}
             onChange={handleUpload}
-            disabled={uploading}
+            disabled={!canEdit || uploading}
           />
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={!canEdit || uploading}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-50"
           >
             <Upload className="w-4 h-4" />
@@ -200,6 +203,7 @@ export default function AttachmentsTab({ moId, organizationId }: AttachmentsTabP
                       <button
                         type="button"
                         onClick={() => handleDelete(att)}
+                        disabled={!canEdit}
                         className="p-1.5 text-gray-500 hover:text-red-600 rounded"
                         title="Remove"
                       >

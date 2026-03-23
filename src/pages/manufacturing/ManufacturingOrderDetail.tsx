@@ -6,7 +6,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
-import { useModuleAccess } from '../../hooks/usePermissions';
+import { useModuleAccess, usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useIssueMaterials } from '../../hooks/useInventoryMovements';
 import { useWarehouses } from '../../hooks/useWarehouses';
@@ -70,7 +70,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const addNotification = useUIStore((s) => s.addNotification);
   const { isInternal } = useAccessContext();
   const { canEdit: canEditInventory } = useModuleAccess('inventory');
-  const { canEdit: canEditManufacturing } = useModuleAccess('manufacturing');
+  const { can } = usePermissions();
   const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -88,6 +88,18 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     has_delivery_override: boolean;
   } | null>(null);
   const listPath = '/manufacturing/manufacturing-orders';
+  const canReadOverview = can('manufacturing.mo.overview.read');
+  const canReadLines = can('manufacturing.mo.lines.read');
+  const canReadMaterials = can('manufacturing.mo.materials.read');
+  const canReadWorkOrders = can('manufacturing.mo.work_orders.read');
+  const canReadSchedule = can('manufacturing.mo.schedule.read');
+  const canReadNotes = can('manufacturing.mo.notes.read');
+  const canReadTimeline = can('manufacturing.mo.timeline.read');
+  const canReadAttachments = can('manufacturing.mo.attachments.read');
+  const canWriteOverview = can('manufacturing.mo.overview.write');
+  const canWriteSchedule = can('manufacturing.mo.schedule.write');
+  const canWriteNotes = can('manufacturing.mo.notes.write');
+  const canWriteAttachments = can('manufacturing.mo.attachments.write');
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
     const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
@@ -331,15 +343,22 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
 
   const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'lines', label: 'Lines', count: moLines.length },
-    { id: 'materials', label: 'Materials', count: materials.length },
-    { id: 'work-orders', label: 'Work Orders' },
-    { id: 'schedule', label: 'Schedule' },
-    { id: 'notes', label: 'Notes' },
-    { id: 'timeline', label: 'Timeline', count: timeline.length },
-    { id: 'attachments', label: 'Attachments' },
-  ];
+    canReadOverview ? { id: 'overview', label: 'Overview' } : null,
+    canReadLines ? { id: 'lines', label: 'Lines', count: moLines.length } : null,
+    canReadMaterials ? { id: 'materials', label: 'Materials', count: materials.length } : null,
+    canReadWorkOrders ? { id: 'work-orders', label: 'Work Orders' } : null,
+    canReadSchedule ? { id: 'schedule', label: 'Schedule' } : null,
+    canReadNotes ? { id: 'notes', label: 'Notes' } : null,
+    canReadTimeline ? { id: 'timeline', label: 'Timeline', count: timeline.length } : null,
+    canReadAttachments ? { id: 'attachments', label: 'Attachments' } : null,
+  ].filter(Boolean) as Array<{ id: string; label: string; count?: number }>;
+
+  useEffect(() => {
+    if (tabs.length === 0) return;
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
@@ -351,7 +370,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     financialSummary.balance_due > 0 ? 'partial' : 'paid';
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
-  if (isInternal && canEditManufacturing && status !== 'cancelled' && status !== 'delivered' && status !== 'completed') {
+  if (isInternal && canWriteOverview && status !== 'cancelled' && status !== 'delivered' && status !== 'completed') {
     if (status === 'draft') {
       actionItems.push({
         label: 'Mark as Reviewed',
@@ -403,6 +422,19 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
     }
+  }
+
+  if (tabs.length === 0) {
+    return (
+      <div className="py-6 px-6">
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+          <p className="text-sm font-medium text-yellow-800">No permission</p>
+          <p className="text-sm text-yellow-700 mt-1">
+            You can access Manufacturing Orders, but you do not have access to any detail sub-tab.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -792,7 +824,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       )}
 
       {activeTab === 'schedule' && (
-        <ScheduleTab moId={moId} canEdit={canEditManufacturing} />
+        <ScheduleTab moId={moId} canEdit={canWriteSchedule} />
       )}
 
       {activeTab === 'work-orders' && moId && (
@@ -807,7 +839,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
       {/* Notes tab */}
       {activeTab === 'notes' && (
-        <NotesTab moId={moId} />
+        <NotesTab moId={moId} canEdit={canWriteNotes} />
       )}
 
       {/* Timeline tab */}
@@ -823,7 +855,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
       {/* Attachments tab */}
       {activeTab === 'attachments' && moId && (
-        <AttachmentsTab moId={moId} organizationId={mo.organization_id} />
+        <AttachmentsTab moId={moId} organizationId={mo.organization_id} canEdit={canWriteAttachments} />
       )}
     </DetailPageLayout>
   );
