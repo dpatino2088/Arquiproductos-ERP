@@ -250,60 +250,29 @@ export default function CustomerNew() {
     }
   }, [billingSame, street1, street2, city, state, zip, country, setValue]);
 
-  // Load Contacts from Supabase for primary_contact_id dropdown (MUST be before early returns)
+  // Load contacts for Primary Contact dropdown.
+  // Business rule: only contacts already related to this customer.
   useEffect(() => {
     const loadContacts = async () => {
-      if (!activeOrganizationId) {
+      if (!activeOrganizationId || !customerId) {
+        // On create mode there are no related contacts yet.
+        setContacts([]);
+        setValue('primary_contact_id', '');
         setLoadingContacts(false);
         return;
       }
 
       try {
         setLoadingContacts(true);
-        
-        // Primero obtener dealers de la organization
-        const { data: orgDealers } = await supabase
-          .from('Dealers')
-          .select('id')
-          .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false);
-
-        const dealerIds = (orgDealers || []).map((c: { id: string }) => c.id);
-
-        // Usar solo columnas explícitas que existen
-        let query = supabase
+        const { data, error } = await supabase
           .from('DirectoryContacts')
           .select('id, contact_name, contact_id_number, contact_type')
+          .eq('organization_id', activeOrganizationId)
+          .eq('customer_id', customerId)
           .eq('deleted', false)
           .order('contact_name', { ascending: true });
-
-        // Filtrar por dealer_id si existen, sino por organization_id
-        if (dealerIds.length > 0) {
-          query = query.in('dealer_id', dealerIds);
-          // También incluir contacts sin dealer_id pero con organization_id (transición)
-          const { data: dealerData } = await query;
-          const { data: orgData } = await supabase
-            .from('DirectoryContacts')
-            .select('id, contact_name, contact_id_number, contact_type')
-            .eq('organization_id', activeOrganizationId)
-            .is('dealer_id', null)
-            .eq('deleted', false)
-            .order('contact_name', { ascending: true });
-
-          // Combinar sin duplicados
-          const all = [...(dealerData || []), ...(orgData || [])];
-          const unique = Array.from(new Map(all.map(item => [item.id, item])).values());
-          setContacts(unique);
-        } else {
-          const { data, error } = await query.eq('organization_id', activeOrganizationId);
-          
-          if (error) {
-            console.error('Error loading contacts', error);
-            setContacts([]);
-          } else if (data) {
-            setContacts(data);
-          }
-        }
+        if (error) throw error;
+        setContacts(data ?? []);
       } catch (err) {
         console.error('Error loading contacts', err);
         setContacts([]);
@@ -313,7 +282,7 @@ export default function CustomerNew() {
     };
 
     loadContacts();
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, customerId, setValue]);
 
   // Load related contacts (contacts linked to this customer) when editing
   const loadRelatedContacts = async () => {
