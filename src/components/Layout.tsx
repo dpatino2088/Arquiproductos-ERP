@@ -773,6 +773,54 @@ function Layout({ children }: LayoutProps) {
     }
   }, [saveCurrentPageBeforeSettings, getLastRouteForModule, userType, allowedModules]);
 
+  // Guard direct URL access to modules without read permission.
+  useEffect(() => {
+    if (permissionsLoading || accessLoading) return;
+    if (isSuperAdminUser) return;
+
+    const first = (currentRoute.split('/')[1] || '').toLowerCase();
+    const map: Partial<Record<string, ModuleKey>> = {
+      dashboard: 'dashboard',
+      directory: 'directory',
+      sales: 'sales',
+      catalog: 'catalog',
+      inventory: 'inventory',
+      manufacturing: 'manufacturing',
+      financials: 'financials',
+      partners: 'partners',
+      settings: 'settings',
+    };
+    const moduleKey = map[first];
+    if (!moduleKey) return;
+
+    if (userType === 'portal') {
+      if (!allowedModules.includes(moduleKey)) {
+        router.navigate('/dashboard', true);
+        setCurrentRoute('/dashboard');
+      }
+      return;
+    }
+
+    if (userType === 'internal') {
+      if (!allowedModules.includes(moduleKey)) {
+        router.navigate('/dashboard', true);
+        setCurrentRoute('/dashboard');
+        return;
+      }
+      const modulePerms = MODULE_PERMS[moduleKey];
+      if (!modulePerms) {
+        router.navigate('/dashboard', true);
+        setCurrentRoute('/dashboard');
+        return;
+      }
+      const canView = modulePerms.view.some((perm) => can(perm));
+      if (!canView) {
+        router.navigate('/dashboard', true);
+        setCurrentRoute('/dashboard');
+      }
+    }
+  }, [currentRoute, permissionsLoading, accessLoading, isSuperAdminUser, userType, allowedModules, can]);
+
   // Sidebar siempre colapsado: solo iconos; nombres y tabs en menú flotante al hover
   const sidebarWidth = useMemo(() => '3.5rem', []);
   const mainMarginLeft = useMemo(() => {

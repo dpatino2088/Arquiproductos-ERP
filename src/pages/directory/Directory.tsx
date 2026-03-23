@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import DirectoryContacts from './Contacts';
 import DirectoryCustomers from './Customers';
+import { usePermissions } from '../../hooks/usePermissions';
+import { router } from '../../lib/router';
 
 export type DirectoryTab = 'contacts' | 'customers';
 
@@ -15,13 +17,19 @@ type Props = {
  */
 export default function Directory({ activeTab }: Props) {
   const { registerSubmodules } = useSubmoduleNav();
+  const { can } = usePermissions();
+  const canViewDirectory = can('directory.read') || can('directory.write');
 
   useEffect(() => {
+    if (!canViewDirectory) {
+      router.navigate('/', false);
+      return;
+    }
     registerSubmodules('Directory', [
       { id: 'customers', label: 'Customers', href: '/directory/customers' },
       { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
     ]);
-  }, [registerSubmodules]);
+  }, [registerSubmodules, canViewDirectory]);
 
   // Sin key en los paneles: evita remount al cambiar tab (culpable #1 del "segundo load").
   return (

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { router } from '../../lib/router';
 import { Building, Store, Building2 } from 'lucide-react';
+import { usePermissions } from '../../hooks/usePermissions';
 
 const PARTNERS_SUBMODULES = [
   { id: 'dealers', label: 'Dealers', href: '/partners/dealers', icon: Building },
@@ -11,11 +12,17 @@ const PARTNERS_SUBMODULES = [
 
 export default function Partners() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { can } = usePermissions();
+  const canViewPartners = can('partners.read') || can('settings.read');
 
   useEffect(() => {
+    if (!canViewPartners) {
+      router.navigate('/', false);
+      return;
+    }
     registerSubmodules('Partners', PARTNERS_SUBMODULES);
     router.navigate('/partners/dealers');
-  }, [registerSubmodules]);
+  }, [registerSubmodules, canViewPartners]);
 
   return null;
 }

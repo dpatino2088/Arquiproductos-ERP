@@ -4,6 +4,7 @@ import { usePreviousPage } from '../../hooks/usePreviousPage';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
+import { usePermissions } from '../../hooks/usePermissions';
 import {
   Building,
   Users,
@@ -20,6 +21,8 @@ export default function Settings() {
   const { role, isSuperAdmin, isAdmin } = useCurrentOrgRole();
   const { activeOrganization } = useOrganizationContext();
   const { activeDealer } = useActiveDealer();
+  const { can } = usePermissions();
+  const canViewSettings = can('settings.read') || can('settings.write');
   const [activeTab, setActiveTab] = useState<string>('organization-user');
 
   // Owner/Admin: org superadmin or admin; portal: dealer_manager can see Members
@@ -27,6 +30,11 @@ export default function Settings() {
 
   // Handle ESC key to close settings and return to previous page
   useEffect(() => {
+    if (!canViewSettings) {
+      router.navigate('/', false);
+      return;
+    }
+
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         const previousPage = getPreviousPage();
@@ -43,7 +51,7 @@ export default function Settings() {
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [getPreviousPage]);
+  }, [getPreviousPage, canViewSettings]);
 
   const handleCloseSettings = (): void => {
     const previousPage = getPreviousPage();

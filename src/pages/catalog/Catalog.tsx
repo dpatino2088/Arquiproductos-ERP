@@ -2,11 +2,18 @@ import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { Package, Wrench } from 'lucide-react';
+import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Catalog() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
+  const { can } = usePermissions();
+  const canViewCatalog = can('catalog.read') || can('catalog.write');
 
   useEffect(() => {
+    if (!canViewCatalog) {
+      router.navigate('/', false);
+      return;
+    }
     // Register Catalog submodules whenever we're in the Catalog module
     const currentPath = window.location.pathname;
     
@@ -33,7 +40,7 @@ export default function Catalog() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog]);
 
   return null;
 }

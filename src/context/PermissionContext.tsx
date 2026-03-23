@@ -67,6 +67,33 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
 
       if (appUserRow?.role_code) {
         const permissionSet = await fetchRolePermissions(supabase, appUserRow.role_code);
+
+        // Merge user-level overrides from OrganizationUserPermissions so
+        // Permissions module changes are reflected even with role_code users.
+        const { data: orgUser } = await supabase
+          .from('OrganizationUsers')
+          .select('id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('user_id', userId)
+          .eq('deleted', false)
+          .limit(1)
+          .maybeSingle();
+
+        if (orgUser?.id) {
+          const { data: extraPerms, error: extraPermsError } = await supabase
+            .from('OrganizationUserPermissions')
+            .select('permission_code')
+            .eq('organization_user_id', orgUser.id);
+
+          if (!extraPermsError) {
+            for (const row of extraPerms || []) {
+              if (row?.permission_code) permissionSet.add(row.permission_code);
+            }
+          } else if (import.meta.env.DEV) {
+            console.warn('⚠️ PermissionContext - Could not merge user override permissions:', extraPermsError.message);
+          }
+        }
+
         setPermissions(permissionSet);
         if (import.meta.env.DEV) {
           console.log('✅ PermissionContext - Permissions from AppUserRolePermissions (role_code):', {

@@ -2,11 +2,18 @@ import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { Package, Warehouse, ShoppingCart, Receipt, ArrowLeftRight, Settings } from 'lucide-react';
+import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Inventory() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
+  const { can } = usePermissions();
+  const canViewInventory = can('inventory.read') || can('inventory.write');
 
   useEffect(() => {
+    if (!canViewInventory) {
+      router.navigate('/', false);
+      return;
+    }
     // Only register Inventory submodules if we're actually in the Inventory module
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/inventory')) {
@@ -33,7 +40,7 @@ export default function Inventory() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewInventory]);
 
   return null;
 }
