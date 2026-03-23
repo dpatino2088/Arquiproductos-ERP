@@ -48,7 +48,7 @@ const customerSchema = z.object({
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   customer_phone: z.string().optional(), // Usar customer_phone (no company_phone)
   alt_phone: z.string().optional(),
-  primary_contact_id: z.string().min(1, 'Primary Contact is required'),
+  primary_contact_id: z.string().optional().or(z.literal('')),
   street_address_line_1: z.string().min(1, 'Street address is required'),
   street_address_line_2: z.string().optional(),
   city: z.string().min(1, 'City is required'),
@@ -392,7 +392,6 @@ export default function CustomerNew() {
       
       if (errors.customer_name) missingFields.push('Customer Name');
         if (errors.customer_type_name) missingFields.push('Customer Type');
-      if (errors.primary_contact_id) missingFields.push('Primary Contact');
       if (errors.street_address_line_1) missingFields.push('Street Address');
       if (errors.city) missingFields.push('City');
       if (errors.state) missingFields.push('State');
@@ -455,7 +454,7 @@ export default function CustomerNew() {
         website: normalizeWebsite(values.website) ?? undefined,
         alt_phone: values.alt_phone || undefined,
         identification_number: values.identification_number?.trim() || undefined,
-        primary_contact_id: values.primary_contact_id,
+        primary_contact_id: values.primary_contact_id || undefined,
         street_address_line_1: values.street_address_line_1,
         street_address_line_2: values.street_address_line_2 || undefined,
         city: values.city || undefined,
@@ -801,7 +800,7 @@ export default function CustomerNew() {
                 />
               </div>
               <div className="col-span-3">
-                <Label htmlFor="primary_contact_id" className="text-xs" required>Primary Contact</Label>
+                <Label htmlFor="primary_contact_id" className="text-xs">Primary Contact</Label>
                 <SelectShadcn
                   value={watch('primary_contact_id') || ''}
                   onValueChange={(value) => {
