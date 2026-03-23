@@ -48,6 +48,10 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toSafeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function resolveRiskBand(params: {
   openAr: number;
   pastDue: number;
@@ -121,13 +125,15 @@ export function useDealerFinancialAccounts(params: UseDealerFinancialAccountsPar
         .map((dealer) => {
           const summary = summaryByDealer.get(dealer.id) ?? {};
           const aging = agingByDealer.get(dealer.id) ?? {};
+          const dealerName = toSafeString(dealer.dealer_name) || 'Unnamed dealer';
+          const dealerNo = toSafeString(dealer.dealer_no) || null;
           const openAr = toNumber(summary.open_ar);
           const pastDue = toNumber(summary.past_due_amount);
           const days90Plus = toNumber(aging.days_90_plus);
           return {
             dealer_id: dealer.id,
-            dealer_name: dealer.dealer_name,
-            dealer_no: dealer.dealer_no ?? null,
+            dealer_name: dealerName,
+            dealer_no: dealerNo,
             total_invoiced_lifetime: toNumber(summary.total_invoiced_lifetime),
             total_paid_lifetime: toNumber(summary.total_paid_lifetime),
             open_ar: openAr,
@@ -154,8 +160,8 @@ export function useDealerFinancialAccounts(params: UseDealerFinancialAccountsPar
     const q = params.q.trim().toLowerCase();
     let rows = q
       ? source.filter((row) =>
-          row.dealer_name.toLowerCase().includes(q) ||
-          (row.dealer_no ?? '').toLowerCase().includes(q)
+          toSafeString(row.dealer_name).toLowerCase().includes(q) ||
+          toSafeString(row.dealer_no).toLowerCase().includes(q)
         )
       : source;
 
@@ -166,7 +172,9 @@ export function useDealerFinancialAccounts(params: UseDealerFinancialAccountsPar
     const [sortField, sortDirRaw] = params.sortKey.split(':');
     const sortDir = sortDirRaw === 'desc' ? -1 : 1;
     const sorted = [...rows].sort((a, b) => {
-      if (sortField === 'dealer') return a.dealer_name.localeCompare(b.dealer_name) * sortDir;
+      const dealerNameA = toSafeString(a.dealer_name);
+      const dealerNameB = toSafeString(b.dealer_name);
+      if (sortField === 'dealer') return dealerNameA.localeCompare(dealerNameB) * sortDir;
       if (sortField === 'open_ar') return (a.open_ar - b.open_ar) * sortDir;
       if (sortField === 'past_due') return (a.past_due_amount - b.past_due_amount) * sortDir;
       if (sortField === 'unapplied') return (a.unapplied_amount - b.unapplied_amount) * sortDir;
@@ -175,7 +183,7 @@ export function useDealerFinancialAccounts(params: UseDealerFinancialAccountsPar
         const bt = b.last_payment_date ? new Date(b.last_payment_date).getTime() : 0;
         return (at - bt) * sortDir;
       }
-      return a.dealer_name.localeCompare(b.dealer_name);
+      return dealerNameA.localeCompare(dealerNameB);
     });
 
     const total = sorted.length;

@@ -35,7 +35,7 @@ export default function DeliveryNoteDetail() {
   const [completing, setCompleting] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
-  const { deliveryNote, lines, loading, refetch, toggleLine, completeDelivery } = useDeliveryNote(deliveryNoteId);
+  const { deliveryNote, lines, loading, refetch, toggleLine, completeDelivery, isUpdatingLine } = useDeliveryNote(deliveryNoteId);
 
   const params = new URLSearchParams(window.location.search);
   const moIdParam = params.get('mo_id');
@@ -339,8 +339,17 @@ export default function DeliveryNoteDetail() {
                       <td className="px-3 py-3 text-center">
                         <button
                           type="button"
-                          onClick={() => !isCompleted && toggleLine(line.id, !line.checked)}
-                          disabled={isCompleted}
+                          onClick={() => {
+                            if (isCompleted) return;
+                            void toggleLine(line.id, !line.checked).catch((e: unknown) => {
+                              addNotification({
+                                type: 'error',
+                                title: 'Error',
+                                message: e instanceof Error ? e.message : 'Failed to update delivery line',
+                              });
+                            });
+                          }}
+                          disabled={isCompleted || isUpdatingLine}
                           className="disabled:opacity-50"
                         >
                           {line.checked ? (
@@ -418,11 +427,17 @@ export default function DeliveryNoteDetail() {
             <button
               type="button"
               onClick={handleComplete}
-              disabled={!someChecked || completing}
+              disabled={!someChecked || completing || isUpdatingLine}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Truck className="w-4 h-4" />
-              {completing ? 'Processing...' : allChecked ? 'Complete Delivery' : `Deliver ${checkedCount} of ${totalCount} lines`}
+              {completing
+                ? 'Processing...'
+                : isUpdatingLine
+                ? 'Saving lines...'
+                : allChecked
+                ? 'Complete Delivery'
+                : `Deliver ${checkedCount} of ${totalCount} lines`}
             </button>
             <button
               type="button"

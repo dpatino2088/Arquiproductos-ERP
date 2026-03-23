@@ -78,7 +78,7 @@ export default function WorkOrdersList() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { role, loading: roleLoading } = useCurrentOrgRole();
   const { user } = useAuth();
-  const isOperator = role === 'operator';
+  const isOperator = role === 'operator' || role === 'operator_member';
   const currentUserId = user?.id ?? null;
 
   const [rows, setRows] = useState<MOWorkOrder[]>([]);

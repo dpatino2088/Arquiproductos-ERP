@@ -82,7 +82,7 @@ export default function CutOptimization() {
   const { activeOrganizationId } = useOrganizationContext();
   const { user } = useAuth();
   const { role } = useCurrentOrgRole();
-  const isOperator = role === 'operator';
+  const isOperator = role === 'operator' || role === 'operator_member';
   const currentUserId = user?.id ?? null;
   const [mode, setMode] = useState<Mode>('profiles');
   const [loading, setLoading] = useState(true);

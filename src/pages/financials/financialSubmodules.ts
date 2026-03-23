@@ -16,16 +16,16 @@ export const FINANCIAL_GROUP_TABS = [
 ];
 
 export const AR_SUBTABS = [
-  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2 },
-  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText },
-  { id: 'payments', label: 'Payments Received', href: '/financials/payments', icon: DollarSign },
+  { id: 'accounts', label: 'Accounts', href: '/financials/accounts', icon: Building2, readPerm: 'financials.accounts.read' },
+  { id: 'invoices', label: 'Invoices', href: '/financials/invoices', icon: FileText, readPerm: 'financials.invoices.read' },
+  { id: 'payments', label: 'Payments Received', href: '/financials/payments', icon: DollarSign, readPerm: 'financials.payments.read' },
 ];
 
 export const AP_SUBTABS = [
-  { id: 'vendor-accounts', label: 'Vendor Accounts', href: '/financials/vendor-accounts', icon: Truck },
-  { id: 'purchase-orders', label: 'Purchase Orders', href: '/financials/purchase-orders', icon: ShoppingCart },
-  { id: 'bills', label: 'Bills', href: '/financials/bills', icon: Receipt },
-  { id: 'vendor-payments', label: 'Payments Made', href: '/financials/vendor-payments', icon: CreditCard },
+  { id: 'vendor-accounts', label: 'Vendor Accounts', href: '/financials/vendor-accounts', icon: Truck, readPerm: 'financials.vendor_accounts.read' },
+  { id: 'purchase-orders', label: 'Purchase Orders', href: '/financials/purchase-orders', icon: ShoppingCart, readPerm: 'financials.purchase_orders.read' },
+  { id: 'bills', label: 'Bills', href: '/financials/bills', icon: Receipt, readPerm: 'financials.bills.read' },
+  { id: 'vendor-payments', label: 'Payments Made', href: '/financials/vendor-payments', icon: CreditCard, readPerm: 'financials.vendor_payments.read' },
 ];
 
 const AR_PATHS = new Set(['/financials/accounts', '/financials/invoices', '/financials/payments']);
@@ -37,6 +37,26 @@ export function getFinancialGroup(pathname: string): 'ar' | 'ap' {
 
 export function getFinancialSubTabs(group: 'ar' | 'ap') {
   return group === 'ar' ? AR_SUBTABS : AP_SUBTABS;
+}
+
+export function getVisibleFinancialSubTabs(
+  group: 'ar' | 'ap',
+  can: (permissionCode: string) => boolean,
+) {
+  return getFinancialSubTabs(group).filter((tab) => can(tab.readPerm));
+}
+
+export function getVisibleFinancialGroupTabs(can: (permissionCode: string) => boolean) {
+  const hasAR = AR_SUBTABS.some((tab) => can(tab.readPerm));
+  const hasAP = AP_SUBTABS.some((tab) => can(tab.readPerm));
+  return FINANCIAL_GROUP_TABS.filter((tab) => (tab.id === 'ar' ? hasAR : hasAP));
+}
+
+export function getFirstAllowedFinancialRoute(can: (permissionCode: string) => boolean): string | null {
+  const firstAR = AR_SUBTABS.find((tab) => can(tab.readPerm));
+  if (firstAR) return firstAR.href;
+  const firstAP = AP_SUBTABS.find((tab) => can(tab.readPerm));
+  return firstAP?.href ?? null;
 }
 
 /** @deprecated Use FINANCIAL_GROUP_TABS + FinancialSubTabs instead */

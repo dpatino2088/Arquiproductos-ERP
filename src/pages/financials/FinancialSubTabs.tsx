@@ -1,12 +1,14 @@
 import { useMemo } from 'react';
 import { router } from '../../lib/router';
-import { getFinancialGroup, getFinancialSubTabs } from './financialSubmodules';
+import { getFinancialGroup, getVisibleFinancialSubTabs } from './financialSubmodules';
+import { usePermissions } from '../../hooks/usePermissions';
 
 export default function FinancialSubTabs() {
   const pathname = window.location.pathname;
+  const { can } = usePermissions();
 
   const group = useMemo(() => getFinancialGroup(pathname), [pathname]);
-  const subTabs = useMemo(() => getFinancialSubTabs(group), [group]);
+  const subTabs = useMemo(() => getVisibleFinancialSubTabs(group, can), [group, can]);
 
   const activeTabId = useMemo(() => {
     const match = subTabs.filter(
@@ -18,6 +20,9 @@ export default function FinancialSubTabs() {
 
   return (
     <nav className="flex items-center gap-1 mb-6" role="tablist" aria-label={`${group === 'ar' ? 'Receivable' : 'Payable'} sub-navigation`}>
+      {subTabs.length === 0 && (
+        <div className="text-sm text-gray-500">No tabs available</div>
+      )}
       {subTabs.map(tab => {
         const isActive = tab.id === activeTabId;
         return (

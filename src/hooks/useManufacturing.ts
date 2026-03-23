@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
-import { useActiveDealer } from './useActiveDealer';
 import { normalizeUUID } from '../utils/uuid';
 
 // ============================================================================
@@ -125,9 +124,10 @@ export interface BomInstanceTotals {
 
 /**
  * Hook para obtener ManufacturingOrders
- * Filtra por organization_id Y dealer_id (vía SalesOrders -> Quotes)
+ * Scope operativo por organization_id.
+ * Opcionalmente permite filtrar por dealer_id explícito.
  *
- * @param dealerId - Opcional: filtra por ese dealer_id; null = todos los dealers; undefined = usar activeDealerId
+ * @param dealerId - Opcional: filtra por ese dealer_id; null/undefined/'all' = todos los dealers
  */
 export function useManufacturingOrders(dealerId?: string | null) {
   const [manufacturingOrders, setManufacturingOrders] = useState<ManufacturingOrder[]>([]);
@@ -135,9 +135,6 @@ export function useManufacturingOrders(dealerId?: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
-  const { activeDealerId } = useActiveDealer();
-
-  const effectiveDealerId = dealerId === undefined ? activeDealerId : dealerId;
 
   const refetch = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -160,32 +157,21 @@ export function useManufacturingOrders(dealerId?: string | null) {
           console.log('🔍 useManufacturingOrders: Fetching ManufacturingOrders for organization:', activeOrganizationId);
         }
 
+        const scopedDealerId =
+          dealerId && dealerId !== 'all'
+            ? dealerId
+            : null;
+
         let salesOrderIds: string[] | null = null;
-        if (effectiveDealerId) {
+        if (scopedDealerId) {
           const { data: salesOrdersData } = await supabase
             .from('SalesOrders')
-            .select('id, quote_id')
+            .select('id')
             .eq('organization_id', activeOrganizationId)
+            .eq('dealer_id', scopedDealerId)
             .eq('deleted', false);
 
-          if (salesOrdersData && salesOrdersData.length > 0) {
-            const quoteIds = salesOrdersData.map((so: { quote_id?: string }) => so.quote_id).filter((id: string | undefined): id is string => !!id);
-            if (quoteIds.length > 0) {
-              const { data: quotesData } = await supabase
-                .from('Quotes')
-                .select('id')
-                .in('id', quoteIds)
-                .eq('dealer_id', effectiveDealerId)
-                .eq('deleted', false);
-
-              if (quotesData) {
-                const validQuoteIds = new Set(quotesData.map((q: { id: string }) => q.id));
-                salesOrderIds = salesOrdersData
-                  .filter((so: { quote_id?: string; id: string }) => so.quote_id && validQuoteIds.has(so.quote_id))
-                  .map((so: { id: string }) => so.id);
-              }
-            }
-          }
+          salesOrderIds = (salesOrdersData ?? []).map((so: { id: string }) => so.id);
         }
 
         // First, try without JOINs to see if basic query works
@@ -259,10 +245,10 @@ export function useManufacturingOrders(dealerId?: string | null) {
 
         if (import.meta.env.DEV) {
           console.log('✅ useManufacturingOrders: Found', data?.length || 0, 'ManufacturingOrders (with JOINs)');
-          if (effectiveDealerId && data && data.length > 0) {
-            console.log('   Filtered by dealer_id:', effectiveDealerId);
-          } else if (effectiveDealerId && (!data || data.length === 0)) {
-            console.warn('   No ManufacturingOrders found for dealer_id:', effectiveDealerId);
+          if (scopedDealerId && data && data.length > 0) {
+            console.log('   Filtered by dealer_id:', scopedDealerId);
+          } else if (scopedDealerId && (!data || data.length === 0)) {
+            console.warn('   No ManufacturingOrders found for dealer_id:', scopedDealerId);
           }
         }
 
@@ -276,7 +262,7 @@ export function useManufacturingOrders(dealerId?: string | null) {
     }
 
     fetchManufacturingOrders();
-  }, [activeOrganizationId, effectiveDealerId, refreshTrigger]);
+  }, [activeOrganizationId, dealerId, refreshTrigger]);
 
   return { manufacturingOrders, loading, error, refetch };
 }

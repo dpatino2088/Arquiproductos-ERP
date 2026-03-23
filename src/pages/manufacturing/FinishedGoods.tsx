@@ -3,7 +3,6 @@ import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFinishedGoods, type FinishedGoodsGroup } from '../../hooks/useFinishedGoods';
-import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { Package, ChevronDown, ChevronRight, Truck, Search, FileText, Lock } from 'lucide-react';
@@ -12,34 +11,71 @@ import { withReturnTo } from '../../lib/navigation/returnTo';
 
 type FilterMode = 'ready' | 'delivered' | 'all';
 
-type FinancialInfo = { balance_due: number; total_paid: number; invoice_status: string };
+type FinancialInfo = {
+  balance_due: number;
+  total_paid: number;
+  invoice_status: string;
+  has_delivery_override: boolean;
+};
 
 export default function FinishedGoods() {
   const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules } = useSubmoduleNav();
   const { groups, loading, error, refetch } = useFinishedGoods();
-  const { role: orgRole } = useOrganizationContext();
   const [filter, setFilter] = useState<FilterMode>('ready');
   const [search, setSearch] = useState('');
   const [expandedMOs, setExpandedMOs] = useState<Set<string>>(new Set());
   const [financialBySoId, setFinancialBySoId] = useState<Record<string, FinancialInfo>>({});
 
-  const canAuthorizeRelease = orgRole === 'superadmin' || orgRole === 'admin';
-
   useEffect(() => {
     const soIds = [...new Set(groups.map(g => g.sales_order_id).filter(Boolean))] as string[];
     if (soIds.length === 0) { setFinancialBySoId({}); return; }
-    supabase
-      .from('sales_order_financial_summary')
-      .select('sales_order_id, balance_due, total_paid, invoice_status')
-      .in('sales_order_id', soIds)
-      .then(({ data }: { data: { sales_order_id: string; balance_due?: number | null; total_paid?: number | null; invoice_status?: string | null }[] | null }) => {
-        const m: Record<string, FinancialInfo> = {};
-        (data ?? []).forEach((r) => {
-          m[r.sales_order_id] = { balance_due: r.balance_due ?? 0, total_paid: r.total_paid ?? 0, invoice_status: r.invoice_status ?? 'none' };
-        });
-        setFinancialBySoId(m);
+    Promise.all([
+      supabase
+        .from('sales_order_financial_summary')
+        .select('sales_order_id, balance_due, total_paid, invoice_status')
+        .in('sales_order_id', soIds),
+      supabase
+        .from('SalesOrders')
+        .select('id, total_amount')
+        .in('id', soIds),
+      supabase
+        .from('SalesOrderDeliveryOverrides')
+        .select('sales_order_id')
+        .in('sales_order_id', soIds)
+        .eq('status', 'active')
+        .eq('deleted', false),
+    ]).then(([summaryRes, soTotalsRes, overrideRes]) => {
+      const summaryRows = (summaryRes.data ?? []) as {
+        sales_order_id: string;
+        balance_due?: number | null;
+        total_paid?: number | null;
+        invoice_status?: string | null;
+      }[];
+      const soTotalsRows = (soTotalsRes.data ?? []) as { id: string; total_amount?: number | null }[];
+      const overrideRows = (overrideRes.data ?? []) as { sales_order_id: string }[];
+
+      const summaryMap = new Map(summaryRows.map((r) => [r.sales_order_id, r]));
+      const soTotalMap = new Map(soTotalsRows.map((r) => [r.id, Number(r.total_amount ?? 0)]));
+      const overrideSet = new Set(overrideRows.map((r) => r.sales_order_id));
+      const next: Record<string, FinancialInfo> = {};
+
+      soIds.forEach((soId) => {
+        const summary = summaryMap.get(soId);
+        const fallbackTotal = soTotalMap.get(soId) ?? 0;
+        const balanceDue = Number(summary?.balance_due ?? fallbackTotal);
+        const totalPaid = Number(summary?.total_paid ?? 0);
+        const invoiceStatus = summary?.invoice_status ?? (fallbackTotal > 0 ? 'issued' : 'none');
+        next[soId] = {
+          balance_due: Math.max(balanceDue, 0),
+          total_paid: totalPaid,
+          invoice_status: invoiceStatus,
+          has_delivery_override: overrideSet.has(soId),
+        };
       });
+
+      setFinancialBySoId(next);
+    });
   }, [groups]);
 
   useEffect(() => {
@@ -150,7 +186,6 @@ export default function FinishedGoods() {
               expanded={expandedMOs.has(group.manufacturing_order_id)}
               onToggle={() => toggleExpand(group.manufacturing_order_id)}
               financial={group.sales_order_id ? financialBySoId[group.sales_order_id] : undefined}
-              canAuthorizeRelease={canAuthorizeRelease}
             />
           ))}
         </div>
@@ -164,21 +199,21 @@ function FinishedGoodsCard({
   expanded,
   onToggle,
   financial,
-  canAuthorizeRelease,
 }: {
   group: FinishedGoodsGroup;
   expanded: boolean;
   onToggle: () => void;
   financial?: FinancialInfo;
-  canAuthorizeRelease: boolean;
 }) {
-  const paymentComplete = financial ? financial.balance_due <= 0.005 : false;
-  const isNotInvoiced = !financial || financial.invoice_status === 'none';
-  const deliveryBlocked = !isNotInvoiced && !paymentComplete && !canAuthorizeRelease;
-  const paymentLabel = isNotInvoiced ? null
-    : paymentComplete ? 'Paid'
-    : financial!.total_paid > 0.005 ? 'Partial Payment'
-    : 'Unpaid';
+  const balanceDue = Number(financial?.balance_due ?? 0);
+  const paymentComplete = balanceDue <= 0;
+  const hasDeliveryOverride = Boolean(financial?.has_delivery_override);
+  const deliveryBlocked = !!financial && balanceDue > 0 && !hasDeliveryOverride;
+  const paymentLabel = financial
+    ? paymentComplete ? 'Paid'
+    : financial.total_paid > 0 ? 'Partial Payment'
+    : 'Unpaid'
+    : null;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
@@ -217,6 +252,11 @@ function FinishedGoodsCard({
                   {paymentLabel}
                 </span>
               )}
+              {hasDeliveryOverride && !paymentComplete && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                  Financial Override
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
               {group.customer_name && <span>{group.customer_name}</span>}
@@ -250,7 +290,7 @@ function FinishedGoodsCard({
                 if (deliveryBlocked) return;
                 router.navigate(withReturnTo(`/manufacturing/delivery-notes/new?mo_id=${group.manufacturing_order_id}`));
               }}
-              title={deliveryBlocked ? `Payment not complete ($${financial?.balance_due?.toFixed(2) ?? '?'} balance due). Manager authorization required.` : undefined}
+              title={deliveryBlocked ? `Delivery blocked: balance due is $${balanceDue.toFixed(2)}. Financials must settle to 0.00 or issue an override.` : undefined}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${
                 deliveryBlocked
                   ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
@@ -258,7 +298,7 @@ function FinishedGoodsCard({
               }`}
             >
               {deliveryBlocked ? <Lock className="w-3.5 h-3.5" /> : <Truck className="w-3.5 h-3.5" />}
-              {deliveryBlocked ? 'Payment Required' : 'Create Delivery'}
+              {deliveryBlocked ? 'Payment Required' : hasDeliveryOverride && !paymentComplete ? 'Create Delivery (Override)' : 'Create Delivery'}
             </button>
           )}
         </div>

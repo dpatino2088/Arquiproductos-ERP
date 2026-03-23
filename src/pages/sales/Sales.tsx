@@ -6,7 +6,13 @@ import { usePermissions } from '../../hooks/usePermissions';
 export default function Sales() {
   const { clearSubmoduleNav } = useSubmoduleNav();
   const { can, loading } = usePermissions();
-  const canViewSales = can('sales.read') || can('sales.write');
+  const salesRoutes = [
+    { href: '/sales/quotes', allowed: can('sales.quotes.read') },
+    { href: '/sales/proposals', allowed: can('sales.proposals.read') },
+    { href: '/sales/orders', allowed: can('sales.orders.read') },
+  ];
+  const firstAllowedRoute = salesRoutes.find((route) => route.allowed)?.href ?? null;
+  const canViewSales = !!firstAllowedRoute;
 
   useEffect(() => {
     if (loading) return;
@@ -19,8 +25,13 @@ export default function Sales() {
     // Just clear submodules when leaving the sales module
     const currentPath = window.location.pathname;
     if (currentPath === '/sales' || currentPath === '/sales/') {
-      // Redirect to quotes by default
-      router.navigate('/sales/quotes', false);
+      router.navigate(firstAllowedRoute!, false);
+      return;
+    }
+    const activeAllowed = salesRoutes.some((route) => route.allowed && currentPath.startsWith(route.href));
+    if (!activeAllowed) {
+      router.navigate(firstAllowedRoute!, false);
+      return;
     }
     
     return () => {
@@ -29,7 +40,7 @@ export default function Sales() {
         clearSubmoduleNav();
       }
     };
-  }, [clearSubmoduleNav, canViewSales, loading]);
+  }, [clearSubmoduleNav, canViewSales, loading, firstAllowedRoute, salesRoutes]);
 
   return null;
 }

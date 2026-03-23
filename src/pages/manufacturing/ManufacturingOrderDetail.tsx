@@ -7,7 +7,6 @@ import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useModuleAccess } from '../../hooks/usePermissions';
-import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useIssueMaterials } from '../../hooks/useInventoryMovements';
 import { useWarehouses } from '../../hooks/useWarehouses';
@@ -73,7 +72,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { canEdit: canEditInventory } = useModuleAccess('inventory');
   const { canEdit: canEditManufacturing } = useModuleAccess('manufacturing');
   const { user } = useAuth();
-  const { role: orgRole } = useOrganizationContext();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -82,7 +80,13 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
-  const [financialSummary, setFinancialSummary] = useState<{ total_invoiced: number; total_paid: number; balance_due: number; invoice_status: string } | null>(null);
+  const [financialSummary, setFinancialSummary] = useState<{
+    total_invoiced: number;
+    total_paid: number;
+    balance_due: number;
+    invoice_status: string;
+    has_delivery_override: boolean;
+  } | null>(null);
   const listPath = '/manufacturing/manufacturing-orders';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -180,12 +184,42 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
   const fetchFinancialSummary = useCallback(async () => {
     if (!mo?.sales_order_id) { setFinancialSummary(null); return; }
-    const { data } = await supabase
-      .from('sales_order_financial_summary')
-      .select('total_invoiced, total_paid, balance_due, invoice_status')
-      .eq('sales_order_id', mo.sales_order_id)
-      .maybeSingle();
-    setFinancialSummary(data as typeof financialSummary ?? null);
+    const [summaryRes, soRes, overrideRes] = await Promise.all([
+      supabase
+        .from('sales_order_financial_summary')
+        .select('total_invoiced, total_paid, balance_due, invoice_status')
+        .eq('sales_order_id', mo.sales_order_id)
+        .maybeSingle(),
+      supabase
+        .from('SalesOrders')
+        .select('total_amount')
+        .eq('id', mo.sales_order_id)
+        .maybeSingle(),
+      supabase
+        .from('SalesOrderDeliveryOverrides')
+        .select('id')
+        .eq('sales_order_id', mo.sales_order_id)
+        .eq('status', 'active')
+        .eq('deleted', false)
+        .limit(1),
+    ]);
+
+    const summaryData = (summaryRes.data ?? null) as {
+      total_invoiced?: number | null;
+      total_paid?: number | null;
+      balance_due?: number | null;
+      invoice_status?: string | null;
+    } | null;
+    const soTotal = Number((soRes.data as { total_amount?: number | null } | null)?.total_amount ?? 0);
+    const fallbackBalance = Math.max(soTotal, 0);
+
+    setFinancialSummary({
+      total_invoiced: Number(summaryData?.total_invoiced ?? soTotal),
+      total_paid: Number(summaryData?.total_paid ?? 0),
+      balance_due: Number(summaryData?.balance_due ?? fallbackBalance),
+      invoice_status: summaryData?.invoice_status ?? (soTotal > 0 ? 'issued' : 'none'),
+      has_delivery_override: (overrideRes.data ?? []).length > 0,
+    });
   }, [mo?.sales_order_id]);
 
   useEffect(() => { fetchTimeline(); fetchMOLines(); fetchTaskProgress(); }, [fetchTimeline, fetchMOLines, fetchTaskProgress]);
@@ -308,15 +342,16 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   ];
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
-  const canAuthorizeRelease = orgRole === 'superadmin' || orgRole === 'admin';
-  const paymentComplete = financialSummary ? financialSummary.balance_due <= 0.005 : false;
+  const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
+  const hasDeliveryOverride = financialSummary?.has_delivery_override === true;
+  const deliveryBlocked = !!financialSummary && financialSummary.balance_due > 0 && !hasDeliveryOverride;
   const paymentStatus: 'not_invoiced' | 'unpaid' | 'partial' | 'paid' =
     !financialSummary || financialSummary.invoice_status === 'none' ? 'not_invoiced' :
-    financialSummary.total_paid <= 0.005 ? 'unpaid' :
-    financialSummary.balance_due > 0.005 ? 'partial' : 'paid';
+    financialSummary.total_paid <= 0 ? 'unpaid' :
+    financialSummary.balance_due > 0 ? 'partial' : 'paid';
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
-  if (isInternal && status !== 'cancelled' && status !== 'delivered' && status !== 'completed') {
+  if (isInternal && canEditManufacturing && status !== 'cancelled' && status !== 'delivered' && status !== 'completed') {
     if (status === 'draft') {
       actionItems.push({
         label: 'Mark as Reviewed',
@@ -347,21 +382,17 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     }
     if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     if (status === 'quality_check') {
-      const releaseBlocked = !paymentComplete && !canAuthorizeRelease;
       actionItems.push({
         label: 'Ready for Pickup',
         onClick: () => handleTransition('ready_for_pickup'),
-        disabled: releaseBlocked,
-        title: releaseBlocked ? `Payment not complete ($${financialSummary?.balance_due?.toFixed(2) ?? '?'} balance due). Manager authorization required.` : undefined,
       });
     }
     if (status === 'ready_for_pickup') {
-      const deliveryBlocked = !paymentComplete && !canAuthorizeRelease;
       actionItems.push({
         label: 'Mark Delivered',
         onClick: () => handleTransition('delivered'),
         disabled: deliveryBlocked,
-        title: deliveryBlocked ? `Payment not complete ($${financialSummary?.balance_due?.toFixed(2) ?? '?'} balance due). Manager authorization required.` : undefined,
+        title: deliveryBlocked ? `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '?'} (must be 0.00) unless Financials issues an override.` : undefined,
       });
     }
     if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status) && materials.length > 0 && canEditInventory) {
@@ -382,13 +413,20 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         <div className="flex items-center gap-2">
           <StatusBadge status={status} type="manufacturing" />
           {mo.sales_order_id && paymentStatus !== 'not_invoiced' && (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-              paymentStatus === 'paid' ? 'bg-green-100 text-green-800' :
-              paymentStatus === 'partial' ? 'bg-amber-100 text-amber-800' :
-              'bg-red-100 text-red-800'
-            }`}>
-              {paymentStatus === 'paid' ? 'Paid' : paymentStatus === 'partial' ? 'Partial Payment' : 'Unpaid'}
-            </span>
+            <>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                paymentStatus === 'paid' ? 'bg-green-100 text-green-800' :
+                paymentStatus === 'partial' ? 'bg-amber-100 text-amber-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                {paymentStatus === 'paid' ? 'Paid' : paymentStatus === 'partial' ? 'Partial Payment' : 'Unpaid'}
+              </span>
+              {hasDeliveryOverride && !paymentComplete && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                  Financial Override
+                </span>
+              )}
+            </>
           )}
         </div>
       }
@@ -484,6 +522,15 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           >
             View Material Demand
           </button>
+        </div>
+      )}
+
+      {status === 'ready_for_pickup' && deliveryBlocked && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-md bg-red-50 border border-red-200 w-full">
+          <span className="inline-block w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+          <span className="text-xs text-red-700 flex-1">
+            Delivery blocked: balance due is ${financialSummary?.balance_due?.toFixed(2) ?? '0.00'}. Financials must settle to 0.00 or issue an override.
+          </span>
         </div>
       )}
 

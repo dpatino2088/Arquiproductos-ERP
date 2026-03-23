@@ -3,6 +3,7 @@ interface ShadeAssemblyDiagramProps {
   heightMm: number;
   shadeType: 'dual' | 'triple';
   panelCount: number;
+  panelWidths?: number[];
   operatingSystem: 'manual' | 'motorized' | 'motor' | null;
   operatingSide?: 'left' | 'right' | null;
   hasCassette: boolean;
@@ -23,6 +24,7 @@ export default function ShadeAssemblyDiagram({
   heightMm,
   shadeType,
   panelCount,
+  panelWidths,
   operatingSystem,
   operatingSide,
   hasCassette,
@@ -35,6 +37,10 @@ export default function ShadeAssemblyDiagram({
   const opSide = operatingSide ?? 'right';
   const layers = shadeType === 'triple' ? ['front', 'middle', 'back'] : ['front', 'back'];
   const totalPanels = panelCount || 1;
+  const widthBase = widthMm > 0 ? widthMm : totalPanels;
+  const pWidths = panelWidths && panelWidths.length === totalPanels
+    ? panelWidths
+    : Array.from({ length: totalPanels }, () => widthBase / totalPanels);
 
   const svgW = 520;
   const svgH = 340;
@@ -147,13 +153,44 @@ export default function ShadeAssemblyDiagram({
           const fName = fabricNames?.[i] ?? null;
           return (
             <g key={`fabric-${layer}`}>
-              <rect x={lx} y={fabricTop} width={layerW} height={fabricH}
-                fill={layerDef.fill} stroke={layerDef.stroke} strokeWidth={0.6} />
-              <text x={lx + layerW / 2} y={fabricTop + fabricH / 2 - 4} textAnchor="middle" fontSize={7} fill={layerDef.stroke}>
+              {(() => {
+                let xOff = lx;
+                return pWidths.map((pw, panelIdx) => {
+                  const panelW = (pw / widthBase) * layerW;
+                  const panelX = xOff;
+                  xOff += panelW;
+                  return (
+                    <g key={`${layer}-panel-${panelIdx}`}>
+                      <rect
+                        x={panelX}
+                        y={fabricTop}
+                        width={panelW}
+                        height={fabricH}
+                        fill={layerDef.fill}
+                        stroke={layerDef.stroke}
+                        strokeWidth={0.6}
+                        strokeDasharray={totalPanels > 1 ? '4,2' : 'none'}
+                      />
+                      {totalPanels > 1 && (
+                        <text
+                          x={panelX + panelW / 2}
+                          y={fabricTop + fabricH / 2 + 2}
+                          textAnchor="middle"
+                          fontSize={5.5}
+                          fill={layerDef.stroke}
+                        >
+                          Panel {panelIdx + 1}
+                        </text>
+                      )}
+                    </g>
+                  );
+                });
+              })()}
+              <text x={lx + layerW / 2} y={fabricTop + 10} textAnchor="middle" fontSize={6.5} fill={layerDef.stroke}>
                 {layerDef.label}
               </text>
-              {fName && (
-                <text x={lx + layerW / 2} y={fabricTop + fabricH / 2 + 8} textAnchor="middle" fontSize={5.5} fill={layerDef.stroke} opacity={0.7}>
+              {fName && totalPanels === 1 && (
+                <text x={lx + layerW / 2} y={fabricTop + fabricH / 2 + 10} textAnchor="middle" fontSize={5.5} fill={layerDef.stroke} opacity={0.7}>
                   {fName}
                 </text>
               )}

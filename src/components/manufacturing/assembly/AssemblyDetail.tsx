@@ -178,6 +178,7 @@ function ProductDiagram({ config }: { config: ProductConfig | null }) {
           heightMm={config.height_mm}
           shadeType={config.product_type as 'dual' | 'triple'}
           panelCount={config.panel_count}
+          panelWidths={config.panel_widths}
           operatingSystem={config.operating_system}
           operatingSide={config.operator_side}
           hasCassette={config.has_cassette}

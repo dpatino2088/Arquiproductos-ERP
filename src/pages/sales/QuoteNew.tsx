@@ -15,7 +15,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
-import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2 } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import ProductConfigurator from './ProductConfigurator';
@@ -49,6 +49,55 @@ function safeErr(e: any) {
     code: e?.code,
     status: e?.status,
   };
+}
+
+type CommercialAdjustmentMeta = {
+  non_billable?: boolean;
+  reason?: string | null;
+  note?: string | null;
+  extra_discount_pct?: number | null;
+  extra_discount_amount?: number | null;
+  base_unit_dealer_price?: number | null;
+  base_line_total?: number | null;
+};
+
+function getCommercialAdjustment(line: any): CommercialAdjustmentMeta | null {
+  const raw = line?.metadata?.commercial_adjustment;
+  if (!raw || typeof raw !== 'object') return null;
+  return raw as CommercialAdjustmentMeta;
+}
+
+function getEffectiveLinePrices(
+  line: any,
+  useDealerPrice: boolean,
+  dealerDiscountPctForDisplay: number
+): { qty: number; unitMsrp: number; unitPrice: number; lineTotal: number; isCommercialAdjusted: boolean } {
+  const qty = Math.max(1, Number(line?.quantity ?? line?.qty ?? 1) || 1);
+  const unitMsrp =
+    line?.unit_msrp != null && Number(line.unit_msrp) >= 0
+      ? Number(line.unit_msrp)
+      : (line?.msrp != null && qty > 0
+          ? Number(line.msrp) / qty
+          : Number(line?.roll_msrp_snapshot || 0) + Number(line?.bom_msrp_snapshot || 0));
+
+  if (!useDealerPrice) {
+    return { qty, unitMsrp, unitPrice: unitMsrp, lineTotal: unitMsrp * qty, isCommercialAdjusted: false };
+  }
+
+  const fallbackUnitDealer = unitMsrp * (1 - dealerDiscountPctForDisplay / 100);
+  const hasDealerUnitSnapshot = line?.unit_dealer_price_snapshot != null && !Number.isNaN(Number(line.unit_dealer_price_snapshot));
+  const unitPrice = hasDealerUnitSnapshot ? Number(line.unit_dealer_price_snapshot) : fallbackUnitDealer;
+  const hasDealerTotalSnapshot = line?.dealer_price_total != null && !Number.isNaN(Number(line.dealer_price_total));
+  const lineTotal = hasDealerTotalSnapshot ? Number(line.dealer_price_total) : unitPrice * qty;
+  const commercialMeta = getCommercialAdjustment(line);
+  const isCommercialAdjusted = Boolean(
+    commercialMeta &&
+      (commercialMeta.non_billable === true ||
+        (commercialMeta.extra_discount_pct != null && Number(commercialMeta.extra_discount_pct) > 0) ||
+        (commercialMeta.extra_discount_amount != null && Number(commercialMeta.extra_discount_amount) > 0))
+  );
+
+  return { qty, unitMsrp, unitPrice, lineTotal, isCommercialAdjusted };
 }
 
 // ====================================================
@@ -658,6 +707,13 @@ export default function QuoteNew() {
   const [draggedLineId, setDraggedLineId] = useState<string | null>(null);
   const [dragOverLineId, setDragOverLineId] = useState<string | null>(null);
   const [previewLineId, setPreviewLineId] = useState<string | null>(null);
+  const [commercialLineId, setCommercialLineId] = useState<string | null>(null);
+  const [commercialNonBillable, setCommercialNonBillable] = useState(false);
+  const [commercialDiscountPct, setCommercialDiscountPct] = useState<string>('');
+  const [commercialDiscountAmount, setCommercialDiscountAmount] = useState<string>('');
+  const [commercialReason, setCommercialReason] = useState('');
+  const [commercialNote, setCommercialNote] = useState('');
+  const [savingCommercial, setSavingCommercial] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
@@ -1097,14 +1153,7 @@ export default function QuoteNew() {
   // Calculate totals from quote lines: unit × qty (misma lógica que la tabla para que no varíe el unitario al cambiar qty)
   const totals = useMemo(() => {
     const subtotal = quoteLines.reduce((sum, line: any) => {
-      const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
-      const unitMsrp =
-        line.unit_msrp != null && Number(line.unit_msrp) >= 0
-          ? Number(line.unit_msrp)
-          : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
-      const lineTotal = useDealerPrice
-        ? unitMsrp * qty * (1 - dealerDiscountPctForDisplay / 100)
-        : unitMsrp * qty;
+      const { lineTotal } = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
       return sum + lineTotal;
     }, 0);
     const taxAmount = exemptTax ? 0 : Math.round(subtotal * taxPct * 100) / 100;
@@ -3034,6 +3083,92 @@ export default function QuoteNew() {
     }
   };
 
+  const openCommercialAdjustment = (line: any) => {
+    const meta = getCommercialAdjustment(line);
+    setCommercialLineId(line.id);
+    setCommercialNonBillable(Boolean(meta?.non_billable));
+    setCommercialDiscountPct(meta?.extra_discount_pct != null ? String(meta.extra_discount_pct) : '');
+    setCommercialDiscountAmount(meta?.extra_discount_amount != null ? String(meta.extra_discount_amount) : '');
+    setCommercialReason(meta?.reason ?? '');
+    setCommercialNote(meta?.note ?? '');
+  };
+
+  const closeCommercialAdjustment = () => {
+    if (savingCommercial) return;
+    setCommercialLineId(null);
+    setCommercialNonBillable(false);
+    setCommercialDiscountPct('');
+    setCommercialDiscountAmount('');
+    setCommercialReason('');
+    setCommercialNote('');
+  };
+
+  const saveCommercialAdjustment = async () => {
+    if (!commercialLineId) return;
+
+    const discountPctNum = commercialDiscountPct.trim() !== '' ? Number(commercialDiscountPct) : null;
+    const discountAmountNum = commercialDiscountAmount.trim() !== '' ? Number(commercialDiscountAmount) : null;
+    const hasDiscountPct = discountPctNum != null && Number.isFinite(discountPctNum) && discountPctNum > 0;
+    const hasDiscountAmount = discountAmountNum != null && Number.isFinite(discountAmountNum) && discountAmountNum > 0;
+
+    if (hasDiscountPct && hasDiscountAmount) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Invalid adjustment',
+        message: 'Use either discount % or discount amount, not both.',
+      });
+      return;
+    }
+
+    if ((commercialNonBillable || hasDiscountPct || hasDiscountAmount) && !commercialReason.trim()) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Reason required',
+        message: 'Provide a reason for non-billable or extra discount.',
+      });
+      return;
+    }
+
+    try {
+      setSavingCommercial(true);
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id ?? null;
+      const userName =
+        authData?.user?.user_metadata?.full_name ||
+        authData?.user?.user_metadata?.name ||
+        authData?.user?.email ||
+        null;
+
+      const { error } = await supabase.rpc('apply_quote_line_commercial_adjustment', {
+        p_quote_line_id: commercialLineId,
+        p_non_billable: commercialNonBillable,
+        p_extra_discount_pct: hasDiscountPct ? discountPctNum : null,
+        p_extra_discount_amount: hasDiscountAmount ? discountAmountNum : null,
+        p_reason: commercialReason.trim() || null,
+        p_note: commercialNote.trim() || null,
+        p_user_id: userId,
+        p_user_name: userName,
+      });
+      if (error) throw error;
+
+      await refetchLines();
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Updated',
+        message: 'Commercial adjustment saved.',
+      });
+      closeCommercialAdjustment();
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Adjustment failed',
+        message: err?.message ?? 'Failed to save commercial adjustment',
+      });
+    } finally {
+      setSavingCommercial(false);
+    }
+  };
+
   // Reorder quote lines (drag-and-drop)
   const handleDragStart = (_e: React.DragEvent, lineId: string) => {
     setDraggedLineId(lineId);
@@ -3220,18 +3355,14 @@ export default function QuoteNew() {
         }
       }
 
-      const qty = (line: any) => line.quantity ?? line.qty ?? 1;
-      const dealerDiscountPct = variant === 'dealer'
-        ? getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers)
-        : 0;
-
       const pdfLines = quoteLines.map((line: any) => {
-        const n = qty(line);
-        const msrpLineTotal = line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
-        const lineTotal =
-          variant === 'dealer'
-            ? msrpLineTotal * (1 - dealerDiscountPct / 100)
-            : (line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
+        const effective = getEffectiveLinePrices(
+          line,
+          variant === 'dealer',
+          dealerDiscountPctForDisplay
+        );
+        const n = effective.qty;
+        const lineTotal = effective.lineTotal;
         const accessoriesStr =
           line.Accessories && Array.isArray(line.Accessories) && line.Accessories.length > 0
             ? line.Accessories.map((acc: any) => {
@@ -3274,7 +3405,7 @@ export default function QuoteNew() {
           notes: quoteData.description ?? quoteData.notes ?? watch('description'),
           terms_title: termsTitle,
           terms_content: termsContent,
-          totals: quoteData.totals ?? {
+          totals: {
             subtotal: totals.subtotal,
             tax_total: totals.tax,
             total: totals.total,
@@ -3434,12 +3565,10 @@ export default function QuoteNew() {
         }
       }
 
-      const qty = (line: any) => line.quantity ?? line.qty ?? 1;
-      const dealerDiscountPct = getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers);
       const pdfLines = quoteLines.map((line: any) => {
-        const n = qty(line);
-        const msrpLineTotal = line.msrp ?? (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0);
-        const lineTotal = msrpLineTotal * (1 - dealerDiscountPct / 100);
+        const effective = getEffectiveLinePrices(line, true, dealerDiscountPctForDisplay);
+        const n = effective.qty;
+        const lineTotal = effective.lineTotal;
         const accessoriesStr =
           line.Accessories && Array.isArray(line.Accessories) && line.Accessories.length > 0
             ? line.Accessories.map((acc: any) => {
@@ -3474,7 +3603,7 @@ export default function QuoteNew() {
           notes: quoteData.description ?? quoteData.notes ?? watch('description'),
           terms_title: termsTitle,
           terms_content: termsContent,
-          totals: quoteData.totals ?? { subtotal: totals.subtotal, tax_total: totals.tax, total: totals.total },
+          totals: { subtotal: totals.subtotal, tax_total: totals.tax, total: totals.total },
           created_at: quoteData.created_at || new Date().toISOString(),
         },
         selectedCustomer ? { customer_name: selectedCustomer.customer_name } : null,
@@ -4065,8 +4194,8 @@ export default function QuoteNew() {
           ) : quoteLines.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
-            <div className="table-fit-wrapper quote-lines-table-wrapper">
-              <table className="table-fit w-full quote-lines-table" style={{ tableLayout: 'fixed' }}>
+            <div className="table-fit-wrapper quote-lines-table-wrapper overflow-x-auto">
+              <table className="table-fit w-full quote-lines-table min-w-[1260px]" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-gray-50 border-b-2 border-gray-300">
                   <tr>
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '32px' }} title="Drag to reorder"> </th>
@@ -4074,13 +4203,13 @@ export default function QuoteNew() {
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '7%' }}>Area</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Position</th>
                     <th className="text-center py-3 pl-4 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Product type</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '18%' }}>Description</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '13%' }}>System Drive</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '16%' }}>Description</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '11%' }}>System Drive</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Measurements</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '36px' }}>Qty</th>
-                    <th className="text-right py-3 pl-2 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '88px' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
-                    <th className="text-right py-3 pl-2 pr-6 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '88px' }}>Total</th>
-                    <th className="text-right py-3 pl-4 pr-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '106px' }}>Actions</th>
+                    <th className="text-right py-3 pl-2 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '92px' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
+                    <th className="text-right py-3 pl-2 pr-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '96px' }}>Total</th>
+                    <th className="text-right py-3 pl-3 pr-3 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '140px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -4167,28 +4296,23 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-center text-gray-900 text-sm tabular-nums whitespace-nowrap">
                           {line.quantity ? line.quantity.toFixed(0) : 'N/A'}
                         </td>
-                        <td className="py-4 pl-2 pr-2 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '88px' }}>
+                        <td className="py-4 pl-2 pr-2 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '92px' }}>
                           {(() => {
-                            const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
-                            const unitMsrp =
-                              line.unit_msrp != null && Number(line.unit_msrp) >= 0
-                                ? Number(line.unit_msrp)
-                                : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
-                            const unitPrice = useDealerPrice
-                              ? unitMsrp * (1 - dealerDiscountPctForDisplay / 100)
-                              : unitMsrp;
+                            const effective = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
                             const rollMsrp = line.roll_msrp_snapshot || 0;
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
                               <div className="relative group whitespace-nowrap text-right">
-                                <span>{formatCurrency(unitPrice, watch('currency'))}</span>
+                                <span>{formatCurrency(effective.unitPrice, watch('currency'))}</span>
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
                                     <div className="text-left">
                                       <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
                                       <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">{useDealerPrice ? 'Dealer unit price (MSRP − tier)' : 'Unit MSRP (from backend)'}</div>
+                                      <div className="border-t border-gray-700 mt-1 pt-1">
+                                        {useDealerPrice ? 'Dealer unit price (snapshot)' : 'Unit MSRP (from backend)'}
+                                      </div>
                                     </div>
                                   </div>
                                 )}
@@ -4197,29 +4321,25 @@ export default function QuoteNew() {
                           })()}
                         </td>
                         {/* TOTAL column: siempre unit_price × qty para que sea consistente con el unitario */}
-                        <td className="py-4 pl-2 pr-6 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '88px' }}>
+                        <td className="py-4 pl-2 pr-4 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '96px' }}>
                           {(() => {
-                            const qty = Math.max(1, line.quantity ?? line.qty ?? 1);
-                            const unitMsrp =
-                              line.unit_msrp != null && Number(line.unit_msrp) >= 0
-                                ? Number(line.unit_msrp)
-                                : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : (line.roll_msrp_snapshot || 0) + (line.bom_msrp_snapshot || 0));
-                            const lineTotal = useDealerPrice
-                              ? unitMsrp * qty * (1 - dealerDiscountPctForDisplay / 100)
-                              : unitMsrp * qty;
+                            const effective = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
                             const rollMsrp = line.roll_msrp_snapshot || 0;
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
                               <div className="relative group whitespace-nowrap text-right">
-                                <span className="font-semibold">{formatCurrency(lineTotal, watch('currency'))}</span>
+                                <span className="font-semibold">{formatCurrency(effective.lineTotal, watch('currency'))}</span>
+                                {effective.isCommercialAdjusted && (
+                                  <div className="text-[10px] text-primary font-medium">Adjusted</div>
+                                )}
                                 {hasDetails && (
                                   <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
                                     <div className="text-left">
                                       <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
                                       <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">{useDealerPrice ? `Dealer line total (qty=${qty})` : `Line total (qty=${qty})`}</div>
-                                      <div>{formatCurrency(lineTotal, watch('currency'))}</div>
+                                      <div className="border-t border-gray-700 mt-1 pt-1">{useDealerPrice ? `Dealer line total (qty=${effective.qty})` : `Line total (qty=${effective.qty})`}</div>
+                                      <div>{formatCurrency(effective.lineTotal, watch('currency'))}</div>
                                     </div>
                                   </div>
                                 )}
@@ -4227,8 +4347,8 @@ export default function QuoteNew() {
                             );
                           })()}
                         </td>
-                        <td className="py-4 pl-4 pr-4 whitespace-nowrap text-right" style={{ width: '106px' }}>
-                          <div className="flex items-center gap-1 justify-end">
+                        <td className="py-4 pl-3 pr-3 whitespace-nowrap text-right" style={{ width: '140px' }}>
+                          <div className="flex items-center gap-0.5 justify-end">
                             <button
                               type="button"
                               onClick={() => setPreviewLineId(line.id)}
@@ -4236,6 +4356,13 @@ export default function QuoteNew() {
                               title="View configured product (customer view)"
                             >
                               <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openCommercialAdjustment(line)}
+                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                              title="Commercial adjustment"
+                            >
+                              <Settings2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDuplicateLine(line.id)}
@@ -4289,6 +4416,115 @@ export default function QuoteNew() {
             termsTitle={quoteData?.terms_title ?? undefined}
             termsContent={quoteData?.terms_content ?? undefined}
           />
+        </div>
+      )}
+
+      {commercialLineId && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-base font-semibold text-gray-900">Commercial Adjustment</h3>
+              <button
+                type="button"
+                onClick={closeCommercialAdjustment}
+                className="p-1 hover:bg-gray-100 rounded"
+                disabled={savingCommercial}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="flex items-center gap-2">
+                <input
+                  id="line-non-billable"
+                  type="checkbox"
+                  checked={commercialNonBillable}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setCommercialNonBillable(checked);
+                    if (checked) {
+                      setCommercialDiscountPct('');
+                      setCommercialDiscountAmount('');
+                    }
+                  }}
+                  className="rounded border-gray-300"
+                />
+                <Label htmlFor="line-non-billable" className="text-sm font-medium">
+                  Non-Billable (dealer pays $0.00)
+                </Label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1">Extra Discount %</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={commercialDiscountPct}
+                    disabled={commercialNonBillable}
+                    onChange={(e) => {
+                      setCommercialDiscountPct(e.target.value);
+                      if (e.target.value.trim() !== '') setCommercialDiscountAmount('');
+                    }}
+                    placeholder="e.g. 10"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1">Extra Discount Amount</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={commercialDiscountAmount}
+                    disabled={commercialNonBillable}
+                    onChange={(e) => {
+                      setCommercialDiscountAmount(e.target.value);
+                      if (e.target.value.trim() !== '') setCommercialDiscountPct('');
+                    }}
+                    placeholder="e.g. 50.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs text-gray-600 mb-1">Reason</Label>
+                <Input
+                  value={commercialReason}
+                  onChange={(e) => setCommercialReason(e.target.value)}
+                  placeholder="Warranty, company error, courtesy..."
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs text-gray-600 mb-1">Internal note (optional)</Label>
+                <Input
+                  value={commercialNote}
+                  onChange={(e) => setCommercialNote(e.target.value)}
+                  placeholder="Extra context for internal team"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 p-4 border-t">
+              <button
+                type="button"
+                onClick={closeCommercialAdjustment}
+                className="px-3 py-2 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                disabled={savingCommercial}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveCommercialAdjustment}
+                className="px-3 py-2 text-sm rounded bg-primary text-white hover:bg-primary/90 disabled:opacity-50"
+                disabled={savingCommercial}
+              >
+                {savingCommercial ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

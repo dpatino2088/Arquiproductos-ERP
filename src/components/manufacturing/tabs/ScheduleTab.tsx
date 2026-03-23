@@ -124,7 +124,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
         .select('id, display_name, email, role_code')
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
-        .in('role_code', ['operator', 'admin', 'superadmin']);
+        .in('role_code', ['operator', 'operator_member', 'operator_admin', 'admin', 'superadmin']);
       setOperators((data ?? []).map((o: any) => ({
         user_id: o.id,
         display_name: o.display_name ?? o.email,

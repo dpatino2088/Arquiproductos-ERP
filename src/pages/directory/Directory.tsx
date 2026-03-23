@@ -18,7 +18,13 @@ type Props = {
 export default function Directory({ activeTab }: Props) {
   const { registerSubmodules } = useSubmoduleNav();
   const { can, loading } = usePermissions();
-  const canViewDirectory = can('directory.read') || can('directory.write');
+  const canViewCustomers = can('directory.customers.read');
+  const canViewContacts = can('directory.contacts.read');
+  const visibleTabs = [
+    canViewCustomers ? { id: 'customers', label: 'Customers', href: '/directory/customers' } : null,
+    canViewContacts ? { id: 'contacts', label: 'Contacts', href: '/directory/contacts' } : null,
+  ].filter(Boolean) as Array<{ id: string; label: string; href: string }>;
+  const canViewDirectory = visibleTabs.length > 0;
 
   useEffect(() => {
     if (loading) return;
@@ -26,11 +32,17 @@ export default function Directory({ activeTab }: Props) {
       router.navigate('/dashboard', false);
       return;
     }
-    registerSubmodules('Directory', [
-      { id: 'customers', label: 'Customers', href: '/directory/customers' },
-      { id: 'contacts', label: 'Contacts', href: '/directory/contacts' },
-    ]);
-  }, [registerSubmodules, canViewDirectory, loading]);
+    registerSubmodules('Directory', visibleTabs);
+    const currentPath = window.location.pathname;
+    const activePath = activeTab === 'customers' ? '/directory/customers' : '/directory/contacts';
+    if (
+      currentPath === '/directory' ||
+      currentPath === '/directory/' ||
+      !visibleTabs.some((tab) => tab.href === activePath)
+    ) {
+      router.navigate(visibleTabs[0].href, false);
+    }
+  }, [registerSubmodules, canViewDirectory, visibleTabs, loading, activeTab]);
 
   // Sin key en los paneles: evita remount al cambiar tab (culpable #1 del "segundo load").
   return (

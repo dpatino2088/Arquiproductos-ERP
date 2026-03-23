@@ -672,6 +672,21 @@ export interface CreateProposalFromQuoteOptions {
   actingDealerId?: string | null;
 }
 
+function getProposalBaseNo(proposalNo: string | null | undefined): string | null {
+  if (!proposalNo) return null;
+  const trimmed = String(proposalNo).trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/_V\d+$/i, '');
+}
+
+function getProposalVersionFromNo(proposalNo: string | null | undefined): number | null {
+  if (!proposalNo) return null;
+  const m = String(proposalNo).match(/_V(\d+)$/i);
+  if (!m || !m[1]) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n >= 2 ? n : null;
+}
+
 /**
  * Create a new Proposal from a Quote and copy its QuoteLines as ProposalLines.
  * Sets created_by_user_id from auth context (org and portal users).
@@ -738,18 +753,42 @@ export async function createProposalFromQuote(
     };
   }
 
-  const { data: maxVersion } = await supabase
+  const { data: existingProposals } = await supabase
     .from('Proposals')
-    .select('version_no')
+    .select('proposal_no, version_no, created_at')
     .eq('quote_id', quoteId)
     .eq('deleted', false)
-    .order('version_no', { ascending: false })
-    .limit(1)
-    .single();
+    .order('version_no', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
 
-  const newVersion = (maxVersion?.version_no ?? 0) + 1;
-  // Proposal has its own sequence PR-0100, PR-0101... per dealer (independent from Quote QT-xxxx)
-  const proposalNo = await generateNextProposalNumber(orgId, dealerId);
+  const proposalsForQuote = (existingProposals ?? []) as Array<{
+    proposal_no: string | null;
+    version_no: number | null;
+    created_at: string | null;
+  }>;
+
+  const maxVersionNoFromColumn = proposalsForQuote.reduce((max, p) => {
+    const n = Number(p.version_no);
+    if (!Number.isFinite(n) || n <= 0) return max;
+    return Math.max(max, n);
+  }, 0);
+  const maxVersionNoFromSuffix = proposalsForQuote.reduce((max, p) => {
+    const suffix = getProposalVersionFromNo(p.proposal_no);
+    if (!suffix) return max;
+    return Math.max(max, suffix);
+  }, 0);
+  const newVersion = Math.max(maxVersionNoFromColumn, maxVersionNoFromSuffix, 0) + 1;
+
+  let baseProposalNo: string | null = null;
+  const firstProposalWithNo = proposalsForQuote.find((p) => getProposalBaseNo(p.proposal_no));
+  if (firstProposalWithNo) {
+    baseProposalNo = getProposalBaseNo(firstProposalWithNo.proposal_no);
+  }
+  if (!baseProposalNo) {
+    // First proposal for this quote: consume next global PR sequence.
+    baseProposalNo = await generateNextProposalNumber(orgId, dealerId);
+  }
+  const proposalNo = newVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${newVersion}`;
 
   // created_by_user_id: auth user id (org or portal). Fallback to quote's creator if needed.
   let finalCreatedByUser: string | null = createdByUserId ?? userId;

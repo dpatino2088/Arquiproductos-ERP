@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QA E2E 0-100 Diagram</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --card: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --line: #334155;
+      --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      background: linear-gradient(180deg, var(--bg), #020617);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      letter-spacing: 0.2px;
+    }
+    .sub {
+      color: var(--muted);
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(170px, 1fr));
+      gap: 14px;
+      align-items: stretch;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      position: relative;
+      min-height: 102px;
+    }
+    .card .k {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .card .v {
+      margin-top: 6px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .card .id {
+      margin-top: 8px;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12px;
+      color: var(--accent);
+      word-break: break-word;
+    }
+    .ok {
+      display: inline-block;
+      margin-top: 8px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .arrow {
+      color: var(--muted);
+      text-align: center;
+      font-size: 22px;
+      line-height: 102px;
+      user-select: none;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(250px, 1fr));
+      gap: 10px 16px;
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .legend div { color: var(--muted); }
+    .legend b { color: var(--text); }
+    .foot {
+      margin-top: 14px;
+      color: var(--warn);
+      font-size: 13px;
+    }
+    @media (max-width: 980px) {
+      .flow { grid-template-columns: repeat(2, minmax(170px, 1fr)); }
+      .arrow { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>QA E2E 0-100 Execution Diagram</h1>
+    <div class="sub">Full user-like flow completed from commercial to delivery lifecycle.</div>
+
+    <div class="panel">
+      <div class="flow">
+        <div class="card">
+          <div class="k">Quote</div>
+          <div class="v">Non-zero quote created</div>
+          <div class="id">QT-91005</div>
+          <span class="ok">PASS</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="k">Proposal</div>
+          <div class="v">Proposal accepted</div>
+          <div class="id">PR-00101</div>
+          <span class="ok">PASS</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="k">Sales Order</div>
+          <div class="v">SO generated and tracked</div>
+          <div class="id">SO-00101-260322</div>
+          <span class="ok">PASS</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="flow">
+        <div class="card">
+          <div class="k">Invoicing</div>
+          <div class="v">Invoice + partial payment</div>
+          <div class="id">INV-QA-0100-260322144747</div>
+          <span class="ok">PASS</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="k">Manufacturing</div>
+          <div class="v">MO created after payment gate</div>
+          <div class="id">MO-000002</div>
+          <span class="ok">PASS</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="k">Work Orders</div>
+          <div class="v">WO groups generated</div>
+          <div class="id">Profile, Roll, Hardware, Assembly</div>
+          <span class="ok">PASS</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="flow">
+        <div class="card">
+          <div class="k">Procurement</div>
+          <div class="v">PO created and received</div>
+          <div class="id">PO-00102</div>
+          <span class="ok">PASS</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="k">MO Lifecycle</div>
+          <div class="v">Planned -> Delivered</div>
+          <div class="id">Material Ready, Production, QC, Pickup</div>
+          <span class="ok">PASS</span>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="k">Final State</div>
+          <div class="v">Delivery completed</div>
+          <div class="id">SO Completed / MO Delivered</div>
+          <span class="ok">PASS</span>
+        </div>
+      </div>
+
+      <div class="legend">
+        <div><b>SO:</b> Completed</div>
+        <div><b>MO:</b> Delivered</div>
+        <div><b>Invoice:</b> Partial (payment applied)</div>
+        <div><b>WO:</b> Generated and started</div>
+      </div>
+      <div class="foot">
+        Note: Behavior observed allows delivery progression under partial payment and non-final WO completion in current configuration.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

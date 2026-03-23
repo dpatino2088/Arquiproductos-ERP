@@ -105,6 +105,7 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
   const [deliveryNote, setDeliveryNote] = useState<DeliveryNote | null>(null);
   const [lines, setLines] = useState<DeliveryNoteLine[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pendingLineUpdates, setPendingLineUpdates] = useState(0);
 
   const fetch = useCallback(async () => {
     if (!deliveryNoteId) return;
@@ -190,13 +191,34 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
 
   const toggleLine = useCallback(async (lineId: string, checked: boolean) => {
     const now = new Date().toISOString();
-    setLines((prev) => prev.map((l) => l.id === lineId ? { ...l, checked, checked_at: checked ? now : null } : l));
+    const prevLine = lines.find((l) => l.id === lineId);
 
-    await supabase
-      .from('DeliveryNoteLines')
-      .update({ checked, checked_at: checked ? now : null })
-      .eq('id', lineId);
-  }, []);
+    setLines((prev) => prev.map((l) => l.id === lineId ? { ...l, checked, checked_at: checked ? now : null } : l));
+    setPendingLineUpdates((n) => n + 1);
+    try {
+      const { error } = await supabase
+        .from('DeliveryNoteLines')
+        .update({ checked, checked_at: checked ? now : null })
+        .eq('id', lineId);
+      if (error) throw error;
+    } catch (e) {
+      // Revert optimistic update on failure so UI stays aligned with DB state.
+      setLines((prev) =>
+        prev.map((l) =>
+          l.id === lineId
+            ? {
+                ...l,
+                checked: prevLine?.checked ?? false,
+                checked_at: prevLine?.checked_at ?? null,
+              }
+            : l
+        )
+      );
+      throw e;
+    } finally {
+      setPendingLineUpdates((n) => Math.max(0, n - 1));
+    }
+  }, [lines]);
 
   const completeDelivery = useCallback(async (receivedByName: string, notes?: string) => {
     if (!deliveryNoteId) return null;
@@ -218,5 +240,5 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
     return result;
   }, [deliveryNoteId]);
 
-  return { deliveryNote, lines, loading, refetch: fetch, toggleLine, completeDelivery };
+  return { deliveryNote, lines, loading, refetch: fetch, toggleLine, completeDelivery, isUpdatingLine: pendingLineUpdates > 0 };
 }

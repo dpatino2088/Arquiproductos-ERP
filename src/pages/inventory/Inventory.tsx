@@ -7,7 +7,16 @@ import { usePermissions } from '../../hooks/usePermissions';
 export default function Inventory() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { can, loading } = usePermissions();
-  const canViewInventory = can('inventory.read') || can('inventory.write');
+  const inventoryTabs = [
+    { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse', icon: Warehouse, allowed: can('inventory.warehouse.read') },
+    { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders', icon: ShoppingCart, allowed: can('inventory.purchase_orders.read') },
+    { id: 'receipts', label: 'Receipts', href: '/inventory/receipts', icon: Receipt, allowed: can('inventory.receipts.read') },
+    { id: 'transactions', label: 'Transactions', href: '/inventory/transactions', icon: ArrowLeftRight, allowed: can('inventory.transactions.read') },
+    { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments', icon: Settings, allowed: can('inventory.adjustments.read') },
+    { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand', icon: Package, allowed: can('inventory.material_demand.read') },
+  ];
+  const visibleTabs = inventoryTabs.filter((tab) => tab.allowed).map(({ allowed, ...tab }) => tab);
+  const canViewInventory = visibleTabs.length > 0;
 
   useEffect(() => {
     if (loading) return;
@@ -18,18 +27,17 @@ export default function Inventory() {
     // Only register Inventory submodules if we're actually in the Inventory module
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/inventory')) {
-      registerSubmodules('Inventory', [
-        { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse', icon: Warehouse },
-        { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders', icon: ShoppingCart },
-        { id: 'receipts', label: 'Receipts', href: '/inventory/receipts', icon: Receipt },
-        { id: 'transactions', label: 'Transactions', href: '/inventory/transactions', icon: ArrowLeftRight },
-        { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments', icon: Settings },
-        { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand', icon: Package },
-      ]);
+      registerSubmodules('Inventory', visibleTabs);
       
       // Redirect to warehouse by default
       if (currentPath === '/inventory' || currentPath === '/inventory/') {
-        router.navigate('/inventory/warehouse');
+        router.navigate(visibleTabs[0].href);
+        return;
+      }
+      const activeAllowed = visibleTabs.some((tab) => currentPath.startsWith(tab.href));
+      if (!activeAllowed) {
+        router.navigate(visibleTabs[0].href);
+        return;
       }
     }
     
@@ -41,7 +49,7 @@ export default function Inventory() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav, canViewInventory, loading]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewInventory, loading, visibleTabs]);
 
   return null;
 }

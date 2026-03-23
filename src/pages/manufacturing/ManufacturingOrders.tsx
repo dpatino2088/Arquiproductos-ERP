@@ -101,7 +101,7 @@ export default function ManufacturingOrders() {
   // Permission checks
   const { canViewMOs, canViewCosts } = useManufacturingAccess();
   const canRead = canViewMOs;
-  const canWrite = can('manufacturing.write');
+  const canWrite = can('manufacturing.mo.write');
   const { canCreate: canCreateMO, canArchive: canArchiveMO, canDelete: canDeleteMO } = useGranularAccess('manufacturing');
 
   // Register Manufacturing submodules
@@ -243,7 +243,7 @@ export default function ManufacturingOrders() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'No permission',
-        message: 'You do not have permission to archive Manufacturing Orders. The "manufacturing.write" permission is required.',
+        message: 'You do not have permission to archive Manufacturing Orders. The "manufacturing.mo.write" permission is required.',
       });
       return;
     }
@@ -292,7 +292,7 @@ export default function ManufacturingOrders() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'No permission',
-        message: 'You do not have permission to restore Manufacturing Orders. The "manufacturing.write" permission is required.',
+        message: 'You do not have permission to restore Manufacturing Orders. The "manufacturing.mo.write" permission is required.',
       });
       return;
     }
@@ -353,7 +353,7 @@ export default function ManufacturingOrders() {
           <p className="text-sm text-yellow-800 font-medium">No permission</p>
           <p className="text-sm text-yellow-700 mt-1">
             You do not have permission to view Manufacturing Orders.
-            Contact an administrator to request the 'manufacturing.read' permission.
+            Contact an administrator to request the 'manufacturing.mo.read' permission.
           </p>
         </div>
       </div>

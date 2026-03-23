@@ -1101,6 +1101,18 @@ export async function approveQuote(quoteId: string, organizationId: string): Pro
 
   console.log('[approveQuote] Approving quote', { quoteId, organizationId });
 
+  // Guardrail in client for clearer UX (DB trigger also enforces this).
+  const { count: quoteLineCount, error: countError } = await supabase
+    .from('QuoteLines')
+    .select('id', { count: 'exact', head: true })
+    .eq('quote_id', quoteId);
+  if (countError) {
+    throw new Error(`Failed to validate quote lines: ${countError.message}`);
+  }
+  if ((quoteLineCount ?? 0) <= 0) {
+    throw new Error('Cannot approve quote without lines. Add at least one quote line before approval.');
+  }
+
   const { data, error } = await supabase
     .from('Quotes')
     .update({

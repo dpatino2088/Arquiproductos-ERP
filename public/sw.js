@@ -1,5 +1,5 @@
 // Service Worker for Adaptio - Performance Optimization
-const CACHE_NAME = 'Adaptio-v1';
+const CACHE_NAME = 'Adaptio-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -87,6 +87,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
+  // For navigation/HTML: prefer network to avoid stale index.html after deploys.
+  if (request.mode === 'navigate') {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  // For script/module chunks: network-first prevents stale chunk mismatches.
+  if (isScriptRequest(request, url)) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
   // Implement different strategies based on request type
   if (isStaticAsset(request.url)) {
     // Cache First strategy for static assets
@@ -102,7 +114,14 @@ self.addEventListener('fetch', (event) => {
 
 // Helper functions for request classification
 function isStaticAsset(url) {
-  return /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/.test(url);
+  return /\.(css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/.test(url);
+}
+
+function isScriptRequest(request, url) {
+  return (
+    request.destination === 'script' ||
+    /\.m?js$/.test(url.pathname)
+  );
 }
 
 function isAPIRequest(url) {

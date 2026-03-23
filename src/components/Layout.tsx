@@ -7,7 +7,7 @@ import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
 import { useUIStore } from '../stores/ui-store';
 import { usePreviousPage } from '../hooks/usePreviousPage';
 import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
-import { usePermissions, MODULE_PERMS } from '../hooks/usePermissions';
+import { usePermissions, MODULE_PERMS, canReadPath } from '../hooks/usePermissions';
 import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
 import { useActiveDealer } from '../hooks/useActiveDealer';
 import { useOrganizationContext } from '../context/OrganizationContext';
@@ -807,14 +807,8 @@ function Layout({ children }: LayoutProps) {
         setCurrentRoute('/dashboard');
         return;
       }
-      const modulePerms = MODULE_PERMS[moduleKey];
-      if (!modulePerms) {
-        router.navigate('/dashboard', true);
-        setCurrentRoute('/dashboard');
-        return;
-      }
-      const canView = modulePerms.view.some((perm) => can(perm));
-      if (!canView) {
+      const routeReadable = canReadPath(can, currentRoute);
+      if (!routeReadable) {
         router.navigate('/dashboard', true);
         setCurrentRoute('/dashboard');
       }

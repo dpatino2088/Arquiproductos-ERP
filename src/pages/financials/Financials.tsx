@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { router } from '../../lib/router';
-import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { getFirstAllowedFinancialRoute, getVisibleFinancialGroupTabs } from './financialSubmodules';
 import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Financials() {
   const { registerSubmodules } = useSubmoduleNav();
   const { can, loading } = usePermissions();
-  const canViewFinancials = can('financials.read') || can('financials.write');
+  const visibleGroupTabs = getVisibleFinancialGroupTabs(can);
+  const firstAllowedRoute = getFirstAllowedFinancialRoute(can);
+  const canViewFinancials = !!firstAllowedRoute;
 
   useEffect(() => {
     if (loading) return;
@@ -15,9 +17,9 @@ export default function Financials() {
       router.navigate('/dashboard');
       return;
     }
-    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
-    router.navigate('/financials/accounts');
-  }, [registerSubmodules, canViewFinancials, loading]);
+    registerSubmodules('Financials', visibleGroupTabs);
+    router.navigate(firstAllowedRoute!, false);
+  }, [registerSubmodules, canViewFinancials, loading, visibleGroupTabs, firstAllowedRoute]);
 
   return null;
 }

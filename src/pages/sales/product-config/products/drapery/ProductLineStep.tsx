@@ -61,6 +61,13 @@ const SYSTEM_SIZE_LABELS: Record<string, string> = {
 
 const PRODUCT_LINES_WITH_SYSTEM_SIZE = new Set(['wave_drapery', 'ripple_fold']);
 
+const getBottomHemImageCandidates = (cm: number): string[] => {
+  if (cm === 0) {
+    return ['/images/DR_0.png', '/images/DR_Hem_Serged.png'];
+  }
+  return [`/images/DR_${cm}.png`, `/images/DR_Hem_${cm}cm.png`];
+};
+
 export default function ProductLineStep({ config, onUpdate }: ProductLineStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
   const [productLines, setProductLines] = useState<string[]>([]);
@@ -455,7 +462,8 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
               const label = cm === 0 ? 'Serged' : `${cm} cm`;
               const subtitle = cm === 0 ? 'Fileteado' : 'Double fold';
               const imgKey = `hem_${cm}`;
-              const imagePath = cm === 0 ? '/images/DR_Hem_Serged.png' : `/images/DR_Hem_${cm}cm.png`;
+              const imageCandidates = getBottomHemImageCandidates(cm);
+              const imagePath = imageCandidates[0];
               const hasImageError = imageErrors[imgKey];
 
               return (
@@ -479,7 +487,17 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
                         src={imagePath}
                         alt={label}
                         className="max-h-full max-w-full object-contain"
-                        onError={() => setImageErrors((prev) => ({ ...prev, [imgKey]: true }))}
+                        onError={(e) => {
+                          const img = e.currentTarget;
+                          const currentIdx = Number(img.dataset.fallbackIndex || '0');
+                          const nextIdx = currentIdx + 1;
+                          if (nextIdx < imageCandidates.length) {
+                            img.dataset.fallbackIndex = String(nextIdx);
+                            img.src = imageCandidates[nextIdx];
+                            return;
+                          }
+                          setImageErrors((prev) => ({ ...prev, [imgKey]: true }));
+                        }}
                       />
                     ) : (
                       <Ruler className="w-16 h-16 text-gray-300" />

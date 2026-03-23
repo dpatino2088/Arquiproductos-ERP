@@ -63,29 +63,70 @@ export const MODULE_PERMS = {
     edit: ['dashboard.write'],
   },
   directory: {
-    view: ['directory.read'],
-    edit: ['directory.write'],
+    view: ['directory.customers.read', 'directory.contacts.read'],
+    edit: ['directory.customers.write', 'directory.contacts.write'],
   },
   catalog: {
     view: ['catalog.read'],
     edit: ['catalog.write'],
   },
   inventory: {
-    view: ['inventory.read'],
-    edit: ['inventory.write'],
+    view: [
+      'inventory.warehouse.read',
+      'inventory.purchase_orders.read',
+      'inventory.receipts.read',
+      'inventory.transactions.read',
+      'inventory.adjustments.read',
+      'inventory.material_demand.read',
+    ],
+    edit: [
+      'inventory.warehouse.write',
+      'inventory.purchase_orders.write',
+      'inventory.receipts.write',
+      'inventory.transactions.write',
+      'inventory.adjustments.write',
+      'inventory.material_demand.write',
+    ],
   },
   sales: {
-    view: ['sales.read'],
-    edit: ['sales.write'],
+    view: ['sales.quotes.read', 'sales.proposals.read', 'sales.orders.read'],
+    edit: ['sales.quotes.write', 'sales.proposals.write', 'sales.orders.write'],
   },
   manufacturing: {
-    view: ['manufacturing.read', 'manufacturing.wo.read', 'manufacturing.workstation.read',
-           'manufacturing.cutopt.read', 'manufacturing.mo.read', 'manufacturing.calendar.read'],
-    edit: ['manufacturing.write'],
+    view: [
+      'manufacturing.mo.read',
+      'manufacturing.wo.read',
+      'manufacturing.calendar.read',
+      'manufacturing.finished_goods.read',
+      'manufacturing.cutopt.read',
+    ],
+    edit: [
+      'manufacturing.mo.write',
+      'manufacturing.wo.write',
+      'manufacturing.calendar.write',
+      'manufacturing.finished_goods.write',
+      'manufacturing.cutopt.write',
+    ],
   },
   financials: {
-    view: ['financials.read'],
-    edit: ['financials.write'],
+    view: [
+      'financials.accounts.read',
+      'financials.invoices.read',
+      'financials.payments.read',
+      'financials.vendor_accounts.read',
+      'financials.bills.read',
+      'financials.vendor_payments.read',
+      'financials.purchase_orders.read',
+    ],
+    edit: [
+      'financials.accounts.write',
+      'financials.invoices.write',
+      'financials.payments.write',
+      'financials.vendor_accounts.write',
+      'financials.bills.write',
+      'financials.vendor_payments.write',
+      'financials.purchase_orders.write',
+    ],
   },
   partners: {
     view: ['settings.read', 'partners.read'],
@@ -115,40 +156,40 @@ export const GRANULAR_PERMS = {
     delete:  ['catalog.delete'],
   },
   quotes: {
-    create: ['quotes.create', 'quotes.edit'],
-    edit:    ['quotes.edit'],
-    archive: ['quotes.archive'],
-    delete:  ['quotes.delete'],
+    create: ['sales.quotes.write'],
+    edit:    ['sales.quotes.write'],
+    archive: ['sales.quotes.write'],
+    delete:  ['sales.quotes.write'],
   },
   proposals: {
-    create: ['proposals.create'],
-    archive: ['proposals.archive'],
-    delete:  ['proposals.delete'],
+    create: ['sales.proposals.write'],
+    archive: ['sales.proposals.write'],
+    delete:  ['sales.proposals.write'],
   },
   salesorders: {
-    create: ['salesorders.create', 'salesorders.edit'],
-    edit:    ['salesorders.edit'],
-    archive: ['salesorders.archive'],
-    delete:  ['salesorders.delete'],
+    create: ['sales.orders.write'],
+    edit:    ['sales.orders.write'],
+    archive: ['sales.orders.write'],
+    delete:  ['sales.orders.write'],
   },
   manufacturing: {
-    create: ['manufacturing.create', 'manufacturing.write'],
-    edit:    ['manufacturing.edit', 'manufacturing.write'],
-    archive: ['manufacturing.archive'],
-    delete:  ['manufacturing.delete'],
+    create: ['manufacturing.mo.write', 'manufacturing.wo.write'],
+    edit:    ['manufacturing.mo.write', 'manufacturing.wo.write'],
+    archive: ['manufacturing.mo.write'],
+    delete:  ['manufacturing.mo.write'],
   },
   inventory: {
-    create: ['inventory.create', 'inventory.write'],
-    edit:    ['inventory.edit', 'inventory.write'],
-    archive: ['inventory.archive'],
-    delete:  ['inventory.delete'],
+    create: ['inventory.transactions.write', 'inventory.purchase_orders.write'],
+    edit:    ['inventory.transactions.write', 'inventory.purchase_orders.write'],
+    archive: ['inventory.transactions.write'],
+    delete:  ['inventory.transactions.write'],
   },
   financials: {
-    create: ['financials.create', 'financials.write'],
-    edit:    ['financials.edit', 'financials.write'],
-    archive: ['financials.archive'],
-    delete:  ['financials.delete'],
-    void:    ['financials.void'],
+    create: ['financials.invoices.write'],
+    edit:    ['financials.invoices.write'],
+    archive: ['financials.invoices.write'],
+    delete:  ['financials.invoices.write'],
+    void:    ['financials.invoices.write'],
   },
 } as const;
 
@@ -223,16 +264,70 @@ export function useManufacturingAccess() {
   const { can } = usePermissions();
 
   return useMemo(() => {
-    const legacy = can('manufacturing.read');
     return {
-      canViewMOs:          legacy || can('manufacturing.mo.read'),
-      canEditMOs:          can('manufacturing.write') || can('manufacturing.mo.write'),
-      canViewWOs:          legacy || can('manufacturing.wo.read'),
-      canEditWOs:          legacy || can('manufacturing.wo.write'),
-      canViewWorkstation:  legacy || can('manufacturing.workstation.read'),
-      canViewCutOpt:       legacy || can('manufacturing.cutopt.read'),
-      canViewCalendar:     legacy || can('manufacturing.calendar.read'),
-      canViewCosts:        legacy || can('manufacturing.costs.read'),
+      canViewMOs:          can('manufacturing.mo.read'),
+      canEditMOs:          can('manufacturing.mo.write'),
+      canViewWOs:          can('manufacturing.wo.read'),
+      canEditWOs:          can('manufacturing.wo.write'),
+      canViewWorkstation:  can('manufacturing.wo.read'),
+      canViewCutOpt:       can('manufacturing.cutopt.read'),
+      canViewCalendar:     can('manufacturing.calendar.read'),
+      canViewCosts:        can('manufacturing.mo.read'),
     };
   }, [can]);
+}
+
+function moduleFromPath(pathname: string): ModuleKey | null {
+  const first = (pathname.split('/')[1] || '').toLowerCase();
+  if (first === 'dashboard') return 'dashboard';
+  if (first === 'directory') return 'directory';
+  if (first === 'sales') return 'sales';
+  if (first === 'catalog') return 'catalog';
+  if (first === 'inventory') return 'inventory';
+  if (first === 'manufacturing') return 'manufacturing';
+  if (first === 'financials') return 'financials';
+  if (first === 'partners') return 'partners';
+  if (first === 'settings') return 'settings';
+  return null;
+}
+
+export function getReadPermissionsForPath(pathname: string): string[] {
+  const cleanPath = pathname.split('?')[0].split('#')[0];
+  const route = '/' + cleanPath.split('/').slice(1, 3).join('/');
+  const routeMap: Record<string, string[]> = {
+    '/directory/customers': ['directory.customers.read'],
+    '/directory/contacts': ['directory.contacts.read'],
+    '/sales/quotes': ['sales.quotes.read'],
+    '/sales/proposals': ['sales.proposals.read'],
+    '/sales/orders': ['sales.orders.read'],
+    '/inventory/warehouse': ['inventory.warehouse.read'],
+    '/inventory/purchase-orders': ['inventory.purchase_orders.read'],
+    '/inventory/receipts': ['inventory.receipts.read'],
+    '/inventory/transactions': ['inventory.transactions.read'],
+    '/inventory/adjustments': ['inventory.adjustments.read'],
+    '/inventory/material-demand': ['inventory.material_demand.read'],
+    '/manufacturing/manufacturing-orders': ['manufacturing.mo.read'],
+    '/manufacturing/work-orders': ['manufacturing.wo.read'],
+    '/manufacturing/calendar': ['manufacturing.calendar.read'],
+    '/manufacturing/finished-goods': ['manufacturing.finished_goods.read'],
+    '/manufacturing/cut-optimization': ['manufacturing.cutopt.read'],
+    '/financials/accounts': ['financials.accounts.read'],
+    '/financials/invoices': ['financials.invoices.read'],
+    '/financials/payments': ['financials.payments.read'],
+    '/financials/vendor-accounts': ['financials.vendor_accounts.read'],
+    '/financials/purchase-orders': ['financials.purchase_orders.read'],
+    '/financials/bills': ['financials.bills.read'],
+    '/financials/vendor-payments': ['financials.vendor_payments.read'],
+  };
+  const direct = routeMap[route];
+  if (direct) return direct;
+  const mod = moduleFromPath(cleanPath);
+  if (!mod) return [];
+  return [...MODULE_PERMS[mod].view];
+}
+
+export function canReadPath(can: (permissionCode: string) => boolean, pathname: string): boolean {
+  const required = getReadPermissionsForPath(pathname);
+  if (required.length === 0) return true;
+  return required.some((perm) => can(perm));
 }

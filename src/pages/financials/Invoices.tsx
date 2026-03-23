@@ -45,9 +45,7 @@ export default function Invoices() {
   const { isInternal } = useAccessContext();
   const { hasAnyPermission } = usePermissions();
   const canCreateInvoice = hasAnyPermission([
-    'financials.invoices.create',
-    'financials.create',
-    'financials.write',
+    'financials.invoices.write',
   ]);
 
   const [invoices, setInvoices] = useState<DealerInvoice[]>([]);

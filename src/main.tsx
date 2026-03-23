@@ -40,7 +40,7 @@ logger.info('Application starting up', {
 
 // Recover from dynamic import chunk load failures (stale chunks after deploy, cache issues)
 const CHUNK_LOAD_KEY = 'adaptio_chunk_reload_attempted'
-window.addEventListener('error', (ev: ErrorEvent) => {
+window.addEventListener('error', async (ev: ErrorEvent) => {
   const msg = ev?.message || ''
   if (
     (msg.includes('Failed to fetch dynamically imported module') ||
@@ -48,7 +48,22 @@ window.addEventListener('error', (ev: ErrorEvent) => {
     !sessionStorage.getItem(CHUNK_LOAD_KEY)
   ) {
     sessionStorage.setItem(CHUNK_LOAD_KEY, '1')
-    window.location.reload()
+    try {
+      // Clear stale SW/caches so new deploy chunks can be fetched.
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(regs.map((r) => r.unregister()))
+      }
+      if ('caches' in window) {
+        const cacheNames = await caches.keys()
+        await Promise.all(cacheNames.map((name) => caches.delete(name)))
+      }
+    } catch {
+      // Best-effort recovery; continue with reload.
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.set('__chunk_recover', String(Date.now()))
+    window.location.replace(url.toString())
   }
 })
 

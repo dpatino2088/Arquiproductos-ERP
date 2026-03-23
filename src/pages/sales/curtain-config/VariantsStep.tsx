@@ -397,6 +397,15 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
     setCollectionSearch(value);
   };
 
+  const trySelectCollectionFromText = (rawValue: string) => {
+    const value = rawValue.trim().toLowerCase();
+    if (!value) return false;
+    const exact = collections.find((name) => name.trim().toLowerCase() === value);
+    if (!exact) return false;
+    handleCollectionChange(exact);
+    return true;
+  };
+
   const handleVariantChange = (variantIdValue: string) => {
     const selectedVariantItem = variants.find((item) => item.id === variantIdValue);
     const variantName =
@@ -534,6 +543,17 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                   value={collectionSearch}
                   onChange={(e) => handleCollectionSearchChange(e.target.value)}
                   onFocus={() => setShowCollectionDropdown(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const matched = trySelectCollectionFromText(collectionSearch);
+                      if (matched) {
+                        e.preventDefault();
+                        setShowCollectionDropdown(false);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setShowCollectionDropdown(false);
+                    }
+                  }}
                   placeholder={loadingCollections ? 'Loading...' : 'Search or select collection'}
                   className="pl-8"
                   disabled={loadingCollections}

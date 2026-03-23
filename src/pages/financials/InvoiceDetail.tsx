@@ -7,7 +7,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { ChevronDown, DollarSign } from 'lucide-react';
+import { ChevronDown, DollarSign, Lock, LockOpen } from 'lucide-react';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFLine, InvoicePDFData, InvoicePDFDealer, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 import { generateNextSequentialNumber } from '../../lib/sequential-numbers';
@@ -84,6 +84,22 @@ interface CreditNote {
   created_at: string;
 }
 
+interface DeliveryGate {
+  sales_order_id: string;
+  balance_due: number;
+  payment_complete: boolean;
+  has_active_override: boolean;
+  active_override_id: string | null;
+  delivery_allowed: boolean;
+}
+
+interface ActiveDeliveryOverride {
+  id: string;
+  reason: string;
+  authorized_by_name: string | null;
+  authorized_at: string;
+}
+
 function getInvoiceId(): string | null {
   const match = window.location.pathname.match(/\/financials\/invoices\/([^/]+)/);
   return match ? match[1] : null;
@@ -108,7 +124,7 @@ function formatBillingAddress(d: DealerBilling): string {
 
 export default function InvoiceDetail() {
   const invoiceId = getInvoiceId();
-  const { activeOrganizationId } = useOrganizationContext();
+  const { activeOrganizationId, role } = useOrganizationContext();
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
   const { user } = useAuth();
@@ -116,6 +132,7 @@ export default function InvoiceDetail() {
 
   const [invoice, setInvoice] = useState<InvoiceHeader | null>(null);
   const [lines, setLines] = useState<InvoiceLine[]>([]);
+  const [linesFallbackFromSalesOrder, setLinesFallbackFromSalesOrder] = useState(false);
   const [applications, setApplications] = useState<PaymentApplication[]>([]);
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,6 +155,14 @@ export default function InvoiceDetail() {
   const [voidCreditTarget, setVoidCreditTarget] = useState<CreditNote | null>(null);
   const [voidCreditReason, setVoidCreditReason] = useState('');
   const [voidingCredit, setVoidingCredit] = useState(false);
+  const [deliveryGate, setDeliveryGate] = useState<DeliveryGate | null>(null);
+  const [activeDeliveryOverride, setActiveDeliveryOverride] = useState<ActiveDeliveryOverride | null>(null);
+  const [deliveryOverrideReason, setDeliveryOverrideReason] = useState('');
+  const [deliveryRevokeReason, setDeliveryRevokeReason] = useState('');
+  const [authorizingDeliveryOverride, setAuthorizingDeliveryOverride] = useState(false);
+  const [revokingDeliveryOverride, setRevokingDeliveryOverride] = useState(false);
+  const [deliveryOverrideDialogOpen, setDeliveryOverrideDialogOpen] = useState(false);
+  const [deliveryOverrideMode, setDeliveryOverrideMode] = useState<'authorize' | 'revoke'>('authorize');
   const hasAutoOpenedPdfRef = useRef(false);
   const listPath = '/financials/invoices';
   const queryReturnTo = getReturnToFromCurrentQuery();
@@ -149,6 +174,7 @@ export default function InvoiceDetail() {
   };
   const hasRedirectBack =
     !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
+  const canManageDeliveryOverride = role === 'admin' || role === 'superadmin';
 
   useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
 
@@ -210,7 +236,44 @@ export default function InvoiceDetail() {
       inv.Dealers = (dealerRes.data as DealerBilling) ?? null;
       inv.SalesOrders = soRes.data ?? null;
       setInvoice(inv);
-      setLines((linesRes.data ?? []) as InvoiceLine[]);
+      const invoiceLines = (linesRes.data ?? []) as InvoiceLine[];
+      if (invoiceLines.length > 0) {
+        setLines(invoiceLines);
+        setLinesFallbackFromSalesOrder(false);
+      } else if (inv.sales_order_id) {
+        const { data: saleOrderLines } = await supabase
+          .from('SaleOrderLines')
+          .select('id, line_number, description, quantity, unit_price, line_total')
+          .eq('sales_order_id', inv.sales_order_id)
+          .eq('deleted', false)
+          .order('line_number', { ascending: true });
+
+        const fallbackLines = ((saleOrderLines ?? []) as Array<{
+          id: string;
+          line_number: number | null;
+          description: string | null;
+          quantity: number | string | null;
+          unit_price: number | string | null;
+          line_total: number | string | null;
+        }>).map((line, idx) => {
+          const qty = Number(line.quantity ?? 0);
+          const unitPrice = Number(line.unit_price ?? 0);
+          const lineSubtotalRaw = Number(line.line_total ?? qty * unitPrice);
+          return {
+            id: `so-${line.id}-${idx}`,
+            description: (line.description ?? '').trim() || 'Line item',
+            qty: Number.isFinite(qty) ? qty : 0,
+            unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+            line_subtotal: Number.isFinite(lineSubtotalRaw) ? lineSubtotalRaw : 0,
+          } satisfies InvoiceLine;
+        });
+
+        setLines(fallbackLines);
+        setLinesFallbackFromSalesOrder(fallbackLines.length > 0);
+      } else {
+        setLines([]);
+        setLinesFallbackFromSalesOrder(false);
+      }
 
       const apps = (appsRes.data ?? []) as PaymentApplication[];
       if (apps.length > 0) {
@@ -238,6 +301,33 @@ export default function InvoiceDetail() {
         setApplications([]);
       }
       setCreditNotes((creditsRes.data ?? []) as CreditNote[]);
+
+      if (inv.sales_order_id) {
+        const [gateRes, overrideRes] = await Promise.all([
+          supabase.rpc('get_sales_order_delivery_gate', {
+            p_sales_order_id: inv.sales_order_id,
+          }),
+          supabase
+            .from('SalesOrderDeliveryOverrides')
+            .select('id, reason, authorized_by_name, authorized_at')
+            .eq('sales_order_id', inv.sales_order_id)
+            .eq('status', 'active')
+            .eq('deleted', false)
+            .order('authorized_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+
+        const gateRow = Array.isArray(gateRes.data)
+          ? (gateRes.data[0] as DeliveryGate | undefined)
+          : undefined;
+
+        setDeliveryGate(gateRow ?? null);
+        setActiveDeliveryOverride((overrideRes.data as ActiveDeliveryOverride | null) ?? null);
+      } else {
+        setDeliveryGate(null);
+        setActiveDeliveryOverride(null);
+      }
     } catch (e: unknown) {
       setError(getSupabaseErrorMessageDetailed(e));
     } finally {
@@ -512,6 +602,68 @@ export default function InvoiceDetail() {
     }
   };
 
+  const handleAuthorizeDeliveryOverride = async () => {
+    if (!invoice?.sales_order_id) return;
+    if (deliveryOverrideReason.trim().length < 5) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Please provide a reason (min 5 characters).' });
+      return;
+    }
+    setAuthorizingDeliveryOverride(true);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('authorize_sales_order_delivery_release', {
+        p_sales_order_id: invoice.sales_order_id,
+        p_reason: deliveryOverrideReason.trim(),
+      });
+      if (rpcError) throw rpcError;
+      const result = (data ?? {}) as { ok?: boolean; error?: string };
+      if (result.ok === false) throw new Error(result.error || 'Authorization failed');
+      addNotification({ type: 'success', title: 'Authorized', message: 'Delivery override authorized from Financials.' });
+      setDeliveryOverrideReason('');
+      setDeliveryOverrideDialogOpen(false);
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setAuthorizingDeliveryOverride(false);
+    }
+  };
+
+  const handleRevokeDeliveryOverride = async () => {
+    if (!invoice?.sales_order_id) return;
+    if (deliveryRevokeReason.trim().length < 5) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Please provide a revoke reason (min 5 characters).' });
+      return;
+    }
+    setRevokingDeliveryOverride(true);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('revoke_sales_order_delivery_release', {
+        p_sales_order_id: invoice.sales_order_id,
+        p_reason: deliveryRevokeReason.trim(),
+      });
+      if (rpcError) throw rpcError;
+      const result = (data ?? {}) as { ok?: boolean; error?: string };
+      if (result.ok === false) throw new Error(result.error || 'Revoke failed');
+      addNotification({ type: 'success', title: 'Revoked', message: 'Delivery override revoked.' });
+      setDeliveryRevokeReason('');
+      setDeliveryOverrideDialogOpen(false);
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setRevokingDeliveryOverride(false);
+    }
+  };
+
+  const openAuthorizeDialog = () => {
+    setDeliveryOverrideMode('authorize');
+    setDeliveryOverrideDialogOpen(true);
+  };
+
+  const openRevokeDialog = () => {
+    setDeliveryOverrideMode('revoke');
+    setDeliveryOverrideDialogOpen(true);
+  };
+
   const loadOrganizationLogoOptions = useCallback(async (): Promise<GenerateInvoicePDFOptions> => {
     const tryLogo = async (path: string): Promise<string | undefined> => {
       try {
@@ -665,6 +817,8 @@ export default function InvoiceDetail() {
     .filter((row) => row.status !== 'void')
     .reduce((s, row) => s + Number(row.amount), 0);
   const balanceDue = Math.max(invoice.total - totalApplied - totalCredited, 0);
+  const gateBalanceDue = Number(deliveryGate?.balance_due ?? 0);
+  const gatePaymentComplete = deliveryGate?.payment_complete ?? gateBalanceDue <= 0;
   const status = invoice.status;
   const dealer = invoice.Dealers;
 
@@ -717,6 +871,20 @@ export default function InvoiceDetail() {
               title="Back"
             >
               Back
+            </button>
+          )}
+          {invoice.sales_order_id && canManageDeliveryOverride && !gatePaymentComplete && (
+            <button
+              type="button"
+              onClick={activeDeliveryOverride ? openRevokeDialog : openAuthorizeDialog}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+              title={
+                activeDeliveryOverride
+                  ? `Revoke override (${activeDeliveryOverride.authorized_by_name ?? 'Unknown'} · ${formatDate(activeDeliveryOverride.authorized_at)})`
+                  : 'Authorize delivery override'
+              }
+            >
+              {activeDeliveryOverride ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
             </button>
           )}
           {actionItems.length > 0 && (
@@ -851,8 +1019,67 @@ export default function InvoiceDetail() {
         </div>
       </div>
 
+      {deliveryOverrideDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">
+              {deliveryOverrideMode === 'authorize' ? 'Authorize Delivery Override' : 'Revoke Delivery Override'}
+            </h4>
+            <p className="text-xs text-gray-600 mb-3">
+              {deliveryOverrideMode === 'authorize'
+                ? 'Provide a reason. This action is audited and allows delivery with pending balance.'
+                : 'Provide a reason to remove the current delivery override.'}
+            </p>
+            <textarea
+              value={deliveryOverrideMode === 'authorize' ? deliveryOverrideReason : deliveryRevokeReason}
+              onChange={(e) => {
+                if (deliveryOverrideMode === 'authorize') setDeliveryOverrideReason(e.target.value);
+                else setDeliveryRevokeReason(e.target.value);
+              }}
+              placeholder={deliveryOverrideMode === 'authorize' ? 'Authorization reason...' : 'Revoke reason...'}
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => setDeliveryOverrideDialogOpen(false)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (deliveryOverrideMode === 'authorize') {
+                    void handleAuthorizeDeliveryOverride();
+                  } else {
+                    void handleRevokeDeliveryOverride();
+                  }
+                }}
+                disabled={deliveryOverrideMode === 'authorize' ? authorizingDeliveryOverride : revokingDeliveryOverride}
+                className={`px-3 py-1.5 text-sm text-white rounded-lg disabled:opacity-50 ${
+                  deliveryOverrideMode === 'authorize' ? 'bg-primary' : 'bg-red-600'
+                }`}
+              >
+                {deliveryOverrideMode === 'authorize'
+                  ? (authorizingDeliveryOverride ? 'Authorizing...' : 'Authorize')
+                  : (revokingDeliveryOverride ? 'Revoking...' : 'Revoke')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'lines' && (
         <div className="space-y-4">
+        {linesFallbackFromSalesOrder && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-xs text-amber-800">
+              Showing line breakdown from Sales Order because invoice lines are missing.
+            </p>
+          </div>
+        )}
         <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">

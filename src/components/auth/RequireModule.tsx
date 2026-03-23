@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { router } from "../../lib/router";
 import { useAccessContext, ModuleKey } from "../../hooks/useAccessContext";
+import { MODULE_PERMS, usePermissions } from "../../hooks/usePermissions";
 
 /**
  * RequireModule — NUNCA retorna null.
@@ -15,18 +16,22 @@ export function RequireModule({
   children: React.ReactNode;
 }) {
   const { loading, allowedModules } = useAccessContext();
-  const hasAccess = allowedModules.includes(module);
+  const { loading: permissionsLoading, can } = usePermissions();
+  const hasModuleAccess = allowedModules.includes(module);
+  const modulePerms = MODULE_PERMS[module];
+  const hasPermissionAccess = modulePerms.view.some((perm) => can(perm));
+  const hasAccess = hasModuleAccess && hasPermissionAccess;
 
   // Redirect si no tiene acceso (solo cuando loading terminó)
   useEffect(() => {
-    if (loading) return;
+    if (loading || permissionsLoading) return;
     if (!hasAccess) {
       if (import.meta.env.DEV) {
         console.log("[RequireModule] Redirecting to /dashboard - module not allowed:", module);
       }
       router.navigate("/dashboard", true);
     }
-  }, [loading, module, hasAccess]);
+  }, [loading, permissionsLoading, module, hasAccess]);
 
   // ✅ SIEMPRE renderizar children — nunca null.
   // El redirect se maneja por useEffect si no tiene acceso.

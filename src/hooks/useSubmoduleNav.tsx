@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { router } from '../lib/router';
+import { canReadPath, usePermissions } from './usePermissions';
 
 interface SubmoduleTab {
   id: string;
@@ -63,6 +64,7 @@ const SubmoduleNavContext = createContext<SubmoduleNavContextType | undefined>(u
 
 export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SubmoduleNavState>(initialState);
+  const { can, loading: permissionsLoading } = usePermissions();
 
   const setSubmoduleNav = useCallback((title: string, tabs: SubmoduleTab[]) => {
     setState({ title, tabs, breadcrumbs: [] });
@@ -78,10 +80,13 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
 
   const registerSubmodules = useCallback((title: string, tabs: Omit<SubmoduleTab, 'isActive' | 'onClick'>[]) => {
     const currentPath = window.location.pathname;
+    const visibleTabs = permissionsLoading
+      ? tabs
+      : tabs.filter((tab) => canReadPath(can, tab.href));
     
     // Extract the main module from the current path and from the tabs
     const currentModule = currentPath.split('/')[1];
-    const tabsModule = tabs[0]?.href.split('/')[1];
+    const tabsModule = visibleTabs[0]?.href.split('/')[1];
     
     // Only register if we're actually in the correct module
     // This prevents registering wrong submodules when navigating between modules
@@ -100,7 +105,7 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
     }
 
     if (tabsModule === 'sales') {
-      const matchingTab = tabs.find(t => currentPath === t.href || currentPath.startsWith(t.href + '/'));
+      const matchingTab = visibleTabs.find(t => currentPath === t.href || currentPath.startsWith(t.href + '/'));
       if (matchingTab) setSalesLastPath(matchingTab.id, currentPath);
     }
 
@@ -109,14 +114,14 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
       return paths.some(p => path === p || path.startsWith(p + '/'));
     };
 
-    const matchingTabs = tabs.filter(tab => tabMatchesPath(tab, currentPath));
+    const matchingTabs = visibleTabs.filter(tab => tabMatchesPath(tab, currentPath));
     const mostSpecificTab = matchingTabs.reduce((prev, current) => {
       const prevLen = Math.max(...(prev.matchPaths ?? [prev.href]).map(p => p.length));
       const curLen = Math.max(...(current.matchPaths ?? [current.href]).map(p => p.length));
       return curLen > prevLen ? current : prev;
     }, matchingTabs[0] || { href: '', id: '' });
     
-    const processedTabs = tabs.map(tab => ({
+    const processedTabs = visibleTabs.map(tab => ({
       ...tab,
       isActive: tab.id === mostSpecificTab.id && tabMatchesPath(tab, currentPath),
       onClick: () => { router.navigate(tab.href); },
@@ -152,7 +157,7 @@ export function SubmoduleNavProvider({ children }: { children: ReactNode }) {
       // No changes needed
       return prev;
     });
-  }, []);
+  }, [can, permissionsLoading]);
 
   // Auto-update tab active states when route changes; persist Sales tab paths for "back to detail"
   React.useEffect(() => {

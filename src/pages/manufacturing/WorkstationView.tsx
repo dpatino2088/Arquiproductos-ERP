@@ -83,7 +83,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const { activeOrganizationId } = useOrganizationContext();
   const { user } = useAuth();
   const { role } = useCurrentOrgRole();
-  const isOperator = role === 'operator';
+  const isOperator = role === 'operator' || role === 'operator_member';
   const [selectedCenter, setSelectedCenter] = useState<string | null>(workCenterId ?? null);
   const [tasks, setTasks] = useState<TaskWithMO[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);

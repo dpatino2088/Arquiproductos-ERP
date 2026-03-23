@@ -95,9 +95,7 @@ export default function InvoiceNew() {
   const addNotification = useUIStore((s) => s.addNotification);
   const { hasAnyPermission } = usePermissions();
   const canCreateInvoice = hasAnyPermission([
-    'financials.invoices.create',
-    'financials.create',
-    'financials.write',
+    'financials.invoices.write',
   ]);
   const { settings: costSettings } = useCostSettings();
   const defaultTaxPct = costSettings?.tax_pct ?? 0.07;
