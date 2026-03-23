@@ -480,8 +480,9 @@ export default function InvoiceNew() {
       addNotification({ type: 'error', title: 'Validation', message: 'Please select a dealer and ensure an invoice number is generated.' });
       return;
     }
-    if (lines.every((l) => !l.description.trim())) {
-      addNotification({ type: 'error', title: 'Validation', message: 'Add at least one line with a description.' });
+    const validLines = lines.filter((l) => l.description.trim() && l.qty > 0);
+    if (validLines.length === 0) {
+      addNotification({ type: 'error', title: 'Validation', message: 'Add at least one valid line (description and qty > 0).' });
       return;
     }
     const preSaveTaxRate = taxExempt ? 0 : (prefillInfo?.soTaxPct ?? soTaxPct ?? defaultTaxPct);
@@ -501,52 +502,45 @@ export default function InvoiceNew() {
       const finalTax = Number((finalSubtotal * taxRate).toFixed(2));
       const finalTotal = Number((finalSubtotal + finalTax).toFixed(2));
 
-      const { data: inv, error: invErr } = await supabase
-        .from('DealerInvoices')
-        .insert({
-          organization_id: activeOrganizationId,
-          dealer_id: selectedDealerId,
-          sales_order_id: salesOrderId,
-          invoice_number: invoiceNumber,
-          status: 'draft',
-          issue_date: issueDate,
-          due_date: dueDate || null,
-          currency_code: currency,
-          subtotal: finalSubtotal,
-          tax_total: finalTax,
-          total: finalTotal,
-          notes: notes.trim() || null,
-          deleted: false,
-        })
-        .select('id')
-        .single();
-      if (invErr) throw invErr;
+      const lineRows = validLines.map((l, i) => {
+        const lineSub = Number((l.qty * l.unit_price).toFixed(2));
+        const lineTax = Number((lineSub * taxRate).toFixed(2));
+        return {
+          sort_order: i + 1,
+          description: l.description.trim(),
+          qty: l.qty,
+          unit_price: l.unit_price,
+          tax_pct: Number(taxRate.toFixed(6)),
+          line_subtotal: lineSub,
+          line_tax: lineTax,
+          line_total: lineSub + lineTax,
+        };
+      });
 
-      const validLines = lines.filter((l) => l.description.trim());
-      if (validLines.length > 0) {
-        const lineRows = validLines.map((l, i) => {
-          const lineSub = Number((l.qty * l.unit_price).toFixed(2));
-          const lineTax = Number((lineSub * taxRate).toFixed(2));
-          return {
-            invoice_id: inv.id,
-            sort_order: i + 1,
-            description: l.description.trim(),
-            qty: l.qty,
-            unit_price: l.unit_price,
-            tax_pct: Number(taxRate.toFixed(6)),
-            line_subtotal: lineSub,
-            line_tax: lineTax,
-            line_total: lineSub + lineTax,
-          };
-        });
-        const { error: linesErr } = await supabase.from('DealerInvoiceLines').insert(lineRows);
-        if (linesErr) throw linesErr;
+      // Atomic create: invoice + lines in one DB transaction.
+      const { data: createdInvoiceId, error: createErr } = await supabase.rpc('create_dealer_invoice_with_lines', {
+        p_organization_id: activeOrganizationId,
+        p_dealer_id: selectedDealerId,
+        p_sales_order_id: salesOrderId,
+        p_invoice_number: invoiceNumber,
+        p_issue_date: issueDate,
+        p_due_date: dueDate || null,
+        p_currency_code: currency,
+        p_subtotal: finalSubtotal,
+        p_tax_total: finalTax,
+        p_total: finalTotal,
+        p_notes: notes.trim() || null,
+        p_lines: lineRows,
+      });
+      if (createErr) throw createErr;
+      if (!createdInvoiceId || typeof createdInvoiceId !== 'string') {
+        throw new Error('Failed to create invoice');
       }
 
       addNotification({ type: 'success', title: 'Invoice Created', message: `Invoice ${invoiceNumber} saved as draft.` });
       const detailPath = queryReturnTo
-        ? withReturnTo(`/financials/invoices/${inv.id}`, queryReturnTo)
-        : `/financials/invoices/${inv.id}`;
+        ? withReturnTo(`/financials/invoices/${createdInvoiceId}`, queryReturnTo)
+        : `/financials/invoices/${createdInvoiceId}`;
       router.navigate(detailPath);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to create invoice';
