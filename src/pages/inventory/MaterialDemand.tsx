@@ -168,6 +168,47 @@ export default function MaterialDemand() {
           onOrderMap.set(r.catalog_item_id, (onOrderMap.get(r.catalog_item_id) || 0) + Number(r.on_order_qty || 0));
         });
 
+        // Include DRAFT POs in Material Demand "on order" so newly created drafts
+        // are reflected immediately on this screen (before approval to OPEN).
+        const { data: draftPOLines } = await supabase
+          .from('PurchaseOrderLines')
+          .select(`
+            catalog_item_id,
+            ordered_qty,
+            received_qty,
+            unit,
+            PurchaseOrders!inner(status, organization_id),
+            CatalogItems(roll_length_m, units_per_purchase_unit)
+          `)
+          .eq('PurchaseOrders.organization_id', activeOrganizationId)
+          .eq('PurchaseOrders.status', 'DRAFT')
+          .in('catalog_item_id', catalogIds);
+
+        const directUnits = new Set(['each', 'ea', 'ft', 'm', 'yd', 'm2', 'yd2', 'roll']);
+        for (const line of draftPOLines ?? []) {
+          const itemId = (line as any).catalog_item_id as string | null;
+          if (!itemId) continue;
+          const ordered = Number((line as any).ordered_qty ?? 0);
+          const received = Number((line as any).received_qty ?? 0);
+          const remaining = Math.max(0, ordered - received);
+          if (remaining <= 0) continue;
+
+          const unit = String((line as any).unit ?? '').toLowerCase();
+          const ci = (line as any).CatalogItems as { roll_length_m?: number | null; units_per_purchase_unit?: number | null } | null;
+          const uppu = Number(ci?.units_per_purchase_unit ?? 1);
+          const rollLengthM = Number(ci?.roll_length_m ?? 1);
+
+          let multiplier = 1;
+          if (unit === 'roll') {
+            multiplier = Number.isFinite(rollLengthM) && rollLengthM > 0 ? rollLengthM : 1;
+          } else if (uppu > 1 && !directUnits.has(unit)) {
+            multiplier = uppu;
+          }
+
+          const qtyNormalized = remaining * multiplier;
+          onOrderMap.set(itemId, (onOrderMap.get(itemId) || 0) + qtyNormalized);
+        }
+
         const { data: ciRows } = await supabase
           .from('CatalogItems')
           .select('*')
