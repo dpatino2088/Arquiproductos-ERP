@@ -1562,8 +1562,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             </div>
           </div>
         ) : (
-        <div className="table-fit-wrapper proposal-lines-table-wrapper">
-          <table className="table-fit proposal-lines-table">
+        <div className="table-fit-wrapper proposal-lines-table-wrapper overflow-x-auto">
+          <table className="table-fit proposal-lines-table w-full min-w-[1320px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs w-10" title="Drag to reorder"></th>

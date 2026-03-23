@@ -407,8 +407,8 @@ export default function Proposals() {
             </div>
           </div>
         )}
-        <div className="table-fit-wrapper">
-          <table className="table-fit">
+        <div className="table-fit-wrapper overflow-x-auto">
+          <table className="table-fit w-full min-w-[1240px]">
             <colgroup>
               <col style={{ width: '4%' }} />
               <col style={{ width: '12%' }} />
