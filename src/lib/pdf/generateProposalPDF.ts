@@ -291,6 +291,8 @@ export function generateProposalPDF(
       ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
       : '';
     const drivePart = driveLabel ? `\n${driveLabel}` : '';
+    // Keep Install Included before dimensions so it remains visible on dense internal rows.
+    const installPart = line.install_included ? '\nInstall Included' : '';
     let dimsPart = '';
     if (includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—') {
       dimsPart = `\n${line.dimensions}`;
@@ -298,8 +300,7 @@ export function generateProposalPDF(
       // Sin medidas: mostrar cantidad de paños en Description (en vez de medidas)
       dimsPart = `\n${panelLabel}`;
     }
-    const installPart = line.install_included ? '\nInstall Included' : '';
-    return `${name}${skuPart}${drivePart}${dimsPart}${installPart}`.trim();
+    return `${name}${skuPart}${drivePart}${installPart}${dimsPart}`.trim();
   };
 
   const tableData = lines.map((line, index) => [
@@ -322,8 +323,9 @@ export function generateProposalPDF(
     desc: 52,
     productType: 24,
     qty: 10,
-    unit: 28,
-    total: 24,
+    // Wider money columns to avoid clipping on amounts > 100,000
+    unit: 31,
+    total: 30,
   };
   const descFlex = tableUsableWidth - (W.n + W.area + W.pos + W.productType + W.qty + W.unit + W.total);
   (W as Record<string, number>).desc = Math.max(descFlex, 18);
@@ -370,7 +372,7 @@ export function generateProposalPDF(
       4: { cellWidth: W.productType, halign: 'center', valign: 'middle' },
       5: { cellWidth: W.qty, halign: 'right', valign: 'middle' },
       6: { cellWidth: W.unit, halign: 'right', valign: 'middle' },
-      7: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 5, right: 5 } },
+      7: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 2, right: 2 } },
     },
     didParseCell: (data) => {
       if (data.section === 'head') {
@@ -379,13 +381,15 @@ export function generateProposalPDF(
         if (data.column.index === 5 || data.column.index === 6) data.cell.styles.halign = 'right';
         if (data.column.index === 7) {
           data.cell.styles.halign = 'right';
-          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 5 };
+          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
         }
       }
       if (data.section === 'body' && data.column.index === 3) {
         const raw = data.cell.raw;
         const text = Array.isArray(raw) ? (raw as string[]).join('\n') : String(raw ?? '');
-        const lineCount = (text.match(/\n/g) || []).length + 1;
+        const descUsableWidth = Math.max(W.desc - 6, 10);
+        const wrapped = doc.splitTextToSize(text, descUsableWidth);
+        const lineCount = Math.max(1, wrapped.length);
         const minHeight = Math.max(22, 10 + lineCount * 5);
         data.cell.styles.minCellHeight = minHeight;
       }
@@ -413,7 +417,7 @@ export function generateProposalPDF(
   }
 
   // —— Summary (right) + Notes (left, aligned with summary) ——
-  const summaryWidth = 62;
+  const summaryWidth = 72;
   const summaryLeft = pageWidth - marginX - summaryWidth;
 
   // Summary rows
@@ -456,8 +460,8 @@ export function generateProposalPDF(
     theme: 'plain',
     bodyStyles: { fontSize: 9, cellPadding: summaryCellPadding },
     columnStyles: {
-      0: { cellWidth: 32, fontStyle: 'bold', cellPadding: summaryCellPadding },
-      1: { cellWidth: 28, halign: 'right', fontStyle: 'bold', cellPadding: summaryCellPadding },
+      0: { cellWidth: 36, fontStyle: 'bold', cellPadding: summaryCellPadding },
+      1: { cellWidth: 34, halign: 'right', fontStyle: 'bold', cellPadding: summaryCellPadding },
     },
     margin: { left: summaryLeft, right: marginX },
     tableWidth: summaryWidth,
