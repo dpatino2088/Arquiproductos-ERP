@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { advanceMOOnTaskStart, advanceMOOnAllTasksComplete } from '../lib/moLifecycle';
+import { useUIStore } from '../stores/ui-store';
 
 export interface WorkOrderTaskLine {
   id: string;
@@ -44,6 +45,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialLoadDone = useRef(false);
+  const addNotification = useUIStore((s) => s.addNotification);
 
   const fetchAll = useCallback(async () => {
     if (!moId) { setTasks([]); return; }
@@ -114,6 +116,30 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  const ensureTaskAssigned = useCallback(
+    async (taskId: string, actionLabel: string): Promise<boolean> => {
+      let assignedUserId = tasks.find((t) => t.id === taskId)?.assigned_to_user_id ?? null;
+      if (!assignedUserId) {
+        const { data } = await supabase
+          .from('WorkOrderTasks')
+          .select('assigned_to_user_id')
+          .eq('id', taskId)
+          .single();
+        assignedUserId = data?.assigned_to_user_id ?? null;
+      }
+      if (!assignedUserId) {
+        addNotification({
+          type: 'warning',
+          title: 'Operator Required',
+          message: `Assign an operator before ${actionLabel}.`,
+        });
+        return false;
+      }
+      return true;
+    },
+    [tasks, addNotification],
+  );
+
   const patchTask = useCallback((taskId: string, patch: Partial<WorkOrderTask>) => {
     setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...patch } : t));
   }, []);
@@ -126,6 +152,19 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
   }, []);
 
   const toggleLineCompleted = useCallback(async (lineId: string, completed: boolean) => {
+    if (completed) {
+      const { data: lineTask } = await supabase
+        .from('WorkOrderTaskLines')
+        .select('task_id')
+        .eq('id', lineId)
+        .single();
+      const taskIdForLine = lineTask?.task_id ?? null;
+      if (taskIdForLine) {
+        const canAdvance = await ensureTaskAssigned(taskIdForLine, 'completing line items');
+        if (!canAdvance) return;
+      }
+    }
+
     const now = new Date().toISOString();
     patchLine(lineId, { completed, completed_at: completed ? now : null });
 
@@ -168,9 +207,17 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     if (taskRow?.status === 'in_progress') {
       await updateTaskStatusInternal(taskId, 'completed');
     }
-  }, [patchLine]);
+  }, [patchLine, ensureTaskAssigned]);
 
   const updateTaskStatusInternal = useCallback(async (taskId: string, status: 'pending' | 'in_progress' | 'completed') => {
+    if (status === 'in_progress' || status === 'completed') {
+      const canAdvance = await ensureTaskAssigned(
+        taskId,
+        status === 'in_progress' ? 'starting this task' : 'completing this task',
+      );
+      if (!canAdvance) return;
+    }
+
     const now = new Date().toISOString();
 
     const { data: currentTask } = await supabase
@@ -214,7 +261,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     if (status === 'completed' && effectiveMoId) {
       const { data: allTasks } = await supabase
         .from('WorkOrderTasks')
-        .select('id, status, depends_on_task_ids')
+        .select('id, status, depends_on_task_ids, assigned_to_user_id')
         .eq('manufacturing_order_id', effectiveMoId)
         .eq('deleted', false);
 
@@ -226,6 +273,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         const toAutoStart = allTasks.filter((t: any) => {
           if (t.id === taskId) return false;
           if (t.status !== 'pending') return false;
+          if (!t.assigned_to_user_id) return false;
           const deps = t.depends_on_task_ids ?? [];
           if (deps.length === 0) return false;
           return deps.every((depId: string) => completedIds.has(depId));
@@ -253,7 +301,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
 
       await fetchAll();
     }
-  }, [patchTask, moId, fetchAll]);
+  }, [patchTask, moId, fetchAll, ensureTaskAssigned]);
 
   const updateTaskStatus = updateTaskStatusInternal;
 

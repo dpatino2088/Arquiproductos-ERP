@@ -270,7 +270,7 @@ export function useManufacturingAccess() {
       canViewWOs:          can('manufacturing.wo.read'),
       canEditWOs:          can('manufacturing.wo.write'),
       canViewWorkstation:  can('manufacturing.wo.read'),
-      canViewCutOpt:       can('manufacturing.cutopt.read'),
+      canViewCutOpt:       can('manufacturing.cutopt.read') || can('manufacturing.wo.read'),
       canViewCalendar:     can('manufacturing.calendar.read'),
       canViewCosts:        can('manufacturing.mo.read'),
     };
@@ -314,7 +314,7 @@ export function getReadPermissionsForPath(pathname: string): string[] {
     '/manufacturing/work-orders': ['manufacturing.wo.read'],
     '/manufacturing/calendar': ['manufacturing.calendar.read'],
     '/manufacturing/finished-goods': ['manufacturing.finished_goods.read'],
-    '/manufacturing/cut-optimization': ['manufacturing.cutopt.read'],
+    '/manufacturing/cut-optimization': ['manufacturing.cutopt.read', 'manufacturing.wo.read'],
     '/financials/accounts': ['financials.accounts.read'],
     '/financials/invoices': ['financials.invoices.read', 'portal.financials.invoices.read'],
     '/financials/payments': ['financials.payments.read', 'portal.financials.payments.read'],

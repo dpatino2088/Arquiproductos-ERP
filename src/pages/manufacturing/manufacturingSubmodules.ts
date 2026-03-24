@@ -23,7 +23,11 @@ export const MANUFACTURING_SUBMODULES = ALL_MANUFACTURING_SUBMODULES;
 export function useFilteredMfgSubmodules(): MfgSubmodule[] {
   const access = useManufacturingAccess();
   return useMemo(
-    () => ALL_MANUFACTURING_SUBMODULES.filter(s => !s.permissionKey || access[s.permissionKey]),
+    () =>
+      ALL_MANUFACTURING_SUBMODULES.filter((s) => {
+        if (s.id === 'cut-optimization') return access.canViewCutOpt || access.canViewWOs;
+        return !s.permissionKey || access[s.permissionKey];
+      }),
     [access],
   );
 }

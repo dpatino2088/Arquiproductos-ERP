@@ -4,6 +4,7 @@ import { useWorkCenters, type WorkCenter } from '../../hooks/useWorkCenters';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
 import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
 import AssemblyDetail from '../../components/manufacturing/assembly/AssemblyDetail';
@@ -90,6 +91,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [fabricRules, setFabricRules] = useState<FabricRuleInfo[]>([]);
   const [selectedFabricLineId, setSelectedFabricLineId] = useState<string | null>(null);
+  const addNotification = useUIStore((s) => s.addNotification);
 
   useEffect(() => {
     if (workCenterId) setSelectedCenter(workCenterId);
@@ -321,7 +323,50 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     return map;
   }, [fabricRules]);
 
+  const ensureMaterialsReadyForTask = useCallback(async (taskId: string): Promise<boolean> => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return false;
+    const { data, error } = await supabase.rpc('get_mo_material_readiness', {
+      p_mo_id: task.manufacturing_order_id,
+    });
+    if (error) {
+      addNotification({ type: 'error', title: 'Materials', message: error.message || 'Could not validate material readiness.' });
+      return false;
+    }
+    const readiness = data as { has_shortage?: boolean; status?: string } | null;
+    const hasShortage = Boolean(readiness?.has_shortage || readiness?.status === 'incomplete');
+    if (hasShortage) {
+      addNotification({
+        type: 'warning',
+        title: 'Materials Incomplete',
+        message: 'Resolve Material Demand before advancing Work Orders.',
+      });
+      return false;
+    }
+    return true;
+  }, [tasks, addNotification]);
+
   const toggleLine = async (lineId: string, completed: boolean) => {
+    if (completed) {
+      const { data: lineRowForGuard } = await supabase
+        .from('WorkOrderTaskLines')
+        .select('task_id')
+        .eq('id', lineId)
+        .single();
+      if (lineRowForGuard?.task_id) {
+        const lineTask = tasks.find((t) => t.id === lineRowForGuard.task_id);
+        if (!lineTask?.assigned_to_user_id) {
+          addNotification({
+            type: 'warning',
+            title: 'Operator Required',
+            message: 'Assign an operator before completing line items.',
+          });
+          return;
+        }
+        const canAdvance = await ensureMaterialsReadyForTask(lineRowForGuard.task_id);
+        if (!canAdvance) return;
+      }
+    }
     const now = new Date().toISOString();
     await supabase
       .from('WorkOrderTaskLines')
@@ -363,8 +408,18 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   };
 
   const startTask = async (taskId: string) => {
+    const canAdvance = await ensureMaterialsReadyForTask(taskId);
+    if (!canAdvance) return;
     const now = new Date().toISOString();
     const task = tasks.find((t) => t.id === taskId);
+    if (!task?.assigned_to_user_id) {
+      addNotification({
+        type: 'warning',
+        title: 'Operator Required',
+        message: 'Assign an operator before starting this task.',
+      });
+      return;
+    }
 
     await supabase
       .from('WorkOrderTasks')
@@ -383,6 +438,8 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   };
 
   const completeTask = async (taskId: string) => {
+    const canAdvance = await ensureMaterialsReadyForTask(taskId);
+    if (!canAdvance) return;
     const now = new Date().toISOString();
     await supabase
       .from('WorkOrderTasks')
@@ -393,7 +450,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     if (task && activeOrganizationId) {
       const { data: allTasks } = await supabase
         .from('WorkOrderTasks')
-        .select('id, status, depends_on_task_ids')
+        .select('id, status, depends_on_task_ids, assigned_to_user_id')
         .eq('manufacturing_order_id', task.manufacturing_order_id)
         .eq('deleted', false);
 
@@ -405,6 +462,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         const toAutoStart = allTasks.filter((t: any) => {
           if (t.id === taskId) return false;
           if (t.status !== 'pending') return false;
+          if (!t.assigned_to_user_id) return false;
           const deps = t.depends_on_task_ids ?? [];
           if (deps.length === 0) return false;
           return deps.every((depId: string) => completedIds.has(depId));
@@ -434,7 +492,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
 
   const filteredTasks = useMemo(() => {
     if (isOperator && user?.id) {
-      return tasks.filter(t => !t.assigned_to_user_id || t.assigned_to_user_id === user.id);
+      return tasks.filter((t) => t.assigned_to_user_id === user.id);
     }
     return tasks;
   }, [tasks, isOperator, user?.id]);

@@ -28,7 +28,7 @@ function StationCard({ task, moMeta, operators, onAssignOperator }: {
   task: WorkOrderTask;
   moMeta: { moNumber: string; customerName: string; productName: string; salesOrderNo?: string };
   operators: OperatorOption[];
-  onAssignOperator: (taskId: string, userId: string | null) => void;
+  onAssignOperator: (taskId: string, userId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const completedCount = task.lines.filter((l) => l.completed).length;
@@ -54,19 +54,23 @@ function StationCard({ task, moMeta, operators, onAssignOperator }: {
             <div className="flex items-center gap-1.5">
               <User className="w-3.5 h-3.5 text-gray-400" />
               <select
-                value={task.assigned_to_user_id ?? ''}
+                value={task.assigned_to_user_id ?? '__unassigned__'}
                 onChange={e => {
                   e.stopPropagation();
-                  onAssignOperator(task.id, e.target.value || null);
+                  if (e.target.value === '__unassigned__') return;
+                  onAssignOperator(task.id, e.target.value);
                 }}
                 onClick={e => e.stopPropagation()}
                 className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 focus:ring-1 focus:ring-primary focus:border-primary max-w-[160px]"
               >
-                <option value="">— Unassigned —</option>
+                <option value="__unassigned__" disabled>Select operator</option>
                 {operators.map(op => (
                   <option key={op.user_id} value={op.user_id}>{op.display_name}</option>
                 ))}
               </select>
+              {!task.assigned_to_user_id && (
+                <span className="text-[10px] text-amber-700">Required</span>
+              )}
             </div>
           )}
         </div>
@@ -180,8 +184,8 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
     })();
   }, [activeOrganizationId]);
 
-  const handleAssignOperator = useCallback(async (taskId: string, userId: string | null) => {
-    const displayName = userId ? operators.find(o => o.user_id === userId)?.display_name ?? null : null;
+  const handleAssignOperator = useCallback(async (taskId: string, userId: string) => {
+    const displayName = operators.find(o => o.user_id === userId)?.display_name ?? null;
     await supabase
       .from('WorkOrderTasks')
       .update({

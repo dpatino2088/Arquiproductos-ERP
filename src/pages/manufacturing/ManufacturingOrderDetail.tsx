@@ -277,7 +277,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         try {
           const { data: woTasks } = await supabase
             .from('WorkOrderTasks')
-            .select('id, status, depends_on_task_ids')
+            .select('id, status, depends_on_task_ids, assigned_to_user_id')
             .eq('manufacturing_order_id', moId)
             .eq('deleted', false)
             .eq('status', 'pending');
@@ -286,7 +286,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
             const now = new Date().toISOString();
             const firstTasks = woTasks.filter((t: any) => {
               const deps = t.depends_on_task_ids ?? [];
-              return deps.length === 0;
+              return deps.length === 0 && Boolean(t.assigned_to_user_id);
             });
             if (firstTasks.length > 0) {
               const ids = firstTasks.map((t: any) => t.id);
@@ -305,7 +305,33 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       refetch();
       fetchTimeline();
     } catch (e: unknown) {
-      addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to update status' });
+      const rawMessage = e instanceof Error ? e.message : 'Failed to update status';
+      const normalized = rawMessage.toLowerCase();
+
+      // Compatibility fallback for environments where "confirmed" is not yet available in DB enum/policy.
+      if (
+        newStatus === 'confirmed' &&
+        (normalized.includes('invalid input value for enum') ||
+          normalized.includes('invalid transition'))
+      ) {
+        try {
+          await transitionStatus(moId, 'planned', user.id, user.name);
+          addNotification({
+            type: 'success',
+            title: 'Status Updated',
+            message: 'MO moved to planned (reviewed).',
+          });
+          refetch();
+          fetchTimeline();
+          return;
+        } catch (fallbackError: unknown) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : rawMessage;
+          addNotification({ type: 'error', title: 'Error', message: fallbackMessage });
+          return;
+        }
+      }
+
+      addNotification({ type: 'error', title: 'Error', message: rawMessage });
     }
   }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification, issueMaterials, defaultWarehouse]);
 

@@ -167,7 +167,9 @@ function getManufacturingTabs(can: (permissionCode: string) => boolean): { label
   if (can('manufacturing.wo.read')) tabs.push({ label: 'Work Orders', href: '/manufacturing/work-orders' });
   if (can('manufacturing.calendar.read')) tabs.push({ label: 'Calendar', href: '/manufacturing/calendar' });
   if (can('manufacturing.finished_goods.read')) tabs.push({ label: 'Finished Goods', href: '/manufacturing/finished-goods' });
-  if (can('manufacturing.cutopt.read')) tabs.push({ label: 'Cut Optimization', href: '/manufacturing/cut-optimization' });
+  if (can('manufacturing.cutopt.read') || can('manufacturing.wo.read')) {
+    tabs.push({ label: 'Cut Optimization', href: '/manufacturing/cut-optimization' });
+  }
   return tabs;
 }
 

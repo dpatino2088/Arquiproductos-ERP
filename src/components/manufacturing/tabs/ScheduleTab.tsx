@@ -132,7 +132,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
     })();
   }, [activeOrganizationId]);
 
-  const handleAssignOperator = useCallback(async (taskId: string, userId: string | null) => {
+  const handleAssignOperator = useCallback(async (taskId: string, userId: string) => {
     if (materialReadiness?.hasShortage) {
       addNotification({
         type: 'warning',
@@ -141,7 +141,11 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
       });
       return;
     }
-    const displayName = userId ? operators.find(o => o.user_id === userId)?.display_name ?? null : null;
+    const displayName = operators.find((o) => o.user_id === userId)?.display_name ?? null;
+    if (!displayName) {
+      addNotification({ type: 'warning', title: 'Operator Required', message: 'Select a valid operator.' });
+      return;
+    }
     await supabase
       .from('WorkOrderTasks')
       .update({
@@ -151,7 +155,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
       })
       .eq('id', taskId);
     await refetchTasks();
-    addNotification({ type: 'success', title: 'Assigned', message: displayName ? `Assigned to ${displayName}` : 'Unassigned' });
+    addNotification({ type: 'success', title: 'Assigned', message: `Assigned to ${displayName}` });
   }, [operators, addNotification, refetchTasks, materialReadiness?.hasShortage]);
 
   const [manualOverrides, setManualOverrides] = useState<Map<string, DateOverride>>(new Map());
@@ -1222,12 +1226,15 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
               </span>
               {canEdit ? (
                 <select
-                  value={selectedTask.assigned_to_user_id ?? ''}
-                  onChange={e => handleAssignOperator(selectedTask.id, e.target.value || null)}
+                  value={selectedTask.assigned_to_user_id ?? '__unassigned__'}
+                  onChange={e => {
+                    if (e.target.value === '__unassigned__') return;
+                    handleAssignOperator(selectedTask.id, e.target.value);
+                  }}
                   disabled={materialReadiness?.hasShortage}
                   className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-gray-50 disabled:text-gray-400"
                 >
-                  <option value="">Unassigned</option>
+                  <option value="__unassigned__" disabled>Select operator</option>
                   {operators.map(op => (
                     <option key={op.user_id} value={op.user_id}>{op.display_name}</option>
                   ))}
