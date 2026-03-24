@@ -37,7 +37,7 @@ type AccessContextState = {
   isPortal: boolean;
 };
 
-const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales"];
+const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales", "financials"];
 
 /** Map AppUser.role_code (dealer_manager, dealer_member) or DealerUsers.role to PortalRole */
 function roleCodeToPortalRole(v: any): PortalRole | null {

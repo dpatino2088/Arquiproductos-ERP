@@ -25,6 +25,7 @@ import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } fro
 import { convertPurchaseQtyToInternal } from '../../lib/inventoryUnitModel';
 import { ArrowLeft, Plus, Trash2, Search, Package, FileDown, Eye, ChevronDown, CheckCircle2, XCircle, Archive } from 'lucide-react';
 import Input from '../../components/ui/Input';
+import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import { normalizeUUID } from '../../utils/uuid';
 import { formatDate } from '../../lib/utils';
 
@@ -1205,13 +1206,6 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
               <p className="text-sm text-slate-600">This purchase order has been archived.</p>
             </div>
           )}
-          {isDraft && !isCreateMode && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-amber-500 shrink-0" />
-              <p className="text-sm text-amber-700">This PO is in <strong>Draft</strong> status. Review and click <strong>Approve</strong> to open it for receiving.</p>
-            </div>
-          )}
-
           {/* Two-card header: Vendor Info + PO Details */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Vendor Info card */}
@@ -1322,7 +1316,14 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
 
             {/* PO Details card */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">PO Details</h3>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <h3 className="text-sm font-semibold text-gray-900">PO Details</h3>
+                {isDraft && !isCreateMode && (
+                  <span className="inline-flex items-center px-1 text-sm font-bold uppercase tracking-wide text-gray-900">
+                    Draft
+                  </span>
+                )}
+              </div>
               {canEdit ? (
                 <div className="space-y-3">
                   {!isCreateMode && (
@@ -1338,14 +1339,22 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   )}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Warehouse *</label>
-                    <select
-                      value={warehouseId}
-                      onChange={e => setWarehouseId(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    <SelectShadcn
+                      value={warehouseId || '__none__'}
+                      onValueChange={(value) => setWarehouseId(value === '__none__' ? '' : value)}
                     >
-                      <option value="">Select warehouse...</option>
-                      {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                    </select>
+                      <SelectTrigger className="h-10 rounded-lg text-sm">
+                        <SelectValue placeholder="Select warehouse..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Select warehouse...</SelectItem>
+                        {warehouses.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>
+                            {w.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </SelectShadcn>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -1359,15 +1368,16 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Currency</label>
-                      <select
-                        value={currency}
-                        onChange={e => setCurrency(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      >
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="GBP">GBP</option>
-                      </select>
+                      <SelectShadcn value={currency} onValueChange={setCurrency}>
+                        <SelectTrigger className="h-10 rounded-lg text-sm">
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="USD">USD</SelectItem>
+                          <SelectItem value="EUR">EUR</SelectItem>
+                          <SelectItem value="GBP">GBP</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
                     </div>
                   </div>
                   {allocationSummary && (
@@ -1621,10 +1631,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                       </td>
                       <td className="px-4 py-3 text-center">
                         {canEdit && line.is_roll_snapshot && line.unit_of_measure_snapshot ? (
-                          <select
+                          <SelectShadcn
                             value={line.unit}
-                            onChange={e => {
-                              const newUnit = e.target.value;
+                            onValueChange={(newUnit) => {
                               const rlv = line.roll_length_value_snapshot ?? 0;
                               const costExw = rlv > 0 && line.unit === 'roll'
                                 ? line.unit_cost / rlv
@@ -1640,16 +1649,19 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                                   : dl
                               ));
                             }}
-                            className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border-0 focus:ring-2 focus:ring-primary/20 cursor-pointer"
                           >
-                            <option value="roll">roll</option>
-                            <option value={line.unit_of_measure_snapshot}>{line.unit_of_measure_snapshot}</option>
-                          </select>
+                            <SelectTrigger className="h-6 min-w-[72px] rounded bg-gray-100 border-0 text-xs text-gray-700 px-1.5 py-0">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="roll">roll</SelectItem>
+                              <SelectItem value={line.unit_of_measure_snapshot}>{line.unit_of_measure_snapshot}</SelectItem>
+                            </SelectContent>
+                          </SelectShadcn>
                         ) : canEdit && line.purchase_unit_snapshot && line.purchase_unit_snapshot !== 'each' ? (
-                          <select
+                          <SelectShadcn
                             value={line.unit}
-                            onChange={e => {
-                              const newUnit = e.target.value;
+                            onValueChange={(newUnit) => {
                               const upp = line.units_per_purchase_unit_snapshot ?? 1;
                               const pkgUnit = line.purchase_unit_snapshot!;
                               const isCurrentlyPkg = line.unit === pkgUnit;
@@ -1668,11 +1680,15 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                                   : dl
                               ));
                             }}
-                            className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border-0 focus:ring-2 focus:ring-primary/20 cursor-pointer"
                           >
-                            <option value={line.purchase_unit_snapshot}>{line.purchase_unit_snapshot}</option>
-                            <option value="each">each</option>
-                          </select>
+                            <SelectTrigger className="h-6 min-w-[72px] rounded bg-gray-100 border-0 text-xs text-gray-700 px-1.5 py-0">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={line.purchase_unit_snapshot}>{line.purchase_unit_snapshot}</SelectItem>
+                              <SelectItem value="each">each</SelectItem>
+                            </SelectContent>
+                          </SelectShadcn>
                         ) : (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
                             {line.unit || 'ea'}

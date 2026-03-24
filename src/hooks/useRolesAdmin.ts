@@ -214,25 +214,62 @@ export function useDeleteRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationKey: ['delete-role'],
-    mutationFn: async (payload: { code: string }) => {
-      const { code } = payload;
+    mutationFn: async (payload: { code: string; fallbackRoleCode?: string }) => {
+      const { code, fallbackRoleCode } = payload;
 
       const { data: role, error: roleErr } = await supabase
         .from('AppUserRoles')
-        .select('code, is_system')
+        .select('code, is_system, user_type')
         .eq('code', code)
         .single();
       if (roleErr) throw roleErr;
-      if ((role as AppUserRoleRow).is_system) throw new Error('System roles cannot be deleted.');
+
+      const userType = (role as AppUserRoleRow).user_type;
+
+      const { data: allRoles, error: allRolesErr } = await supabase
+        .from('AppUserRoles')
+        .select('code, user_type, is_system')
+        .eq('user_type', userType);
+      if (allRolesErr) throw allRolesErr;
 
       const { count, error: countErr } = await supabase
         .from('AppUsers')
         .select('id', { count: 'exact', head: true })
         .eq('role_code', code)
+        .eq('user_type', userType)
         .eq('deleted', false);
       if (countErr) throw countErr;
-      if ((count ?? 0) > 0) {
-        throw new Error(`Cannot delete role "${code}" — ${count} user(s) are still assigned to it. Reassign them first.`);
+
+      const assignedUsers = count ?? 0;
+      if (assignedUsers > 0) {
+        const roleCodesForType = new Set(
+          (allRoles ?? [])
+            .map((r: { code: string }) => r.code)
+        );
+
+        const fallbackCandidates =
+          userType === 'dealer'
+            ? ['dealer_member', 'dealer']
+            : ['member', 'operator_member'];
+
+        const resolvedFallback =
+          (fallbackRoleCode && fallbackRoleCode !== code ? fallbackRoleCode : null) ??
+          fallbackCandidates.find((candidate) => candidate !== code && roleCodesForType.has(candidate)) ??
+          null;
+
+        if (!resolvedFallback) {
+          throw new Error(
+            `Cannot delete role "${code}" — ${assignedUsers} user(s) are assigned and no fallback role exists for ${userType}.`
+          );
+        }
+
+        const { error: reassignErr } = await supabase
+          .from('AppUsers')
+          .update({ role_code: resolvedFallback })
+          .eq('role_code', code)
+          .eq('user_type', userType)
+          .eq('deleted', false);
+        if (reassignErr) throw reassignErr;
       }
 
       const { error: delPermsErr } = await supabase

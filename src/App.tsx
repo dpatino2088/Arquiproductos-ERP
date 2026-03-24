@@ -16,7 +16,6 @@ import AuthGate from './auth/AuthGate';
 
 // Code splitting with React.lazy
 const ManagementDashboard = lazy(() => import('./pages/Dashboard'));
-const Inbox = lazy(() => import('./pages/Inbox'));
 
 // Error pages
 const BadRequest = lazy(() => import('./pages/error-pages/BadRequest'));
@@ -95,6 +94,7 @@ const InvoiceNew = lazy(() => import('./pages/financials/InvoiceNew'));
 const InvoiceDetail = lazy(() => import('./pages/financials/InvoiceDetail'));
 const FinancialPayments = lazy(() => import('./pages/financials/FinancialPayments'));
 const PaymentDetail = lazy(() => import('./pages/financials/PaymentDetail'));
+const FinancialStatement = lazy(() => import('./pages/financials/FinancialStatement'));
 const VendorAccountsList = lazy(() => import('./pages/financials/VendorAccounts'));
 const VendorAccountDetail = lazy(() => import('./pages/financials/VendorAccountDetail'));
 const BillsList = lazy(() => import('./pages/financials/BillsList'));
@@ -362,7 +362,7 @@ function App() {
     
     router.addRoute('/inbox', () => {
       if (isAuthenticated) {
-        setCurrentPage('inbox');
+        setCurrentPage('management-dashboard');
       } else {
         setCurrentPage('login');
       }
@@ -856,25 +856,55 @@ function App() {
     router.addRoute('/financials', () => {
       if (isAuthenticated) { setCurrentPage('financials'); } else { setCurrentPage('login'); }
     });
+    router.addRoute('/my-financials', () => {
+      if (isAuthenticated) { setCurrentPage('financials'); } else { setCurrentPage('login'); }
+    });
     router.addRoute('/financials/invoices', () => {
+      if (isAuthenticated) { setCurrentPage('financials-invoices'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/my-financials/invoices', () => {
       if (isAuthenticated) { setCurrentPage('financials-invoices'); } else { setCurrentPage('login'); }
     });
     router.addRoute('/financials/accounts', () => {
       if (isAuthenticated) { setCurrentPage('financials-accounts'); } else { setCurrentPage('login'); }
     });
+    router.addRoute('/my-financials/accounts', () => {
+      if (isAuthenticated) { setCurrentPage('financials-accounts'); } else { setCurrentPage('login'); }
+    });
     router.addRoute('/financials/accounts/:dealerId', () => {
+      if (isAuthenticated) { setCurrentPage('financials-account-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/my-financials/accounts/:dealerId', () => {
       if (isAuthenticated) { setCurrentPage('financials-account-detail'); } else { setCurrentPage('login'); }
     });
     router.addRoute('/financials/invoices/new', () => {
       if (isAuthenticated) { setCurrentPage('financials-invoice-new'); } else { setCurrentPage('login'); }
     });
+    router.addRoute('/my-financials/invoices/new', () => {
+      if (isAuthenticated) { setCurrentPage('financials-invoice-new'); } else { setCurrentPage('login'); }
+    });
     router.addRoute('/financials/invoices/:id', () => {
+      if (isAuthenticated) { setCurrentPage('financials-invoice-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/my-financials/invoices/:id', () => {
       if (isAuthenticated) { setCurrentPage('financials-invoice-detail'); } else { setCurrentPage('login'); }
     });
     router.addRoute('/financials/payments', () => {
       if (isAuthenticated) { setCurrentPage('financials-payments'); } else { setCurrentPage('login'); }
     });
+    router.addRoute('/my-financials/payments', () => {
+      if (isAuthenticated) { setCurrentPage('financials-payments'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/financials/statement', () => {
+      if (isAuthenticated) { setCurrentPage('financials-statement'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/my-financials/statement', () => {
+      if (isAuthenticated) { setCurrentPage('financials-statement'); } else { setCurrentPage('login'); }
+    });
     router.addRoute('/financials/payments/:id', () => {
+      if (isAuthenticated) { setCurrentPage('financials-payment-detail'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/my-financials/payments/:id', () => {
       if (isAuthenticated) { setCurrentPage('financials-payment-detail'); } else { setCurrentPage('login'); }
     });
     router.addRoute('/financials/vendor-accounts', () => {
@@ -1100,8 +1130,7 @@ function App() {
     });
     router.addRoute('/settings/roles', () => {
       if (isAuthenticated) {
-        setCurrentPage('admin-roles');
-        router.navigate('/admin/roles', false);
+        setCurrentPage('company-settings');
       } else {
         setCurrentPage('login');
       }
@@ -1225,8 +1254,6 @@ function App() {
       // Dashboard pages
       case 'management-dashboard':
         return <ManagementDashboard />;
-      case 'inbox':
-        return <Inbox />;
       case 'branches':
         return <Branches />;
       
@@ -1355,6 +1382,8 @@ function App() {
         return <RequireModule module="financials"><FinancialPayments /></RequireModule>;
       case 'financials-payment-detail':
         return <RequireModule module="financials"><PaymentDetail /></RequireModule>;
+      case 'financials-statement':
+        return <RequireModule module="financials"><FinancialStatement /></RequireModule>;
       case 'financials-vendor-accounts':
         return <RequireModule module="financials"><VendorAccountsList /></RequireModule>;
       case 'financials-vendor-account-detail':

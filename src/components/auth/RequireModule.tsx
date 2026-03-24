@@ -15,12 +15,16 @@ export function RequireModule({
   module: ModuleKey;
   children: React.ReactNode;
 }) {
-  const { loading, allowedModules } = useAccessContext();
+  const { loading, allowedModules, userType } = useAccessContext();
   const { loading: permissionsLoading, can } = usePermissions();
   const hasModuleAccess = allowedModules.includes(module);
   const modulePerms = MODULE_PERMS[module];
   const hasPermissionAccess = modulePerms.view.some((perm) => can(perm));
-  const hasAccess = hasModuleAccess && hasPermissionAccess;
+  // Portal users are gated by allowedModules + table-level RLS.
+  // Internal users require both module-level allowlist and explicit RBAC permission checks.
+  const hasAccess = userType === 'portal'
+    ? hasModuleAccess
+    : (hasModuleAccess && hasPermissionAccess);
 
   // Redirect si no tiene acceso (solo cuando loading terminó)
   useEffect(() => {

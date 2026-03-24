@@ -38,17 +38,60 @@ logger.info('Application starting up', {
   version: import.meta.env.VITE_APP_VERSION || '1.0.0',
 })
 
-// Recover from dynamic import chunk load failures (stale chunks after deploy, cache issues)
-const CHUNK_LOAD_KEY = 'adaptio_chunk_reload_attempted'
-async function recoverFromChunkLoadFailure(message: string | null | undefined): Promise<void> {
-  const msg = message || ''
-  const isChunkFailure =
-    msg.includes('Failed to fetch dynamically imported module') ||
-    msg.includes('Importing a module script failed')
+// Recover from dynamic import chunk load failures (stale chunks after deploy, cache issues).
+// Keep retries bounded, but do not permanently block recovery for the rest of the session.
+const CHUNK_RECOVERY_STATE_KEY = 'adaptio_chunk_recovery_state'
+const CHUNK_RECOVERY_MAX_ATTEMPTS = 2
+const CHUNK_RECOVERY_WINDOW_MS = 2 * 60 * 1000
 
-  if (!isChunkFailure || sessionStorage.getItem(CHUNK_LOAD_KEY)) return
+function isChunkLoadFailureText(text: string): boolean {
+  const msg = text.toLowerCase()
+  return (
+    msg.includes('failed to fetch dynamically imported module') ||
+    msg.includes('error loading dynamically imported module') ||
+    msg.includes('importing a module script failed') ||
+    msg.includes('loading chunk') ||
+    msg.includes('chunkloaderror') ||
+    msg.includes('/assets/') && msg.includes('.js')
+  )
+}
 
-  sessionStorage.setItem(CHUNK_LOAD_KEY, '1')
+function getChunkRecoveryState(): { attempts: number; lastAt: number } {
+  try {
+    const raw = sessionStorage.getItem(CHUNK_RECOVERY_STATE_KEY)
+    if (!raw) return { attempts: 0, lastAt: 0 }
+    const parsed = JSON.parse(raw) as { attempts?: number; lastAt?: number }
+    return {
+      attempts: Number(parsed.attempts ?? 0),
+      lastAt: Number(parsed.lastAt ?? 0),
+    }
+  } catch {
+    return { attempts: 0, lastAt: 0 }
+  }
+}
+
+function setChunkRecoveryState(next: { attempts: number; lastAt: number }): void {
+  try {
+    sessionStorage.setItem(CHUNK_RECOVERY_STATE_KEY, JSON.stringify(next))
+  } catch {
+    // no-op
+  }
+}
+
+async function recoverFromChunkLoadFailure(
+  message: string | null | undefined,
+  extraContext?: string | null | undefined
+): Promise<void> {
+  const msg = `${message || ''} ${extraContext || ''}`.trim()
+  if (!isChunkLoadFailureText(msg)) return
+
+  const now = Date.now()
+  const current = getChunkRecoveryState()
+  const inWindow = now - current.lastAt <= CHUNK_RECOVERY_WINDOW_MS
+  const attempts = inWindow ? current.attempts : 0
+  if (attempts >= CHUNK_RECOVERY_MAX_ATTEMPTS) return
+
+  setChunkRecoveryState({ attempts: attempts + 1, lastAt: now })
   try {
     // Clear stale SW/caches so new deploy chunks can be fetched.
     if ('serviceWorker' in navigator) {
@@ -68,7 +111,7 @@ async function recoverFromChunkLoadFailure(message: string | null | undefined): 
 }
 
 window.addEventListener('error', (ev: ErrorEvent) => {
-  void recoverFromChunkLoadFailure(ev?.message)
+  void recoverFromChunkLoadFailure(ev?.message, ev?.filename)
 })
 
 window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {

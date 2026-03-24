@@ -222,10 +222,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     // NO directory.*, NO sales.*, NO settings.*, NO financials.*, NO org.*
   ],
   procurement: [
-    'dashboard.read',
-    'directory.customers.read',
     'catalog.read',
-    // catalog.write is OPTIONAL - prefer OFF initially
     'inventory.warehouse.read',
     'inventory.warehouse.write',
     'inventory.purchase_orders.read',
@@ -239,7 +236,9 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'inventory.material_demand.read',
     'inventory.material_demand.write',
     'sales.orders.read',
-    // NO manufacturing.write, NO settings.write, NO org.users.manage, NO financials.write
+    'manufacturing.mo.read',
+    'manufacturing.mo.overview.read',
+    // NO dashboard.read, NO settings.*, NO partners.*, NO manufacturing.wo.*, NO manufacturing.calendar.*
   ],
   finance: [
     'dashboard.read',

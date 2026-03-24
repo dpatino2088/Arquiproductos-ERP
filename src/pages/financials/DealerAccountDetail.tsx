@@ -19,7 +19,10 @@ import type {
 } from '../../lib/pdf/generateAccountStatementPDF';
 import type { DealerFinancialTimelineEvent } from '../../hooks/useDealerFinancialTimeline';
 import { useUIStore } from '../../stores/ui-store';
-import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { FINANCIAL_GROUP_TABS, getVisiblePortalFinancialSubTabs } from './financialSubmodules';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { usePermissions } from '../../hooks/usePermissions';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 interface DealerInvoiceRow {
   invoice_id: string;
@@ -83,14 +86,21 @@ function formatBillingAddress(d: DealerBillingRow): string {
 }
 
 function getDealerIdFromPath(): string | null {
-  const match = window.location.pathname.match(/\/financials\/accounts\/([^/]+)/);
+  const match = window.location.pathname.match(/\/(?:financials|my-financials)\/accounts\/([^/]+)/);
   return match ? match[1] : null;
 }
 
-export default function DealerAccountDetail() {
-  const dealerId = getDealerIdFromPath();
+export default function DealerAccountDetail({ dealerIdOverride }: { dealerIdOverride?: string | null } = {}) {
+  const routeDealerId = getDealerIdFromPath();
   const { activeOrganizationId } = useOrganizationContext();
   const { registerSubmodules } = useSubmoduleNav();
+  const { isPortal, portalDealerId, portalRole } = useAccessContext();
+  const { can } = usePermissions();
+  const pathname = window.location.pathname;
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const viewerMode = isPortal || myFinancialsMode;
+  const basePath = getFinancialBasePath(pathname);
+  const dealerId = viewerMode ? (dealerIdOverride ?? portalDealerId ?? null) : (dealerIdOverride ?? routeDealerId);
   const [activeTab, setActiveTab] = useState('overview');
   const [invoices, setInvoices] = useState<DealerInvoiceRow[]>([]);
   const [payments, setPayments] = useState<DealerPaymentRow[]>([]);
@@ -100,7 +110,7 @@ export default function DealerAccountDetail() {
   const [statementPdfLoading, setStatementPdfLoading] = useState(false);
   const addNotification = useUIStore((s) => s.addNotification);
 
-  const listPath = '/financials/accounts';
+  const listPath = viewerMode ? `${basePath}/invoices` : '/financials/accounts';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
     const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
@@ -109,8 +119,13 @@ export default function DealerAccountDetail() {
   const hasRedirectBack = !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
 
   useEffect(() => {
+    if (viewerMode) {
+      const portalTabs = getVisiblePortalFinancialSubTabs(can, portalRole, basePath);
+      registerSubmodules('My Financials', portalTabs.map((tab) => ({ id: tab.id, label: tab.label, href: tab.href })));
+      return;
+    }
     registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
-  }, [registerSubmodules]);
+  }, [registerSubmodules, viewerMode, can, portalRole, basePath]);
 
   const { detail, isInitialLoading, error: detailError } = useDealerFinancialDetail(dealerId);
   const { events, isInitialLoading: timelineLoading } = useDealerFinancialTimeline(dealerId);
@@ -494,7 +509,7 @@ export default function DealerAccountDetail() {
               {invoices.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No invoices</td></tr>
               ) : invoices.map((inv) => (
-                <tr key={inv.invoice_id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => router.navigate(withReturnTo(`/financials/invoices/${inv.invoice_id}`))}>
+                <tr key={inv.invoice_id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => router.navigate(withReturnTo(`${basePath}/invoices/${inv.invoice_id}`))}>
                   <td className="px-4 py-4 font-medium text-primary">{inv.invoice_number}</td>
                   <td className="px-4 py-4">{formatDate(inv.issue_date)}</td>
                   <td className="px-4 py-4">{formatDate(inv.due_date)}</td>
@@ -523,7 +538,7 @@ export default function DealerAccountDetail() {
               {payments.length === 0 ? (
                 <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No payments</td></tr>
               ) : payments.map((pay) => (
-                <tr key={pay.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => router.navigate(withReturnTo(`/financials/payments/${pay.id}`))}>
+                <tr key={pay.id} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => router.navigate(withReturnTo(`${basePath}/payments/${pay.id}`))}>
                   <td className="px-4 py-4">{formatDate(pay.payment_date)}</td>
                   <td className="px-4 py-4">{pay.payment_method ?? '—'}</td>
                   <td className="px-4 py-4">{pay.reference_number ?? '—'}</td>

@@ -1,94 +1,103 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useSubmoduleNav } from '../hooks/useSubmoduleNav';
-import { Home, Inbox, Users, TrendingUp, AlertTriangle, CheckCircle, Clock, DollarSign } from 'lucide-react';
+import {
+  Home,
+  CheckCircle,
+  Clock,
+  DollarSign,
+  FileText,
+  Package,
+  ReceiptText,
+  TrendingUp,
+} from 'lucide-react';
+import { useDashboardOverview } from '../hooks/useDashboardOverview';
+import { formatCurrency } from '../lib/utils';
+import StatusBadge from '../components/shared/StatusBadge';
+import { router } from '../lib/router';
 
 export default function ManagementDashboard() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { data, isInitialLoading, isRefreshing, error } = useDashboardOverview();
 
   useEffect(() => {
-    // Register submodule tabs for management dashboard
     registerSubmodules('Management Dashboard', [
       { id: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: Home },
-      { id: 'inbox', label: 'Inbox', href: '/inbox', icon: Inbox }
     ]);
   }, [registerSubmodules]);
 
-  // Mejorar experiencia: Scroll al top y limpiar estado cuando se monta el Dashboard
   useEffect(() => {
-    // Scroll suave al top cuando se carga el Dashboard
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // También asegurar que el main content esté en el top
     const mainElement = document.querySelector('main[role="main"]');
     if (mainElement) {
       mainElement.scrollTop = 0;
     }
-    
-    // Limpiar cualquier foco residual
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
   }, []);
 
-  const managementStats = [
-    { title: 'Total Employees', value: '247', change: '+12', changeType: 'positive', icon: Users },
-    { title: 'Open Positions', value: '8', change: '+3', changeType: 'neutral', icon: AlertTriangle },
-    { title: 'Avg Performance', value: '4.2/5', change: '+0.3', changeType: 'positive', icon: TrendingUp },
-    { title: 'Monthly Payroll', value: '$2.4M', change: '+5%', changeType: 'positive', icon: DollarSign }
-  ];
+  const kpiCards = useMemo(() => {
+    const salesDelta = data.salesTotal.deltaPct;
+    const salesDeltaLabel = `${salesDelta != null && salesDelta >= 0 ? '+' : ''}${(salesDelta ?? 0).toFixed(1)}% vs prev 30d`;
+    const activeDeltaLabel = `${data.activeOrders.delta >= 0 ? '+' : ''}${data.activeOrders.delta} vs prev 30d`;
+    const sentDeltaLabel = `${data.proposalsSent.delta >= 0 ? '+' : ''}${data.proposalsSent.delta} vs prev 30d`;
+    const acceptedDeltaLabel = `${data.proposalsAccepted.delta >= 0 ? '+' : ''}${data.proposalsAccepted.delta} vs prev 30d`;
 
-  const pendingApprovals = [
-    { type: 'PTO Request', employee: 'Sarah Johnson', details: '3 days - Feb 15-17', priority: 'medium' },
-    { type: 'Expense Report', employee: 'Mike Chen', details: '$1,250 - Conference travel', priority: 'high' },
-    { type: 'Promotion Review', employee: 'Alex Rodriguez', details: 'Senior Developer role', priority: 'high' },
-    { type: 'Budget Request', employee: 'Emily Davis', details: 'Q1 Marketing budget', priority: 'medium' }
-  ];
+    return [
+      {
+        title: 'Total Sales',
+        value: formatCurrency(data.salesTotal.current),
+        change: salesDeltaLabel,
+        changeType: (salesDelta ?? 0) >= 0 ? 'positive' : 'negative',
+        icon: DollarSign,
+      },
+      {
+        title: 'Active Orders',
+        value: data.activeOrders.current.toString(),
+        change: activeDeltaLabel,
+        changeType: data.activeOrders.delta >= 0 ? 'positive' : 'negative',
+        icon: Package,
+      },
+      {
+        title: 'Proposals Sent',
+        value: data.proposalsSent.current.toString(),
+        change: sentDeltaLabel,
+        changeType: data.proposalsSent.delta >= 0 ? 'positive' : 'negative',
+        icon: ReceiptText,
+      },
+      {
+        title: 'Proposals Accepted',
+        value: data.proposalsAccepted.current.toString(),
+        change: acceptedDeltaLabel,
+        changeType: data.proposalsAccepted.delta >= 0 ? 'positive' : 'negative',
+        icon: CheckCircle,
+      },
+    ];
+  }, [data]);
 
-  const teamPerformance = [
-    { department: 'Engineering', performance: 92, employees: 45, trend: 'up' },
-    { department: 'Product', performance: 88, employees: 12, trend: 'up' },
-    { department: 'Design', performance: 85, employees: 8, trend: 'stable' },
-    { department: 'Sales', performance: 78, employees: 32, trend: 'down' }
-  ];
-
-  const recentActivities = [
-    { action: 'New hire onboarded', details: 'Lisa Brown joined HR department', time: '2 hours ago' },
-    { action: 'Performance review completed', details: 'Q4 reviews for Engineering team', time: '1 day ago' },
-    { action: 'Policy updated', details: 'Remote work policy revision', time: '2 days ago' },
-    { action: 'Training completed', details: 'Security awareness training', time: '3 days ago' }
-  ];
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'text-status-red bg-red-50';
-      case 'medium': return 'text-status-yellow bg-yellow-50';
-      default: return 'text-status-green bg-green-50';
-    }
-  };
-
-  const getTrendIcon = (trend: string) => {
-    switch (trend) {
-      case 'up': return <TrendingUp className="h-4 w-4 text-status-green" />;
-      case 'down': return <TrendingUp className="h-4 w-4 text-status-red rotate-180" />;
-      default: return <div className="h-4 w-4 rounded-full bg-neutral-gray" />;
-    }
-  };
+  const scopeTitle = data.scopeMode === 'dealer' ? 'Dealer Overview' : 'Organization Overview';
 
   return (
     <div className="p-6">
-      {/* Management Header */}
       <div className="mb-8">
         <h1 className="text-title font-semibold text-foreground">Management Dashboard</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {scopeTitle} {isRefreshing ? '· Updating...' : ''}
+        </p>
+        {error ? (
+          <p className="text-xs text-status-red mt-1">
+            Dashboard query error: {error}
+          </p>
+        ) : null}
       </div>
 
-      {/* Management Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {managementStats.map((stat, index) => (
+        {kpiCards.map((stat, index) => (
           <div key={index} className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-all duration-200 hover:border-primary/20">
             <div className="flex items-center justify-between mb-4">
               <stat.icon className="h-8 w-8 text-primary" />
               <div className="text-right">
-                <div className="text-2xl font-bold text-foreground">{stat.value}</div>
+                <div className="text-2xl font-bold text-foreground">{isInitialLoading ? '...' : stat.value}</div>
                 <div className={`text-sm ${stat.changeType === 'positive' ? 'text-status-green' : stat.changeType === 'negative' ? 'text-status-red' : 'text-muted-foreground'}`}>
                   {stat.change}
                 </div>
@@ -100,62 +109,61 @@ export default function ManagementDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Pending Approvals */}
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-heading font-semibold">Pending Approvals</h2>
-            <div className="bg-red-50 text-status-red text-xs px-2 py-1 rounded-full">
-              {pendingApprovals.length} pending
+            <h2 className="text-heading font-semibold">Commercial Pipeline</h2>
+            <div className="bg-blue-50 text-status-blue text-xs px-2 py-1 rounded-full">
+              Live
             </div>
           </div>
           <div className="space-y-4">
-            {pendingApprovals.map((approval, index) => (
-              <div key={index} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium">{approval.type}</span>
-                    <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(approval.priority)}`}>
-                      {approval.priority}
-                    </span>
-                  </div>
-                  <div className="text-sm text-muted-foreground">{approval.employee}</div>
-                  <div className="text-xs text-muted-foreground">{approval.details}</div>
+            {[
+              { label: 'Quotes Draft', value: data.pipeline.quotesDraft, icon: FileText, route: '/sales/quotes?status=draft' },
+              { label: 'Quotes Approved', value: data.pipeline.quotesApproved, icon: CheckCircle, route: '/sales/quotes?status=approved' },
+              { label: 'Proposals Sent', value: data.pipeline.proposalsSent, icon: ReceiptText, route: '/sales/proposals?status=sent' },
+              { label: 'Proposals Accepted', value: data.pipeline.proposalsAccepted, icon: TrendingUp, route: '/sales/proposals?status=accepted' },
+              { label: 'Orders Active', value: data.pipeline.activeOrders, icon: Package, route: '/sales/orders?status=confirmed' },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => router.navigate(item.route)}
+                className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors"
+                title={`Go to ${item.label}`}
+              >
+                <div className="flex items-center gap-3">
+                  <item.icon className="h-4 w-4 text-primary" />
+                  <span className="font-medium">{item.label}</span>
                 </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1 text-xs bg-green-50 text-status-green rounded hover:opacity-80">
-                    Approve
-                  </button>
-                  <button className="px-3 py-1 text-xs bg-red-50 text-status-red rounded hover:opacity-80">
-                    Reject
-                  </button>
-                </div>
-              </div>
+                <span className="text-lg font-semibold text-foreground">{isInitialLoading ? '...' : item.value}</span>
+              </button>
             ))}
           </div>
         </div>
 
-        {/* Team Performance */}
         <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <h2 className="text-heading font-semibold mb-6">Team Performance</h2>
+          <h2 className="text-heading font-semibold mb-6">Orders Follow-up</h2>
           <div className="space-y-4">
-            {teamPerformance.map((team, index) => (
-              <div key={index} className="p-3 hover:bg-gray-50 rounded-lg transition-colors">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-medium">{team.department}</div>
-                  <div className="flex items-center gap-2">
-                    {getTrendIcon(team.trend)}
-                    <span className="font-bold text-primary-contrast">{team.performance}%</span>
+            {data.recentOrders.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No orders found for this scope yet.</div>
+            ) : data.recentOrders.map((order) => (
+              <div key={order.id} className="p-3 hover:bg-gray-50 rounded-lg transition-colors">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">{order.number}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(order.created_at).toLocaleDateString()}
+                    </div>
+                    {order.dealerName && (
+                      <div className="text-xs text-muted-foreground">
+                        Dealer: {order.dealerName}
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>{team.employees} employees</span>
-                  <span className="capitalize">{team.trend} trend</span>
-                </div>
-                <div className="mt-2 bg-gray-200 rounded-full h-2">
-                  <div 
-                    className="bg-primary rounded-full h-2 transition-all duration-300"
-                    style={{ width: `${team.performance}%` }}
-                  />
+                  <div className="text-right">
+                    <StatusBadge status={order.status} type="salesOrder" size="sm" />
+                    <div className="text-sm font-semibold mt-1">{formatCurrency(order.amount)}</div>
+                  </div>
                 </div>
               </div>
             ))}
@@ -163,21 +171,30 @@ export default function ManagementDashboard() {
         </div>
       </div>
 
-      {/* Recent Management Activities */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="flex items-center gap-3 mb-6">
           <Clock className="h-6 w-6 text-status-blue" />
-          <h2 className="text-heading font-semibold">Recent Activities</h2>
+          <h2 className="text-heading font-semibold">Recent Commercial Activity</h2>
         </div>
         <div className="space-y-4">
-          {recentActivities.map((activity, index) => (
-            <div key={index} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors">
+          {data.recentActivity.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No recent activity for this scope yet.</div>
+          ) : data.recentActivity.map((activity) => (
+            <div key={activity.id} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors">
               <CheckCircle className="h-5 w-5 text-status-green mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <div className="font-medium">{activity.action}</div>
-                <div className="text-sm text-muted-foreground">{activity.details}</div>
+              <div className="flex-1 flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium uppercase text-xs text-muted-foreground mb-1">{activity.entity}</div>
+                  <div className="font-medium">{activity.number}</div>
+                  <div className="text-sm text-muted-foreground capitalize">{activity.status.replace(/_/g, ' ')}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-semibold">{formatCurrency(activity.amount)}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(activity.created_at).toLocaleDateString()}
+                  </div>
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">{activity.time}</div>
             </div>
           ))}
         </div>

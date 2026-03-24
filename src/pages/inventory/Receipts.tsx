@@ -9,6 +9,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { Search, SortAsc, SortDesc, Plus, ArrowLeft, Package } from 'lucide-react';
 import Input from '../../components/ui/Input';
+import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
@@ -349,18 +350,22 @@ export default function Receipts() {
             {/* PO Selector card */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Purchase Order</h3>
-              <select
-                value={selectedPOId}
-                onChange={e => handlePOSelect(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              <SelectShadcn
+                value={selectedPOId || '__none__'}
+                onValueChange={(value) => handlePOSelect(value === '__none__' ? '' : value)}
               >
-                <option value="">Choose a purchase order...</option>
-                {receivablePOs.map(po => (
-                  <option key={po.id} value={po.id}>
-                    {po.po_number ?? po.id.slice(0, 8)} — {po.DirectoryVendors?.name ?? 'No vendor'} ({po.status})
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-10 text-sm">
+                  <SelectValue placeholder="Choose a purchase order..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Choose a purchase order...</SelectItem>
+                  {receivablePOs.map((po) => (
+                    <SelectItem key={po.id} value={po.id}>
+                      {(po.po_number ?? po.id.slice(0, 8))} - {po.DirectoryVendors?.name ?? 'No vendor'} ({po.status})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </SelectShadcn>
               {selectedPO && (
                 <dl className="mt-3 grid grid-cols-3 gap-4 text-sm">
                   <div>

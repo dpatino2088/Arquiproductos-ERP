@@ -129,7 +129,7 @@ export const MODULE_PERMS = {
     ],
   },
   partners: {
-    view: ['settings.read', 'partners.read'],
+    view: ['partners.read'],
     edit: ['settings.write', 'partners.write'],
   },
   settings: {
@@ -286,6 +286,7 @@ function moduleFromPath(pathname: string): ModuleKey | null {
   if (first === 'inventory') return 'inventory';
   if (first === 'manufacturing') return 'manufacturing';
   if (first === 'financials') return 'financials';
+  if (first === 'my-financials') return 'financials';
   if (first === 'partners') return 'partners';
   if (first === 'settings') return 'settings';
   return null;
@@ -295,8 +296,11 @@ export function getReadPermissionsForPath(pathname: string): string[] {
   const cleanPath = pathname.split('?')[0].split('#')[0];
   const route = '/' + cleanPath.split('/').slice(1, 3).join('/');
   const routeMap: Record<string, string[]> = {
+    '/dashboard': ['dashboard.read'],
     '/directory/customers': ['directory.customers.read'],
     '/directory/contacts': ['directory.contacts.read'],
+    '/catalog/items': ['catalog.read'],
+    '/catalog/bom': ['catalog.write'],
     '/sales/quotes': ['sales.quotes.read'],
     '/sales/proposals': ['sales.proposals.read'],
     '/sales/orders': ['sales.orders.read'],
@@ -312,8 +316,13 @@ export function getReadPermissionsForPath(pathname: string): string[] {
     '/manufacturing/finished-goods': ['manufacturing.finished_goods.read'],
     '/manufacturing/cut-optimization': ['manufacturing.cutopt.read'],
     '/financials/accounts': ['financials.accounts.read'],
-    '/financials/invoices': ['financials.invoices.read'],
-    '/financials/payments': ['financials.payments.read'],
+    '/financials/invoices': ['financials.invoices.read', 'portal.financials.invoices.read'],
+    '/financials/payments': ['financials.payments.read', 'portal.financials.payments.read'],
+    '/financials/statement': ['portal.financials.statement.read'],
+    '/my-financials/invoices': ['portal.financials.invoices.read'],
+    '/my-financials/payments': ['portal.financials.payments.read'],
+    '/my-financials/statement': ['portal.financials.statement.read'],
+    '/my-financials/accounts': ['portal.financials.statement.read'],
     '/financials/vendor-accounts': ['financials.vendor_accounts.read'],
     '/financials/purchase-orders': ['financials.purchase_orders.read'],
     '/financials/bills': ['financials.bills.read'],

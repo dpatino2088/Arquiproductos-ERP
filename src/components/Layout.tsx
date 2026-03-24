@@ -10,6 +10,7 @@ import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
 import { usePermissions, MODULE_PERMS, canReadPath } from '../hooks/usePermissions';
 import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
 import { useActiveDealer } from '../hooks/useActiveDealer';
+import { useNotifications } from '../hooks/useNotifications';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
 import { ActingAsSwitcher } from './layout/ActingAsSwitcher';
@@ -48,6 +49,7 @@ import {
   Package,
   Wrench,
   DollarSign,
+  Wallet,
   FileText,
   RefreshCw,
   Handshake
@@ -131,12 +133,43 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Accounts Receivable', href: '/financials/accounts' },
     { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
   ],
+  '/my-financials': [
+    { label: 'Invoices', href: '/my-financials/invoices' },
+    { label: 'Payments', href: '/my-financials/payments' },
+  ],
   '/partners': [
     { label: 'Dealers', href: '/partners/dealers' },
     { label: 'Vendors', href: '/partners/vendors' },
     { label: 'Manufacturers', href: '/partners/manufacturers' },
   ],
 };
+
+function getPortalFinancialTabs(portalRole: 'dealer_member' | 'dealer_manager' | null | undefined): { label: string; href: string }[] {
+  const base = [
+    { label: 'Invoices', href: '/my-financials/invoices' },
+    { label: 'Payments', href: '/my-financials/payments' },
+  ];
+  if (portalRole === 'dealer_manager') {
+    return [...base, { label: 'Statement', href: '/my-financials/statement' }];
+  }
+  return base;
+}
+
+function getCatalogTabs(can: (permissionCode: string) => boolean): { label: string; href: string }[] {
+  const tabs = [{ label: 'Items', href: '/catalog/items' }];
+  if (can('catalog.write')) tabs.push({ label: 'BOM', href: '/catalog/bom' });
+  return tabs;
+}
+
+function getManufacturingTabs(can: (permissionCode: string) => boolean): { label: string; href: string }[] {
+  const tabs: { label: string; href: string }[] = [];
+  if (can('manufacturing.mo.read')) tabs.push({ label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' });
+  if (can('manufacturing.wo.read')) tabs.push({ label: 'Work Orders', href: '/manufacturing/work-orders' });
+  if (can('manufacturing.calendar.read')) tabs.push({ label: 'Calendar', href: '/manufacturing/calendar' });
+  if (can('manufacturing.finished_goods.read')) tabs.push({ label: 'Finished Goods', href: '/manufacturing/finished-goods' });
+  if (can('manufacturing.cutopt.read')) tabs.push({ label: 'Cut Optimization', href: '/manufacturing/cut-optimization' });
+  return tabs;
+}
 
 /** Línea de carga en la parte superior del header. Usa globalLoading del store; retraso mínimo al ocultar para evitar parpadeo. */
 const MIN_HIDE_DELAY_MS = 320;
@@ -252,6 +285,7 @@ const baseNavigation = [
 
 function Layout({ children }: LayoutProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const { logout, user } = useAuth();
   const [currentOrganization, setCurrentOrganization] = useState<{ id: string; name: string } | null>(null);
   const [currentRoute, setCurrentRoute] = useState(() => router.getCurrentRoute() || '/');
@@ -264,6 +298,7 @@ function Layout({ children }: LayoutProps) {
 
   // Solo Organization Super Admin ve el switcher "Dealer Account" (rol canónico: superadmin)
   const isSuperAdminUser = isSuperAdmin || orgContextRole === 'superadmin' || currentRole === 'superadmin';
+  const isAdminUser = orgContextRole === 'admin' || currentRole === 'admin';
 
   // ActingAs dealer display: show switcher for internal users
   const showDealerSwitcher = userType === 'internal' && (isSuperAdminUser || currentRole === 'admin');
@@ -312,6 +347,14 @@ function Layout({ children }: LayoutProps) {
     showDealerSwitcher &&
     ((isOnDirectory && needsApplyDirectory && directoryLoadContacts && directoryLoadCustomers) ||
       (isOnSales && needsApplySalesCurrentTab && hasCurrentSalesLoader));
+
+  const {
+    notifications,
+    unreadCount: unreadBellCount,
+    markAsRead: markNotificationAsRead,
+    markAllAsRead: markAllNotificationsAsRead,
+    loading: notificationsLoading,
+  } = useNotifications(25);
 
   // Debug log for SuperAdmin detection
   if (import.meta.env.DEV) {
@@ -446,30 +489,48 @@ function Layout({ children }: LayoutProps) {
     setCurrentOrganization(null);
   }, []);
 
-  // Close user menu when clicking outside
+  // Close top-right menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       if (!target.closest('[data-user-menu]')) {
         setIsUserMenuOpen(false);
       }
+      if (!target.closest('[data-notifications-menu]')) {
+        setIsNotificationsOpen(false);
+      }
     };
 
-    if (isUserMenuOpen) {
+    if (isUserMenuOpen || isNotificationsOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isUserMenuOpen]);
+  }, [isUserMenuOpen, isNotificationsOpen]);
+
+  const getNotificationTargetRoute = useCallback((n: { entity_type: string; entity_id: string }) => {
+    switch (n.entity_type) {
+      case 'sales_order':
+        return `/sales/orders/${n.entity_id}`;
+      case 'manufacturing_order':
+        return `/manufacturing/manufacturing-orders/${n.entity_id}`;
+      case 'purchase_order':
+        return `/inventory/purchase-orders/${n.entity_id}`;
+      case 'dealer_invoice':
+        return `/financials/invoices/${n.entity_id}`;
+      default:
+        return null;
+    }
+  }, []);
 
   // Helper function to determine if a navigation item is active
   const isNavItemActive = useCallback((itemName: string, itemHref: string) => {
     switch (itemName) {
       case 'Dashboard':
-        // Dashboard is active if we're on root, dashboard route, or inbox
-        return currentRoute === '/' || currentRoute === '/dashboard' || currentRoute.includes('/dashboard') || currentRoute.includes('/inbox');
+        // Dashboard is active if we're on root or dashboard routes
+        return currentRoute === '/' || currentRoute === '/dashboard' || currentRoute.includes('/dashboard');
       case 'Directory':
         // Directory is active if we're on any directory route
         return currentRoute.includes('/directory');
@@ -485,8 +546,10 @@ function Layout({ children }: LayoutProps) {
         // Manufacturing is active if we're on any manufacturing route
         return currentRoute.includes('/manufacturing');
       case 'Financials':
-        // Financials is active if we're on any financials route
-        return currentRoute.includes('/financials');
+        // Financials (internal cockpit) excludes My Financials routes
+        return currentRoute.includes('/financials') && !currentRoute.startsWith('/my-financials');
+      case 'My Financials':
+        return currentRoute.startsWith('/my-financials');
       case 'Partners':
         return currentRoute.includes('/partners');
       case 'Branches':
@@ -516,13 +579,16 @@ function Layout({ children }: LayoutProps) {
     // Navigation items aligned with MODULE_PERMS and AccessContext
     type NavItem = { name: string; href: string; icon: any; module?: ModuleKey };
     const allItems: NavItem[] = [
-      dashboardItem ? { ...dashboardItem, module: undefined } : { name: 'Dashboard', href: '/dashboard', icon: Home },
+      dashboardItem ? { ...dashboardItem, module: 'dashboard' as const } : { name: 'Dashboard', href: '/dashboard', icon: Home, module: 'dashboard' as const },
       { name: 'Directory', href: '/directory', icon: BookOpen, module: 'directory' },
       { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, module: 'sales' },
+      { name: 'My Financials', href: '/my-financials', icon: Wallet, module: 'financials' },
       { name: 'Catalog', href: '/catalog', icon: Book, module: 'catalog' },
       { name: 'Inventory', href: '/inventory', icon: Package, module: 'inventory' },
       { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, module: 'manufacturing' },
-      { name: 'Financials', href: '/financials', icon: DollarSign, module: 'financials' },
+      ...(userType === 'internal'
+        ? [{ name: 'Financials', href: '/financials', icon: DollarSign, module: 'financials' as const }]
+        : []),
       { name: 'Partners', href: '/partners', icon: Handshake, module: 'partners' },
     ];
     
@@ -537,10 +603,6 @@ function Layout({ children }: LayoutProps) {
       // Ya sabemos userType
       if (userType === "portal") {
         return allItems.filter(i => !i.module || allowedModules.includes(i.module));
-      }
-      // Internal users: mostrar todos mientras carga, pero asegurar que SuperAdmin siempre vea todo
-      if (userType === "internal" && isSuperAdminUser) {
-        return allItems; // SuperAdmin siempre ve todo, incluso durante loading
       }
       return allItems; // internal: ok mostrar mientras carga permisos
     }
@@ -580,14 +642,6 @@ function Layout({ children }: LayoutProps) {
           return false;
         }
         
-        // ✅ SUPERADMIN BYPASS: SuperAdmin can see all modules without permission checks
-        if (isSuperAdminUser) {
-          if (import.meta.env.DEV && item.name === "Financials") {
-            console.log("[Sidebar] SuperAdmin - Financials: BYPASSED, showing module");
-          }
-          return true;
-        }
-        
         // Second check: RBAC permissions (MODULE_PERMS) for non-superadmin users
         const modulePerms = MODULE_PERMS[item.module as keyof typeof MODULE_PERMS];
         if (!modulePerms) {
@@ -615,7 +669,7 @@ function Layout({ children }: LayoutProps) {
       }
       return false;
     });
-  }, [can, permissionsLoading, allowedModules, accessLoading, userType, isSuperAdminUser]);
+  }, [can, permissionsLoading, allowedModules, accessLoading, userType, isSuperAdmin]);
 
   const dashboardItem = useMemo(() => 
     navigation.find(item => item?.name === 'Dashboard' || item?.name === 'Home'), [navigation]
@@ -759,7 +813,12 @@ function Layout({ children }: LayoutProps) {
       setCurrentRoute(actualPath);
     } else if (path === '/financials') {
       const lastRoute = getLastRouteForModule('/financials');
-      const actualPath = lastRoute || '/financials';
+      const actualPath = userType === 'portal' ? '/my-financials/invoices' : (lastRoute || '/financials');
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/my-financials') {
+      const portalDefault = portalRole === 'dealer_manager' ? '/my-financials/statement' : '/my-financials/invoices';
+      const actualPath = userType === 'portal' ? portalDefault : '/my-financials/invoices';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/partners') {
@@ -771,12 +830,11 @@ function Layout({ children }: LayoutProps) {
       router.navigate(path);
       setCurrentRoute(path);
     }
-  }, [saveCurrentPageBeforeSettings, getLastRouteForModule, userType, allowedModules]);
+  }, [saveCurrentPageBeforeSettings, getLastRouteForModule, userType, allowedModules, portalRole]);
 
   // Guard direct URL access to modules without read permission.
   useEffect(() => {
     if (permissionsLoading || accessLoading) return;
-    if (isSuperAdminUser) return;
 
     const first = (currentRoute.split('/')[1] || '').toLowerCase();
     const map: Partial<Record<string, ModuleKey>> = {
@@ -787,6 +845,7 @@ function Layout({ children }: LayoutProps) {
       inventory: 'inventory',
       manufacturing: 'manufacturing',
       financials: 'financials',
+      'my-financials': 'financials',
       partners: 'partners',
       settings: 'settings',
     };
@@ -813,7 +872,7 @@ function Layout({ children }: LayoutProps) {
         setCurrentRoute('/dashboard');
       }
     }
-  }, [currentRoute, permissionsLoading, accessLoading, isSuperAdminUser, userType, allowedModules, can]);
+  }, [currentRoute, permissionsLoading, accessLoading, userType, allowedModules, can]);
 
   // Sidebar siempre colapsado: solo iconos; nombres y tabs en menú flotante al hover
   const sidebarWidth = useMemo(() => '3.5rem', []);
@@ -980,7 +1039,15 @@ function Layout({ children }: LayoutProps) {
                 const isHovered = hoveredNavHref === item.href;
                 const isActive = isNavItemActive(item.name, item.href) || isHovered;
                 const Icon = item.icon;
-                const tabs = MODULE_TABS[item.href] ?? [];
+                const tabs = item.href === '/my-financials'
+                  ? getPortalFinancialTabs(portalRole)
+                  : item.href === '/catalog'
+                  ? getCatalogTabs(can)
+                  : item.href === '/manufacturing'
+                  ? getManufacturingTabs(can)
+                  : item.href === '/financials' && userType === 'portal'
+                  ? getPortalFinancialTabs(portalRole)
+                  : (MODULE_TABS[item.href] ?? []);
 
                 return (
                   <div
@@ -1034,9 +1101,17 @@ function Layout({ children }: LayoutProps) {
         )}
 
         {/* Menú flotante con tabs: renderizado en portal para no ser recortado por overflow del nav */}
-        {!isSettingsRoute && hoveredNavHref && popoverRect && (MODULE_TABS[hoveredNavHref]?.length ?? 0) > 0 && (() => {
+        {!isSettingsRoute && hoveredNavHref && popoverRect && (() => {
           const hoveredItem = otherNavItems.find((i) => i?.href === hoveredNavHref);
-          const tabs = MODULE_TABS[hoveredNavHref] ?? [];
+          const tabs = hoveredNavHref === '/my-financials'
+            ? getPortalFinancialTabs(portalRole)
+            : hoveredNavHref === '/catalog'
+            ? getCatalogTabs(can)
+            : hoveredNavHref === '/manufacturing'
+            ? getManufacturingTabs(can)
+            : hoveredNavHref === '/financials' && userType === 'portal'
+            ? getPortalFinancialTabs(portalRole)
+            : (MODULE_TABS[hoveredNavHref] ?? []);
           if (!hoveredItem || tabs.length === 0) return null;
           const popoverContent = (
             <div
@@ -1145,14 +1220,82 @@ function Layout({ children }: LayoutProps) {
                 <Search style={{ width: '16px', height: '16px' }} />
               </button>
               
-              <button 
-                className="p-1 rounded"
-                style={{ color: 'var(--gray-950)' }}
-                aria-label="View notifications"
-                title="Notifications"
-              >
-                <Bell style={{ width: '16px', height: '16px' }} />
-              </button>
+              <div className="relative" data-notifications-menu>
+                <button
+                  className="p-1 rounded relative"
+                  style={{ color: 'var(--gray-950)' }}
+                  aria-label="View notifications"
+                  title="Notifications"
+                  aria-expanded={isNotificationsOpen}
+                  aria-haspopup="menu"
+                  onClick={() => {
+                    setIsNotificationsOpen((prev) => !prev);
+                    setIsUserMenuOpen(false);
+                  }}
+                >
+                  <Bell style={{ width: '16px', height: '16px' }} />
+                  {unreadBellCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-600 text-white text-[10px] leading-4 text-center"
+                      aria-label={`${unreadBellCount} unread notifications`}
+                    >
+                      {unreadBellCount > 99 ? '99+' : unreadBellCount}
+                    </span>
+                  )}
+                </button>
+
+                {isNotificationsOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-[360px] max-h-[460px] overflow-auto bg-white shadow-lg border border-gray-200 rounded-md z-50"
+                    role="menu"
+                    aria-label="Notifications menu"
+                  >
+                    <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                      <div className="text-sm font-semibold text-gray-900">Notifications</div>
+                      <button
+                        type="button"
+                        onClick={() => markAllNotificationsAsRead()}
+                        className="text-xs text-blue-600 hover:text-blue-700"
+                      >
+                        Mark all read
+                      </button>
+                    </div>
+
+                    {notificationsLoading ? (
+                      <div className="px-3 py-4 text-sm text-gray-500">Loading...</div>
+                    ) : notifications.length === 0 ? (
+                      <div className="px-3 py-4 text-sm text-gray-500">No notifications yet.</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {notifications.map((n) => {
+                          const targetRoute = getNotificationTargetRoute(n);
+                          return (
+                            <button
+                              key={n.id}
+                              type="button"
+                              onClick={async () => {
+                                await markNotificationAsRead(n.id);
+                                setIsNotificationsOpen(false);
+                                if (targetRoute) router.navigate(targetRoute);
+                              }}
+                              className={`w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors ${!n.is_read ? 'bg-blue-50/50' : ''}`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="text-sm font-medium text-gray-900">{n.title}</div>
+                                {!n.is_read && <span className="w-2 h-2 rounded-full bg-blue-600 mt-1.5" />}
+                              </div>
+                              <div className="text-xs text-gray-600 mt-1">{n.message}</div>
+                              <div className="text-[11px] text-gray-400 mt-1">
+                                {new Date(n.created_at).toLocaleString()}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <button 
                 onClick={handleHelpClick}

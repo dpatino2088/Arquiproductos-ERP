@@ -84,7 +84,13 @@ export default function Quotes() {
   const [sortBy, setSortBy] = useState<'quote_no' | 'status' | 'customer_name' | 'total' | 'created_at'>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [statusTab, setStatusTab] = useState('all');
+  const [statusTab, setStatusTab] = useState(() => {
+    const raw = new URLSearchParams(window.location.search).get('status')?.toLowerCase() ?? 'all';
+    if (raw === 'draft' || raw === 'approved' || raw === 'cancelled' || raw === 'archived' || raw === 'all') {
+      return raw;
+    }
+    return 'all';
+  });
 
   const quotes = hookQuotes;
   const getStatusForDisplay = useCallback((quote: EnrichedQuote) => {

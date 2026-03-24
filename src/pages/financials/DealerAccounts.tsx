@@ -8,6 +8,8 @@ import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 import FinancialSubTabs from './FinancialSubTabs';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 const RISK_TABS: Array<{ value: DealerFinancialRisk; label: string }> = [
   { value: 'all', label: 'All' },
@@ -25,6 +27,11 @@ const SORT_OPTIONS = [
 
 export default function DealerAccounts() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { isPortal } = useAccessContext();
+  const pathname = window.location.pathname;
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const basePath = getFinancialBasePath(pathname);
+  const viewerMode = isPortal || myFinancialsMode;
   const [q, setQ] = useState('');
   const [risk, setRisk] = useState<DealerFinancialRisk>('all');
   const [sortKey, setSortKey] = useState('open_ar:desc');
@@ -32,8 +39,12 @@ export default function DealerAccounts() {
   const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
+    if (viewerMode) {
+      router.navigate(`${basePath}/statement`, false);
+      return;
+    }
     registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
-  }, [registerSubmodules]);
+  }, [registerSubmodules, viewerMode, basePath]);
 
   const { rows, total, isInitialLoading, error } = useDealerFinancialAccounts({
     q,
@@ -41,7 +52,10 @@ export default function DealerAccounts() {
     sortKey,
     page,
     pageSize,
+    enabled: !viewerMode,
   });
+
+  if (viewerMode) return null;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const tabs = RISK_TABS.map((tab) => ({ label: tab.label, value: tab.value, count: 0 }));

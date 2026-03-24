@@ -8,6 +8,7 @@ export default function Catalog() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { can, loading } = usePermissions();
   const canViewCatalog = can('catalog.read') || can('catalog.write');
+  const canViewBOM = can('catalog.write');
 
   useEffect(() => {
     if (loading) return;
@@ -19,14 +20,17 @@ export default function Catalog() {
     const currentPath = window.location.pathname;
     
     if (currentPath.startsWith('/catalog')) {
-      // Register Catalog sub-modules
-      registerSubmodules('Catalog', [
+      const catalogTabs = [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
-        { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
-      ]);
+        ...(canViewBOM ? [{ id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench }] : []),
+      ];
+      // Register Catalog sub-modules
+      registerSubmodules('Catalog', catalogTabs);
       
       // Only redirect to items if we're at the base /catalog route
       if (currentPath === '/catalog' || currentPath === '/catalog/') {
+        router.navigate('/catalog/items');
+      } else if (currentPath.startsWith('/catalog/bom') && !canViewBOM) {
         router.navigate('/catalog/items');
       }
     } else {
@@ -41,7 +45,7 @@ export default function Catalog() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog, loading]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog, canViewBOM, loading]);
 
   return null;
 }

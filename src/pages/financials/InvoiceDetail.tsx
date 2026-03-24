@@ -15,8 +15,11 @@ import { getSupabaseErrorMessageDetailed } from '../../lib/supabase-error-utils'
 import { formatDate } from '../../lib/utils';
 import { useAuth } from '../../hooks/useAuth';
 import { useGranularAccess } from '../../hooks/usePermissions';
+import { usePermissions } from '../../hooks/usePermissions';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
-import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { FINANCIAL_GROUP_TABS, getVisiblePortalFinancialSubTabs } from './financialSubmodules';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 interface DealerBilling {
   dealer_name: string;
@@ -101,7 +104,7 @@ interface ActiveDeliveryOverride {
 }
 
 function getInvoiceId(): string | null {
-  const match = window.location.pathname.match(/\/financials\/invoices\/([^/]+)/);
+  const match = window.location.pathname.match(/\/(?:financials|my-financials)\/invoices\/([^/]+)/);
   return match ? match[1] : null;
 }
 
@@ -129,6 +132,12 @@ export default function InvoiceDetail() {
   const addNotification = useUIStore((s) => s.addNotification);
   const { user } = useAuth();
   const { canDelete: canDeleteFin, canVoid: canVoidFin } = useGranularAccess('financials');
+  const { can } = usePermissions();
+  const { isInternal, isPortal, portalRole } = useAccessContext();
+  const pathname = window.location.pathname;
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const viewerMode = isPortal || myFinancialsMode;
+  const basePath = getFinancialBasePath(pathname);
 
   const [invoice, setInvoice] = useState<InvoiceHeader | null>(null);
   const [lines, setLines] = useState<InvoiceLine[]>([]);
@@ -164,7 +173,7 @@ export default function InvoiceDetail() {
   const [deliveryOverrideDialogOpen, setDeliveryOverrideDialogOpen] = useState(false);
   const [deliveryOverrideMode, setDeliveryOverrideMode] = useState<'authorize' | 'revoke'>('authorize');
   const hasAutoOpenedPdfRef = useRef(false);
-  const listPath = '/financials/invoices';
+  const listPath = `${basePath}/invoices`;
   const queryReturnTo = getReturnToFromCurrentQuery();
   const queryParams = new URLSearchParams(window.location.search);
   const openPdfOnly = queryParams.get('pdf') === '1';
@@ -175,21 +184,29 @@ export default function InvoiceDetail() {
   const hasRedirectBack =
     !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
   const canManageDeliveryOverride = role === 'admin' || role === 'superadmin';
+  const canUsePdf = isInternal || can('portal.financials.invoice_pdf.read');
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
+  useEffect(() => {
+    if (viewerMode) {
+      const portalTabs = getVisiblePortalFinancialSubTabs(can, portalRole, basePath);
+      registerSubmodules('My Financials', portalTabs.map((tab) => ({ id: tab.id, label: tab.label, href: tab.href })));
+      return;
+    }
+    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
+  }, [registerSubmodules, viewerMode, can, portalRole, basePath]);
 
   const fmt = (v: number, currency = 'USD') =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
 
   const handleBack = useCallback(() => {
     router.navigate(listPath);
-  }, []);
+  }, [listPath]);
   const handleBackContextual = useCallback(() => {
     navigateBackContextual(router, {
       queryReturnTo,
       fallback: listPath,
     });
-  }, [queryReturnTo]);
+  }, [queryReturnTo, listPath]);
 
   const refetch = useCallback(async () => {
     if (!invoiceId || !activeOrganizationId) { setLoading(false); return; }
@@ -829,15 +846,17 @@ export default function InvoiceDetail() {
   ];
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean }[] = [];
-  actionItems.push({ label: 'Preview PDF', onClick: handlePreviewPDF });
-  actionItems.push({ label: 'Download PDF', onClick: handleDownloadPDF });
-  if (status === 'draft') {
+  if (canUsePdf) {
+    actionItems.push({ label: 'Preview PDF', onClick: handlePreviewPDF });
+    actionItems.push({ label: 'Download PDF', onClick: handleDownloadPDF });
+  }
+  if (isInternal && status === 'draft') {
     actionItems.push({ label: 'Issue Invoice', onClick: () => updateStatus('issued') });
     if (totalApplied <= 0.005 && totalCredited <= 0.005 && canDeleteFin) {
       actionItems.push({ label: 'Delete Draft', onClick: () => setDeleteConfirmOpen(true), danger: true });
     }
   }
-  if (status === 'issued' || status === 'partial' || status === 'paid') {
+  if (isInternal && (status === 'issued' || status === 'partial' || status === 'paid')) {
     if (canVoidFin) actionItems.push({ label: 'Void Invoice', onClick: () => setVoidDialogOpen(true), danger: true });
     const creditableRemaining = Math.max(Number(invoice.total) - totalCredited, 0);
     if (creditableRemaining > 0.005) {
@@ -1152,7 +1171,7 @@ export default function InvoiceDetail() {
 
       {activeTab === 'payments' && (
         <div className="space-y-4">
-          {balanceDue > 0 && (status === 'issued' || status === 'partial') && !applyFormOpen && (
+          {isInternal && balanceDue > 0 && (status === 'issued' || status === 'partial') && !applyFormOpen && (
             <div className="mb-4 flex justify-end">
               <button
                 type="button"
@@ -1246,7 +1265,7 @@ export default function InvoiceDetail() {
                     <tr
                       key={a.id}
                       className="border-t hover:bg-gray-50 cursor-pointer"
-                      onClick={() => router.navigate(withReturnTo(`/financials/payments/${a.payment_id}`))}
+                      onClick={() => router.navigate(withReturnTo(`${basePath}/payments/${a.payment_id}`))}
                     >
                       <td className="px-4 py-4">{formatDate(a.Payments?.payment_date)}</td>
                       <td className="px-4 py-4 capitalize">{a.Payments?.method ?? '—'}</td>

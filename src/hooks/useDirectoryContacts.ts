@@ -123,9 +123,6 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
   
   // ✅ Estándar #1: State Machine
   const [scopeState, setScopeState] = useState<ScopeState>('idle');
-  
-  // Cache por scopeKey (optimization)
-  const cacheRef = useRef<Map<string, DirectoryContact[]>>(new Map());
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchIdRef = useRef(0);
@@ -260,18 +257,6 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
     const thisFetchId = ++fetchIdRef.current;
     const currentScopeKey = scopeKey;
 
-    if (cacheRef.current.has(currentScopeKey) && scopeKeyRef.current === currentScopeKey) {
-      const cached = cacheRef.current.get(currentScopeKey)!;
-      if (import.meta.env.DEV) {
-        console.log('[useDirectoryContacts] Cache HIT:', { scopeKey: currentScopeKey, count: cached.length });
-      }
-      setContacts(cached);
-      setScopeState('ready');
-      setHasResolvedOnce(true);
-      setIsPending(false);
-      return;
-    }
-
     setIsPending(true);
     setScopeState(hasResolvedOnce ? 'switching' : 'loading_scope');
 
@@ -315,7 +300,6 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
         });
       }
 
-      cacheRef.current.set(currentScopeKey, mapped);
       setContacts(mapped);
       setError(null);
       setScopeState('ready');

@@ -18,6 +18,7 @@ import CostEngineSettings from './CostEngineSettings';
 import DealerProfile from './DealerProfile';
 import WorkCentersSettings from './WorkCentersSettings';
 import FabricRulesSettings from './FabricRulesSettings';
+import AdminRoles from '../admin/Roles';
 
 export default function CompanySettings() {
   const { isMember, loading: roleLoading } = useCurrentOrgRole();
@@ -83,7 +84,7 @@ export default function CompanySettings() {
     }
   }, [currentRoute, activeSection]);
 
-  // When on /settings/roles we show Roles page (full page), so keep section in sync if user opens settings again
+  // Keep roles section in sync with route.
   useEffect(() => {
     if (currentRoute.includes('/settings/roles') && activeSection !== 'roles') {
       setActiveSection('roles');
@@ -139,7 +140,7 @@ export default function CompanySettings() {
     } else if (sectionId === 'fabric-rules') {
       router.navigate('/settings/fabric-rules');
     } else if (sectionId === 'roles') {
-      router.navigate('/admin/roles');
+      router.navigate('/settings/roles');
     }
   };
 
@@ -213,6 +214,10 @@ export default function CompanySettings() {
 
     if (activeSection === 'fabric-rules') {
       return <FabricRulesSettings />;
+    }
+
+    if (activeSection === 'roles') {
+      return <AdminRoles embedded />;
     }
 
     // Default content for other sections (shouldn't happen with current menu)

@@ -122,8 +122,6 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
   
   // ✅ Estándar #1: State Machine
   const [scopeState, setScopeState] = useState<ScopeState>('idle');
-  
-  const cacheRef = useRef<Map<string, DirectoryCustomer[]>>(new Map());
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchIdRef = useRef(0);
@@ -233,18 +231,6 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
     const thisFetchId = ++fetchIdRef.current;
     const currentScopeKey = scopeKey;
 
-    if (cacheRef.current.has(currentScopeKey) && scopeKeyRef.current === currentScopeKey) {
-      const cached = cacheRef.current.get(currentScopeKey)!;
-      if (import.meta.env.DEV) {
-        console.log('[useDirectoryCustomers] Cache HIT:', { scopeKey: currentScopeKey, count: cached.length });
-      }
-      setCustomers(cached);
-      setScopeState('ready');
-      setHasResolvedOnce(true);
-      setIsPending(false);
-      return;
-    }
-
     setIsPending(true);
     setScopeState(hasResolvedOnce ? 'switching' : 'loading_scope');
 
@@ -286,7 +272,6 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
         });
       }
 
-      cacheRef.current.set(currentScopeKey, mapped);
       setCustomers(mapped);
       setError(null);
       setScopeState('ready');

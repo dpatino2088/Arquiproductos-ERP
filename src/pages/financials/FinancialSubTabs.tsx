@@ -1,14 +1,24 @@
 import { useMemo } from 'react';
 import { router } from '../../lib/router';
-import { getFinancialGroup, getVisibleFinancialSubTabs } from './financialSubmodules';
+import { getFinancialGroup, getVisibleFinancialSubTabs, getVisiblePortalFinancialSubTabs } from './financialSubmodules';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 export default function FinancialSubTabs() {
   const pathname = window.location.pathname;
   const { can } = usePermissions();
+  const { isPortal, portalRole } = useAccessContext();
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const basePath = getFinancialBasePath(pathname);
 
   const group = useMemo(() => getFinancialGroup(pathname), [pathname]);
-  const subTabs = useMemo(() => getVisibleFinancialSubTabs(group, can), [group, can]);
+  const subTabs = useMemo(
+    () => ((isPortal || myFinancialsMode)
+      ? getVisiblePortalFinancialSubTabs(can, portalRole, basePath)
+      : getVisibleFinancialSubTabs(group, can)),
+    [can, group, isPortal, portalRole, myFinancialsMode, basePath],
+  );
 
   const activeTabId = useMemo(() => {
     const match = subTabs.filter(
@@ -19,7 +29,7 @@ export default function FinancialSubTabs() {
   }, [pathname, subTabs]);
 
   return (
-    <nav className="flex items-center gap-1 mb-6" role="tablist" aria-label={`${group === 'ar' ? 'Receivable' : 'Payable'} sub-navigation`}>
+    <nav className="flex items-center gap-1 mb-6" role="tablist" aria-label={(isPortal || myFinancialsMode) ? 'My Financials sub-navigation' : `${group === 'ar' ? 'Receivable' : 'Payable'} sub-navigation`}>
       {subTabs.length === 0 && (
         <div className="text-sm text-gray-500">No tabs available</div>
       )}

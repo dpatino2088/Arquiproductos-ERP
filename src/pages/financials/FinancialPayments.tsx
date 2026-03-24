@@ -10,9 +10,13 @@ import { useUIStore } from '../../stores/ui-store';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import { Search, Plus, ArrowLeft, DollarSign } from 'lucide-react';
-import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { FINANCIAL_GROUP_TABS, getVisiblePortalFinancialSubTabs } from './financialSubmodules';
 import { formatDate } from '../../lib/utils';
 import FinancialSubTabs from './FinancialSubTabs';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
+import { usePermissions } from '../../hooks/usePermissions';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 const STATUS_VALUES = ['all', 'unassigned', 'unapplied', 'partial', 'applied', 'void'] as const;
 const STATUS_LABELS: Record<string, string> = {
@@ -47,6 +51,14 @@ function getErrorMessage(err: unknown): string {
 export default function FinancialPayments() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
+  const { isInternal, isPortal, portalDealerId, portalRole } = useAccessContext();
+  const { can } = usePermissions();
+  const { activeDealerId } = useActiveDealer();
+  const pathname = window.location.pathname;
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const viewerMode = isPortal || myFinancialsMode;
+  const basePath = getFinancialBasePath(pathname);
+  const effectiveDealerId = viewerMode ? (portalDealerId ?? activeDealerId ?? null) : null;
 
   const { user } = useAuth();
   const addNotification = useUIStore((s) => s.addNotification);
@@ -68,7 +80,7 @@ export default function FinancialPayments() {
   const [formDescription, setFormDescription] = useState('');
   const [formSalesOrderId, setFormSalesOrderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const listPath = '/financials/payments';
+  const listPath = `${basePath}/payments`;
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
     const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
@@ -83,7 +95,14 @@ export default function FinancialPayments() {
     });
   }, [queryReturnTo]);
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
+  useEffect(() => {
+    if (viewerMode) {
+      const portalTabs = getVisiblePortalFinancialSubTabs(can, portalRole, basePath);
+      registerSubmodules('My Financials', portalTabs.map((tab) => ({ id: tab.id, label: tab.label, href: tab.href })));
+      return;
+    }
+    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
+  }, [registerSubmodules, viewerMode, can, portalRole, basePath]);
 
   // Open "Record New Payment" form when navigating from SO (e.g. /financials/payments?new=1)
   useEffect(() => {
@@ -109,10 +128,10 @@ export default function FinancialPayments() {
       }
     }
 
-    if (shouldOpen) {
+    if (shouldOpen && isInternal) {
       setFormOpen(true);
     }
-  }, []);
+  }, [isInternal]);
 
   const fetchPayments = useCallback(async () => {
     if (!activeOrganizationId) { setLoading(false); return; }
@@ -123,12 +142,15 @@ export default function FinancialPayments() {
       const extendedSelect = `${baseSelect}, description`;
       let rows: (Payment & { dealer_id: string })[] = [];
 
-      const primary = await supabase
+      let primaryQuery = supabase
         .from('Payments')
         .select(extendedSelect)
         .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
-        .order('payment_date', { ascending: false });
+        .eq('deleted', false);
+      if (effectiveDealerId) {
+        primaryQuery = primaryQuery.eq('dealer_id', effectiveDealerId);
+      }
+      const primary = await primaryQuery.order('payment_date', { ascending: false });
 
       if (primary.error) {
         const msg = getErrorMessage(primary.error).toLowerCase();
@@ -137,12 +159,15 @@ export default function FinancialPayments() {
           throw primary.error;
         }
 
-        const fallback = await supabase
+        let fallbackQuery = supabase
           .from('Payments')
           .select(baseSelect)
           .eq('organization_id', activeOrganizationId)
-          .eq('deleted', false)
-          .order('payment_date', { ascending: false });
+          .eq('deleted', false);
+        if (effectiveDealerId) {
+          fallbackQuery = fallbackQuery.eq('dealer_id', effectiveDealerId);
+        }
+        const fallback = await fallbackQuery.order('payment_date', { ascending: false });
 
         if (fallback.error) throw fallback.error;
         rows = ((fallback.data ?? []) as (Payment & { dealer_id: string })[]).map((row) => ({
@@ -211,19 +236,21 @@ export default function FinancialPayments() {
     } finally {
       setLoading(false);
     }
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, effectiveDealerId]);
 
   useEffect(() => { void fetchPayments(); }, [fetchPayments]);
 
   useEffect(() => {
+    if (!isInternal || viewerMode) return;
     if (!activeOrganizationId) return;
     supabase.from('Dealers').select('id, dealer_name, dealer_no')
       .eq('organization_id', activeOrganizationId).eq('deleted', false).eq('status', 'active')
       .order('dealer_name', { ascending: true })
       .then(({ data }: { data: { id: string; dealer_name: string; dealer_no: string | null }[] | null }) => { if (data) setDealers(data); });
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, isInternal, viewerMode]);
 
   const handleRecordPayment = async () => {
+    if (!isInternal) return;
     if (!activeOrganizationId || !formAmount) return;
     const amount = parseFloat(formAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -310,11 +337,11 @@ export default function FinancialPayments() {
 
   return (
     <div className="py-6 px-6">
-      <FinancialSubTabs />
+      {!viewerMode && <FinancialSubTabs />}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Payments</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Payments received from dealers</p>
+          <p className="text-sm text-gray-500 mt-0.5">{viewerMode ? 'Dealer payments and applications (viewer)' : 'Payments received from dealers'}</p>
         </div>
         <div className="flex items-center gap-2">
           {hasRedirectBack && (
@@ -328,7 +355,7 @@ export default function FinancialPayments() {
               Back
             </button>
           )}
-          {!formOpen && (
+          {isInternal && !viewerMode && !formOpen && (
             <button
               type="button"
               onClick={() => setFormOpen(true)}
@@ -341,7 +368,7 @@ export default function FinancialPayments() {
         </div>
       </div>
 
-      {formOpen && (
+      {isInternal && !viewerMode && formOpen && (
         <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Record New Payment</h3>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -469,7 +496,7 @@ export default function FinancialPayments() {
                     <tr
                       key={p.id}
                       className={`border-t hover:bg-gray-50 cursor-pointer ${isVoid ? 'opacity-60' : ''}`}
-                      onClick={() => router.navigate(withReturnTo(`/financials/payments/${p.id}`))}
+                      onClick={() => router.navigate(withReturnTo(`${basePath}/payments/${p.id}`))}
                     >
                       <td className={`px-4 py-4 ${isVoid ? 'line-through' : ''}`}>{formatDate(p.payment_date)}</td>
                       <td className={`px-4 py-4 text-gray-700 ${isVoid ? 'line-through' : ''}`}>{p.Dealers?.dealer_name ?? '—'}</td>

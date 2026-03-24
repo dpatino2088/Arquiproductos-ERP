@@ -12,7 +12,10 @@ import { getSupabaseErrorMessageDetailed } from '../../lib/supabase-error-utils'
 import { formatDate } from '../../lib/utils';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import { useGranularAccess } from '../../hooks/usePermissions';
-import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { FINANCIAL_GROUP_TABS, getVisiblePortalFinancialSubTabs } from './financialSubmodules';
+import { useAccessContext } from '../../hooks/useAccessContext';
+import { usePermissions } from '../../hooks/usePermissions';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 interface DealerInfo {
   dealer_name: string;
@@ -84,7 +87,7 @@ function getErrorMessage(err: unknown): string {
 }
 
 function getPaymentId(): string | null {
-  const match = window.location.pathname.match(/\/financials\/payments\/([^/]+)/);
+  const match = window.location.pathname.match(/\/(?:financials|my-financials)\/payments\/([^/]+)/);
   return match ? match[1] : null;
 }
 
@@ -109,6 +112,12 @@ export default function PaymentDetail() {
   const paymentId = getPaymentId();
   const { activeOrganizationId } = useOrganizationContext();
   const { registerSubmodules } = useSubmoduleNav();
+  const { isInternal, isPortal, portalRole } = useAccessContext();
+  const { can } = usePermissions();
+  const pathname = window.location.pathname;
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const viewerMode = isPortal || myFinancialsMode;
+  const basePath = getFinancialBasePath(pathname);
 
   const addNotification = useUIStore((s) => s.addNotification);
   const { user } = useAuth();
@@ -132,7 +141,7 @@ export default function PaymentDetail() {
   const [voidReason, setVoidReason] = useState('');
   const [voidingPayment, setVoidingPayment] = useState(false);
   const [unapplyTarget, setUnapplyTarget] = useState<InvoiceApplication | null>(null);
-  const listPath = '/financials/payments';
+  const listPath = `${basePath}/payments`;
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
     const trimmed = (path ?? '').split('?')[0].split('#')[0].replace(/\/+$/, '');
@@ -142,15 +151,22 @@ export default function PaymentDetail() {
     !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
   const onBack = useCallback(() => {
     router.navigate(listPath);
-  }, []);
+  }, [listPath]);
   const onBackContextual = useCallback(() => {
     navigateBackContextual(router, {
       queryReturnTo,
       fallback: listPath,
     });
-  }, [queryReturnTo]);
+  }, [queryReturnTo, listPath]);
 
-  useEffect(() => { registerSubmodules('Financials', FINANCIAL_GROUP_TABS); }, [registerSubmodules]);
+  useEffect(() => {
+    if (viewerMode) {
+      const portalTabs = getVisiblePortalFinancialSubTabs(can, portalRole, basePath);
+      registerSubmodules('My Financials', portalTabs.map((tab) => ({ id: tab.id, label: tab.label, href: tab.href })));
+      return;
+    }
+    registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
+  }, [registerSubmodules, viewerMode, can, portalRole, basePath]);
 
   const fmt = (v: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
@@ -253,6 +269,7 @@ export default function PaymentDetail() {
   }, [activeOrganizationId]);
 
   const handleAssignDealer = async () => {
+    if (!isInternal) return;
     if (!paymentId || !assignDealerId) return;
     setAssigning(true);
     try {
@@ -354,6 +371,7 @@ export default function PaymentDetail() {
   }, [activeOrganizationId, payment?.dealer_id, addNotification]);
 
   const handleOpenApplyForm = async () => {
+    if (!isInternal) return;
     if (!payment?.dealer_id) {
       addNotification({ type: 'error', title: 'Dealer required', message: 'Assign a dealer before applying this payment.' });
       return;
@@ -365,6 +383,7 @@ export default function PaymentDetail() {
   };
 
   const handleApplyToInvoice = async () => {
+    if (!isInternal) return;
     if (!paymentId || !selectedInvoiceId || !applyAmount) return;
     const amount = Number(applyAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -414,6 +433,7 @@ export default function PaymentDetail() {
   };
 
   const confirmUnapply = async () => {
+    if (!isInternal) return;
     if (!unapplyTarget || !paymentId || !activeOrganizationId) return;
     try {
       const { error: delErr } = await supabase
@@ -443,6 +463,7 @@ export default function PaymentDetail() {
   };
 
   const handleVoidPayment = async () => {
+    if (!isInternal) return;
     if (!paymentId || !payment) return;
     if (voidReason.trim().length < 3) {
       addNotification({ type: 'error', title: 'Validation', message: 'Please provide a void reason.' });
@@ -549,7 +570,7 @@ export default function PaymentDetail() {
               Back
             </button>
           )}
-          {payment.status !== 'void' && unapplied >= payment.amount - 0.005 && canVoidFin && (
+          {isInternal && payment.status !== 'void' && unapplied >= payment.amount - 0.005 && canVoidFin && (
             <button
               type="button"
               onClick={() => setVoidDialogOpen(true)}
@@ -681,7 +702,7 @@ export default function PaymentDetail() {
                 </div>
               )}
             </dl>
-          ) : (
+          ) : isInternal ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
                 <span className="text-xs text-amber-700 font-medium">Unassigned</span>
@@ -709,13 +730,17 @@ export default function PaymentDetail() {
                 {assigning ? 'Assigning...' : 'Assign Dealer'}
               </button>
             </div>
+          ) : (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              Dealer information is unavailable for this payment.
+            </div>
           )}
         </div>
       </div>
 
       {activeTab === 'invoices' && (
         <div className="space-y-4">
-          {unapplied > 0.005 && payment.dealer_id && payment.status !== 'void' && !applyFormOpen && (
+          {isInternal && unapplied > 0.005 && payment.dealer_id && payment.status !== 'void' && !applyFormOpen && (
             <div className="flex justify-end">
               <button
                 type="button"
@@ -726,7 +751,7 @@ export default function PaymentDetail() {
               </button>
             </div>
           )}
-          {applyFormOpen && (
+          {isInternal && applyFormOpen && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
               <h4 className="text-sm font-semibold text-gray-800">Apply Payment to Dealer Invoice</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -809,7 +834,7 @@ export default function PaymentDetail() {
                   <tr
                     key={a.id}
                     className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(`/financials/invoices/${a.invoice_id}`)}
+                    onClick={() => router.navigate(`${basePath}/invoices/${a.invoice_id}`)}
                   >
                     <td className="px-4 py-4 font-medium text-primary">{a.Invoice?.invoice_number ?? '—'}</td>
                     <td className="px-4 py-4 text-right font-mono text-gray-900">{a.Invoice ? fmt(a.Invoice.total) : '—'}</td>
@@ -819,7 +844,7 @@ export default function PaymentDetail() {
                     </td>
                     <td className="px-4 py-4 text-gray-500">{formatDate(a.created_at)}</td>
                     <td className="px-4 py-4 text-right">
-                      {payment.status !== 'void' && (
+                      {isInternal && payment.status !== 'void' && (
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setUnapplyTarget(a); }}
@@ -848,7 +873,7 @@ export default function PaymentDetail() {
         </div>
       )}
 
-      {voidDialogOpen && (
+      {isInternal && voidDialogOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-4 w-full max-w-md">
             <h4 className="text-sm font-semibold text-gray-900 mb-2">Void Payment</h4>
@@ -883,7 +908,7 @@ export default function PaymentDetail() {
         </div>
       )}
 
-      {unapplyTarget && (
+      {isInternal && unapplyTarget && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-4 w-full max-w-md">
             <h4 className="text-sm font-semibold text-gray-900 mb-2">Unapply Payment</h4>

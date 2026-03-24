@@ -233,6 +233,11 @@ export function dashboardOverviewKey(scopeKey: string): unknown[] {
   return ['manufacturing', 'dashboard', 'overview', LIST_QUERY_VERSION, scopeKey];
 }
 
+/** Commercial dashboard overview (org/dealer scoped) */
+export function commercialDashboardOverviewKey(scopeKey: string): unknown[] {
+  return ['dashboard', 'commercial', 'overview', LIST_QUERY_VERSION, scopeKey];
+}
+
 /** Manufacturing Dispatch Board */
 export function dispatchBoardKey(scopeKey: string, days: number): unknown[] {
   return ['manufacturing', 'dispatch', LIST_QUERY_VERSION, scopeKey, days];

@@ -46,7 +46,11 @@ export default function SalesOrdersPage() {
   const orders: SalesOrderRow[] = (salesOrders ?? []) as SalesOrderRow[];
   const [moCountBySoId, setMoCountBySoId] = useState<Record<string, number>>({});
   const [financialBySoId, setFinancialBySoId] = useState<Record<string, { total_paid: number }>>({});
-  const [activeTab, setActiveTab] = useState('all');
+  const [activeTab, setActiveTab] = useState(() => {
+    const raw = new URLSearchParams(window.location.search).get('status')?.toLowerCase() ?? 'all';
+    if ((STATUS_VALUES as readonly string[]).includes(raw)) return raw;
+    return 'all';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);

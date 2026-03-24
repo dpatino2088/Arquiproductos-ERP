@@ -12,6 +12,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useAuthStore } from '../../stores/auth-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { usePermissions } from '../../hooks/usePermissions';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { supabase } from '../../lib/supabase/client';
 import { formatDate } from '../../lib/utils';
@@ -741,8 +742,14 @@ interface DealerUsersProps {
 const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function DealerUsers({ hideSectionHeader = false, useInlineEdit = false }, ref) {
   const { activeOrganizationId, activeOrganization } = useOrganizationContext();
   const { userType, portalDealerId, portalRole } = useAccessContext();
+  const { can } = usePermissions();
   const isPortalManager = userType === 'portal' && portalRole === 'dealer_manager';
   const isPortal = userType === 'portal';
+  const canManageDealerUsersInternal = !isPortal && (
+    can('org.users.manage') ||
+    can('settings.write') ||
+    can('partners.write')
+  );
 
   const orgUsers = useDealerAppUsersForOrg(isPortal ? null : activeOrganizationId);
   const dealerOnlyUsers = useAppUsersByDealer(isPortal ? portalDealerId ?? undefined : undefined, { onlyWhenDealerId: true });
@@ -1021,7 +1028,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {(activeOrganizationId || (isPortal && portalDealerId)) && (isPortalManager || !isPortal) && (
+            {(activeOrganizationId || (isPortal && portalDealerId)) && (isPortalManager || canManageDealerUsersInternal) && (
               <button
                 onClick={() => setIsCreateOpen(true)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90"
@@ -1179,7 +1186,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                     {/* Actions - only Dealer Manager (portal) or internal users can manage */}
                     <td className="py-4 px-6">
                       <div className="flex items-center justify-end gap-2">
-                        {(isPortalManager || !isPortal) && user.status === 'invited' && (
+                        {(isPortalManager || canManageDealerUsersInternal) && user.status === 'invited' && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1193,7 +1200,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                           </button>
                         )}
                         
-                        {(isPortalManager || !isPortal) && user.status === 'invited' && user.email && (
+                        {(isPortalManager || canManageDealerUsersInternal) && user.status === 'invited' && user.email && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleResendInvite(user)}
@@ -1233,7 +1240,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                         )}
 
                         {/* Edit / Archive / Delete - only for Manager (portal) or internal */}
-                        {(isPortalManager || !isPortal) && (
+                        {(isPortalManager || canManageDealerUsersInternal) && (
                           <>
                             <button
                               onClick={(e) => {

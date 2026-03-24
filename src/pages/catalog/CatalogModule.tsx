@@ -5,6 +5,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { usePermissions } from '../../hooks/usePermissions';
 import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
 import { catalogItemsListKey } from '../../lib/queryKeys';
 import { warmModuleQueries } from '../../lib/warmModuleQueries';
@@ -30,15 +31,20 @@ export default function CatalogModule({ activeTab }: Props) {
   const { activeOrganizationId } = useOrganizationContext();
   const { activeDealerId, hasHydrated } = useActiveDealer();
   const { userType } = useAccessContext();
+  const { can } = usePermissions();
+  const canViewBOM = can('catalog.write');
 
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/catalog')) {
-      registerSubmodules('Catalog', [
+      const tabs = [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
-        { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
-      ]);
+        ...(canViewBOM ? [{ id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench }] : []),
+      ];
+      registerSubmodules('Catalog', tabs);
       if (currentPath === '/catalog' || currentPath === '/catalog/') {
+        router.navigate('/catalog/items');
+      } else if (currentPath.startsWith('/catalog/bom') && !canViewBOM) {
         router.navigate('/catalog/items');
       }
     } else {
@@ -47,7 +53,7 @@ export default function CatalogModule({ activeTab }: Props) {
     return () => {
       if (!window.location.pathname.startsWith('/catalog')) clearSubmoduleNav();
     };
-  }, [registerSubmodules, clearSubmoduleNav]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewBOM]);
 
   useEffect(() => {
     if (!activeOrganizationId || (userType === 'internal' && !hasHydrated)) return;
@@ -70,7 +76,7 @@ export default function CatalogModule({ activeTab }: Props) {
       <div hidden={activeTab !== 'items'} aria-hidden={activeTab !== 'items'}>
         <Items />
       </div>
-      <div hidden={activeTab !== 'bom'} aria-hidden={activeTab !== 'bom'}>
+      <div hidden={activeTab !== 'bom' || !canViewBOM} aria-hidden={activeTab !== 'bom' || !canViewBOM}>
         <BOM />
       </div>
     </>

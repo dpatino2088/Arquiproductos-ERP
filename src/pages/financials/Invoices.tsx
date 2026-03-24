@@ -3,15 +3,17 @@ import { supabase } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import StatusTabs from '../../components/shared/StatusTabs';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 import { Search, Plus, FileText } from 'lucide-react';
-import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
+import { FINANCIAL_GROUP_TABS, getVisiblePortalFinancialSubTabs } from './financialSubmodules';
 import { formatDate } from '../../lib/utils';
 import FinancialSubTabs from './FinancialSubTabs';
 import { usePermissions } from '../../hooks/usePermissions';
+import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
 
 const STATUS_VALUES = ['all', 'draft', 'issued', 'partial', 'paid', 'void'] as const;
 const STATUS_LABELS: Record<string, string> = {
@@ -34,16 +36,17 @@ interface DealerInvoice {
   SalesOrders?: { sales_order_no: string } | null;
 }
 
-function getInvoiceIdFromPath(): string | null {
-  const match = window.location.pathname.match(/\/financials\/invoices\/([^/]+)/);
-  return match ? match[1] : null;
-}
-
 export default function Invoices() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
-  const { isInternal } = useAccessContext();
-  const { hasAnyPermission } = usePermissions();
+  const { isInternal, isPortal, portalDealerId, portalRole } = useAccessContext();
+  const { activeDealerId } = useActiveDealer();
+  const { hasAnyPermission, can } = usePermissions();
+  const pathname = window.location.pathname;
+  const myFinancialsMode = isMyFinancialsPath(pathname);
+  const viewerMode = isPortal || myFinancialsMode;
+  const basePath = getFinancialBasePath(pathname);
+  const effectiveDealerId = viewerMode ? (portalDealerId ?? activeDealerId ?? null) : null;
   const canCreateInvoice = hasAnyPermission([
     'financials.invoices.write',
   ]);
@@ -55,20 +58,28 @@ export default function Invoices() {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
+    if (viewerMode) {
+      const portalTabs = getVisiblePortalFinancialSubTabs(can, portalRole, basePath);
+      registerSubmodules('My Financials', portalTabs.map((tab) => ({ id: tab.id, label: tab.label, href: tab.href })));
+      return;
+    }
     registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
-  }, [registerSubmodules]);
+  }, [registerSubmodules, viewerMode, can, portalRole, basePath]);
 
   const fetchInvoices = useCallback(async () => {
     if (!activeOrganizationId) { setLoading(false); return; }
     setLoading(true);
     setError(null);
     try {
-      const { data, error: err } = await supabase
+      let query = supabase
         .from('DealerInvoices')
         .select('id, invoice_number, status, issue_date, due_date, currency_code, subtotal, tax_total, total, sales_order_id, dealer_id, created_at')
         .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
-        .order('created_at', { ascending: false });
+        .eq('deleted', false);
+      if (effectiveDealerId) {
+        query = query.eq('dealer_id', effectiveDealerId);
+      }
+      const { data, error: err } = await query.order('created_at', { ascending: false });
       if (err) throw err;
 
       const rows = (data ?? []) as (DealerInvoice & { dealer_id: string })[];
@@ -102,7 +113,7 @@ export default function Invoices() {
     } finally {
       setLoading(false);
     }
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, effectiveDealerId]);
 
   useEffect(() => { void fetchInvoices(); }, [fetchInvoices]);
 
@@ -130,13 +141,13 @@ export default function Invoices() {
 
   return (
     <div className="py-6 px-6">
-      <FinancialSubTabs />
+      {!viewerMode && <FinancialSubTabs />}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Invoices</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Dealer invoices (AR)</p>
+          <p className="text-sm text-gray-500 mt-0.5">{viewerMode ? 'Dealer invoices (viewer)' : 'Dealer invoices (AR)'}</p>
         </div>
-        {isInternal && canCreateInvoice && (
+        {isInternal && !viewerMode && canCreateInvoice && (
           <button
             type="button"
             onClick={() => router.navigate('/financials/invoices/new')}
@@ -199,7 +210,7 @@ export default function Invoices() {
                   <tr
                     key={inv.id}
                     className="border-t hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.navigate(withReturnTo(`/financials/invoices/${inv.id}`))}
+                    onClick={() => router.navigate(withReturnTo(`${basePath}/invoices/${inv.id}`))}
                   >
                     <td className="px-4 py-4 font-medium text-primary">{inv.invoice_number}</td>
                     <td className="px-4 py-4 text-gray-700">{inv.Dealers?.dealer_name ?? '—'}</td>

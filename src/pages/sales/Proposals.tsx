@@ -91,7 +91,13 @@ export default function Proposals() {
   const [sortBy, setSortBy] = useState<'proposal_no' | 'status' | 'customer_name' | 'total' | 'updated_at'>('updated_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [statusTab, setStatusTab] = useState('all');
+  const [statusTab, setStatusTab] = useState(() => {
+    const raw = new URLSearchParams(window.location.search).get('status')?.toLowerCase() ?? 'all';
+    if (raw === 'draft' || raw === 'sent' || raw === 'accepted' || raw === 'rejected' || raw === 'expired' || raw === 'archived' || raw === 'all') {
+      return raw;
+    }
+    return 'all';
+  });
 
   const nonArchivedList = useMemo(() => list.filter((p) => !p.archived), [list]);
   const archivedCount = useMemo(() => list.filter((p) => p.archived).length, [list]);

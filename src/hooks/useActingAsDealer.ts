@@ -62,15 +62,6 @@ export function useActingAsDealer() {
 
   const mutation = useMutation({
     mutationFn: callSetActingDealer,
-    onMutate: async (nextDealerId) => {
-      await queryClient.cancelQueries({ queryKey: ACTING_DEALER_KEY });
-      const prev = queryClient.getQueryData<string | null>(ACTING_DEALER_KEY);
-      queryClient.setQueryData(ACTING_DEALER_KEY, nextDealerId);
-      return { prev };
-    },
-    onError: (_err, _nextDealerId, ctx) => {
-      queryClient.setQueryData(ACTING_DEALER_KEY, ctx?.prev ?? null);
-    },
     onSuccess: (activeDealerId) => {
       queryClient.setQueryData(ACTING_DEALER_KEY, activeDealerId);
       if (typeof window !== 'undefined' && activeOrganizationId) {
