@@ -382,17 +382,53 @@ export default function SalesOrderDetail() {
   const handleCreateMO = useCallback(async () => {
     if (!salesOrderId || !user?.id) return;
     setActionsOpen(false);
-    try {
-      const result = await createMO(salesOrderId, user.id, undefined, user.name);
-      if (result?.mo_id) {
-        router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${result.mo_id}`));
-      } else {
-        refetch();
-      }
-    } catch {
-      // useSOActions already shows notification
+    const eligibleLineIds = lines.filter((line) => !lineMoMap.has(line.id)).map((line) => line.id);
+    if (eligibleLineIds.length === 0) {
+      addNotification({
+        type: 'info',
+        title: 'Manufacturing',
+        message: 'All lines already have a Manufacturing Order.',
+      });
+      return;
     }
-  }, [salesOrderId, user, createMO, refetch]);
+    setCreatingMOForLines(true);
+    const created: Array<{ id: string; number: string }> = [];
+    const errors: string[] = [];
+    try {
+      for (const lineId of eligibleLineIds) {
+        try {
+          const result = await createMO(salesOrderId, user.id, lineId, user.name);
+          if (result?.mo_id) {
+            created.push({ id: result.mo_id, number: result.mo_number ?? result.mo_id });
+          }
+        } catch (err: unknown) {
+          errors.push(err instanceof Error ? err.message : 'Error creating Manufacturing Order');
+        }
+      }
+    } finally {
+      setCreatingMOForLines(false);
+    }
+
+    if (created.length > 0 && errors.length === 0 && created.length === 1) {
+      router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${created[0].id}`));
+    } else {
+      if (created.length > 0) {
+        addNotification({
+          type: 'success',
+          title: 'MOs Created',
+          message: `Created: ${created.map((c) => c.number).join(', ')}`,
+        });
+      }
+      if (errors.length > 0) {
+        addNotification({
+          type: 'error',
+          title: 'Some MOs failed',
+          message: errors.join('; '),
+        });
+      }
+      refetch();
+    }
+  }, [salesOrderId, user, lines, lineMoMap, createMO, addNotification, refetch]);
 
   const handleCreateMOForSelectedLines = useCallback(async () => {
     if (!salesOrderId || !user?.id || selectedLineIds.size === 0) return;
@@ -1238,11 +1274,11 @@ export default function SalesOrderDetail() {
                         <button
                           type="button"
                           onClick={handleCreateMO}
-                          disabled={isActing || !hasPaidAmount}
+                          disabled={isActing || creatingMOForLines || !hasPaidAmount}
                           className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
-                          <Factory className="w-4 h-4" />
-                          Create Manufacturing Order
+                          {creatingMOForLines ? <Loader2 className="w-4 h-4 animate-spin" /> : <Factory className="w-4 h-4" />}
+                          {eligibleLines.length > 1 ? `Create All Pending MOs (${eligibleLines.length})` : 'Create Manufacturing Order'}
                         </button>
                       </>
                     )}

@@ -9,7 +9,7 @@ import { withReturnTo } from '../../lib/navigation/returnTo';
 import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 import FinancialSubTabs from './FinancialSubTabs';
 import { useAccessContext } from '../../hooks/useAccessContext';
-import { getFinancialBasePath, isMyFinancialsPath } from './myFinancialsRoute';
+import { isMyFinancialsPath } from './myFinancialsRoute';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
 const RISK_TABS: Array<{ value: DealerFinancialRisk; label: string }> = [
@@ -31,7 +31,6 @@ export default function DealerAccounts() {
   const { isPortal } = useAccessContext();
   const pathname = window.location.pathname;
   const myFinancialsMode = isMyFinancialsPath(pathname);
-  const basePath = getFinancialBasePath(pathname);
   const viewerMode = isPortal || myFinancialsMode;
   const [q, setQ] = useState('');
   const [risk, setRisk] = useState<DealerFinancialRisk>('all');
@@ -41,11 +40,12 @@ export default function DealerAccounts() {
 
   useEffect(() => {
     if (viewerMode) {
-      router.navigate(`${basePath}/statement`, false);
+      // Viewer (dealer-facing) context is always served from /my-financials.
+      router.navigate('/my-financials/statement', false);
       return;
     }
     registerSubmodules('Financials', FINANCIAL_GROUP_TABS);
-  }, [registerSubmodules, viewerMode, basePath]);
+  }, [registerSubmodules, viewerMode]);
 
   const { rows, total, isInitialLoading, error } = useDealerFinancialAccounts({
     q,

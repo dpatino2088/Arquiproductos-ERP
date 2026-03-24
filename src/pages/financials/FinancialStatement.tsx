@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
@@ -12,10 +13,18 @@ export default function FinancialStatement() {
   const viewerMode = isPortal || myFinancialsMode;
   const dealerId = portalDealerId ?? activeDealerId ?? null;
 
-  if (!viewerMode) {
-    router.navigate('/financials/accounts', false);
-    return null;
-  }
+  useEffect(() => {
+    // Avoid render-time navigate loops and keep Financial Statement in canonical routes.
+    if (!viewerMode) {
+      router.navigate('/financials/accounts', false);
+      return;
+    }
+    if (!myFinancialsMode) {
+      router.navigate('/my-financials/statement', false);
+    }
+  }, [viewerMode, myFinancialsMode]);
+
+  if (!viewerMode || !myFinancialsMode) return null;
 
   if (!dealerId) {
     return (

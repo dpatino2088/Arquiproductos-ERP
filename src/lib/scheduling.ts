@@ -304,7 +304,7 @@ export function checkScheduleReadiness(
   }
 
   if (materialStatus === 'incomplete') {
-    warnings.push('Materials incomplete — generate Purchase Order first');
+    blockers.push('Materials incomplete — resolve Material Demand before scheduling');
   }
 
   return {

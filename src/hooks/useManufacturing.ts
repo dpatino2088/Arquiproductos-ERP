@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { useAuth } from './useAuth';
 import { normalizeUUID } from '../utils/uuid';
 
 // ============================================================================
@@ -576,22 +577,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
 export function useCreateManufacturingOrder() {
   const [isCreating, setIsCreating] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
-
-  const ensureBOMGenerated = async (manufacturingOrderId: string, manufacturingOrderNo?: string | null) => {
-    const { data: bomResult, error: bomError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
-      p_manufacturing_order_id: manufacturingOrderId,
-    });
-    if (bomError) {
-      throw new Error(`MO created, but BOM generation failed for ${manufacturingOrderNo ?? manufacturingOrderId}: ${bomError.message}`);
-    }
-    const bomOk = Boolean((bomResult as { ok?: boolean } | null)?.ok);
-    if (!bomOk) {
-      const errors = (bomResult as { errors?: string[] } | null)?.errors ?? [];
-      throw new Error(
-        `MO created, but BOM generation failed for ${manufacturingOrderNo ?? manufacturingOrderId}: ${errors.join('; ') || 'Unknown error'}`
-      );
-    }
-  };
+  const { user } = useAuth();
 
   const createManufacturingOrder = async (moData: {
     sales_order_id: string;
@@ -606,77 +592,48 @@ export function useCreateManufacturingOrder() {
 
     setIsCreating(true);
     try {
-      // Generate manufacturing order number
-      let moNumber: string;
-      try {
-        const { data: counterValue, error: counterError } = await supabase.rpc('get_next_counter_value', {
-          p_organization_id: activeOrganizationId,
-          p_key: 'manufacturing_order',
-        });
-
-        if (!counterError && counterValue !== null && counterValue !== undefined) {
-          moNumber = 'MO-' + String(counterValue).padStart(6, '0');
-        } else {
-          const timestamp = Date.now();
-          moNumber = `MO-TEMP-${timestamp}`;
-        }
-      } catch (err) {
-        const timestamp = Date.now();
-        moNumber = `MO-TEMP-${timestamp}`;
+      if (!user?.id) {
+        throw new Error('User not authenticated');
       }
 
-      const plannedPayload = {
-        organization_id: activeOrganizationId,
-        sales_order_id: moData.sales_order_id,
-        manufacturing_order_no: moNumber,
-        status: 'draft',
-        priority: moData.priority || 'normal',
-        planned_start_at: moData.planned_start_at || null,
-        planned_end_at: moData.planned_end_at || null,
-        notes: moData.notes || null,
-        deleted: false,
-        archived: false,
-      };
+      const { data: rpcData, error: rpcError } = await supabase.rpc('create_manufacturing_order', {
+        p_sales_order_id: moData.sales_order_id,
+        p_user_id: user.id,
+        p_sales_order_line_id: null,
+        p_user_name: user.name ?? user.email ?? null,
+      });
+      if (rpcError) throw rpcError;
 
-      const primary = await supabase
+      const rpcResult = (rpcData ?? null) as { mo_id?: string; mo_number?: string; error?: string } | null;
+      const moId = rpcResult?.mo_id ?? null;
+      if (!moId) {
+        throw new Error(rpcResult?.error || 'Failed to create Manufacturing Order');
+      }
+
+      const patchPayload: Record<string, unknown> = {};
+      if (moData.priority !== undefined) patchPayload.priority = moData.priority;
+      if (moData.planned_start_at !== undefined) patchPayload.planned_start_at = moData.planned_start_at || null;
+      if (moData.planned_end_at !== undefined) patchPayload.planned_end_at = moData.planned_end_at || null;
+      if (moData.notes !== undefined) patchPayload.notes = moData.notes || null;
+      if (Object.keys(patchPayload).length > 0) {
+        const { error: updateError } = await supabase
+          .from('ManufacturingOrders')
+          .update(patchPayload)
+          .eq('id', moId)
+          .eq('organization_id', activeOrganizationId);
+        if (updateError) throw updateError;
+      }
+
+      const { data: created, error: loadError } = await supabase
         .from('ManufacturingOrders')
-        .insert(plannedPayload)
-        .select()
+        .select('*')
+        .eq('id', moId)
+        .eq('organization_id', activeOrganizationId)
         .single();
-
-      if (!primary.error) {
-        await ensureBOMGenerated(primary.data.id, primary.data.manufacturing_order_no);
-        return primary.data;
+      if (loadError) {
+        throw loadError;
       }
-
-      const primaryMessage = String((primary.error as { message?: string })?.message ?? '').toLowerCase();
-      const missingPlannedColumns = primaryMessage.includes('planned_start_at') || primaryMessage.includes('planned_end_at');
-      if (!missingPlannedColumns) {
-        throw primary.error;
-      }
-
-      const fallbackPayload = {
-        organization_id: activeOrganizationId,
-        sales_order_id: moData.sales_order_id,
-        manufacturing_order_no: moNumber,
-        status: 'draft',
-        priority: moData.priority || 'normal',
-        planned_start_at: moData.planned_start_at ?? null,
-        planned_end_at: moData.planned_end_at ?? null,
-        notes: moData.notes || null,
-        deleted: false,
-        archived: false,
-      };
-
-      const fallback = await supabase
-        .from('ManufacturingOrders')
-        .insert(fallbackPayload)
-        .select()
-        .single();
-
-      if (fallback.error) throw fallback.error;
-      await ensureBOMGenerated(fallback.data.id, fallback.data.manufacturing_order_no);
-      return fallback.data;
+      return created;
     } finally {
       setIsCreating(false);
     }

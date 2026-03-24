@@ -133,6 +133,14 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
   }, [activeOrganizationId]);
 
   const handleAssignOperator = useCallback(async (taskId: string, userId: string | null) => {
+    if (materialReadiness?.hasShortage) {
+      addNotification({
+        type: 'warning',
+        title: 'Materials Incomplete',
+        message: 'Resolve Material Demand before assigning operators.',
+      });
+      return;
+    }
     const displayName = userId ? operators.find(o => o.user_id === userId)?.display_name ?? null : null;
     await supabase
       .from('WorkOrderTasks')
@@ -144,7 +152,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
       .eq('id', taskId);
     await refetchTasks();
     addNotification({ type: 'success', title: 'Assigned', message: displayName ? `Assigned to ${displayName}` : 'Unassigned' });
-  }, [operators, addNotification, refetchTasks]);
+  }, [operators, addNotification, refetchTasks, materialReadiness?.hasShortage]);
 
   const [manualOverrides, setManualOverrides] = useState<Map<string, DateOverride>>(new Map());
   const [editOverrideTaskId, setEditOverrideTaskId] = useState<string | null>(null);
@@ -1216,7 +1224,8 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
                 <select
                   value={selectedTask.assigned_to_user_id ?? ''}
                   onChange={e => handleAssignOperator(selectedTask.id, e.target.value || null)}
-                  className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  disabled={materialReadiness?.hasShortage}
+                  className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-gray-50 disabled:text-gray-400"
                 >
                   <option value="">Unassigned</option>
                   {operators.map(op => (

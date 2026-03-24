@@ -431,6 +431,16 @@ export default function ProductionCalendar() {
       const targetDay = calendarDays[idx];
       const mo = scheduledMOs.find((m) => m.id === moId);
       if (!mo?.planned_start_at || !mo?.planned_end_at) return;
+      const readiness = materialReadinessMap[moId];
+      const materialIncomplete = Boolean(readiness?.status === 'incomplete' || readiness?.has_shortage);
+      if (materialIncomplete) {
+        addNotification({
+          type: 'warning',
+          title: 'Materials Incomplete',
+          message: 'Resolve Material Demand before scheduling this MO.',
+        });
+        return;
+      }
       const { planned_start_at, planned_end_at } = moveMoToDay(mo, targetDay);
       justDroppedRef.current = true;
       setTimeout(() => { justDroppedRef.current = false; }, 300);
@@ -443,14 +453,26 @@ export default function ProductionCalendar() {
         addNotification({ type: 'error', title: 'Error', message: msg });
       }
     },
-    [calendarDays, scheduledMOs, updateManufacturingOrder, refetch, addNotification]
+    [calendarDays, scheduledMOs, updateManufacturingOrder, refetch, addNotification, materialReadinessMap]
   );
 
   const goPrev = () => setMonthCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
   const goNext = () => setMonthCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
 
   const handleAutoSchedule = useCallback(async () => {
-    const toSchedule = manufacturingOrders.filter((mo) => mo.status !== 'cancelled');
+    const toSchedule = manufacturingOrders.filter((mo) => {
+      if (mo.status === 'cancelled') return false;
+      const readiness = materialReadinessMap[mo.id];
+      return !(readiness?.status === 'incomplete' || readiness?.has_shortage);
+    });
+    const skippedIncomplete = manufacturingOrders.filter((mo) => {
+      const readiness = materialReadinessMap[mo.id];
+      return mo.status !== 'cancelled' && Boolean(readiness?.status === 'incomplete' || readiness?.has_shortage);
+    }).length;
+    if (toSchedule.length === 0) {
+      addNotification({ type: 'warning', title: 'Auto Schedule', message: 'No MOs eligible for scheduling. Resolve Material Demand first.' });
+      return;
+    }
     const withDeadline = toSchedule
       .filter((mo) => mo.SalesOrders?.expected_delivery_date)
       .sort((a, b) => {
@@ -486,9 +508,15 @@ export default function ProductionCalendar() {
       cursor = new Date(end.getTime());
       skipWeekend(cursor);
     }
-    addNotification({ type: 'success', title: 'Auto Schedule', message: `${sorted.length} MO(s) scheduled.` });
+    addNotification({
+      type: 'success',
+      title: 'Auto Schedule',
+      message: skippedIncomplete > 0
+        ? `${sorted.length} MO(s) scheduled. ${skippedIncomplete} skipped due to incomplete materials.`
+        : `${sorted.length} MO(s) scheduled.`,
+    });
     refetch();
-  }, [manufacturingOrders, monthStart, updateManufacturingOrder, refetch, addNotification]);
+  }, [manufacturingOrders, monthStart, updateManufacturingOrder, refetch, addNotification, materialReadinessMap]);
 
   const renderBlock = (mo: ManufacturingOrder, day: Date) => {
     const isLate = !!(

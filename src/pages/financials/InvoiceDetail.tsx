@@ -185,6 +185,7 @@ export default function InvoiceDetail() {
     !!queryReturnTo && normalizePath(queryReturnTo) !== normalizePath(listPath);
   const canManageDeliveryOverride = role === 'admin' || role === 'superadmin';
   const canUsePdf = isInternal || can('portal.financials.invoice_pdf.read');
+  const canManagePayments = isInternal && can('financials.payments.write');
 
   useEffect(() => {
     if (viewerMode) {
@@ -587,11 +588,13 @@ export default function InvoiceDetail() {
   }, [invoice?.dealer_id, activeOrganizationId]);
 
   const handleOpenApplyForm = () => {
+    if (!canManagePayments) return;
     setApplyFormOpen(true);
     loadAvailablePayments();
   };
 
   const handleApplyPayment = async () => {
+    if (!canManagePayments) return;
     if (!invoiceId || !selectedPaymentId || !applyAmount) return;
     const amount = parseFloat(applyAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -1171,7 +1174,7 @@ export default function InvoiceDetail() {
 
       {activeTab === 'payments' && (
         <div className="space-y-4">
-          {isInternal && balanceDue > 0 && (status === 'issued' || status === 'partial') && !applyFormOpen && (
+          {canManagePayments && balanceDue > 0 && (status === 'issued' || status === 'partial') && !applyFormOpen && (
             <div className="mb-4 flex justify-end">
               <button
                 type="button"
@@ -1188,7 +1191,7 @@ export default function InvoiceDetail() {
               <p className="text-xs text-amber-700">Issue this invoice first to apply payments.</p>
             </div>
           )}
-          {applyFormOpen && (
+          {canManagePayments && applyFormOpen && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
               <h4 className="text-sm font-semibold text-gray-800">Apply Payment to Invoice</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

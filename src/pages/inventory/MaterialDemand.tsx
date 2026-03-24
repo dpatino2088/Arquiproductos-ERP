@@ -104,7 +104,7 @@ export default function MaterialDemand() {
         .from('manufacturing_order_material_demand')
         .select('*')
         .eq('organization_id', activeOrganizationId)
-        .in('mo_status', ['draft', 'planned']);
+        .in('mo_status', ['draft', 'confirmed', 'planned', 'procurement']);
       if (error) throw error;
       if (!demand?.length) return [];
 

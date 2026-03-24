@@ -4,6 +4,7 @@ import { formatDate } from '../../lib/utils';
 import { useWorkOrderTasks, type WorkOrderTask } from '../../hooks/useWorkOrderTasks';
 import { useMoMaterialReadiness } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { generateWorkOrderPDF } from '../../lib/pdf/workOrderPdf';
 import { generatePartLabelsPDF, type PartLabel } from '../../lib/pdf/partLabelPdf';
@@ -158,6 +159,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
   const { tasks, loading, error, generateWorkOrders, refetch: refetchTasks } = useWorkOrderTasks(moId);
   const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
   const { activeOrganizationId } = useOrganizationContext();
+  const addNotification = useUIStore((s) => s.addNotification);
   const [generating, setGenerating] = useState(false);
   const [operators, setOperators] = useState<OperatorOption[]>([]);
   const materialsIncomplete = materialReadiness?.hasShortage === true;
@@ -192,6 +194,14 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
   }, [operators, refetchTasks]);
 
   const handleGenerate = async (regenerate = false) => {
+    if (materialsIncomplete) {
+      addNotification({
+        type: 'warning',
+        title: 'Materials Incomplete',
+        message: 'Resolve Material Demand before generating Work Orders.',
+      });
+      return;
+    }
     if (regenerate && !confirm('This will delete existing work orders and regenerate them. Continue?')) return;
     setGenerating(true);
     try {
@@ -228,7 +238,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         )}
         <Zap className="h-10 w-10 text-gray-300 mx-auto mb-3" />
         <p className="text-sm text-gray-500 mb-4">No work orders generated yet for this Manufacturing Order.</p>
-        <button type="button" onClick={() => handleGenerate()} disabled={generating} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:opacity-90 disabled:opacity-60">
+        <button type="button" onClick={() => handleGenerate()} disabled={generating || materialsIncomplete} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:opacity-90 disabled:opacity-60">
           {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
           Generate Work Orders
         </button>
@@ -251,7 +261,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         <button
           type="button"
           onClick={() => handleGenerate(true)}
-          disabled={generating}
+          disabled={generating || materialsIncomplete}
           className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
         >
           {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}

@@ -59,6 +59,7 @@ export default function FinancialPayments() {
   const viewerMode = isPortal || myFinancialsMode;
   const basePath = getFinancialBasePath(pathname);
   const effectiveDealerId = viewerMode ? (portalDealerId ?? activeDealerId ?? null) : null;
+  const canRecordPayments = isInternal && !viewerMode && can('financials.payments.write');
 
   const { user } = useAuth();
   const addNotification = useUIStore((s) => s.addNotification);
@@ -128,10 +129,10 @@ export default function FinancialPayments() {
       }
     }
 
-    if (shouldOpen && isInternal) {
+    if (shouldOpen && canRecordPayments) {
       setFormOpen(true);
     }
-  }, [isInternal]);
+  }, [canRecordPayments]);
 
   const fetchPayments = useCallback(async () => {
     if (!activeOrganizationId) { setLoading(false); return; }
@@ -241,16 +242,16 @@ export default function FinancialPayments() {
   useEffect(() => { void fetchPayments(); }, [fetchPayments]);
 
   useEffect(() => {
-    if (!isInternal || viewerMode) return;
+    if (!canRecordPayments) return;
     if (!activeOrganizationId) return;
     supabase.from('Dealers').select('id, dealer_name, dealer_no')
       .eq('organization_id', activeOrganizationId).eq('deleted', false).eq('status', 'active')
       .order('dealer_name', { ascending: true })
       .then(({ data }: { data: { id: string; dealer_name: string; dealer_no: string | null }[] | null }) => { if (data) setDealers(data); });
-  }, [activeOrganizationId, isInternal, viewerMode]);
+  }, [activeOrganizationId, canRecordPayments]);
 
   const handleRecordPayment = async () => {
-    if (!isInternal) return;
+    if (!canRecordPayments) return;
     if (!activeOrganizationId || !formAmount) return;
     const amount = parseFloat(formAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -355,7 +356,7 @@ export default function FinancialPayments() {
               Back
             </button>
           )}
-          {isInternal && !viewerMode && !formOpen && (
+          {canRecordPayments && !formOpen && (
             <button
               type="button"
               onClick={() => setFormOpen(true)}
@@ -368,7 +369,7 @@ export default function FinancialPayments() {
         </div>
       </div>
 
-      {isInternal && !viewerMode && formOpen && (
+      {canRecordPayments && formOpen && (
         <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Record New Payment</h3>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
