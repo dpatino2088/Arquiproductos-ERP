@@ -21,18 +21,22 @@ export { PermissionContext };
 /**
  * PermissionProvider - RBAC permissions for the active context.
  *
+ * Source of truth: AppUserRolePermissions (via role_code on AppUsers).
+ *
  * Priority:
- * 1. role_code from AppUsers -> load from AppUserRolePermissions (role-based).
- * 2. role admin/superadmin -> all permissions from Permissions.
- * 3. Legacy (temporal): OrganizationUserPermissions by activeMembership.id.
- *    En fase final todos los usuarios tendrán role_code y esta rama se elimina.
- * Fuente de verdad: AppUserRolePermissions; el frontend solo consume el set resuelto.
+ * 1. role_code from AppUsers -> AppUserRolePermissions (all users must have this).
+ * 2. Fallback for admin/superadmin without AppUsers row -> load all Permissions.
+ * 3. No role_code and not admin/superadmin -> empty set (deny all).
+ *
+ * OrganizationUserPermissions (legacy individual overrides) is intentionally
+ * NOT used — it caused permission bleed-through across role changes.
  */
 export function PermissionProvider({ children }: { children: React.ReactNode }) {
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const { userId } = useAuthSession();
   const { activeOrganizationId, activeMembership, role } = useOrganizationContext();
+  // activeMembership is kept for the dev-log below; not used for permission resolution.
 
   const loadPermissions = useCallback(async () => {
     if (!userId || !activeOrganizationId) {
@@ -66,34 +70,10 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
         .maybeSingle();
 
       if (appUserRow?.role_code) {
+        // role_code is the source of truth — permissions come exclusively from AppUserRolePermissions.
+        // OrganizationUserPermissions (legacy) is intentionally NOT merged here to prevent
+        // stale individual overrides from bleeding through role-based access control.
         const permissionSet = await fetchRolePermissions(supabase, appUserRow.role_code);
-
-        // Merge user-level overrides from OrganizationUserPermissions so
-        // Permissions module changes are reflected even with role_code users.
-        const { data: orgUser } = await supabase
-          .from('OrganizationUsers')
-          .select('id')
-          .eq('organization_id', activeOrganizationId)
-          .eq('user_id', userId)
-          .eq('deleted', false)
-          .limit(1)
-          .maybeSingle();
-
-        if (orgUser?.id) {
-          const { data: extraPerms, error: extraPermsError } = await supabase
-            .from('OrganizationUserPermissions')
-            .select('permission_code')
-            .eq('organization_user_id', orgUser.id);
-
-          if (!extraPermsError) {
-            for (const row of extraPerms || []) {
-              if (row?.permission_code) permissionSet.add(row.permission_code);
-            }
-          } else if (import.meta.env.DEV) {
-            console.warn('⚠️ PermissionContext - Could not merge user override permissions:', extraPermsError.message);
-          }
-        }
-
         setPermissions(permissionSet);
         if (import.meta.env.DEV) {
           console.log('✅ PermissionContext - Permissions from AppUserRolePermissions (role_code):', {
@@ -105,80 +85,36 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
         return;
       }
 
-      // 2) Admin/superadmin: all permissions
+      // 2) Fallback: admin/superadmin without an AppUsers row (edge case during setup).
+      // In normal operation all admins have an AppUsers row with role_code='superadmin'/'admin'
+      // and are handled by path 1 above. This path ensures they never get locked out.
       if (role === 'admin' || role === 'superadmin') {
         if (import.meta.env.DEV) {
-          console.log('🔍 PermissionContext - Role is admin/superadmin, loading all permissions', {
-            role,
-            activeMembershipId: activeMembership?.id,
-            activeOrganizationId,
-          });
+          console.log('🔍 PermissionContext - Fallback: admin/superadmin without AppUsers row, loading all permissions');
         }
-
         const { data: allPermissions, error: allPermsError } = await supabase
           .from('Permissions')
           .select('code');
-
-        if (allPermsError) {
-          if (import.meta.env.DEV) {
-            console.error('❌ PermissionContext - Error loading all permissions:', allPermsError);
-          }
+        if (!allPermsError) {
+          setPermissions(new Set<string>(
+            (allPermissions || []).map((p: { code: string }) => p.code).filter(Boolean)
+          ));
+        } else {
           setPermissions(new Set());
-          setLoading(false);
-          return;
-        }
-
-        const allPermCodes = new Set<string>(
-          (allPermissions || []).map((p: { code: string }) => p.code).filter((c: string | undefined): c is string => Boolean(c))
-        );
-        setPermissions(allPermCodes);
-
-        if (import.meta.env.DEV) {
-          console.log('✅ PermissionContext - All permissions loaded for admin/superadmin:', {
-            count: allPermCodes.size,
-            role,
-          });
         }
         setLoading(false);
         return;
       }
 
-      // 3) Legacy (temporal): OrganizationUserPermissions. Fase final = solo role_code.
-      if (!activeMembership?.id) {
-        if (import.meta.env.DEV) {
-          console.warn('⚠️ PermissionContext - No activeMembership.id and no AppUser role_code');
-        }
-        setPermissions(new Set());
-        setLoading(false);
-        return;
-      }
-
+      // 3) No role_code, not admin/superadmin → deny all.
+      // Every user should have a role_code assigned; if not, it's a data issue.
       if (import.meta.env.DEV) {
-        console.log('🔍 PermissionContext - Loading legacy permissions for organization_user_id:', activeMembership.id);
+        console.warn('⚠️ PermissionContext - User has no role_code and is not admin/superadmin. Denying all permissions.', {
+          userId, activeOrganizationId,
+        });
       }
-
-      const { data: userPermissions, error: permissionsError } = await supabase
-        .from('OrganizationUserPermissions')
-        .select('permission_code')
-        .eq('organization_user_id', activeMembership.id);
-
-      if (permissionsError) {
-        if (import.meta.env.DEV) {
-          console.error('❌ PermissionContext - Error loading user permissions:', permissionsError.message);
-        }
-        setPermissions(new Set());
-        setLoading(false);
-        return;
-      }
-
-      const permissionSet = new Set<string>(
-        (userPermissions || []).map((p: { permission_code: string }) => p.permission_code).filter((c: string | undefined): c is string => Boolean(c))
-      );
-      setPermissions(permissionSet);
-
-      if (import.meta.env.DEV) {
-        console.log('✅ PermissionContext - User permissions loaded (legacy):', { count: permissionSet.size });
-      }
+      setPermissions(new Set());
+      setLoading(false);
     } catch (err: any) {
       if (import.meta.env.DEV) {
         console.error('❌ PermissionContext - Exception loading permissions:', err?.message);
@@ -187,7 +123,7 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
     } finally {
       setLoading(false);
     }
-  }, [userId, activeOrganizationId, activeMembership?.id, role]);
+  }, [userId, activeOrganizationId, role]);
 
   useEffect(() => {
     loadPermissions();

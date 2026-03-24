@@ -117,7 +117,17 @@ export default function Roles({ embedded = false }: RolesProps) {
   };
 
   const handleSelectAllInModule = (module: string) => {
-    const perms = permissions.filter((p) => (p.module || 'Other') === module);
+    // Safety-net merge map mirrors RolePermissionsEditor — catches any legacy module values.
+    const MODULE_MERGE: Record<string, string> = {
+      purchasing: 'inventory', quotes: 'sales', proposals: 'sales',
+      salesorders: 'sales', admin: 'settings', org: 'settings',
+      reports: 'settings', portal: 'financials',
+    };
+    const perms = permissions.filter((p) => {
+      const raw = (p.module || 'other').trim().toLowerCase();
+      const canonical = MODULE_MERGE[raw] ?? raw;
+      return canonical === module;
+    });
     const allChecked = perms.every((p) => selectedPermissionCodes.has(p.code));
     setSelectedPermissionCodes((prev) => {
       const next = new Set(prev);

@@ -238,7 +238,9 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'sales.orders.read',
     'manufacturing.mo.read',
     'manufacturing.mo.overview.read',
-    // NO dashboard.read, NO settings.*, NO partners.*, NO manufacturing.wo.*, NO manufacturing.calendar.*
+    'partners.read',    // view-only: Vendors, Dealers, Manufacturers
+    'dashboard.read',   // Procurement Dashboard
+    // NO partners.write, NO settings.*, NO manufacturing.wo.*, NO manufacturing.calendar.*
   ],
   finance: [
     'dashboard.read',
