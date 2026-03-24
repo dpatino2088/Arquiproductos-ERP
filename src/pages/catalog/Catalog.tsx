@@ -7,8 +7,9 @@ import { usePermissions } from '../../hooks/usePermissions';
 export default function Catalog() {
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const { can, loading } = usePermissions();
-  const canViewCatalog = can('catalog.read') || can('catalog.write');
-  const canViewBOM = can('catalog.write');
+  const canViewItems = can('catalog.items.read') || can('catalog.read') || can('catalog.write');
+  const canViewBOM = can('catalog.bom.read') || can('catalog.bom.write') || can('catalog.write');
+  const canViewCatalog = canViewItems || canViewBOM;
 
   useEffect(() => {
     if (loading) return;
@@ -21,7 +22,7 @@ export default function Catalog() {
     
     if (currentPath.startsWith('/catalog')) {
       const catalogTabs = [
-        { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
+        ...(canViewItems ? [{ id: 'items', label: 'Items', href: '/catalog/items', icon: Package }] : []),
         ...(canViewBOM ? [{ id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench }] : []),
       ];
       // Register Catalog sub-modules
@@ -29,9 +30,14 @@ export default function Catalog() {
       
       // Only redirect to items if we're at the base /catalog route
       if (currentPath === '/catalog' || currentPath === '/catalog/') {
-        router.navigate('/catalog/items');
+        if (canViewItems) router.navigate('/catalog/items');
+        else if (canViewBOM) router.navigate('/catalog/bom');
       } else if (currentPath.startsWith('/catalog/bom') && !canViewBOM) {
-        router.navigate('/catalog/items');
+        if (canViewItems) router.navigate('/catalog/items');
+        else router.navigate('/dashboard');
+      } else if (currentPath.startsWith('/catalog/items') && !canViewItems) {
+        if (canViewBOM) router.navigate('/catalog/bom');
+        else router.navigate('/dashboard');
       }
     } else {
       // Clear submodules when leaving Catalog module
@@ -45,7 +51,7 @@ export default function Catalog() {
         clearSubmoduleNav();
       }
     };
-  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog, canViewBOM, loading]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewCatalog, canViewItems, canViewBOM, loading]);
 
   return null;
 }

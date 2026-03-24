@@ -17,7 +17,7 @@ import { useCatalogItems, useDeleteCatalogItem, useCatalogCategories } from '../
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
-import { useGranularAccess } from '../../hooks/usePermissions';
+import { useGranularAccess, usePermissions } from '../../hooks/usePermissions';
 import { buildCatalogScopeKey } from '../../lib/catalogScopeKey';
 import { catalogItemDetailKey } from '../../lib/queryKeys';
 import { fetchCatalogItemDetail } from '../../lib/catalogListFetchers';
@@ -150,6 +150,8 @@ function hasCatalogRestoreSignal(params: URLSearchParams): boolean {
 
 export default function Items() {
   const { registerSubmodules } = useSubmoduleNav();
+  const { can } = usePermissions();
+  const canViewBOM = can('catalog.bom.read') || can('catalog.bom.write') || can('catalog.write');
   const { canCreate: canCreateCat, canArchive: canArchiveCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
   const { items, loading, loadingMore, error, refetch } = useCatalogItems();
   const { categories: catalogCategories } = useCatalogCategories();
@@ -169,10 +171,10 @@ export default function Items() {
     if (currentPath.startsWith('/catalog')) {
       registerSubmodules('Catalog', [
         { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
-        { id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench },
+        ...(canViewBOM ? [{ id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench }] : []),
       ]);
     }
-  }, [registerSubmodules]);
+  }, [registerSubmodules, canViewBOM]);
   const { activeOrganizationId } = useOrganizationContext();
   const { userId, loading: authLoading } = useAuthSession();
   const { activeDealerId } = useActiveDealer();

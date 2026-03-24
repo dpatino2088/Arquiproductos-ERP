@@ -111,6 +111,8 @@ const RESOURCE_LABEL_OVERRIDE: Record<string, string> = {
   'portal.financials.invoice_pdf':  'Portal – Invoice PDF',
   // catalog
   'catalog':                        'Module Access',
+  'catalog.items':                  'Items',
+  'catalog.bom':                    'BOM',
   // settings
   'settings':                       'Settings Access',
   'org.users':                      'Organization Users',

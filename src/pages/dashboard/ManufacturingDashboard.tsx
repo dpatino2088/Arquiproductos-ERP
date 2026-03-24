@@ -122,7 +122,7 @@ export default function ManufacturingDashboard() {
           </div>
           <button
             type="button"
-            onClick={() => router.navigate('/manufacturing/orders')}
+            onClick={() => router.navigate('/manufacturing/manufacturing-orders')}
             className="flex items-center gap-1 text-xs text-primary hover:underline"
           >
             View all <ArrowRight className="w-3 h-3" />
@@ -150,7 +150,7 @@ export default function ManufacturingDashboard() {
                   <tr
                     key={mo.id}
                     className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => router.navigate(`/manufacturing/orders/${mo.id}`)}
+                    onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${mo.id}`)}
                   >
                     <td className="py-2.5 pr-4 font-medium">{mo.manufacturing_order_no}</td>
                     <td className="py-2.5 pr-4">

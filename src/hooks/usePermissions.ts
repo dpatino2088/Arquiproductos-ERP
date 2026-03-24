@@ -67,8 +67,8 @@ export const MODULE_PERMS = {
     edit: ['directory.customers.write', 'directory.contacts.write'],
   },
   catalog: {
-    view: ['catalog.read'],
-    edit: ['catalog.write'],
+    view: ['catalog.read', 'catalog.items.read', 'catalog.bom.read'],
+    edit: ['catalog.write', 'catalog.items.write', 'catalog.bom.write'],
   },
   inventory: {
     view: [

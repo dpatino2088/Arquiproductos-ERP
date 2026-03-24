@@ -32,20 +32,24 @@ export default function CatalogModule({ activeTab }: Props) {
   const { activeDealerId, hasHydrated } = useActiveDealer();
   const { userType } = useAccessContext();
   const { can } = usePermissions();
-  const canViewBOM = can('catalog.write');
+  const canViewItems = can('catalog.items.read') || can('catalog.read') || can('catalog.write');
+  const canViewBOM = can('catalog.bom.read') || can('catalog.bom.write') || can('catalog.write');
 
   useEffect(() => {
     const currentPath = window.location.pathname;
     if (currentPath.startsWith('/catalog')) {
       const tabs = [
-        { id: 'items', label: 'Items', href: '/catalog/items', icon: Package },
+        ...(canViewItems ? [{ id: 'items', label: 'Items', href: '/catalog/items', icon: Package }] : []),
         ...(canViewBOM ? [{ id: 'bom', label: 'BOM', href: '/catalog/bom', icon: Wrench }] : []),
       ];
       registerSubmodules('Catalog', tabs);
       if (currentPath === '/catalog' || currentPath === '/catalog/') {
-        router.navigate('/catalog/items');
+        if (canViewItems) router.navigate('/catalog/items');
+        else if (canViewBOM) router.navigate('/catalog/bom');
       } else if (currentPath.startsWith('/catalog/bom') && !canViewBOM) {
-        router.navigate('/catalog/items');
+        if (canViewItems) router.navigate('/catalog/items');
+      } else if (currentPath.startsWith('/catalog/items') && !canViewItems) {
+        if (canViewBOM) router.navigate('/catalog/bom');
       }
     } else {
       clearSubmoduleNav();
@@ -53,7 +57,7 @@ export default function CatalogModule({ activeTab }: Props) {
     return () => {
       if (!window.location.pathname.startsWith('/catalog')) clearSubmoduleNav();
     };
-  }, [registerSubmodules, clearSubmoduleNav, canViewBOM]);
+  }, [registerSubmodules, clearSubmoduleNav, canViewItems, canViewBOM]);
 
   useEffect(() => {
     if (!activeOrganizationId || (userType === 'internal' && !hasHydrated)) return;
@@ -74,7 +78,7 @@ export default function CatalogModule({ activeTab }: Props) {
   return (
     <>
       <div hidden={activeTab !== 'items'} aria-hidden={activeTab !== 'items'}>
-        <Items />
+        {canViewItems ? <Items /> : null}
       </div>
       <div hidden={activeTab !== 'bom' || !canViewBOM} aria-hidden={activeTab !== 'bom' || !canViewBOM}>
         <BOM />
