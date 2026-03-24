@@ -13,7 +13,7 @@ const PARTNERS_SUBMODULES = [
 export default function Partners() {
   const { registerSubmodules } = useSubmoduleNav();
   const { can, loading } = usePermissions();
-  const canViewPartners = can('partners.read') || can('settings.read');
+  const canViewPartners = can('partners.read');
 
   useEffect(() => {
     if (loading) return;

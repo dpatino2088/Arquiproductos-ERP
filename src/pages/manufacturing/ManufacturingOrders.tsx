@@ -11,7 +11,6 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { usePermissions, useGranularAccess, useManufacturingAccess } from '../../hooks/usePermissions';
 import { Search, Eye, Archive, RotateCcw, SortAsc, SortDesc } from 'lucide-react';
-import Input from '../../components/ui/Input';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
 
@@ -376,15 +375,20 @@ export default function ManufacturingOrders() {
 
       {/* Search */}
       <div className="mb-4 mt-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search by MO #, Sale Order #, or customer name..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 relative min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by MO #, Sale Order #, or customer name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search manufacturing orders"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

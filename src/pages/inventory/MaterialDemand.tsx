@@ -10,7 +10,6 @@ import { router } from '../../lib/router';
 import {
   Search, SortAsc, SortDesc, ShoppingCart, ChevronDown, Filter, X, ExternalLink, Loader2,
 } from 'lucide-react';
-import Input from '../../components/ui/Input';
 import { resolveInventoryUnitModel, convertInternalToPurchaseQty, type MeasureBasis } from '../../lib/inventoryUnitModel';
 
 const INVENTORY_SUBMODULES = [
@@ -641,12 +640,14 @@ export default function MaterialDemand() {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 flex items-center gap-3 flex-wrap">
-          <div className="relative min-w-[200px]">
+      <div className="mb-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="relative min-w-[200px]">
             <button
               type="button"
               onClick={() => setShowMODropdown(!showMODropdown)}
-              className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white hover:bg-gray-50"
+              className="w-full flex items-center justify-between px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px] hover:bg-gray-50"
             >
               <span className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-gray-400" />
@@ -663,7 +664,7 @@ export default function MaterialDemand() {
               )}
             </button>
             {showMODropdown && (
-              <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-hidden">
+              <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded shadow-lg max-h-64 overflow-hidden">
                 <div className="p-2 border-b">
                   <input
                     type="text"
@@ -697,28 +698,31 @@ export default function MaterialDemand() {
                 </div>
               </div>
             )}
+            </div>
+
+            <div className="relative flex-1 min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search SKU, item name..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search material demand"
+              />
+            </div>
+
+            <label className="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer whitespace-nowrap select-none px-3 py-1 border border-gray-200 rounded bg-white min-h-[32px]">
+              <input
+                type="checkbox"
+                checked={needToBuyOnly}
+                onChange={e => setNeedToBuyOnly(e.target.checked)}
+                className="rounded border-gray-300 text-primary focus:ring-primary/20"
+              />
+              Need to Buy
+            </label>
           </div>
-
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search SKU, item name..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
         </div>
-
-        <label className="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer whitespace-nowrap select-none">
-          <input
-            type="checkbox"
-            checked={needToBuyOnly}
-            onChange={e => setNeedToBuyOnly(e.target.checked)}
-            className="rounded border-gray-300 text-primary focus:ring-primary/20"
-          />
-          Need to Buy
-        </label>
       </div>
 
       {/* Created POs Banner */}

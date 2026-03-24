@@ -1401,21 +1401,21 @@ function App() {
       case 'financials-vendor-payment-detail':
         return <RequireModule module="financials"><VendorPaymentDetail /></RequireModule>;
       case 'partners':
-        return <RequireModule module="settings"><Partners /></RequireModule>;
+        return <RequireModule module="partners"><Partners /></RequireModule>;
       case 'partners-dealers':
-        return <RequireModule module="settings"><PartnerDealers /></RequireModule>;
+        return <RequireModule module="partners"><PartnerDealers /></RequireModule>;
       case 'partners-dealer-detail':
-        return <RequireModule module="settings"><DealerDetail /></RequireModule>;
+        return <RequireModule module="partners"><DealerDetail /></RequireModule>;
       case 'partners-vendors':
-        return <RequireModule module="settings"><PartnerVendors /></RequireModule>;
+        return <RequireModule module="partners"><PartnerVendors /></RequireModule>;
       case 'partners-vendor-form': {
         const path = window.location.pathname;
         const match = path.match(/\/partners\/vendors\/edit\/([^/]+)/);
         const vendorId = match?.[1] ?? null;
-        return <RequireModule module="settings"><PartnerVendorForm vendorId={vendorId} /></RequireModule>;
+        return <RequireModule module="partners"><PartnerVendorForm vendorId={vendorId} /></RequireModule>;
       }
       case 'partners-manufacturers':
-        return <RequireModule module="settings"><PartnerManufacturers /></RequireModule>;
+        return <RequireModule module="partners"><PartnerManufacturers /></RequireModule>;
 
       case 'reports':
         return <CompanyReports />;

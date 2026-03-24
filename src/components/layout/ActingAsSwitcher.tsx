@@ -6,7 +6,7 @@ import { router } from '../../lib/router';
 import { ChevronDown, Check, Store, LayoutGrid, Loader2 } from 'lucide-react';
 
 /**
- * Dealer filter for org users (SuperAdmin / Admin).
+ * Dealer filter for org users (SuperAdmin, Admin, Sales Coordinator).
  * Calls set_acting_dealer RPC directly via useActingAsDealer.
  */
 export function ActingAsSwitcher({ onAfterSelect, labelAbove }: { onAfterSelect?: () => void; labelAbove?: boolean } = {}) {

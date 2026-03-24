@@ -13,6 +13,7 @@ import { Search, Plus } from 'lucide-react';
 import { supabase, initSessionContext } from '../../lib/supabase/client';
 import { FINANCIAL_GROUP_TABS } from './financialSubmodules';
 import FinancialSubTabs from './FinancialSubTabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
 const STATUS_VALUES = ['all', 'active', 'void'] as const;
 const STATUS_LABELS: Record<string, string> = { all: 'All', active: 'Active', void: 'Void' };
@@ -337,8 +338,8 @@ export default function VendorPaymentsList() {
 
       <div className="mb-4 mt-4">
         <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 relative">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[240px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
@@ -348,9 +349,16 @@ export default function VendorPaymentsList() {
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
               />
             </div>
-            <select value={sortKey} onChange={e => setSortKey(e.target.value)} className="px-3 py-1 border border-gray-200 rounded text-sm bg-white">
-              {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <div className="w-[220px] shrink-0">
+              <Select value={sortKey} onValueChange={setSortKey}>
+                <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </div>
@@ -426,9 +434,16 @@ export default function VendorPaymentsList() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-700">Show:</span>
-            <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }} className="px-3 py-1 border border-gray-200 rounded-lg text-sm">
-              {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
+            <div className="w-[90px]">
+              <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                <SelectTrigger className="px-3 py-1 border border-gray-200 rounded-lg text-sm bg-white min-h-[32px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[10, 25, 50, 100].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <span className="text-sm text-gray-700">Showing {total > 0 ? start : 0}–{end} of {total}</span>
           </div>
           <div className="flex items-center gap-2">

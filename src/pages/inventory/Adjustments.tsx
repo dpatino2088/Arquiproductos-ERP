@@ -4,7 +4,6 @@ import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useInventoryMovements, ADJUSTMENT_REASON_LABELS, AdjustmentReason } from '../../hooks/useInventoryMovements';
 import { Search, SortAsc, SortDesc, Plus } from 'lucide-react';
-import Input from '../../components/ui/Input';
 import StatusTabs from '../../components/shared/StatusTabs';
 
 const INVENTORY_SUBMODULES = [
@@ -109,16 +108,21 @@ export default function Adjustments() {
         onChange={(val) => { setStatusFilter(val); setCurrentPage(1); }}
       />
 
-      <div className="mb-4 flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search by adjustment #, notes, warehouse, reason..."
-            value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="pl-10"
-          />
+      <div className="mb-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 relative min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by adjustment #, notes, warehouse, reason..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search adjustments"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

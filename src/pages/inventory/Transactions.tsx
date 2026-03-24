@@ -5,7 +5,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useInventoryMovements, MovementType, MovementStatus } from '../../hooks/useInventoryMovements';
 import { supabase } from '../../lib/supabase/client';
 import { Search, SortAsc, SortDesc, Plus } from 'lucide-react';
-import Input from '../../components/ui/Input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
 interface TransactionsProps {
   defaultTypeFilter?: MovementType;
@@ -132,38 +132,57 @@ export default function Transactions({ defaultTypeFilter, title }: TransactionsP
       </div>
 
       {/* Filters */}
-      <div className="mb-4 flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search by movement #, notes, warehouse..."
-            value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="pl-10"
-          />
+      <div className="mb-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 relative min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by movement #, notes, warehouse..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search transactions"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-[180px] shrink-0">
+                <Select
+                  value={typeFilter || '__all__'}
+                  onValueChange={(v) => { setTypeFilter(v === '__all__' ? '' : v as any); setCurrentPage(1); }}
+                >
+                  <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                    <SelectValue placeholder="All Types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Types</SelectItem>
+                    <SelectItem value="receipt">Receipt</SelectItem>
+                    <SelectItem value="issue_to_production">Issue to Production</SelectItem>
+                    <SelectItem value="transfer">Transfer</SelectItem>
+                    <SelectItem value="adjustment">Adjustment</SelectItem>
+                    <SelectItem value="return">Return</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-[160px] shrink-0">
+                <Select
+                  value={statusFilter || '__all__'}
+                  onValueChange={(v) => { setStatusFilter(v === '__all__' ? '' : v as any); setCurrentPage(1); }}
+                >
+                  <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                    <SelectValue placeholder="All Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Status</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
         </div>
-        <select
-          value={typeFilter}
-          onChange={e => { setTypeFilter(e.target.value as any); setCurrentPage(1); }}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-        >
-          <option value="">All Types</option>
-          <option value="receipt">Receipt</option>
-          <option value="issue_to_production">Issue to Production</option>
-          <option value="transfer">Transfer</option>
-          <option value="adjustment">Adjustment</option>
-          <option value="return">Return</option>
-        </select>
-        <select
-          value={statusFilter}
-          onChange={e => { setStatusFilter(e.target.value as any); setCurrentPage(1); }}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-        >
-          <option value="">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="confirmed">Confirmed</option>
-        </select>
       </div>
 
       {loading ? (

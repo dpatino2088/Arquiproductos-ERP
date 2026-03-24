@@ -1,6 +1,13 @@
 import { useEffect, useState, useMemo, useImperativeHandle, forwardRef, useRef } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/SelectShadcn';
 
 export interface ManufacturersRef {
   openNewModal: () => void;
@@ -587,16 +594,20 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Vendor (Supplier)
                 </label>
-                <select
-                  value={formData.vendor_id}
-                  onChange={(e) => setFormData({ ...formData, vendor_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white"
+                <Select
+                  value={formData.vendor_id || '__none__'}
+                  onValueChange={(v) => setFormData({ ...formData, vendor_id: v === '__none__' ? '' : v })}
                 >
-                  <option value="">No vendor assigned</option>
-                  {vendors.map((v) => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </select>
+                  <SelectTrigger className="py-1 text-sm">
+                    <SelectValue placeholder="No vendor assigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No vendor assigned</SelectItem>
+                    {vendors.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-[10px] text-gray-400 mt-1">Which vendor supplies products from this manufacturer?</p>
               </div>
             </div>

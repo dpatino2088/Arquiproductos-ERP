@@ -300,8 +300,10 @@ function Layout({ children }: LayoutProps) {
   const isSuperAdminUser = isSuperAdmin || orgContextRole === 'superadmin' || currentRole === 'superadmin';
   const isAdminUser = orgContextRole === 'admin' || currentRole === 'admin';
 
-  // ActingAs dealer display: show switcher for internal users
-  const showDealerSwitcher = userType === 'internal' && (isSuperAdminUser || currentRole === 'admin');
+  // Acting-as dealer filter: org users who coordinate or manage multi-dealer scope (RLS + lists respect current_dealer_id).
+  const showDealerSwitcher =
+    userType === 'internal' &&
+    (isSuperAdminUser || currentRole === 'admin' || currentRole === 'sales_coordinator');
   const { activeDealerId, activeDealer } = useActiveDealer();
   const currentScopeKey = `${activeOrganization?.id ?? 'none'}:${activeDealerId ?? 'none'}`;
   const {

@@ -6,6 +6,13 @@ import { formatDate } from '../../lib/utils';
 import { useAuthStore } from '../../stores/auth-store';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/SelectShadcn';
 
 interface OrganizationUser {
   id: string;
@@ -538,17 +545,21 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
                     </div>
                   </td>
                   <td className="py-4 px-6 whitespace-nowrap">
-                    <select
+                    <Select
                       value={orgUser.role}
-                      onChange={(e) => handleUpdateRole(orgUser.user_id, e.target.value as any)}
-                      className={`text-xs font-medium px-2 py-1 rounded ${getRoleBadgeColor(orgUser.role)} border-0`}
-                      disabled={orgUser.user_id === user?.id || !canManageUsers} // Can't change own role
+                      onValueChange={(v) => handleUpdateRole(orgUser.user_id, v as any)}
+                      disabled={orgUser.user_id === user?.id || !canManageUsers}
                     >
-                      <option value="owner">Owner</option>
-                      <option value="admin">Admin</option>
-                      <option value="member">Member</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
+                      <SelectTrigger className="py-0.5 text-xs h-auto w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="owner">Owner</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="member">Member</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="py-4 px-6 whitespace-nowrap">
                     {getStatusBadge(orgUser.status)}
@@ -621,16 +632,16 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
                 <label className="block text-sm font-medium text-foreground mb-2">
                   Role
                 </label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
-                  disabled={isInviting}
-                >
-                  <option value="admin">Admin</option>
-                  <option value="member">Member</option>
-                  <option value="viewer">Viewer</option>
-                </select>
+                <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as any)} disabled={isInviting}>
+                  <SelectTrigger className="py-1 text-sm">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="member">Member</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                  </SelectContent>
+                </Select>
                 <p className="text-xs text-muted-foreground mt-1">
                   Note: Owner role can only be assigned by app admins
                 </p>
@@ -718,35 +729,39 @@ export default function OrganizationUsers({ organizationId: propOrganizationId }
                 <label className="block text-sm font-medium text-foreground mb-2">
                   Role
                 </label>
-                <select
+                <Select
                   value={editingUser.role}
-                  onChange={(e) => {
-                    setEditingUser({ ...editingUser, role: e.target.value as any });
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                  onValueChange={(v) => setEditingUser({ ...editingUser, role: v as any })}
                 >
-                  <option value="owner">Owner</option>
-                  <option value="admin">Admin</option>
-                  <option value="member">Member</option>
-                  <option value="viewer">Viewer</option>
-                </select>
+                  <SelectTrigger className="py-1 text-sm">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="owner">Owner</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="member">Member</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">
                   Status
                 </label>
-                <select
+                <Select
                   value={editingUser.status}
-                  onChange={(e) => {
-                    setEditingUser({ ...editingUser, status: e.target.value as any });
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary/20 focus:border-primary/50"
+                  onValueChange={(v) => setEditingUser({ ...editingUser, status: v as any })}
                 >
-                  <option value="invited">Invited</option>
-                  <option value="active">Active</option>
-                  <option value="disabled">Disabled</option>
-                </select>
+                  <SelectTrigger className="py-1 text-sm">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="invited">Invited</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
                 <p className="text-xs text-muted-foreground mt-1">
                   Invited: User needs to set password. Active: User can access. Disabled: User cannot access.
                 </p>

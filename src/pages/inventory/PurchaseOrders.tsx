@@ -7,7 +7,13 @@ import { usePurchaseOrders, PurchaseOrderStatus } from '../../hooks/usePurchaseO
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { Search, SortAsc, SortDesc, Plus } from 'lucide-react';
-import Input from '../../components/ui/Input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/SelectShadcn';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
@@ -110,42 +116,61 @@ export default function PurchaseOrders() {
         </button>
       </div>
 
-      <div className="mb-4 flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search by PO number..."
-            value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="pl-10"
-          />
+      <div className="mb-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 relative min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by PO number..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search purchase orders"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-[170px] shrink-0">
+            <Select
+              value={statusFilter || '__all__'}
+              onValueChange={(v) => { setStatusFilter(v === '__all__' ? '' : v as PurchaseOrderStatus); setCurrentPage(1); }}
+            >
+              <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Status</SelectItem>
+                <SelectItem value="DRAFT">Draft</SelectItem>
+                <SelectItem value="OPEN">Open</SelectItem>
+                <SelectItem value="PARTIAL">Partial</SelectItem>
+                <SelectItem value="CLOSED">Closed</SelectItem>
+                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                <SelectItem value="ARCHIVED">Archived</SelectItem>
+              </SelectContent>
+            </Select>
+              </div>
+              {warehouses.length > 1 && (
+                <div className="w-[190px] shrink-0">
+                  <Select
+                    value={warehouseFilter || '__all__'}
+                    onValueChange={(v) => { setWarehouseFilter(v === '__all__' ? '' : v); setCurrentPage(1); }}
+                  >
+                    <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                      <SelectValue placeholder="All Warehouses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All Warehouses</SelectItem>
+                      {warehouses.map(w => (
+                        <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-        <select
-          value={statusFilter}
-          onChange={e => { setStatusFilter(e.target.value as PurchaseOrderStatus | ''); setCurrentPage(1); }}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-        >
-          <option value="">All Status</option>
-          <option value="DRAFT">Draft</option>
-          <option value="OPEN">Open</option>
-          <option value="PARTIAL">Partial</option>
-          <option value="CLOSED">Closed</option>
-          <option value="CANCELLED">Cancelled</option>
-          <option value="ARCHIVED">Archived</option>
-        </select>
-        {warehouses.length > 1 && (
-          <select
-            value={warehouseFilter}
-            onChange={e => { setWarehouseFilter(e.target.value); setCurrentPage(1); }}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-          >
-            <option value="">All Warehouses</option>
-            {warehouses.map(w => (
-              <option key={w.id} value={w.id}>{w.name}</option>
-            ))}
-          </select>
-        )}
       </div>
 
       {error && (

@@ -444,7 +444,7 @@ export default function FinancialPayments() {
 
       <StatusTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 
-      <div className="mb-4 mt-4 bg-white border border-gray-200 rounded-lg py-4 px-4">
+      <div className="mb-4 mt-4 bg-white border border-gray-200 rounded-lg py-6 px-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
@@ -452,7 +452,7 @@ export default function FinancialPayments() {
             placeholder="Search by dealer, reference or method..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
           />
         </div>
       </div>

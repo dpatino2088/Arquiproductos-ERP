@@ -99,9 +99,13 @@ function isCancelledOrder(status: string | null | undefined): boolean {
 export function useDashboardOverview() {
   const { activeOrganizationId } = useOrganizationContext();
   const { userType, portalDealerId } = useAccessContext();
-  const { effectiveDealerId, hasHydrated } = useDealerScope();
+  // Use activeDealerId (DB / acting-as RPC), not effectiveDealerId from useDealerScope.
+  // effectiveDealerId includes optimistic localStorage fallback for list UX; that can scope
+  // internal users (e.g. sales_coordinator) to a stale dealer without a real session dealer,
+  // yielding an empty dashboard while RLS would allow org-wide reads when current_dealer_id() is null.
+  const { activeDealerId, hasHydrated } = useDealerScope();
 
-  const scopedDealerId = userType === 'portal' ? (portalDealerId ?? null) : (effectiveDealerId ?? null);
+  const scopedDealerId = userType === 'portal' ? (portalDealerId ?? null) : (activeDealerId ?? null);
   const scopeKey = buildDirectoryScopeKey({
     orgId: activeOrganizationId ?? null,
     activeDealerId: scopedDealerId,

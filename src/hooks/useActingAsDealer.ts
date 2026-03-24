@@ -77,6 +77,7 @@ export function useActingAsDealer() {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['catalog'] });
       queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'commercial', 'overview'] });
     },
   });
 

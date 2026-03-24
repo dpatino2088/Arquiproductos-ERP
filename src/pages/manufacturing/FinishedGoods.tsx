@@ -117,11 +117,11 @@ export default function FinishedGoods() {
   const deliveredCount = groups.reduce((s, g) => s + g.deliveredLines, 0);
 
   return (
-    <div className="space-y-4">
+    <div className="py-6 px-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">Finished Goods</h2>
-          <p className="text-sm text-gray-500">Products ready for delivery from completed manufacturing orders</p>
+          <h1 className="text-xl font-semibold text-foreground">Finished Goods</h1>
+          <p className="text-xs text-gray-500">Products ready for delivery from completed manufacturing orders</p>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-1.5">
@@ -136,30 +136,34 @@ export default function FinishedGoods() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
-        <div className="flex rounded-lg border border-gray-200 bg-white overflow-hidden">
-          {([['ready', 'Ready'], ['delivered', 'Delivered'], ['all', 'All']] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className={`px-3 py-1.5 text-sm font-medium border-r last:border-r-0 border-gray-200 ${
-                filter === key ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search MO, SO, customer..."
-            className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200"
-          />
+      <div className="mb-4 mt-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex rounded border border-gray-200 bg-white overflow-hidden shrink-0">
+              {([['ready', 'Ready'], ['delivered', 'Delivered'], ['all', 'All']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  className={`px-3 py-1 text-sm font-medium border-r last:border-r-0 border-gray-200 ${
+                    filter === key ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="relative flex-1 min-w-[240px] max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search MO, SO, customer..."
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

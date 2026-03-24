@@ -15,7 +15,7 @@ import {
   SortDesc,
   Eye,
 } from 'lucide-react';
-import Input from '../../components/ui/Input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
@@ -268,10 +268,10 @@ export default function Warehouse() {
 
   return (
     <div className="px-6 py-6">
-      <div className="flex items-start justify-between mb-5">
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground leading-tight">Warehouse Inventory</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--gray-500)' }}>
+          <h1 className="text-xl font-semibold text-foreground mb-1">Warehouse Inventory</h1>
+          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
             {filtered.length} SKU{filtered.length === 1 ? '' : 's'} in stock
             {selectedWarehouseName ? ` · ${selectedWarehouseName}` : ' · All warehouses'}
           </p>
@@ -279,29 +279,40 @@ export default function Warehouse() {
       </div>
 
       {/* Filters */}
-      <div className="mb-5 flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search SKU, item name, or category..."
-            value={searchTerm}
-            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-            className="pl-10"
-          />
+      <div className="mb-4">
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 relative min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search SKU, item name, or category..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search warehouse inventory"
+              />
+            </div>
+            {warehouses.length > 1 && (
+              <div className="w-[190px] shrink-0">
+                <Select
+                  value={selectedWarehouseId || '__all__'}
+                  onValueChange={(v) => { setSelectedWarehouseId(v === '__all__' ? '' : v); setCurrentPage(1); }}
+                >
+                  <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                    <SelectValue placeholder="All Warehouses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All Warehouses</SelectItem>
+                    {warehouses.map(w => (
+                      <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
         </div>
-        {warehouses.length > 1 && (
-          <select
-            value={selectedWarehouseId}
-            onChange={e => { setSelectedWarehouseId(e.target.value); setCurrentPage(1); }}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-          >
-            <option value="">All Warehouses</option>
-            {warehouses.map(w => (
-              <option key={w.id} value={w.id}>{w.name}</option>
-            ))}
-          </select>
-        )}
       </div>
 
       {isLoading ? (

@@ -16,6 +16,13 @@ import OrganizationUserPermissions from './OrganizationUserPermissions';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { getRoleLabel, getDefaultPermissionsForRole, type OrgRole, isValidOrgRole, mapLegacyRole } from '../../rbac/rolePresets';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/SelectShadcn';
 
 // Debug state (temporary)
 let debugClickCount = 0;
@@ -576,57 +583,48 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
                 <Label htmlFor="role" required>
                   Role
                 </Label>
-                <select
-                  id="role"
-                  {...form.register('role', {
-                    onChange: async (e) => {
-                      const newRole = e.target.value;
-                      const oldRole = previousRoleRef.current;
-                      
-                      // Only handle role preset logic for new roles (not 'member')
-                      if (oldRole && oldRole !== newRole && isValidOrgRole(newRole)) {
-                        // If permissions are dirty, ask user
-                        if (isDirtyPermissions) {
-                          const confirmed = await showConfirm({
-                            title: 'Apply role defaults?',
-                            message: `You have modified permissions. Do you want to apply the default permissions for "${getRoleLabel(newRole)}" or keep your current permissions?`,
-                            confirmText: 'Apply defaults',
-                            cancelText: 'Keep current',
-                            variant: 'info',
-                          });
-                          
-                          if (confirmed && permissionsComponentRef.current) {
-                            // Apply role preset
-                            await permissionsComponentRef.current.applyRolePreset(newRole);
-                          }
-                          // If not confirmed, just change the role (permissions stay as-is)
-                        } else {
-                          // No dirty permissions, apply preset automatically
-                          if (permissionsComponentRef.current) {
-                            await permissionsComponentRef.current.applyRolePreset(newRole);
-                          }
+                <Select
+                  value={form.watch('role')}
+                  onValueChange={async (newRole) => {
+                    const oldRole = previousRoleRef.current;
+                    form.setValue('role', newRole as any, { shouldValidate: true, shouldDirty: true });
+
+                    if (oldRole && oldRole !== newRole && isValidOrgRole(newRole)) {
+                      if (isDirtyPermissions) {
+                        const confirmed = await showConfirm({
+                          title: 'Apply role defaults?',
+                          message: `You have modified permissions. Do you want to apply the default permissions for "${getRoleLabel(newRole)}" or keep your current permissions?`,
+                          confirmText: 'Apply defaults',
+                          cancelText: 'Keep current',
+                          variant: 'info',
+                        });
+                        if (confirmed && permissionsComponentRef.current) {
+                          await permissionsComponentRef.current.applyRolePreset(newRole);
+                        }
+                      } else {
+                        if (permissionsComponentRef.current) {
+                          await permissionsComponentRef.current.applyRolePreset(newRole);
                         }
                       }
-                      
-                      previousRoleRef.current = newRole;
-                    },
-                  })}
-                  className={`w-full px-2.5 py-1.5 text-xs border rounded-md bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
-                    form.formState.errors.role 
-                      ? 'border-red-300 bg-red-50 focus:ring-red-500/20 focus:border-red-500' 
-                      : 'border-gray-200 focus:ring-primary/20 focus:border-primary/50'
-                  }`}
+                    }
+                    previousRoleRef.current = newRole;
+                  }}
                 >
-                  <option value="superadmin">{getRoleLabel('superadmin')}</option>
-                  <option value="admin">{getRoleLabel('admin')}</option>
-                  <option value="sales_coordinator">{getRoleLabel('sales_coordinator')}</option>
-                  <option value="operator_admin">{getRoleLabel('operator_admin')}</option>
-                  <option value="operator_member">{getRoleLabel('operator_member')}</option>
-                  <option value="operator">{getRoleLabel('operator')}</option>
-                  <option value="procurement">{getRoleLabel('procurement')}</option>
-                  <option value="finance">{getRoleLabel('finance')}</option>
-                  <option value="member">Member (legacy)</option>
-                </select>
+                  <SelectTrigger className={`py-1 text-xs ${form.formState.errors.role ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="superadmin">{getRoleLabel('superadmin')}</SelectItem>
+                    <SelectItem value="admin">{getRoleLabel('admin')}</SelectItem>
+                    <SelectItem value="sales_coordinator">{getRoleLabel('sales_coordinator')}</SelectItem>
+                    <SelectItem value="operator_admin">{getRoleLabel('operator_admin')}</SelectItem>
+                    <SelectItem value="operator_member">{getRoleLabel('operator_member')}</SelectItem>
+                    <SelectItem value="operator">{getRoleLabel('operator')}</SelectItem>
+                    <SelectItem value="procurement">{getRoleLabel('procurement')}</SelectItem>
+                    <SelectItem value="finance">{getRoleLabel('finance')}</SelectItem>
+                    <SelectItem value="member">Member (legacy)</SelectItem>
+                  </SelectContent>
+                </Select>
                 {form.formState.errors.role && (
                   <p className="mt-1 text-xs text-red-600">
                     {form.formState.errors.role.message}
@@ -638,19 +636,19 @@ export default function OrganizationUserEdit({ userId, embedded = false }: Organ
                 <Label htmlFor="status" required>
                   Status
                 </Label>
-                <select
-                  id="status"
-                  {...form.register('status')}
-                  className={`w-full px-2.5 py-1.5 text-xs border rounded-md bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-0 ${
-                    form.formState.errors.status 
-                      ? 'border-red-300 bg-red-50 focus:ring-red-500/20 focus:border-red-500' 
-                      : 'border-gray-200 focus:ring-primary/20 focus:border-primary/50'
-                  }`}
+                <Select
+                  value={form.watch('status')}
+                  onValueChange={(v) => form.setValue('status', v as any, { shouldValidate: true, shouldDirty: true })}
                 >
-                  <option value="invited">Invited</option>
-                  <option value="active">Active</option>
-                  <option value="disabled">Disabled</option>
-                </select>
+                  <SelectTrigger className={`py-1 text-xs ${form.formState.errors.status ? 'border-red-300 bg-red-50' : ''}`}>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="invited">Invited</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
                 {form.formState.errors.status && (
                   <p className="mt-1 text-xs text-red-600">
                     {form.formState.errors.status.message}
