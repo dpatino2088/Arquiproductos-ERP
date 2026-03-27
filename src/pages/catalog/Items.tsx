@@ -73,6 +73,7 @@ interface Item {
   discontinued?: boolean;
   manufacturer?: string;
   category?: string;
+  categoryId?: string;
   family?: string;
   image?: string;
 }
@@ -86,6 +87,7 @@ interface CatalogItemsListStateSnapshot {
   sortOrder: 'asc' | 'desc';
   selectedManufacturer: string[];
   selectedCategory: string[];
+  selectedSubcategory: string[];
   selectedFamily: string[];
   selectedMeasureBasis: string[];
   selectedActive: string[];
@@ -126,6 +128,7 @@ function hasCatalogListParams(params: URLSearchParams): boolean {
     params.has('q') ||
     params.has('manufacturer') ||
     params.has('category') ||
+    params.has('subcategory') ||
     params.has('family') ||
     params.has('measureBasis') ||
     params.has('active') ||
@@ -153,7 +156,7 @@ export default function Items() {
   const { can } = usePermissions();
   const canViewBOM = can('catalog.bom.read') || can('catalog.bom.write') || can('catalog.write');
   const { canCreate: canCreateCat, canArchive: canArchiveCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
-  const { items, loading, loadingMore, error, refetch } = useCatalogItems();
+  const { items, loading, loadingMore, error, refetch } = useCatalogItems({ includeInactive: true });
   const { categories: catalogCategories } = useCatalogCategories();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
@@ -224,6 +227,7 @@ export default function Items() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedManufacturer, setSelectedManufacturer] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string[]>([]);
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string[]>([]);
   // Removed selectedItemType - using selectedCategory instead
   const [selectedMeasureBasis, setSelectedMeasureBasis] = useState<string[]>([]);
@@ -283,6 +287,7 @@ export default function Items() {
       setSortOrder((snapshot.sortOrder as 'asc' | 'desc') ?? 'asc');
       setSelectedManufacturer(Array.isArray(snapshot.selectedManufacturer) ? snapshot.selectedManufacturer : []);
       setSelectedCategory(Array.isArray(snapshot.selectedCategory) ? snapshot.selectedCategory : []);
+      setSelectedSubcategory(Array.isArray(snapshot.selectedSubcategory) ? snapshot.selectedSubcategory : []);
       setSelectedFamily(Array.isArray(snapshot.selectedFamily) ? snapshot.selectedFamily : []);
       setSelectedMeasureBasis(Array.isArray(snapshot.selectedMeasureBasis) ? snapshot.selectedMeasureBasis : []);
       setSelectedActive(Array.isArray(snapshot.selectedActive) ? snapshot.selectedActive : []);
@@ -326,6 +331,7 @@ export default function Items() {
       setSortOrder((snapshot.sortOrder as 'asc' | 'desc') ?? 'asc');
       setSelectedManufacturer(Array.isArray(snapshot.selectedManufacturer) ? snapshot.selectedManufacturer : []);
       setSelectedCategory(Array.isArray(snapshot.selectedCategory) ? snapshot.selectedCategory : []);
+      setSelectedSubcategory(Array.isArray(snapshot.selectedSubcategory) ? snapshot.selectedSubcategory : []);
       setSelectedFamily(Array.isArray(snapshot.selectedFamily) ? snapshot.selectedFamily : []);
       setSelectedMeasureBasis(Array.isArray(snapshot.selectedMeasureBasis) ? snapshot.selectedMeasureBasis : []);
       setSelectedActive(Array.isArray(snapshot.selectedActive) ? snapshot.selectedActive : []);
@@ -355,6 +361,7 @@ export default function Items() {
       searchTerm.trim().length > 0 ||
       selectedManufacturer.length > 0 ||
       selectedCategory.length > 0 ||
+      selectedSubcategory.length > 0 ||
       selectedFamily.length > 0 ||
       selectedMeasureBasis.length > 0 ||
       selectedActive.length > 0,
@@ -362,6 +369,7 @@ export default function Items() {
       searchTerm,
       selectedManufacturer,
       selectedCategory,
+      selectedSubcategory,
       selectedFamily,
       selectedMeasureBasis,
       selectedActive,
@@ -385,6 +393,7 @@ export default function Items() {
       setSearchTerm('');
       setSelectedManufacturer([]);
       setSelectedCategory([]);
+      setSelectedSubcategory([]);
       setSelectedFamily([]);
       setSelectedMeasureBasis([]);
       setSelectedActive([]);
@@ -538,6 +547,7 @@ export default function Items() {
         discontinued: item.discontinued || false,
         manufacturer: item.manufacturer || item.metadata?.manufacturer || 'Not specified',
         category: categoryName || 'N/A',
+        categoryId: item.category_id || undefined,
         family: item.metadata?.family || 'Not specified',
         image: item.image_url || item.metadata?.image || null,
       };
@@ -618,6 +628,9 @@ export default function Items() {
       // Category filter
       const matchesCategory = selectedCategory.length === 0 || (item.category && selectedCategory.includes(item.category));
 
+      // Sub Category filter (by category_id to avoid label collisions)
+      const matchesSubcategory = selectedSubcategory.length === 0 || (item.categoryId && selectedSubcategory.includes(item.categoryId));
+
       // Family filter
       const matchesFamily = selectedFamily.length === 0 || (item.family && selectedFamily.includes(item.family));
 
@@ -627,7 +640,7 @@ export default function Items() {
       // Active filter
       const matchesActive = selectedActive.length === 0 || (item.active !== undefined && selectedActive.includes(item.active ? 'Active' : 'Inactive'));
 
-      return matchesSearch && matchesManufacturer && matchesCategory && matchesFamily && matchesMeasureBasis && matchesActive;
+      return matchesSearch && matchesManufacturer && matchesCategory && matchesSubcategory && matchesFamily && matchesMeasureBasis && matchesActive;
     });
 
     // Apply sorting
@@ -687,7 +700,7 @@ export default function Items() {
       if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [searchTerm, itemsData, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedFamily, selectedMeasureBasis, selectedActive]);
+  }, [searchTerm, itemsData, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedSubcategory, selectedFamily, selectedMeasureBasis, selectedActive]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
@@ -735,6 +748,7 @@ export default function Items() {
       sortOrder,
       selectedManufacturer,
       selectedCategory,
+      selectedSubcategory,
       selectedFamily,
       selectedMeasureBasis,
       selectedActive,
@@ -754,6 +768,7 @@ export default function Items() {
     sortOrder,
     selectedManufacturer,
     selectedCategory,
+    selectedSubcategory,
     selectedFamily,
     selectedMeasureBasis,
     selectedActive,
@@ -764,6 +779,7 @@ export default function Items() {
     if (searchTerm.trim()) params.set('q', searchTerm.trim());
     if (selectedManufacturer.length > 0) params.set('manufacturer', selectedManufacturer.map(encodeURIComponent).join(','));
     if (selectedCategory.length > 0) params.set('category', selectedCategory.map(encodeURIComponent).join(','));
+    if (selectedSubcategory.length > 0) params.set('subcategory', selectedSubcategory.map(encodeURIComponent).join(','));
     if (selectedFamily.length > 0) params.set('family', selectedFamily.map(encodeURIComponent).join(','));
     if (selectedMeasureBasis.length > 0) params.set('measureBasis', selectedMeasureBasis.map(encodeURIComponent).join(','));
     if (selectedActive.length > 0) params.set('active', selectedActive.map(encodeURIComponent).join(','));
@@ -778,6 +794,7 @@ export default function Items() {
     searchTerm,
     selectedManufacturer,
     selectedCategory,
+    selectedSubcategory,
     selectedFamily,
     selectedMeasureBasis,
     selectedActive,
@@ -807,6 +824,7 @@ export default function Items() {
       sortOrder,
       selectedManufacturer,
       selectedCategory,
+      selectedSubcategory,
       selectedFamily,
       selectedMeasureBasis,
       selectedActive,
@@ -840,6 +858,7 @@ export default function Items() {
     sortOrder,
     selectedManufacturer,
     selectedCategory,
+    selectedSubcategory,
     selectedFamily,
     selectedMeasureBasis,
     selectedActive,
@@ -855,6 +874,7 @@ export default function Items() {
     setSearchTerm(params.get('q') ?? '');
     setSelectedManufacturer(splitCsvParam(params.get('manufacturer')));
     setSelectedCategory(splitCsvParam(params.get('category')));
+    setSelectedSubcategory(splitCsvParam(params.get('subcategory')));
     setSelectedFamily(splitCsvParam(params.get('family')));
     setSelectedMeasureBasis(splitCsvParam(params.get('measureBasis')));
     setSelectedActive(splitCsvParam(params.get('active')));
@@ -905,6 +925,14 @@ export default function Items() {
     );
   };
 
+  const handleSubcategoryToggle = (subcategoryId: string) => {
+    setSelectedSubcategory((prev) =>
+      prev.includes(subcategoryId)
+        ? prev.filter((id) => id !== subcategoryId)
+        : [...prev, subcategoryId]
+    );
+  };
+
   const handleFamilyToggle = (family: string) => {
     setSelectedFamily(prev => 
       prev.includes(family) 
@@ -917,6 +945,7 @@ export default function Items() {
   const clearAllFilters = () => {
     setSelectedManufacturer([]);
     setSelectedCategory([]);
+    setSelectedSubcategory([]);
     setSelectedFamily([]);
     // Removed setSelectedItemType - using selectedCategory instead
     setSelectedMeasureBasis([]);
@@ -929,6 +958,7 @@ export default function Items() {
     setSearchTerm('');
     setSelectedManufacturer([]);
     setSelectedCategory([]);
+    setSelectedSubcategory([]);
     setSelectedFamily([]);
     setSelectedMeasureBasis([]);
     setSelectedActive([]);
@@ -1277,12 +1307,25 @@ export default function Items() {
   // Get unique filter options
   const manufacturerOptions = Array.from(new Set(displayItems.map(item => item.manufacturer).filter(Boolean)));
   const categoryOptions = Array.from(new Set(displayItems.map(item => item.category).filter(Boolean)));
+  const subcategoryOptions = useMemo(() => {
+    const byId = new Map(catalogCategories.map((cat) => [cat.id, cat]));
+    return catalogCategories
+      .filter((cat) => !cat.is_group && Boolean(cat.parent_id))
+      .map((cat) => {
+        const parentName = cat.parent_id ? (byId.get(cat.parent_id)?.name || 'Not specified') : 'Not specified';
+        return {
+          id: cat.id,
+          label: `${parentName} > ${cat.name}`,
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [catalogCategories]);
   const familyOptions = Array.from(new Set(displayItems.map(item => item.family).filter(Boolean)));
   // Category options already handled by selectedCategory
   const measureBasisOptions = Array.from(new Set(displayItems.map(item => item.measure_basis).filter(Boolean)));
   const activeOptions = ['Active', 'Inactive'];
 
-  const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedFamily.length + 
+  const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedSubcategory.length + selectedFamily.length + 
                              selectedMeasureBasis.length + selectedActive.length;
 
   if (loading) return <div className="py-6 px-6" />;
@@ -1520,19 +1563,6 @@ export default function Items() {
                 </span>
               )}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                clearAllFilters();
-                setCurrentPage(1);
-              }}
-              disabled={!hasActiveFilters}
-              className="inline-flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded border border-gray-200 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-              title="Clear filters"
-              aria-label="Clear filters"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
 
           {/* Filters Dropdown */}
@@ -1706,6 +1736,38 @@ export default function Items() {
                           className="w-4 h-4"
                         />
                         <span className="text-sm text-gray-700">{family}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sub Category Filter */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Sub Category</span>
+                    {selectedSubcategory.length > 0 && (
+                      <button
+                        onClick={() => setSelectedSubcategory([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                      >
+                        Clear ({selectedSubcategory.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {subcategoryOptions.map((subcategory) => (
+                      <div
+                        key={subcategory.id}
+                        onClick={() => handleSubcategoryToggle(subcategory.id)}
+                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSubcategory.includes(subcategory.id)}
+                          readOnly
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm text-gray-700">{subcategory.label}</span>
                       </div>
                     ))}
                   </div>

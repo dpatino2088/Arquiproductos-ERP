@@ -37,6 +37,13 @@ export interface Proposal {
   terms_content?: string | null;
   /** Snapshot: source template id. */
   terms_source_template_id?: string | null;
+  /** Snapshot captured when proposal transitions to sent/accepted */
+  customer_snapshot_name?: string | null;
+  customer_snapshot_address?: string | null;
+  customer_snapshot_email?: string | null;
+  customer_snapshot_phone?: string | null;
+  contact_snapshot_name?: string | null;
+  contact_snapshot_email?: string | null;
   global_discount_pct: number | null;
   global_fee_amount: number | null;
   /** Discount % applied to installation addons total (e.g. 15 = 15%). */

@@ -273,6 +273,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
   }
 
   const proposal = proposalData as Proposal;
+  const isFrozenProposal = proposal.status === 'sent' || proposal.status === 'accepted';
 
   const { data: linesData, error: linesError } = await supabase
     .from('ProposalLines')
@@ -495,66 +496,80 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
 
   let customer: ProposalDetailCustomer | null = null;
   let contact: ProposalDetailContact | null = null;
-  let customerIdToUse = proposal.customer_id;
-  let contactIdToUse = proposal.contact_id;
-  if ((!customerIdToUse || !contactIdToUse) && proposal.quote_id) {
-    const { data: quoteRow } = await supabase
-      .from('Quotes')
-      .select('customer_id, contact_id')
-      .eq('id', proposal.quote_id)
-      .eq('deleted', false)
-      .maybeSingle();
-    if (quoteRow) {
-      if (!customerIdToUse && (quoteRow as any).customer_id) customerIdToUse = (quoteRow as any).customer_id;
-      if (!contactIdToUse && (quoteRow as any).contact_id) contactIdToUse = (quoteRow as any).contact_id;
-    }
+  if (isFrozenProposal && proposal.customer_snapshot_name) {
+    customer = {
+      customer_name: proposal.customer_snapshot_name || 'N/A',
+      address: proposal.customer_snapshot_address ?? null,
+      customer_email: proposal.customer_snapshot_email ?? null,
+      customer_phone: proposal.customer_snapshot_phone ?? null,
+    };
+    contact = {
+      contact_name: proposal.contact_snapshot_name ?? null,
+      contact_email: proposal.contact_snapshot_email ?? null,
+    };
   }
-  if (customerIdToUse && proposal.organization_id) {
-    const { data: custData } = await supabase
-      .from('DirectoryCustomers')
-      .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
-      .eq('id', customerIdToUse)
-      .eq('organization_id', proposal.organization_id)
-      .maybeSingle();
-    if (custData) {
-      const c = custData as {
-        customer_name?: string;
-        street_address_line_1?: string | null;
-        street_address_line_2?: string | null;
-        city?: string | null;
-        state?: string | null;
-        zip_code?: string | null;
-        country?: string | null;
-        customer_email?: string | null;
-        customer_phone?: string | null;
-        alt_phone?: string | null;
-      };
-      const parts = [
-        c.street_address_line_1,
-        c.street_address_line_2,
-        [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
-        c.country,
-      ].filter(Boolean) as string[];
-      customer = {
-        customer_name: c.customer_name || 'N/A',
-        address: parts.length > 0 ? parts.join(', ') : null,
-        customer_email: c.customer_email ?? null,
-        customer_phone: c.customer_phone ?? c.alt_phone ?? null,
-      };
+  if (!customer || !contact) {
+    let customerIdToUse = proposal.customer_id;
+    let contactIdToUse = proposal.contact_id;
+    if ((!customerIdToUse || !contactIdToUse) && proposal.quote_id) {
+      const { data: quoteRow } = await supabase
+        .from('Quotes')
+        .select('customer_id, contact_id')
+        .eq('id', proposal.quote_id)
+        .eq('deleted', false)
+        .maybeSingle();
+      if (quoteRow) {
+        if (!customerIdToUse && (quoteRow as any).customer_id) customerIdToUse = (quoteRow as any).customer_id;
+        if (!contactIdToUse && (quoteRow as any).contact_id) contactIdToUse = (quoteRow as any).contact_id;
+      }
     }
-  }
-  if (contactIdToUse && proposal.organization_id) {
-    const { data: contData } = await supabase
-      .from('DirectoryContacts')
-      .select('contact_name, contact_email')
-      .eq('id', contactIdToUse)
-      .eq('organization_id', proposal.organization_id)
-      .maybeSingle();
-    if (contData)
-      contact = {
-        contact_name: (contData as any).contact_name ?? null,
-        contact_email: (contData as any).contact_email ?? null,
-      };
+    if (!customer && customerIdToUse && proposal.organization_id) {
+      const { data: custData } = await supabase
+        .from('DirectoryCustomers')
+        .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
+        .eq('id', customerIdToUse)
+        .eq('organization_id', proposal.organization_id)
+        .maybeSingle();
+      if (custData) {
+        const c = custData as {
+          customer_name?: string;
+          street_address_line_1?: string | null;
+          street_address_line_2?: string | null;
+          city?: string | null;
+          state?: string | null;
+          zip_code?: string | null;
+          country?: string | null;
+          customer_email?: string | null;
+          customer_phone?: string | null;
+          alt_phone?: string | null;
+        };
+        const parts = [
+          c.street_address_line_1,
+          c.street_address_line_2,
+          [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
+          c.country,
+        ].filter(Boolean) as string[];
+        customer = {
+          customer_name: c.customer_name || 'N/A',
+          address: parts.length > 0 ? parts.join(', ') : null,
+          customer_email: c.customer_email ?? null,
+          customer_phone: c.customer_phone ?? c.alt_phone ?? null,
+        };
+      }
+    }
+    if (!contact && contactIdToUse && proposal.organization_id) {
+      const { data: contData } = await supabase
+        .from('DirectoryContacts')
+        .select('contact_name, contact_email')
+        .eq('id', contactIdToUse)
+        .eq('organization_id', proposal.organization_id)
+        .maybeSingle();
+      if (contData)
+        contact = {
+          contact_name: (contData as any).contact_name ?? null,
+          contact_email: (contData as any).contact_email ?? null,
+        };
+    }
   }
 
   let dealerLogoUrl: string | null = null;
@@ -610,6 +625,7 @@ export function useProposalDetail(proposalId: string | null) {
     queryKey: proposalDetailKey(scopeKey, proposalId),
     queryFn: () => fetchProposalDetailData(proposalId!),
     enabled: !!proposalId && isScopeReady,
+    refetchOnMount: true,
   });
 
   const refetch = useCallback(() => {

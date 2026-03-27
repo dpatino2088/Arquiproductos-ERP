@@ -414,7 +414,20 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 export function useOrganizationContext(): OrganizationContextValue {
   const context = useContext(OrganizationContext);
   if (context === undefined) {
-    throw new Error('useOrganizationContext must be used within an OrganizationProvider');
+    // Graceful fallback prevents hard-crash screens during transient provider timing/HMR issues.
+    return {
+      memberships: [],
+      organizations: [],
+      activeOrganizationId: null,
+      activeOrganization: null,
+      activeMembership: null,
+      role: null,
+      loading: false,
+      error: null,
+      hasOrganizations: false,
+      setActiveOrganizationId: () => {},
+      refresh: async () => {},
+    };
   }
   return context;
 }

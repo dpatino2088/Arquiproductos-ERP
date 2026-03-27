@@ -104,7 +104,7 @@ export default function MaterialDemand() {
         .from('manufacturing_order_material_demand')
         .select('*')
         .eq('organization_id', activeOrganizationId)
-        .in('mo_status', ['draft', 'confirmed', 'planned', 'procurement']);
+        .in('mo_status', ['confirmed', 'procurement', 'materials_ready']);
       if (error) throw error;
       if (!demand?.length) return [];
 
@@ -588,7 +588,7 @@ export default function MaterialDemand() {
             .select('status')
             .eq('id', moId)
             .single();
-          if (mo && ['draft', 'confirmed'].includes(mo.status)) {
+          if (mo && mo.status === 'confirmed') {
             await supabase.rpc('transition_mo_status', {
               p_mo_id: moId,
               p_new_status: 'procurement',

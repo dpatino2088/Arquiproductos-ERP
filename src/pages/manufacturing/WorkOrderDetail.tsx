@@ -67,7 +67,8 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
   const depsBlocked = depIds.length > 0 && siblingTasks
     ? !depIds.every(depId => siblingTasks.find(s => s.id === depId)?.status === 'completed')
     : false;
-  const canStart = !depsBlocked && (isAssembly ? allUpstreamReady : true);
+  const plannedStartDue = task.planned_start_at ? new Date(task.planned_start_at).getTime() <= Date.now() : false;
+  const canStart = !depsBlocked && (isAssembly ? allUpstreamReady : true) && plannedStartDue;
 
   return (
     <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
@@ -103,7 +104,7 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
             </button>
           )}
           {task.status === 'pending' && !canStart && (
-            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Upstream tasks must be completed first">
+            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Blocked by dependencies or scheduled start date/time">
               <AlertTriangle className="h-3 w-3" /> Blocked
             </span>
           )}
@@ -235,7 +236,7 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
                     checked={line.completed}
                     onChange={e => onToggleLine(line.id, e.target.checked)}
                     className="rounded border-gray-300"
-                    disabled={task.status === 'completed'}
+                    disabled={task.status !== 'in_progress'}
                   />
                 </td>
                 <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{line.sku || '—'}</td>

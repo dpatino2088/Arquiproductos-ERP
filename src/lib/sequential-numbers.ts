@@ -131,8 +131,10 @@ const PROPOSAL_NUMBER_START = 100;
 const PROPOSAL_PREFIX = 'PR';
 
 /**
- * Generates the next Proposal number. Per dealer when dealerId is provided.
+ * Generates the next base Proposal number. Per dealer when dealerId is provided.
  * Format: PR-NNNNN starting at PR-00100. Independent from Quote (QT) numbering.
+ * Versioned siblings (PR-00100_V2, PR-00100_V3, ...) share the same base number
+ * and must NOT consume a new slot in this sequence.
  */
 export async function generateNextProposalNumber(
   organizationId: string,
@@ -155,7 +157,9 @@ export async function generateNextProposalNumber(
         .map((row: { proposal_no: string | null }) => {
           const no = row.proposal_no;
           if (!no) return null;
-          const m = String(no).match(/^(?:PR|PRO)-(\d+)$/i);
+          // Accept both bare base numbers (PR-00100) AND versioned ones (PR-00100_V2).
+          // The _V\d+ suffix must be ignored so versions don't pollute the counter.
+          const m = String(no).match(/^(?:PR|PRO)-(\d+)(?:_V\d+)?$/i);
           return m ? parseInt(m[1], 10) : null;
         })
         .filter((n: number | null): n is number => n != null);

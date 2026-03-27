@@ -185,10 +185,10 @@ export default function SalesOrderDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
   const [creatingMOForLines, setCreatingMOForLines] = useState(false);
   const [lineMoMap, setLineMoMap] = useState<Map<string, { mo_id: string; mo_no: string; status: string }>>(new Map());
   const [moLineCounts, setMoLineCounts] = useState<Map<string, number>>(new Map());
+  const [moDisplayStatusMap, setMoDisplayStatusMap] = useState<Map<string, string>>(new Map());
 
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
@@ -298,18 +298,22 @@ export default function SalesOrderDetail() {
           const moIds = mosData.map(m => m.id);
           const { data: molRows } = await supabase
             .from('ManufacturingOrderLines')
-            .select('sales_order_line_id, manufacturing_order_id')
+            .select('sales_order_line_id, manufacturing_order_id, status')
             .in('manufacturing_order_id', moIds)
             .eq('deleted', false);
           const moMap = new Map(mosData.map(m => [m.id, m]));
           const newLineMoMap = new Map<string, { mo_id: string; mo_no: string; status: string }>();
           const newMoLineCounts = new Map<string, number>();
+          const newMoStatusBuckets = new Map<string, Set<string>>();
           (molRows ?? []).forEach((r: any) => {
             if (r.manufacturing_order_id) {
               newMoLineCounts.set(
                 r.manufacturing_order_id,
                 (newMoLineCounts.get(r.manufacturing_order_id) ?? 0) + 1,
               );
+              const statusBucket = newMoStatusBuckets.get(r.manufacturing_order_id) ?? new Set<string>();
+              if (r.status) statusBucket.add(String(r.status));
+              newMoStatusBuckets.set(r.manufacturing_order_id, statusBucket);
             }
             if (r.sales_order_line_id && !newLineMoMap.has(r.sales_order_line_id)) {
               const mo = moMap.get(r.manufacturing_order_id);
@@ -324,9 +328,24 @@ export default function SalesOrderDetail() {
           });
           setLineMoMap(newLineMoMap);
           setMoLineCounts(newMoLineCounts);
+          const nextDisplayMap = new Map<string, string>();
+          mosData.forEach((mo) => {
+            const statuses = Array.from(newMoStatusBuckets.get(mo.id) ?? []);
+            if (statuses.includes('in_production') && statuses.includes('completed')) {
+              nextDisplayMap.set(mo.id, 'partial_completed');
+              return;
+            }
+            if (statuses.includes('in_production') && statuses.includes('planned')) {
+              nextDisplayMap.set(mo.id, 'partial');
+              return;
+            }
+            nextDisplayMap.set(mo.id, mo.status);
+          });
+          setMoDisplayStatusMap(nextDisplayMap);
         } else {
           setLineMoMap(new Map());
           setMoLineCounts(new Map());
+          setMoDisplayStatusMap(new Map());
         }
       }
       if (timelineRes.error) {
@@ -382,79 +401,30 @@ export default function SalesOrderDetail() {
   const handleCreateMO = useCallback(async () => {
     if (!salesOrderId || !user?.id) return;
     setActionsOpen(false);
-    const eligibleLineIds = lines.filter((line) => !lineMoMap.has(line.id)).map((line) => line.id);
-    if (eligibleLineIds.length === 0) {
+    const existingMo = mos.find((m) => (m.status || '').toLowerCase() !== 'cancelled');
+    if (existingMo) {
       addNotification({
         type: 'info',
         title: 'Manufacturing',
-        message: 'All lines already have a Manufacturing Order.',
+        message: `This Sales Order already has Manufacturing Order ${existingMo.manufacturing_order_no}.`,
       });
+      router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${existingMo.id}`));
       return;
     }
     setCreatingMOForLines(true);
-    const created: Array<{ id: string; number: string }> = [];
-    const errors: string[] = [];
     try {
-      for (const lineId of eligibleLineIds) {
-        try {
-          const result = await createMO(salesOrderId, user.id, lineId, user.name);
-          if (result?.mo_id) {
-            created.push({ id: result.mo_id, number: result.mo_number ?? result.mo_id });
-          }
-        } catch (err: unknown) {
-          errors.push(err instanceof Error ? err.message : 'Error creating Manufacturing Order');
-        }
+      const result = await createMO(salesOrderId, user.id, undefined, user.name);
+      if (result?.mo_id) {
+        router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${result.mo_id}`));
+        return;
       }
+      refetch();
+    } catch {
+      // useSOActions already shows notification
     } finally {
       setCreatingMOForLines(false);
     }
-
-    if (created.length > 0 && errors.length === 0 && created.length === 1) {
-      router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${created[0].id}`));
-    } else {
-      if (created.length > 0) {
-        addNotification({
-          type: 'success',
-          title: 'MOs Created',
-          message: `Created: ${created.map((c) => c.number).join(', ')}`,
-        });
-      }
-      if (errors.length > 0) {
-        addNotification({
-          type: 'error',
-          title: 'Some MOs failed',
-          message: errors.join('; '),
-        });
-      }
-      refetch();
-    }
-  }, [salesOrderId, user, lines, lineMoMap, createMO, addNotification, refetch]);
-
-  const handleCreateMOForSelectedLines = useCallback(async () => {
-    if (!salesOrderId || !user?.id || selectedLineIds.size === 0) return;
-    setCreatingMOForLines(true);
-    const created: string[] = [];
-    const errors: string[] = [];
-    for (const lineId of selectedLineIds) {
-      if (lineMoMap.has(lineId)) continue;
-      try {
-        const result = await createMO(salesOrderId, user.id, lineId, user.name);
-        if (result?.mo_number) created.push(result.mo_number);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Error';
-        errors.push(msg);
-      }
-    }
-    setCreatingMOForLines(false);
-    setSelectedLineIds(new Set());
-    if (created.length > 0) {
-      addNotification({ type: 'success', title: 'MOs Created', message: `Created: ${created.join(', ')}` });
-    }
-    if (errors.length > 0) {
-      addNotification({ type: 'error', title: 'Some MOs failed', message: errors.join('; ') });
-    }
-    refetch();
-  }, [salesOrderId, user, selectedLineIds, lineMoMap, createMO, addNotification, refetch]);
+  }, [salesOrderId, user, mos, createMO, addNotification, refetch]);
 
 
   const actionButtons = useMemo(() => {
@@ -1065,49 +1035,15 @@ export default function SalesOrderDetail() {
 
       {activeTab === 'lines' && (
         <div className="space-y-3">
-          {/* Send to Production bar */}
-          {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount && (
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">
-                Select lines to send to production individually, or use the global button in Manufacturing tab.
-              </p>
-              <button
-                type="button"
-                onClick={handleCreateMOForSelectedLines}
-                disabled={selectedLineIds.size === 0 || creatingMOForLines || isActing}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {creatingMOForLines ? <Loader2 className="w-4 h-4 animate-spin" /> : <Factory className="w-4 h-4" />}
-                Send to Production ({selectedLineIds.size})
-              </button>
-            </div>
+          {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (
+            <p className="text-xs text-gray-500">
+              Sales Order creates one Manufacturing Order by default. If needed, split production later from Manufacturing.
+            </p>
           )}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount && (
-                    <th className="px-3 py-3 text-center w-10">
-                      <input
-                        type="checkbox"
-                        checked={lines.length > 0 && lines.filter(l => !lineMoMap.has(l.id)).every(l => selectedLineIds.has(l.id)) && lines.some(l => !lineMoMap.has(l.id))}
-                        onChange={() => {
-                          const eligible = lines.filter(l => !lineMoMap.has(l.id));
-                          const allSelected = eligible.every(l => selectedLineIds.has(l.id));
-                          setSelectedLineIds(prev => {
-                            const next = new Set(prev);
-                            if (allSelected) {
-                              eligible.forEach(l => next.delete(l.id));
-                            } else {
-                              eligible.forEach(l => next.add(l.id));
-                            }
-                            return next;
-                          });
-                        }}
-                        className="rounded border-gray-300"
-                      />
-                    </th>
-                  )}
                   <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
@@ -1121,7 +1057,7 @@ export default function SalesOrderDetail() {
               <tbody>
                 {lines.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       No lines
                     </td>
                   </tr>
@@ -1135,27 +1071,8 @@ export default function SalesOrderDetail() {
                       '—';
                     const dims = [line.width_m, line.height_m].filter((v) => v != null);
                     const linkedMo = lineMoMap.get(line.id);
-                    const canSelect = !linkedMo && isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount;
                     return (
                       <tr key={line.id} className={`border-t hover:bg-gray-50 ${linkedMo ? 'bg-green-50/30' : ''}`}>
-                        {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && hasPaidAmount && (
-                          <td className="px-3 py-4 text-center">
-                            {canSelect ? (
-                              <input
-                                type="checkbox"
-                                checked={selectedLineIds.has(line.id)}
-                                onChange={() => setSelectedLineIds(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(line.id)) next.delete(line.id); else next.add(line.id);
-                                  return next;
-                                })}
-                                className="rounded border-gray-300"
-                              />
-                            ) : (
-                              <CheckCircle2 className="w-4 h-4 text-green-500 mx-auto" />
-                            )}
-                          </td>
-                        )}
                         <td className="px-4 py-4 text-gray-500 tabular-nums">{line.line_number ?? idx + 1}</td>
                         <td className="px-4 py-4">
                           <div className="text-gray-900">{name}</div>
@@ -1254,23 +1171,30 @@ export default function SalesOrderDetail() {
                 )}
               </dl>
               {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (() => {
-                const allLinesCovered = lines.length > 0 && lines.every(l => lineMoMap.has(l.id));
-                const eligibleLines = lines.filter(l => !lineMoMap.has(l.id));
+                const activeMo = mos.find((m) => (m.status || '').toLowerCase() !== 'cancelled');
                 return (
                   <div className="mt-4 pt-3 border-t border-gray-100">
-                    {allLinesCovered ? (
-                      <p className="text-xs text-green-700 flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        All lines are in production.
-                      </p>
+                    {activeMo ? (
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-green-700 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          MO created: {activeMo.manufacturing_order_no}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${activeMo.id}`))}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                        >
+                          <Eye className="w-3 h-3" />
+                          View MO
+                        </button>
+                      </div>
                     ) : (
                       <>
                         {!hasPaidAmount && (
                           <p className="text-xs text-amber-600 mb-2">At least 15% of the order total must be paid before creating a Manufacturing Order.</p>
                         )}
-                        {eligibleLines.length < lines.length && eligibleLines.length > 0 && (
-                          <p className="text-xs text-gray-500 mb-2">{eligibleLines.length} of {lines.length} line(s) pending production. Use the Lines tab to select specific lines.</p>
-                        )}
+                        <p className="text-xs text-gray-500 mb-2">This action creates one Manufacturing Order for the Sales Order.</p>
                         <button
                           type="button"
                           onClick={handleCreateMO}
@@ -1278,7 +1202,7 @@ export default function SalesOrderDetail() {
                           className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                           {creatingMOForLines ? <Loader2 className="w-4 h-4 animate-spin" /> : <Factory className="w-4 h-4" />}
-                          {eligibleLines.length > 1 ? `Create All Pending MOs (${eligibleLines.length})` : 'Create Manufacturing Order'}
+                          Create Manufacturing Order
                         </button>
                       </>
                     )}
@@ -1330,7 +1254,7 @@ export default function SalesOrderDetail() {
                     <td className="px-4 py-4">
                       {mo.mo_type && <StatusBadge status={mo.mo_type} type="moType" size="sm" />}
                     </td>
-                    <td className="px-4 py-4"><StatusBadge status={mo.status} type="manufacturing" size="sm" /></td>
+                    <td className="px-4 py-4"><StatusBadge status={moDisplayStatusMap.get(mo.id) ?? mo.status} type="manufacturing" size="sm" /></td>
                     <td className="px-4 py-4">{productLabel}</td>
                     <td className="px-4 py-4 text-right">{mo.quantity}</td>
                     <td className="px-4 py-4">

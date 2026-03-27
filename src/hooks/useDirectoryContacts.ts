@@ -4,6 +4,7 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 import { useDealerScope } from './useDealerScope';
 import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
+import { queryClient } from '../lib/query-client';
 
 /**
  * ✅ Estándar #1: Scope State Machine
@@ -515,6 +516,7 @@ export function useDirectoryContacts(params?: { organizationId?: string | null; 
 
       // Refrescar lista
       await fetchContacts();
+      await queryClient.invalidateQueries({ queryKey: ['sales', 'proposals'] });
 
       return updatedContact;
     } catch (err: any) {

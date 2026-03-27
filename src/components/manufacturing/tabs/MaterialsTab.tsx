@@ -17,6 +17,7 @@ interface MaterialsTabProps {
   saleOrderId: string | null;
   moStatus: ManufacturingOrderStatus;
   currency?: string;
+  canViewCosts?: boolean;
   /** Called after BOM is generated so parent can refresh MO lines / timeline */
   onBOMGenerated?: () => void;
 }
@@ -60,9 +61,25 @@ interface AggregatedMaterial {
   totalMsrp: number;
 }
 
-export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus, currency = 'USD', onBOMGenerated: _onBOMGenerated }: MaterialsTabProps) {
+const TABLE_HEAD_CELL = 'py-3 px-6 font-medium text-xs';
+const TABLE_BODY_CELL = 'py-3 px-6 text-sm';
+const TABLE_HEAD_STICKY = 'bg-gray-50 border-b border-gray-200 sticky top-0 z-10 shadow-[0_1px_0_0_theme(colors.gray.200)]';
+const SECTION_HEADER = 'bg-gray-50 px-6 py-3 border-b border-gray-200';
+
+export default function MaterialsTab({
+  moId,
+  saleOrderId: _saleOrderId,
+  moStatus,
+  currency = 'USD',
+  canViewCosts = false,
+  onBOMGenerated: _onBOMGenerated,
+}: MaterialsTabProps) {
   const { materials, bomTotals, loading, error, hasBomInstances, hasBomLines, debugCounts } = useManufacturingMaterials(moId);
   const [showCosts, setShowCosts] = useState(false);
+  useEffect(() => {
+    if (!canViewCosts && showCosts) setShowCosts(false);
+  }, [canViewCosts, showCosts]);
+
   const [viewMode, setViewMode] = useState<ViewMode>('category');
   const [shouldShowError, setShouldShowError] = useState(false);
 
@@ -199,18 +216,28 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
     }
   }, [error, loading]);
 
-  // ✅ FIX: Group materials by category_code first (fallback to part_role)
-  // This ensures consistent grouping by category (hardware/tube/drive/bottom_bar/bracket/fabric/accessory)
-  // instead of by role which can be inconsistent (e.g., operating_system_drive vs drive_manual)
-  const groupedMaterials = materials.reduce((acc, material) => {
-    // Use category_code as primary grouping key, fallback to part_role if category_code is null
-    const category = material.category_code || material.part_role || 'accessory';
-    if (!acc[category]) {
-      acc[category] = [];
+  const itemCategoryByCatalogId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const material of materials) {
+      if (!material.catalog_item_id) continue;
+      if (map.has(material.catalog_item_id)) continue;
+      map.set(material.catalog_item_id, material.category_code || material.part_role || 'accessory');
     }
-    acc[category].push(material);
-    return acc;
-  }, {} as Record<string, typeof materials>);
+    return map;
+  }, [materials]);
+
+  const groupedMaterialsByCategory = useMemo(() => {
+    const grouped: Record<string, AggregatedMaterial[]> = {};
+    for (const agg of aggregatedBySku) {
+      const category = itemCategoryByCatalogId.get(agg.catalog_item_id) || agg.part_role || 'accessory';
+      if (!grouped[category]) grouped[category] = [];
+      grouped[category].push(agg);
+    }
+    Object.keys(grouped).forEach((category) => {
+      grouped[category].sort((a, b) => a.sku.localeCompare(b.sku));
+    });
+    return grouped;
+  }, [aggregatedBySku, itemCategoryByCatalogId]);
   
   useEffect(() => {
     // Track materials for debugging (DEV only)
@@ -221,14 +248,14 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
       }, {} as Record<string, number>);
       console.warn('[DEBUG] Materials displayed', {
         materialsCount: materials.length,
-        groupedCategories: Object.keys(groupedMaterials),
+        groupedCategories: Object.keys(groupedMaterialsByCategory),
         uomDistribution: uomCounts
       });
     }
-  }, [materials, groupedMaterials]);
+  }, [materials, groupedMaterialsByCategory]);
 
   // Sort categories by predefined order
-  const sortedCategories = Object.keys(groupedMaterials).sort((a, b) => {
+  const sortedCategories = Object.keys(groupedMaterialsByCategory).sort((a, b) => {
     const indexA = CATEGORY_ORDER.indexOf(a);
     const indexB = CATEGORY_ORDER.indexOf(b);
     if (indexA === -1 && indexB === -1) return a.localeCompare(b);
@@ -396,15 +423,17 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
                 By SKU
               </button>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showCosts}
-                onChange={(e) => setShowCosts(e.target.checked)}
-                className="rounded border-gray-300 text-primary focus:ring-primary"
-              />
-              <span className="text-sm text-gray-700">Show costs</span>
-            </label>
+            {canViewCosts && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showCosts}
+                  onChange={(e) => setShowCosts(e.target.checked)}
+                  className="rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <span className="text-sm text-gray-700">Show costs</span>
+              </label>
+            )}
           </div>
         </div>
       </div>
@@ -412,27 +441,27 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
       {viewMode === 'sku' ? (
         /* ===== BY SKU VIEW (aggregated summary) ===== */
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+          <div className={SECTION_HEADER}>
             <h4 className="text-sm font-semibold text-gray-900">
               Material Summary — {aggregatedBySku.length} unique SKUs
             </h4>
           </div>
           <div className="max-h-[60vh] overflow-y-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10 shadow-[0_1px_0_0_theme(colors.gray.200)]">
+            <table className="w-full table-fixed">
+              <thead className={TABLE_HEAD_STICKY}>
                 <tr>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">SKU</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Description</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Role</th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">Total Qty</th>
-                  <th className="text-right py-3 px-6 font-medium text-gray-900 text-xs">UoM</th>
-                  <th className="text-left py-3 px-6 font-medium text-gray-900 text-xs">Availability</th>
-                  {showCosts && (
+                  <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[160px]`}>SKU</th>
+                  <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
+                  <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
+                  <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`}>Total Qty</th>
+                  <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[90px]`}>UoM</th>
+                  <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Availability</th>
+                  {canViewCosts && showCosts && (
                     <>
-                      <th className="text-right py-3 px-6 font-medium text-blue-900 text-xs">Unit MSRP</th>
-                      <th className="text-right py-3 px-6 font-medium text-blue-900 text-xs">Total MSRP</th>
-                      <th className="text-right py-3 px-6 font-medium text-gray-500 text-xs">Unit Cost</th>
-                      <th className="text-right py-3 px-6 font-medium text-gray-500 text-xs">Total Cost</th>
+                      <th className={`text-right text-blue-900 ${TABLE_HEAD_CELL} w-[130px]`}>Unit MSRP</th>
+                      <th className={`text-right text-blue-900 ${TABLE_HEAD_CELL} w-[130px]`}>Total MSRP</th>
+                      <th className={`text-right text-gray-500 ${TABLE_HEAD_CELL} w-[130px]`}>Unit Cost</th>
+                      <th className={`text-right text-gray-500 ${TABLE_HEAD_CELL} w-[130px]`}>Total Cost</th>
                     </>
                   )}
                 </tr>
@@ -440,28 +469,28 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
               <tbody className="divide-y divide-gray-200">
                 {aggregatedBySku.map((agg) => (
                   <tr key={agg.catalog_item_id} className="hover:bg-gray-50">
-                    <td className="py-3 px-6 text-sm text-gray-900 font-mono">{agg.sku}</td>
-                    <td className="py-3 px-6 text-sm text-gray-700">{agg.item_name}</td>
-                    <td className="py-3 px-6 text-sm text-gray-700">{agg.part_role}</td>
-                    <td className="py-3 px-6 text-sm text-gray-900 text-right font-semibold">
+                    <td className={`${TABLE_BODY_CELL} text-gray-900 font-mono w-[160px]`}>{agg.sku}</td>
+                    <td className={`${TABLE_BODY_CELL} text-gray-700 truncate`}>{agg.item_name}</td>
+                    <td className={`${TABLE_BODY_CELL} text-gray-700 w-[140px]`}>{agg.part_role}</td>
+                    <td className={`${TABLE_BODY_CELL} text-gray-900 text-right font-semibold w-[120px]`}>
                       {agg.uom === 'm' ? agg.totalQty.toFixed(2) : agg.totalQty.toFixed(0)}
                     </td>
-                    <td className="py-3 px-6 text-sm text-gray-700 text-right">{agg.uom}</td>
-                    <td className="py-3 px-6 text-sm">
+                    <td className={`${TABLE_BODY_CELL} text-gray-700 text-right w-[90px]`}>{agg.uom}</td>
+                    <td className={`${TABLE_BODY_CELL} w-[140px]`}>
                       <InventoryAvailabilityBadge row={availabilityMap[agg.catalog_item_id]} />
                     </td>
-                    {showCosts && (
+                    {canViewCosts && showCosts && (
                       <>
-                        <td className="py-3 px-6 text-sm text-blue-700 text-right font-medium">
+                        <td className={`${TABLE_BODY_CELL} text-blue-700 text-right font-medium w-[130px]`}>
                           {agg.unitMsrp ? formatCurrency(agg.unitMsrp, currency) : 'N/A'}
                         </td>
-                        <td className="py-3 px-6 text-sm text-blue-900 text-right font-bold">
+                        <td className={`${TABLE_BODY_CELL} text-blue-900 text-right font-bold w-[130px]`}>
                           {agg.totalMsrp ? formatCurrency(agg.totalMsrp, currency) : 'N/A'}
                         </td>
-                        <td className="py-3 px-6 text-sm text-gray-500 text-right text-xs">
+                        <td className={`${TABLE_BODY_CELL} text-gray-500 text-right text-xs w-[130px]`}>
                           {agg.unitCost ? formatCurrency(agg.unitCost, currency) : 'N/A'}
                         </td>
-                        <td className="py-3 px-6 text-sm text-gray-500 text-right text-xs">
+                        <td className={`${TABLE_BODY_CELL} text-gray-500 text-right text-xs w-[130px]`}>
                           {formatCurrency(agg.totalCost, currency)}
                         </td>
                       </>
@@ -474,22 +503,22 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
         </div>
       ) : (
         /* ===== BY CATEGORY VIEW (detailed, per BOMInstance line) ===== */
-        <div className="space-y-6">
+        <div className="space-y-4">
           {sortedCategories.map((category) => {
-            const categoryMaterials = groupedMaterials[category];
+            const categoryMaterials = groupedMaterialsByCategory[category];
             if (!categoryMaterials || categoryMaterials.length === 0) return null;
 
-            const categoryTotal = categoryMaterials.reduce((sum, m) => sum + m.total_cost_exw, 0);
-            const categoryTotalMSRP = categoryMaterials.reduce((sum, m) => sum + (m.total_msrp || 0), 0);
+            const categoryTotal = categoryMaterials.reduce((sum, m) => sum + m.totalCost, 0);
+            const categoryTotalMSRP = categoryMaterials.reduce((sum, m) => sum + (m.totalMsrp || 0), 0);
 
             return (
               <div key={category} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200">
+                <div className={SECTION_HEADER}>
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-semibold text-gray-900">
-                      {CATEGORY_LABELS[category] || category}
+                      {CATEGORY_LABELS[category] || category} — {categoryMaterials.length} unique SKUs
                     </h4>
-                    {showCosts && (
+                    {canViewCosts && showCosts && (
                       <div className="flex items-center gap-4">
                         <span className="text-sm font-medium text-gray-700">
                           Cost: {formatCurrency(categoryTotal, currency)}
@@ -502,60 +531,52 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
                   </div>
                 </div>
 
-                <div className="table-fit-wrapper">
-                  <table className="table-fit w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
+                <div className="max-h-[60vh] overflow-y-auto">
+                  <table className="w-full table-fixed">
+                    <thead className={TABLE_HEAD_STICKY}>
                       <tr>
-                        <th className="text-left py-2.5 px-4 font-medium text-gray-900 text-xs">SKU</th>
-                        <th className="text-left py-2.5 px-4 font-medium text-gray-900 text-xs">Description</th>
-                        <th className="text-left py-2.5 px-4 font-medium text-gray-900 text-xs">Role</th>
-                        <th className="text-right py-2.5 px-4 font-medium text-gray-900 text-xs">Qty</th>
-                        <th className="text-right py-2.5 px-4 font-medium text-gray-900 text-xs">UoM</th>
-                        <th className="text-right py-2.5 px-4 font-medium text-gray-900 text-xs">Width (mm)</th>
-                        <th className="text-right py-2.5 px-4 font-medium text-gray-900 text-xs">Height (mm)</th>
-                        <th className="text-left py-2.5 px-4 font-medium text-gray-900 text-xs">Availability</th>
-                        {showCosts && (
+                        <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[160px]`}>SKU</th>
+                        <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
+                        <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
+                        <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`}>Total Qty</th>
+                        <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[90px]`}>UoM</th>
+                        <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Availability</th>
+                        {canViewCosts && showCosts && (
                           <>
-                            <th className="text-right py-2.5 px-4 font-medium text-blue-900 text-xs">Unit MSRP</th>
-                            <th className="text-right py-2.5 px-4 font-medium text-blue-900 text-xs">Total MSRP</th>
-                            <th className="text-right py-2.5 px-4 font-medium text-gray-500 text-xs">Unit Cost</th>
-                            <th className="text-right py-2.5 px-4 font-medium text-gray-500 text-xs">Total Cost</th>
+                            <th className={`text-right text-blue-900 ${TABLE_HEAD_CELL} w-[130px]`}>Unit MSRP</th>
+                            <th className={`text-right text-blue-900 ${TABLE_HEAD_CELL} w-[130px]`}>Total MSRP</th>
+                            <th className={`text-right text-gray-500 ${TABLE_HEAD_CELL} w-[130px]`}>Unit Cost</th>
+                            <th className={`text-right text-gray-500 ${TABLE_HEAD_CELL} w-[130px]`}>Total Cost</th>
                           </>
                         )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {categoryMaterials.map((material) => (
-                        <tr key={material.bom_instance_line_id} className="hover:bg-gray-50">
-                          <td className="py-2.5 px-4 text-sm text-gray-900 font-mono">{material.sku || 'N/A'}</td>
-                          <td className="py-2.5 px-4 text-sm text-gray-700">{material.item_name || 'N/A'}</td>
-                          <td className="py-2.5 px-4 text-sm text-gray-700">{material.part_role || 'N/A'}</td>
-                          <td className="py-2.5 px-4 text-sm text-gray-900 text-right font-medium">
-                            {material.uom === 'm' ? material.qty.toFixed(2) : material.qty.toFixed(0)}
+                        <tr key={material.catalog_item_id} className="hover:bg-gray-50">
+                          <td className={`${TABLE_BODY_CELL} text-gray-900 font-mono w-[160px]`}>{material.sku || 'N/A'}</td>
+                          <td className={`${TABLE_BODY_CELL} text-gray-700 truncate`}>{material.item_name || 'N/A'}</td>
+                          <td className={`${TABLE_BODY_CELL} text-gray-700 w-[140px]`}>{material.part_role || 'N/A'}</td>
+                          <td className={`${TABLE_BODY_CELL} text-gray-900 text-right font-semibold w-[120px]`}>
+                            {material.uom === 'm' ? material.totalQty.toFixed(2) : material.totalQty.toFixed(0)}
                           </td>
-                          <td className="py-2.5 px-4 text-sm text-gray-700 text-right">{material.uom}</td>
-                          <td className="py-2.5 px-4 text-sm text-gray-700 text-right">
-                            {material.product_width_mm != null ? material.product_width_mm.toLocaleString() : '—'}
-                          </td>
-                          <td className="py-2.5 px-4 text-sm text-gray-700 text-right">
-                            {material.product_height_mm != null ? material.product_height_mm.toLocaleString() : '—'}
-                          </td>
-                          <td className="py-2.5 px-4 text-sm">
+                          <td className={`${TABLE_BODY_CELL} text-gray-700 text-right w-[90px]`}>{material.uom}</td>
+                          <td className={`${TABLE_BODY_CELL} w-[140px]`}>
                             <InventoryAvailabilityBadge row={availabilityMap[material.catalog_item_id]} />
                           </td>
-                          {showCosts && (
+                          {canViewCosts && showCosts && (
                             <>
-                              <td className="py-2.5 px-4 text-sm text-blue-700 text-right font-medium">
-                                {material.unit_msrp ? formatCurrency(material.unit_msrp, currency) : 'N/A'}
+                              <td className={`${TABLE_BODY_CELL} text-blue-700 text-right font-medium w-[130px]`}>
+                                {material.unitMsrp ? formatCurrency(material.unitMsrp, currency) : 'N/A'}
                               </td>
-                              <td className="py-2.5 px-4 text-sm text-blue-900 text-right font-bold">
-                                {material.total_msrp ? formatCurrency(material.total_msrp, currency) : 'N/A'}
+                              <td className={`${TABLE_BODY_CELL} text-blue-900 text-right font-bold w-[130px]`}>
+                                {material.totalMsrp ? formatCurrency(material.totalMsrp, currency) : 'N/A'}
                               </td>
-                              <td className="py-2.5 px-4 text-sm text-gray-500 text-right text-xs">
-                                {material.unit_cost_exw ? formatCurrency(material.unit_cost_exw, currency) : 'N/A'}
+                              <td className={`${TABLE_BODY_CELL} text-gray-500 text-right text-xs w-[130px]`}>
+                                {material.unitCost ? formatCurrency(material.unitCost, currency) : 'N/A'}
                               </td>
-                              <td className="py-2.5 px-4 text-sm text-gray-500 text-right text-xs">
-                                {formatCurrency(material.total_cost_exw, currency)}
+                              <td className={`${TABLE_BODY_CELL} text-gray-500 text-right text-xs w-[130px]`}>
+                                {formatCurrency(material.totalCost, currency)}
                               </td>
                             </>
                           )}
@@ -571,7 +592,7 @@ export default function MaterialsTab({ moId, saleOrderId: _saleOrderId, moStatus
       )}
 
       {/* Grand Total / Summary */}
-      {(materials.length > 0 || bomTotals.totalCostWithLabor > 0) && (
+      {canViewCosts && showCosts && (materials.length > 0 || bomTotals.totalCostWithLabor > 0) && (
         <div className="mt-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
           <div className="space-y-3">
             <div className="flex justify-between items-center">

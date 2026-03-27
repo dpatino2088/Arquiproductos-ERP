@@ -73,6 +73,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'manufacturing.finished_goods.write',
     'manufacturing.cutopt.read',
     'manufacturing.cutopt.write',
+    'manufacturing.costs.read',
     'financials.accounts.read',
     'financials.accounts.write',
     'financials.invoices.read',
@@ -141,6 +142,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'manufacturing.finished_goods.write',
     'manufacturing.cutopt.read',
     'manufacturing.cutopt.write',
+    'manufacturing.costs.read',
     'financials.accounts.read',
     'financials.accounts.write',
     'financials.invoices.read',
@@ -223,6 +225,9 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
   ],
   procurement: [
     'catalog.read',
+    'catalog.items.read',
+    'catalog.items.write',   // edit catalog items (costs, suppliers, specs)
+    'catalog.items.create',  // add new SKUs to catalog
     'inventory.warehouse.read',
     'inventory.warehouse.write',
     'inventory.purchase_orders.read',

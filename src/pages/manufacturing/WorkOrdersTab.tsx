@@ -5,6 +5,8 @@ import { useWorkOrderTasks, type WorkOrderTask } from '../../hooks/useWorkOrderT
 import { useMoMaterialReadiness } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { generateWorkOrderPDF } from '../../lib/pdf/workOrderPdf';
 import { generatePartLabelsPDF, type PartLabel } from '../../lib/pdf/partLabelPdf';
@@ -22,6 +24,7 @@ interface WorkOrdersTabProps {
   customerName?: string;
   productName?: string;
   salesOrderNo?: string;
+  moStatus?: string;
 }
 
 function StationCard({ task, moMeta, operators, onAssignOperator }: {
@@ -37,6 +40,10 @@ function StationCard({ task, moMeta, operators, onAssignOperator }: {
 
   const stationName = task.work_center?.name ?? 'Station';
   const stationCode = task.work_center?.code ?? '';
+  const upperStationCode = stationCode.toUpperCase();
+  const isRollCut = upperStationCode === 'CUT-ROLL';
+  const isProfileCut = upperStationCode === 'CUT-PROFILE';
+  const columnCount = 8;
 
   return (
     <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
@@ -117,17 +124,29 @@ function StationCard({ task, moMeta, operators, onAssignOperator }: {
       </div>
 
       {expanded && (
-        <table className="w-full text-sm">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col className="w-8" />
+            <col className="w-[16%]" />
+            <col className="w-[34%]" />
+            <col className="w-[12%]" />
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+            <col className="w-[11%]" />
+            <col className="w-[11%]" />
+          </colgroup>
           <thead>
-          <tr className="border-b border-gray-100 text-gray-500 text-xs">
+            <tr className="border-b border-gray-100 text-gray-500 text-xs">
               <th className="text-left px-4 py-2 w-8"></th>
               <th className="text-left px-4 py-2">SKU</th>
               <th className="text-left px-4 py-2">Description</th>
               <th className="text-left px-4 py-2">Role</th>
               <th className="text-right px-4 py-2">Qty</th>
               <th className="text-left px-4 py-2">UOM</th>
-              <th className="text-right px-4 py-2">Length X (mm)</th>
-              <th className="text-right px-4 py-2">Length Y (mm)</th>
+              <th className="text-right px-4 py-2">
+                {isRollCut ? 'Length X (mm)' : isProfileCut ? 'Length (mm)' : ''}
+              </th>
+              <th className="text-right px-4 py-2">{isRollCut ? 'Length Y (mm)' : ''}</th>
             </tr>
           </thead>
           <tbody>
@@ -141,16 +160,26 @@ function StationCard({ task, moMeta, operators, onAssignOperator }: {
                 <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{line.sku || '—'}</td>
                 <td className={`px-4 py-2 ${line.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>{line.item_name || '—'}</td>
                 <td className="px-4 py-2">
-                  {line.component_role && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{line.component_role}</span>}
+                  {line.component_role
+                    ? <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{line.component_role}</span>
+                    : <span className="text-gray-400">—</span>}
                 </td>
                 <td className="px-4 py-2 text-right text-gray-700">{line.qty}</td>
                 <td className="px-4 py-2 text-gray-500">{line.uom}</td>
-                <td className="px-4 py-2 text-right text-gray-600">{line.cut_length_mm != null ? Math.round(Number(line.cut_length_mm)) : '—'}</td>
-                <td className="px-4 py-2 text-right text-gray-600">{line.cut_width_mm != null ? Math.round(Number(line.cut_width_mm)) : '—'}</td>
+                <td className="px-4 py-2 text-right text-gray-600">
+                  {isRollCut || isProfileCut
+                    ? (line.cut_length_mm != null ? Math.round(Number(line.cut_length_mm)) : '—')
+                    : '—'}
+                </td>
+                <td className="px-4 py-2 text-right text-gray-600">
+                  {isRollCut
+                    ? (line.cut_width_mm != null ? Math.round(Number(line.cut_width_mm)) : '—')
+                    : '—'}
+                </td>
               </tr>
             ))}
             {task.lines.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400 text-sm">No lines in this station</td></tr>
+              <tr><td colSpan={columnCount} className="px-4 py-6 text-center text-gray-400 text-sm">No lines in this station</td></tr>
             )}
           </tbody>
         </table>
@@ -159,14 +188,27 @@ function StationCard({ task, moMeta, operators, onAssignOperator }: {
   );
 }
 
-export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', productName = '', salesOrderNo }: WorkOrdersTabProps) {
+export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', productName = '', salesOrderNo, moStatus }: WorkOrdersTabProps) {
   const { tasks, loading, error, generateWorkOrders, refetch: refetchTasks } = useWorkOrderTasks(moId);
   const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
   const { activeOrganizationId } = useOrganizationContext();
   const addNotification = useUIStore((s) => s.addNotification);
+  const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
   const [generating, setGenerating] = useState(false);
   const [operators, setOperators] = useState<OperatorOption[]>([]);
   const materialsIncomplete = materialReadiness?.hasShortage === true;
+  const canGenerateByStatus = ['confirmed', 'planned', 'in_production'].includes(moStatus ?? '');
+  const sortedTasks = [...tasks].sort((a, b) => {
+    const rank = (code?: string | null) => {
+      const c = (code ?? '').toUpperCase();
+      if (c === 'CUT-ROLL') return 0;
+      if (c === 'CUT-PROFILE') return 1;
+      return 10;
+    };
+    const byRank = rank(a.work_center?.code) - rank(b.work_center?.code);
+    if (byRank !== 0) return byRank;
+    return (a.work_center?.name ?? '').localeCompare(b.work_center?.name ?? '');
+  });
 
   useEffect(() => {
     if (!activeOrganizationId) return;
@@ -198,20 +240,33 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
   }, [operators, refetchTasks]);
 
   const handleGenerate = async (regenerate = false) => {
-    if (materialsIncomplete) {
+    if (!canGenerateByStatus) {
       addNotification({
         type: 'warning',
-        title: 'Materials Incomplete',
-        message: 'Resolve Material Demand before generating Work Orders.',
+        title: 'Status Required',
+        message: 'Work Orders can only be generated when MO is Reviewed, Planned, or In Production.',
       });
       return;
     }
-    if (regenerate && !confirm('This will delete existing work orders and regenerate them. Continue?')) return;
+    if (regenerate) {
+      const confirmed = await showConfirm({
+        title: 'Regenerate Work Orders',
+        message: 'This will delete existing work orders and regenerate them. Continue?',
+        confirmText: 'Regenerate',
+        cancelText: 'Cancel',
+        variant: 'warning',
+      });
+      if (!confirmed) return;
+    }
     setGenerating(true);
     try {
       await generateWorkOrders(regenerate);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Error generating work orders');
+      addNotification({
+        type: 'error',
+        title: 'Work Orders',
+        message: e instanceof Error ? e.message : 'Error generating work orders',
+      });
     } finally {
       setGenerating(false);
     }
@@ -236,13 +291,13 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           <div className="mb-4 flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-100 w-fit mx-auto">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
             <span className="text-xs text-amber-700">
-              Material shortage — <button type="button" onClick={() => router.navigate(`/inventory/material-demand?mo_id=${moId}`)} className="underline font-medium">open Material Demand</button> to cover before starting production.
+              Material shortage on some lines — <button type="button" onClick={() => router.navigate(`/inventory/material-demand?mo_id=${moId}`)} className="underline font-medium">open Material Demand</button> to complete pending lines.
             </span>
           </div>
         )}
         <Zap className="h-10 w-10 text-gray-300 mx-auto mb-3" />
         <p className="text-sm text-gray-500 mb-4">No work orders generated yet for this Manufacturing Order.</p>
-        <button type="button" onClick={() => handleGenerate()} disabled={generating || materialsIncomplete} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:opacity-90 disabled:opacity-60">
+        <button type="button" onClick={() => handleGenerate()} disabled={generating || !canGenerateByStatus} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:opacity-90 disabled:opacity-60">
           {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
           Generate Work Orders
         </button>
@@ -252,11 +307,19 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
 
   return (
     <div className="space-y-4">
+      {!canGenerateByStatus && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-100 w-fit">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
+          <span className="text-xs text-red-700">
+            Work Orders can only be generated when MO is Reviewed, Planned, or In Production.
+          </span>
+        </div>
+      )}
       {materialsIncomplete && (
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-100 w-fit">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
           <span className="text-xs text-amber-700">
-            Material shortage — cover demand before starting production.
+            Material shortage on some lines — only ready lines can be advanced.
             <button type="button" onClick={() => router.navigate(`/inventory/material-demand?mo_id=${moId}`)} className="underline font-medium ml-1">Material Demand</button>
           </span>
         </div>
@@ -265,7 +328,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         <button
           type="button"
           onClick={() => handleGenerate(true)}
-          disabled={generating || materialsIncomplete}
+          disabled={generating || !canGenerateByStatus}
           className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
         >
           {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
@@ -279,7 +342,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           Open in Work Orders <ArrowUpRight className="w-3 h-3" />
         </button>
       </div>
-      {tasks.map((task) => (
+      {sortedTasks.map((task) => (
         <StationCard
           key={task.id}
           task={task}
@@ -288,6 +351,17 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           onAssignOperator={handleAssignOperator}
         />
       ))}
+      <ConfirmDialog
+        isOpen={dialogState.isOpen}
+        onClose={closeDialog}
+        onConfirm={handleConfirm}
+        title={dialogState.title}
+        message={dialogState.message}
+        confirmText={dialogState.confirmText}
+        cancelText={dialogState.cancelText}
+        variant={dialogState.variant}
+        isLoading={dialogState.isLoading}
+      />
     </div>
   );
 }

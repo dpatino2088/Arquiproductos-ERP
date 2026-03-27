@@ -121,8 +121,8 @@ export function useSOActions() {
           p_user_name: userName ?? null,
         });
         if (error) throw error;
-        const mo = data as { mo_id?: string; mo_number?: string } | null;
-        if (mo?.mo_id) {
+        const mo = data as { mo_id?: string; mo_number?: string; existing?: boolean } | null;
+        if (mo?.mo_id && !mo?.existing) {
           // Compatibility fallback: if backend RPC does not auto-generate BOM yet,
           // generate it explicitly after MO creation.
           const { data: bomData, error: bomError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
@@ -135,8 +135,12 @@ export function useSOActions() {
             throw new Error(`MO created but BOM generation failed: ${bomErrors.join('; ') || 'Unknown error'}`);
           }
         }
-        addNotification({ type: 'success', title: 'MO Created', message: 'Manufacturing order created.' });
-        return data as { mo_id: string; mo_number: string };
+        addNotification({
+          type: 'success',
+          title: mo?.existing ? 'MO Exists' : 'MO Created',
+          message: mo?.existing ? `Using existing manufacturing order ${mo.mo_number ?? ''}.` : 'Manufacturing order created.',
+        });
+        return data as { mo_id: string; mo_number: string; existing?: boolean };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to create manufacturing order';
         addNotification({ type: 'error', title: 'Error', message: msg });

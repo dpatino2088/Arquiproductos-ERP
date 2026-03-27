@@ -6,6 +6,7 @@ import ProductionStepsTab from './tabs/ProductionStepsTab';
 import NotesTab from './tabs/NotesTab';
 import DocumentsTab from './tabs/DocumentsTab';
 import { useManufacturingOrder } from '../../hooks/useManufacturing';
+import { usePermissions } from '../../hooks/usePermissions';
 
 interface ManufacturingOrderTabsProps {
   moId: string;
@@ -23,6 +24,8 @@ const TABS = [
 export default function ManufacturingOrderTabs({ moId }: ManufacturingOrderTabsProps) {
   const [activeTab, setActiveTab] = useState<string>('summary');
   const { manufacturingOrder } = useManufacturingOrder(moId);
+  const { can } = usePermissions();
+  const canViewCosts = can('manufacturing.costs.read');
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -62,6 +65,7 @@ export default function ManufacturingOrderTabs({ moId }: ManufacturingOrderTabsP
             saleOrderId={manufacturingOrder?.sales_order_id || null}
             moStatus={manufacturingOrder?.status || 'draft'}
             currency={(manufacturingOrder as any)?.SalesOrders?.currency ?? (manufacturingOrder as any)?.SaleOrders?.currency ?? 'USD'}
+            canViewCosts={canViewCosts}
           />
         )}
         {activeTab === 'cut-list' && (

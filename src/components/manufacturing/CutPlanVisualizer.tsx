@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { optimize1D, type CutPiece, type CutPlan1DResult } from '../../lib/cutOptimizer';
 import { generateCutPlanPDF } from '../../lib/pdf/generateCutPlanPDF';
-import { Scissors, BarChart3, AlertTriangle, Printer } from 'lucide-react';
+import { Scissors, BarChart3, AlertTriangle, Printer, Tag } from 'lucide-react';
 
 const MO_COLORS = [
   'bg-blue-400', 'bg-emerald-400', 'bg-amber-400', 'bg-rose-400',
@@ -20,6 +20,7 @@ interface CutPlanVisualizerProps {
   title?: string;
   subtitle?: string;
   stockLabel?: string;
+  onPrintStickers?: () => void;
 }
 
 export default function CutPlanVisualizer({
@@ -29,6 +30,7 @@ export default function CutPlanVisualizer({
   title = 'Profile Cut Optimization',
   subtitle,
   stockLabel = 'Stock (mm)',
+  onPrintStickers,
 }: CutPlanVisualizerProps) {
   const [stockLengthMm, setStockLengthMm] = useState(initialStockLength);
   const [kerfMm, setKerfMm] = useState(3);
@@ -165,6 +167,16 @@ export default function CutPlanVisualizer({
           >
             <Printer className="w-3.5 h-3.5" /> PDF
           </button>
+          {onPrintStickers && (
+            <button
+              type="button"
+              onClick={onPrintStickers}
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+              title="Print 4×1″ thermal stickers"
+            >
+              <Tag className="w-3.5 h-3.5" /> Stickers
+            </button>
+          )}
         </div>
       </div>
 

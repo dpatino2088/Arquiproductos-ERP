@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, useMoMaterialReadiness } from '../../hooks/useManufacturing';
@@ -56,6 +56,12 @@ interface MOLine {
   } | null;
 }
 
+interface MOLineReadiness {
+  sales_order_line_id: string;
+  readiness_status: 'ok' | 'incomplete';
+  has_shortage: boolean;
+}
+
 export default function ManufacturingOrderDetail({ moId: propMoId }: ManufacturingOrderDetailProps) {
   const normalizedPropMoId = propMoId ? normalizeUUID(propMoId) : null;
   const [moId, setMoId] = useState<string | null>(normalizedPropMoId);
@@ -71,12 +77,14 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { isInternal } = useAccessContext();
   const { canEdit: canEditInventory } = useModuleAccess('inventory');
   const { can } = usePermissions();
+  const canViewCosts = can('manufacturing.costs.read');
   const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [actionsOpen, setActionsOpen] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [moLines, setMoLines] = useState<MOLine[]>([]);
+  const [lineReadinessBySoLineId, setLineReadinessBySoLineId] = useState<Map<string, MOLineReadiness>>(new Map());
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
@@ -88,6 +96,32 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     has_delivery_override: boolean;
   } | null>(null);
   const listPath = '/manufacturing/manufacturing-orders';
+  const productTypeSummary = useMemo(() => {
+    const labels: Record<string, string> = {
+      roller: 'Roller Shade',
+      roller_shade: 'Roller Shade',
+      drapery: 'Drapery',
+      dual_shade: 'Dual Shade',
+      dual: 'Dual Shade',
+      triple_shade: 'Triple Shade',
+      triple: 'Triple Shade',
+      zebra: 'Zebra Shade',
+      zebra_shade: 'Zebra Shade',
+      blind: 'Blind',
+      curtain: 'Curtain',
+      panel: 'Panel',
+      catalog: 'Catalog',
+    };
+    const types = Array.from(new Set(
+      moLines
+        .map((line) => (line.SaleOrderLine?.product_type ?? '').toLowerCase().trim())
+        .filter(Boolean),
+    ));
+    if (types.length === 0) return mo?.product_name ?? '—';
+    return types
+      .map((t) => labels[t] ?? t.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
+      .join(' | ');
+  }, [moLines, mo?.product_name]);
   const canReadOverview = can('manufacturing.mo.overview.read');
   const canReadLines = can('manufacturing.mo.lines.read');
   const canReadMaterials = can('manufacturing.mo.materials.read');
@@ -168,7 +202,11 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       .eq('manufacturing_order_id', moId)
       .eq('deleted', false)
       .order('created_at', { ascending: true });
-    if (!molData || molData.length === 0) { setMoLines([]); return; }
+    if (!molData || molData.length === 0) {
+      setMoLines([]);
+      setLineReadinessBySoLineId(new Map());
+      return;
+    }
 
     const solIds = [...new Set(molData.map((m: any) => m.sales_order_line_id).filter(Boolean))];
     let solMap = new Map<string, any>();
@@ -192,6 +230,21 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       ...m,
       SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
     })));
+
+    const { data: readinessRows, error: readinessErr } = await supabase.rpc('get_mo_line_material_readiness', {
+      p_mo_id: moId,
+    });
+    if (readinessErr) {
+      if (import.meta.env.DEV) console.warn('[ManufacturingOrderDetail] line readiness error:', readinessErr);
+      setLineReadinessBySoLineId(new Map());
+      return;
+    }
+    const nextMap = new Map<string, MOLineReadiness>();
+    (readinessRows as MOLineReadiness[] | null ?? []).forEach((row) => {
+      if (!row?.sales_order_line_id) return;
+      nextMap.set(row.sales_order_line_id, row);
+    });
+    setLineReadinessBySoLineId(nextMap);
   }, [moId]);
 
   const fetchTaskProgress = useCallback(async () => {
@@ -305,15 +358,26 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       refetch();
       fetchTimeline();
     } catch (e: unknown) {
-      const rawMessage = e instanceof Error ? e.message : 'Failed to update status';
+      const extractErrorMessage = (err: unknown): string => {
+        if (err instanceof Error && err.message) return err.message;
+        if (typeof err === 'object' && err !== null) {
+          const maybe = err as { message?: unknown; details?: unknown; hint?: unknown; error?: unknown };
+          const parts = [
+            typeof maybe.message === 'string' ? maybe.message : '',
+            typeof maybe.details === 'string' ? maybe.details : '',
+            typeof maybe.hint === 'string' ? maybe.hint : '',
+            typeof maybe.error === 'string' ? maybe.error : '',
+          ].filter(Boolean);
+          if (parts.length > 0) return parts.join(' | ');
+        }
+        return 'Failed to update status';
+      };
+
+      const rawMessage = extractErrorMessage(e);
       const normalized = rawMessage.toLowerCase();
 
       // Compatibility fallback for environments where "confirmed" is not yet available in DB enum/policy.
-      if (
-        newStatus === 'confirmed' &&
-        (normalized.includes('invalid input value for enum') ||
-          normalized.includes('invalid transition'))
-      ) {
+      if (newStatus === 'confirmed') {
         try {
           await transitionStatus(moId, 'planned', user.id, user.name);
           addNotification({
@@ -325,7 +389,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           fetchTimeline();
           return;
         } catch (fallbackError: unknown) {
-          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : rawMessage;
+          const fallbackMessage = extractErrorMessage(fallbackError);
           addNotification({ type: 'error', title: 'Error', message: fallbackMessage });
           return;
         }
@@ -405,6 +469,10 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       actionItems.push({
         label: 'Buy Materials',
         onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`),
+      });
+      actionItems.push({
+        label: 'Set Planned',
+        onClick: () => handleTransition('planned'),
       });
     }
     if (status === 'procurement') {
@@ -694,7 +762,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Product</dt>
-                <dd className="text-gray-900">{mo.product_name ?? '—'}</dd>
+                <dd className="text-gray-900">{productTypeSummary}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Quantity</dt>
@@ -789,7 +857,27 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
               ) : (
                 moLines.map((line, idx) => {
                   const sol = line.SaleOrderLine;
-                  const ptLabels: Record<string, string> = { roller: 'Roller Shade', drapery: 'Drapery', catalog: 'Catalog', blind: 'Blind', curtain: 'Curtain' };
+                  const readiness = line.sales_order_line_id
+                    ? lineReadinessBySoLineId.get(line.sales_order_line_id)
+                    : undefined;
+                  let effectiveLineStatus = line.status ?? 'planned';
+                  if (!['in_production', 'completed', 'cancelled'].includes(effectiveLineStatus)) {
+                    effectiveLineStatus = readiness?.readiness_status === 'ok' ? 'ok' : 'incomplete';
+                  }
+                  const ptLabels: Record<string, string> = {
+                    roller: 'Roller Shade',
+                    roller_shade: 'Roller Shade',
+                    drapery: 'Drapery',
+                    dual: 'Dual Shade',
+                    dual_shade: 'Dual Shade',
+                    triple: 'Triple Shade',
+                    triple_shade: 'Triple Shade',
+                    zebra: 'Zebra Shade',
+                    zebra_shade: 'Zebra Shade',
+                    catalog: 'Catalog',
+                    blind: 'Blind',
+                    curtain: 'Curtain',
+                  };
                   const ptRaw = (sol?.product_type || '').toLowerCase();
                   const ptLabel = ptLabels[ptRaw] || (ptRaw ? ptRaw.charAt(0).toUpperCase() + ptRaw.slice(1) : '');
                   const fabricName = sol?.description || sol?.CatalogItems?.name || sol?.variant_name || 'Item';
@@ -826,7 +914,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{line.quantity ?? sol?.quantity ?? '—'}</td>
                       <td className="px-4 py-3 text-center">
-                        <StatusBadge status={line.status ?? 'planned'} type="moLineStatus" size="sm" />
+                        <StatusBadge status={effectiveLineStatus} type="moLineStatus" size="sm" />
                       </td>
                     </tr>
                   );
@@ -844,6 +932,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           saleOrderId={mo.sales_order_id || null}
           moStatus={status}
           currency="USD"
+          canViewCosts={canViewCosts}
         />
       )}
 
@@ -858,6 +947,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           customerName={customer}
           productName={mo.product_name ?? ''}
           salesOrderNo={so?.sales_order_no}
+          moStatus={status}
         />
       )}
 

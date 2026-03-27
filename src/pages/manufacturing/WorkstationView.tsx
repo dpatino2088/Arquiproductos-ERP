@@ -67,6 +67,8 @@ interface TaskWithMO {
   assigned_to_user_id: string | null;
   started_at: string | null;
   completed_at: string | null;
+  planned_start_at: string | null;
+  planned_end_at: string | null;
   mo_number: string;
   customer_name: string;
   product_name: string;
@@ -109,7 +111,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     try {
       const { data: taskData, error: tErr } = await supabase
         .from('WorkOrderTasks')
-        .select('id, manufacturing_order_id, sequence, status, assigned_to, assigned_to_user_id, started_at, completed_at')
+        .select('id, manufacturing_order_id, sequence, status, assigned_to, assigned_to_user_id, started_at, completed_at, planned_start_at, planned_end_at')
         .eq('work_center_id', selectedCenter)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
@@ -243,6 +245,8 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           assigned_to_user_id: t.assigned_to_user_id ?? null,
           started_at: t.started_at,
           completed_at: t.completed_at,
+          planned_start_at: t.planned_start_at ?? null,
+          planned_end_at: t.planned_end_at ?? null,
           mo_number: mo?.manufacturing_order_no ?? '—',
           customer_name: soId ? (customerMap[soId] ?? 'N/A') : 'N/A',
           product_name: mo?.product_name ?? '—',
@@ -323,28 +327,57 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     return map;
   }, [fabricRules]);
 
-  const ensureMaterialsReadyForTask = useCallback(async (taskId: string): Promise<boolean> => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task) return false;
-    const { data, error } = await supabase.rpc('get_mo_material_readiness', {
-      p_mo_id: task.manufacturing_order_id,
+  const ensureLineMaterialsReady = useCallback(async (lineId: string): Promise<boolean> => {
+    const { data: lineRow } = await supabase
+      .from('WorkOrderTaskLines')
+      .select('task_id, bom_instance_line_id')
+      .eq('id', lineId)
+      .single();
+    if (!lineRow?.task_id) return false;
+    if (!lineRow.bom_instance_line_id) return true;
+
+    const { data: taskRow } = await supabase
+      .from('WorkOrderTasks')
+      .select('manufacturing_order_id')
+      .eq('id', lineRow.task_id)
+      .single();
+    if (!taskRow?.manufacturing_order_id) return true;
+
+    const { data: bilRow } = await supabase
+      .from('BOMInstanceLines')
+      .select('bom_instance_id')
+      .eq('id', lineRow.bom_instance_line_id)
+      .single();
+    if (!bilRow?.bom_instance_id) return true;
+
+    const { data: biRow } = await supabase
+      .from('BOMInstances')
+      .select('sales_order_line_id')
+      .eq('id', bilRow.bom_instance_id)
+      .single();
+    const soLineId = biRow?.sales_order_line_id as string | null;
+    if (!soLineId) return true;
+
+    const { data: readinessRows, error: readinessErr } = await supabase.rpc('get_mo_line_material_readiness', {
+      p_mo_id: taskRow.manufacturing_order_id,
     });
-    if (error) {
-      addNotification({ type: 'error', title: 'Materials', message: error.message || 'Could not validate material readiness.' });
+    if (readinessErr) {
+      addNotification({ type: 'error', title: 'Materials', message: readinessErr.message || 'Could not validate line material readiness.' });
       return false;
     }
-    const readiness = data as { has_shortage?: boolean; status?: string } | null;
-    const hasShortage = Boolean(readiness?.has_shortage || readiness?.status === 'incomplete');
-    if (hasShortage) {
+
+    const row = ((readinessRows as Array<{ sales_order_line_id: string; readiness_status: string }> | null) ?? [])
+      .find((r) => r.sales_order_line_id === soLineId);
+    if (row && row.readiness_status === 'incomplete') {
       addNotification({
         type: 'warning',
-        title: 'Materials Incomplete',
-        message: 'Resolve Material Demand before advancing Work Orders.',
+        title: 'Line Not Ready',
+        message: 'This line is incomplete. Cover missing materials before marking progress.',
       });
       return false;
     }
     return true;
-  }, [tasks, addNotification]);
+  }, [addNotification]);
 
   const toggleLine = async (lineId: string, completed: boolean) => {
     if (completed) {
@@ -354,6 +387,19 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         .eq('id', lineId)
         .single();
       if (lineRowForGuard?.task_id) {
+        const { data: taskGuard } = await supabase
+          .from('WorkOrderTasks')
+          .select('status')
+          .eq('id', lineRowForGuard.task_id)
+          .single();
+        if (taskGuard?.status !== 'in_progress') {
+          addNotification({
+            type: 'warning',
+            title: 'Task Not Started',
+            message: 'Press Play to start this task before checking lines.',
+          });
+          return;
+        }
         const lineTask = tasks.find((t) => t.id === lineRowForGuard.task_id);
         if (!lineTask?.assigned_to_user_id) {
           addNotification({
@@ -363,8 +409,8 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           });
           return;
         }
-        const canAdvance = await ensureMaterialsReadyForTask(lineRowForGuard.task_id);
-        if (!canAdvance) return;
+        const lineReady = await ensureLineMaterialsReady(lineId);
+        if (!lineReady) return;
       }
     }
     const now = new Date().toISOString();
@@ -408,10 +454,25 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   };
 
   const startTask = async (taskId: string) => {
-    const canAdvance = await ensureMaterialsReadyForTask(taskId);
-    if (!canAdvance) return;
     const now = new Date().toISOString();
     const task = tasks.find((t) => t.id === taskId);
+    const plannedStart = task?.planned_start_at ? new Date(task.planned_start_at) : null;
+    if (!plannedStart) {
+      addNotification({
+        type: 'warning',
+        title: 'Schedule Required',
+        message: 'Set the calendar schedule before starting this task.',
+      });
+      return;
+    }
+    if (plannedStart.getTime() > Date.now()) {
+      addNotification({
+        type: 'warning',
+        title: 'Too Early to Start',
+        message: 'This task can only start on or after its scheduled date/time.',
+      });
+      return;
+    }
     if (!task?.assigned_to_user_id) {
       addNotification({
         type: 'warning',
@@ -438,8 +499,6 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   };
 
   const completeTask = async (taskId: string) => {
-    const canAdvance = await ensureMaterialsReadyForTask(taskId);
-    if (!canAdvance) return;
     const now = new Date().toISOString();
     await supabase
       .from('WorkOrderTasks')
@@ -450,7 +509,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     if (task && activeOrganizationId) {
       const { data: allTasks } = await supabase
         .from('WorkOrderTasks')
-        .select('id, status, depends_on_task_ids, assigned_to_user_id')
+        .select('id, status, depends_on_task_ids, assigned_to_user_id, planned_start_at')
         .eq('manufacturing_order_id', task.manufacturing_order_id)
         .eq('deleted', false);
 
@@ -463,6 +522,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           if (t.id === taskId) return false;
           if (t.status !== 'pending') return false;
           if (!t.assigned_to_user_id) return false;
+          if (!t.planned_start_at || new Date(t.planned_start_at).getTime() > Date.now()) return false;
           const deps = t.depends_on_task_ids ?? [];
           if (deps.length === 0) return false;
           return deps.every((depId: string) => completedIds.has(depId));
@@ -595,15 +655,16 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                     {(() => {
                       const upstreamOk = !isAssemblyStation || !task.siblingStatuses?.length ||
                         task.siblingStatuses.every(s => s.status === 'completed');
+                      const plannedStartDue = !!task.planned_start_at && new Date(task.planned_start_at).getTime() <= Date.now();
                       return (
                         <>
-                          {task.status === 'pending' && upstreamOk && (
+                          {task.status === 'pending' && upstreamOk && plannedStartDue && (
                             <button type="button" onClick={() => startTask(task.id)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">
                               <Play className="h-3 w-3" /> Start
                             </button>
                           )}
-                          {task.status === 'pending' && !upstreamOk && (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Upstream tasks must be completed first">
+                          {task.status === 'pending' && (!upstreamOk || !plannedStartDue) && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Blocked by dependencies or scheduled start date/time">
                               <AlertTriangle className="h-3 w-3" /> Blocked
                             </span>
                           )}
@@ -663,6 +724,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                                   checked={line.completed}
                                   onChange={(e) => { e.stopPropagation(); toggleLine(line.id, e.target.checked); }}
                                   className="rounded border-gray-300"
+                                  disabled={task.status !== 'in_progress'}
                                 />
                               </td>
                               <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{line.sku ?? '—'}</td>

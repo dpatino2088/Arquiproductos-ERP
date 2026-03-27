@@ -151,6 +151,63 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     })));
   }, []);
 
+  const ensureLineMaterialsReady = useCallback(async (lineId: string): Promise<boolean> => {
+    const { data: lineData } = await supabase
+      .from('WorkOrderTaskLines')
+      .select('task_id, bom_instance_line_id')
+      .eq('id', lineId)
+      .single();
+    if (!lineData?.task_id) return false;
+    if (!lineData.bom_instance_line_id) return true;
+
+    const { data: taskData } = await supabase
+      .from('WorkOrderTasks')
+      .select('manufacturing_order_id')
+      .eq('id', lineData.task_id)
+      .single();
+    if (!taskData?.manufacturing_order_id) return true;
+
+    const { data: bilData } = await supabase
+      .from('BOMInstanceLines')
+      .select('bom_instance_id')
+      .eq('id', lineData.bom_instance_line_id)
+      .single();
+    if (!bilData?.bom_instance_id) return true;
+
+    const { data: biData } = await supabase
+      .from('BOMInstances')
+      .select('sales_order_line_id')
+      .eq('id', bilData.bom_instance_id)
+      .single();
+    const soLineId = biData?.sales_order_line_id as string | null;
+    if (!soLineId) return true;
+
+    const { data: readinessRows, error } = await supabase.rpc('get_mo_line_material_readiness', {
+      p_mo_id: taskData.manufacturing_order_id,
+    });
+    if (error) {
+      addNotification({
+        type: 'error',
+        title: 'Materials',
+        message: error.message ?? 'Could not validate line material readiness.',
+      });
+      return false;
+    }
+
+    const lineReadiness = ((readinessRows as Array<{ sales_order_line_id: string; readiness_status: string }> | null) ?? [])
+      .find((r) => r.sales_order_line_id === soLineId);
+    if (lineReadiness?.readiness_status === 'incomplete') {
+      addNotification({
+        type: 'warning',
+        title: 'Line Not Ready',
+        message: 'This line is incomplete. Cover missing materials before marking progress.',
+      });
+      return false;
+    }
+
+    return true;
+  }, [addNotification]);
+
   const toggleLineCompleted = useCallback(async (lineId: string, completed: boolean) => {
     if (completed) {
       const { data: lineTask } = await supabase
@@ -160,8 +217,23 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         .single();
       const taskIdForLine = lineTask?.task_id ?? null;
       if (taskIdForLine) {
+        const { data: taskForLine } = await supabase
+          .from('WorkOrderTasks')
+          .select('status')
+          .eq('id', taskIdForLine)
+          .single();
+        if (taskForLine?.status !== 'in_progress') {
+          addNotification({
+            type: 'warning',
+            title: 'Task Not Started',
+            message: 'Press Play to start this task before checking lines.',
+          });
+          return;
+        }
         const canAdvance = await ensureTaskAssigned(taskIdForLine, 'completing line items');
         if (!canAdvance) return;
+        const lineReady = await ensureLineMaterialsReady(lineId);
+        if (!lineReady) return;
       }
     }
 
@@ -207,24 +279,44 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     if (taskRow?.status === 'in_progress') {
       await updateTaskStatusInternal(taskId, 'completed');
     }
-  }, [patchLine, ensureTaskAssigned]);
+  }, [patchLine, ensureTaskAssigned, ensureLineMaterialsReady, addNotification]);
 
   const updateTaskStatusInternal = useCallback(async (taskId: string, status: 'pending' | 'in_progress' | 'completed') => {
+    const { data: currentTask } = await supabase
+      .from('WorkOrderTasks')
+      .select('status, started_at, completed_at, manufacturing_order_id, planned_start_at')
+      .eq('id', taskId)
+      .single();
+
     if (status === 'in_progress' || status === 'completed') {
       const canAdvance = await ensureTaskAssigned(
         taskId,
         status === 'in_progress' ? 'starting this task' : 'completing this task',
       );
       if (!canAdvance) return;
+
+      if (status === 'in_progress') {
+        const plannedStart = currentTask?.planned_start_at ? new Date(currentTask.planned_start_at) : null;
+        if (!plannedStart) {
+          addNotification({
+            type: 'warning',
+            title: 'Schedule Required',
+            message: 'Set task schedule before starting this Work Order.',
+          });
+          return;
+        }
+        if (plannedStart.getTime() > Date.now()) {
+          addNotification({
+            type: 'warning',
+            title: 'Too Early to Start',
+            message: 'This task can only start on or after its scheduled date/time.',
+          });
+          return;
+        }
+      }
     }
 
     const now = new Date().toISOString();
-
-    const { data: currentTask } = await supabase
-      .from('WorkOrderTasks')
-      .select('status, started_at, completed_at, manufacturing_order_id')
-      .eq('id', taskId)
-      .single();
 
     const prevStatus = currentTask?.status;
     const prevStarted = currentTask?.started_at;
@@ -261,7 +353,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     if (status === 'completed' && effectiveMoId) {
       const { data: allTasks } = await supabase
         .from('WorkOrderTasks')
-        .select('id, status, depends_on_task_ids, assigned_to_user_id')
+        .select('id, status, depends_on_task_ids, assigned_to_user_id, planned_start_at')
         .eq('manufacturing_order_id', effectiveMoId)
         .eq('deleted', false);
 
@@ -274,6 +366,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
           if (t.id === taskId) return false;
           if (t.status !== 'pending') return false;
           if (!t.assigned_to_user_id) return false;
+          if (!t.planned_start_at || new Date(t.planned_start_at).getTime() > Date.now()) return false;
           const deps = t.depends_on_task_ids ?? [];
           if (deps.length === 0) return false;
           return deps.every((depId: string) => completedIds.has(depId));
@@ -301,7 +394,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
 
       await fetchAll();
     }
-  }, [patchTask, moId, fetchAll, ensureTaskAssigned]);
+  }, [patchTask, moId, fetchAll, ensureTaskAssigned, addNotification]);
 
   const updateTaskStatus = updateTaskStatusInternal;
 

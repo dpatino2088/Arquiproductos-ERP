@@ -735,12 +735,27 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
   }
 
   const hasUnsavedChanges = manualOverrides.size > 0;
+  const schedulableStatuses = ['planned', 'in_production'];
+  const preScheduleStatuses = ['draft', 'confirmed', 'procurement', 'materials_ready'];
+  const scheduleEditable = canEdit && schedulableStatuses.includes(mo.status);
+  const scheduleStatusBlocker = (() => {
+    if (schedulableStatuses.includes(mo.status)) return null;
+    if (preScheduleStatuses.includes(mo.status))
+      return 'Schedule will be available after MO reaches Planned status. Generate Work Orders first.';
+    return 'Schedule is locked — MO has progressed past production.';
+  })();
 
   return (
     <div className="space-y-4">
       {/* Blockers + Warnings */}
-      {(!scheduleCheck.canSchedule || scheduleCheck.warnings.length > 0) && (
+      {(!scheduleCheck.canSchedule || scheduleCheck.warnings.length > 0 || Boolean(scheduleStatusBlocker)) && (
         <div className="flex flex-wrap gap-2">
+          {scheduleStatusBlocker && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 border border-red-100">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+              <span className="text-xs text-red-700">{scheduleStatusBlocker}</span>
+            </div>
+          )}
           {!scheduleCheck.canSchedule && scheduleCheck.blockers.map((r) => (
             <div key={r} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 border border-red-100">
               <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
@@ -769,7 +784,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
                 Unsaved changes
               </span>
             )}
-            {canEdit && scheduleCheck.canSchedule && (
+            {scheduleEditable && scheduleCheck.canSchedule && (
               <button
                 type="button"
                 onClick={handleSaveSchedule}
@@ -799,7 +814,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
                   setStartDate(e.target.value);
                   setManualOverrides(new Map());
                 }}
-                disabled={!canEdit || !scheduleCheck.canSchedule}
+                disabled={!scheduleEditable || !scheduleCheck.canSchedule}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-gray-50 text-transparent"
               />
               <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-gray-900">
@@ -834,7 +849,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
           days={heatmapDays}
           simulatedLoad={simulatedLoad}
           selectedTaskWorkCenterId={selectedTask?.work_center_id ?? null}
-          onCellClick={canEdit ? handleHeatmapCellClick : undefined}
+          onCellClick={scheduleEditable ? handleHeatmapCellClick : undefined}
         />
       )}
 
@@ -848,7 +863,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
           selectedTaskId={selectedTaskId}
           onSelectTask={(id) => { setSelectedTaskId(id); setEditOverrideTaskId(null); }}
           onMoveTask={handleMoveTask}
-          canEdit={canEdit && scheduleCheck.canSchedule}
+          canEdit={scheduleEditable && scheduleCheck.canSchedule}
         />
       )}
 
@@ -1082,7 +1097,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
               <div className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[selectedTask.status]}`} />
               {selectedTask.work_center?.name ?? `Task #${selectedTask.sequence}`}
               {selectedTask.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />}
-              {selectedTask.status !== 'pending' && canEdit && (
+              {selectedTask.status !== 'pending' && scheduleEditable && (
                 <button
                   type="button"
                   onClick={() => setEditOverrideTaskId(isOverridden ? null : selectedTask.id)}
@@ -1111,7 +1126,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
             {/* Duration */}
             <div>
               <span className="block text-xs font-medium text-gray-500 mb-1">Duration</span>
-              {canEdit && isTaskEditable ? (
+              {scheduleEditable && isTaskEditable ? (
                 <div className="flex items-center gap-1">
                   <input
                     type="number"
@@ -1141,7 +1156,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
             {/* Start Date */}
             <div>
               <span className="block text-xs font-medium text-gray-500 mb-1">Start Date</span>
-              {canEdit && isTaskEditable ? (() => {
+              {scheduleEditable && isTaskEditable ? (() => {
                 const deps = selectedTask.depends_on_task_ids ?? [];
                 let minDate = todayStr;
                 if (deps.length > 0 && computed) {
@@ -1179,7 +1194,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
             {/* End Date */}
             <div>
               <span className="block text-xs font-medium text-gray-500 mb-1">End Date</span>
-              {canEdit && isTaskEditable ? (
+              {scheduleEditable && isTaskEditable ? (
                 <div className="relative">
                   <input
                     type="date"
@@ -1224,7 +1239,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
               <span className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
                 <User className="w-3 h-3" /> Operator
               </span>
-              {canEdit ? (
+              {scheduleEditable ? (
                 <select
                   value={selectedTask.assigned_to_user_id ?? '__unassigned__'}
                   onChange={e => {
@@ -1248,7 +1263,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
           </div>
 
           {/* Dependencies */}
-          {canEdit && (
+          {scheduleEditable && (
             <div>
               <span className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
                 <Clock className="w-3 h-3" /> Dependencies

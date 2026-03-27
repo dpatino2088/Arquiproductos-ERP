@@ -10,9 +10,10 @@ import RollCutVisualizer from '../../components/manufacturing/RollCutVisualizer'
 import FabricSpecsCard from '../../components/manufacturing/FabricSpecsCard';
 import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
 import { optimize1D, type CutPiece } from '../../lib/cutOptimizer';
-import type { FabricPiece, PlacedFabricPiece } from '../../lib/cutOptimizer2D';
-import { generateConsolidated1DPDF, type ConsolidatedCutGroup } from '../../lib/pdf/generateCutPlanPDF';
-import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer } from 'lucide-react';
+import { optimize2D, type FabricPiece, type PlacedFabricPiece } from '../../lib/cutOptimizer2D';
+import { generateConsolidated1DPDF, generateCutPlanPDF, type ConsolidatedCutGroup } from '../../lib/pdf/generateCutPlanPDF';
+import { generateThermalCutStickersPDF, openThermalStickerPrintWindow, type ThermalCutLabel } from '../../lib/pdf/thermalCutStickerPdf';
+import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, MoreVertical } from 'lucide-react';
 
 type Mode = 'profiles' | 'fabric';
 
@@ -25,6 +26,7 @@ interface PendingCut {
   qty: number;
   mo_id: string;
   mo_number: string;
+  so_number: string | null;
   part_role: string;
   stock_length_mm: number | null;
   roll_width_m: number | null;
@@ -94,6 +96,7 @@ export default function CutOptimization() {
   const [expandedSkuMOs, setExpandedSkuMOs] = useState<Set<string>>(new Set());
   const [expandedSpec, setExpandedSpec] = useState<string | null>(null);
   const [selectedFabricPiece, setSelectedFabricPiece] = useState<{ piece: PlacedFabricPiece; skuGroup: SkuGroup } | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   useEffect(() => {
     registerSubmodules('Manufacturing', filteredSubmodules);
@@ -143,14 +146,28 @@ export default function CutOptimization() {
           .in('task_id', taskIds),
         supabase
           .from('ManufacturingOrders')
-          .select('id, manufacturing_order_no, status')
+          .select('id, manufacturing_order_no, status, sales_order_id')
           .in('id', moIds)
           .not('status', 'in', '("draft","cancelled")'),
       ]);
 
       const moMap: Record<string, string> = {};
+      const moToSoId: Record<string, string | null> = {};
       const activeMoIds = new Set<string>();
-      (mos ?? []).forEach((m: any) => { moMap[m.id] = m.manufacturing_order_no; activeMoIds.add(m.id); });
+      (mos ?? []).forEach((m: any) => {
+        moMap[m.id] = m.manufacturing_order_no;
+        moToSoId[m.id] = m.sales_order_id ?? null;
+        activeMoIds.add(m.id);
+      });
+
+      const soIds = [...new Set((mos ?? []).map((m: any) => m.sales_order_id).filter(Boolean))];
+      const { data: soRows } = soIds.length > 0
+        ? await supabase.from('SalesOrders').select('id, sales_order_no').in('id', soIds)
+        : { data: [] };
+      const soMap: Record<string, string> = {};
+      (soRows ?? []).forEach((so: any) => {
+        soMap[so.id] = so.sales_order_no ?? null;
+      });
 
       // Only keep tasks whose MO is active (not draft/planned/completed)
       const taskToMo: Record<string, string> = {};
@@ -168,49 +185,45 @@ export default function CutOptimization() {
       const catMap: Record<string, any> = {};
       (catalogItems ?? []).forEach((ci: any) => { catMap[ci.id] = ci; });
 
-      // --- Fabric mode: fetch product_type + product dimensions via BIL → BI → SOL ---
+      // Fetch product_type + product dimensions via BIL -> BI -> SOL (used by cut stickers too)
       const bilMetaMap: Record<string, { product_type: string | null; width_m: number | null; height_m: number | null }> = {};
+      const bilIds = [...new Set((lines ?? []).map((l: any) => l.bom_instance_line_id).filter(Boolean))] as string[];
+      if (bilIds.length > 0) {
+        const { data: bilRows } = await supabase
+          .from('BOMInstanceLines')
+          .select('id, bom_instance_id')
+          .in('id', bilIds);
 
-      if (mode === 'fabric') {
-        const bilIds = [...new Set((lines ?? []).map((l: any) => l.bom_instance_line_id).filter(Boolean))] as string[];
+        const biMap: Record<string, string> = {};
+        (bilRows ?? []).forEach((r: any) => { biMap[r.id] = r.bom_instance_id; });
 
-        if (bilIds.length > 0) {
-          const { data: bilRows } = await supabase
-            .from('BOMInstanceLines')
-            .select('id, bom_instance_id')
-            .in('id', bilIds);
+        const biIds = [...new Set(Object.values(biMap))];
+        const { data: biRows } = await supabase
+          .from('BOMInstances')
+          .select('id, sales_order_line_id')
+          .in('id', biIds);
 
-          const biMap: Record<string, string> = {};
-          (bilRows ?? []).forEach((r: any) => { biMap[r.id] = r.bom_instance_id; });
+        const biSolMap: Record<string, string> = {};
+        (biRows ?? []).forEach((r: any) => { if (r.sales_order_line_id) biSolMap[r.id] = r.sales_order_line_id; });
 
-          const biIds = [...new Set(Object.values(biMap))];
-          const { data: biRows } = await supabase
-            .from('BOMInstances')
-            .select('id, sales_order_line_id')
-            .in('id', biIds);
+        const solIds = [...new Set(Object.values(biSolMap))];
+        const { data: solRows } = solIds.length > 0
+          ? await supabase.from('SaleOrderLines').select('id, product_type, width_m, height_m').in('id', solIds)
+          : { data: [] };
 
-          const biSolMap: Record<string, string> = {};
-          (biRows ?? []).forEach((r: any) => { if (r.sales_order_line_id) biSolMap[r.id] = r.sales_order_line_id; });
+        const solMap: Record<string, any> = {};
+        (solRows ?? []).forEach((r: any) => { solMap[r.id] = r; });
 
-          const solIds = [...new Set(Object.values(biSolMap))];
-          const { data: solRows } = solIds.length > 0
-            ? await supabase.from('SaleOrderLines').select('id, product_type, width_m, height_m').in('id', solIds)
-            : { data: [] };
-
-          const solMap: Record<string, any> = {};
-          (solRows ?? []).forEach((r: any) => { solMap[r.id] = r; });
-
-          bilIds.forEach(bilId => {
-            const biId = biMap[bilId];
-            const solId = biId ? biSolMap[biId] : null;
-            const sol = solId ? solMap[solId] : null;
-            bilMetaMap[bilId] = {
-              product_type: sol?.product_type ?? null,
-              width_m: sol?.width_m != null ? Number(sol.width_m) : null,
-              height_m: sol?.height_m != null ? Number(sol.height_m) : null,
-            };
-          });
-        }
+        bilIds.forEach(bilId => {
+          const biId = biMap[bilId];
+          const solId = biId ? biSolMap[biId] : null;
+          const sol = solId ? solMap[solId] : null;
+          bilMetaMap[bilId] = {
+            product_type: sol?.product_type ?? null,
+            width_m: sol?.width_m != null ? Number(sol.width_m) : null,
+            height_m: sol?.height_m != null ? Number(sol.height_m) : null,
+          };
+        });
       }
 
       const cuts: PendingCut[] = (lines ?? []).filter((l: any) => taskToMo[l.task_id]).map((l: any) => {
@@ -226,6 +239,7 @@ export default function CutOptimization() {
           qty: Number(l.qty),
           mo_id: moId,
           mo_number: moMap[moId] ?? '',
+          so_number: moToSoId[moId] ? soMap[moToSoId[moId] as string] ?? null : null,
           part_role: l.component_role ?? '',
           stock_length_mm: ci?.stock_length_mm != null ? Number(ci.stock_length_mm) : null,
           roll_width_m: ci?.roll_width_m != null ? Number(ci.roll_width_m) : null,
@@ -387,12 +401,7 @@ export default function CutOptimization() {
     '#a78bfa', '#22d3ee', '#fb923c', '#818cf8',
   ];
 
-  const handlePrintAllProfiles = useCallback(async () => {
-    const profileGroups = selectedGroups.filter(g => {
-      return g.cuts.some(c => c.cut_length_mm != null && c.cut_length_mm > 0);
-    });
-    if (profileGroups.length === 0) return;
-
+  const loadLogo = useCallback(async (): Promise<{ base64?: string; w: number; h: number }> => {
     const logoPaths = ['/images/Arquiproductos.png', '/images/arquiproductos.png', '/images/Arquiproductos.jpg'];
     let logoBase64: string | undefined;
     for (const path of logoPaths) {
@@ -409,8 +418,7 @@ export default function CutOptimization() {
         if (logoBase64) break;
       } catch { /* ignore */ }
     }
-
-    let logoW = 100, logoH = 100;
+    let w = 100, h = 100;
     if (logoBase64) {
       const dims = await new Promise<{ w: number; h: number }>(resolve => {
         const img = new Image();
@@ -418,9 +426,19 @@ export default function CutOptimization() {
         img.onerror = () => resolve({ w: 100, h: 100 });
         img.src = logoBase64!;
       });
-      logoW = dims.w;
-      logoH = dims.h;
+      w = dims.w;
+      h = dims.h;
     }
+    return { base64: logoBase64, w, h };
+  }, []);
+
+  const handlePrintAllProfiles = useCallback(async () => {
+    const profileGroups = selectedGroups.filter(g => {
+      return g.cuts.some(c => c.cut_length_mm != null && c.cut_length_mm > 0);
+    });
+    if (profileGroups.length === 0) return;
+
+    const logo = await loadLogo();
 
     const allMoIds = [...new Set(profileGroups.flatMap(g => g.cuts.map(c => c.mo_id)))];
     const globalMoHexMap: Record<string, string> = {};
@@ -450,12 +468,112 @@ export default function CutOptimization() {
     });
 
     const doc = generateConsolidated1DPDF(groups, {
-      logoPngBase64: logoBase64,
-      logoWidthPx: logoW,
-      logoHeightPx: logoH,
+      logoPngBase64: logo.base64,
+      logoWidthPx: logo.w,
+      logoHeightPx: logo.h,
     });
     doc.save(`CutOrder-Profiles-${new Date().toISOString().slice(0, 10)}.pdf`);
-  }, [selectedGroups]);
+  }, [selectedGroups, loadLogo]);
+
+  const handlePrintAllFabric = useCallback(async () => {
+    if (selectedGroups.length === 0) return;
+    const logo = await loadLogo();
+
+    const allMoIds = [...new Set(selectedGroups.flatMap(g => g.cuts.map(c => c.mo_id)))];
+    const moHexMap: Record<string, string> = {};
+    allMoIds.forEach((id, i) => { moHexMap[id] = MO_HEX_COLORS[i % MO_HEX_COLORS.length]; });
+    const moNumberMap: Record<string, string> = {};
+    selectedGroups.forEach(g => g.cuts.forEach(c => { moNumberMap[c.mo_id] = c.mo_number; }));
+
+    for (const group of selectedGroups) {
+      const fabricPieces: FabricPiece[] = group.cuts.flatMap(c =>
+        decomposePanelIntoDrops(c, group.rollWidthMm),
+      );
+      if (fabricPieces.length === 0) continue;
+
+      const result = optimize2D(fabricPieces, group.rollWidthMm, group.rollLengthMm, group.canRotate);
+
+      const doc = generateCutPlanPDF({
+        type: '2d',
+        title: `${group.sku} — ${group.itemName}`,
+        subtitle: `${group.cuts.length} panel(s) · Roll: ${(group.rollWidthMm / 1000).toFixed(2)}m × ${(group.rollLengthMm / 1000).toFixed(1)}m · MOs: ${group.moNumbers.join(', ')}`,
+        sku: group.sku,
+        moNumbers: group.moNumbers,
+        rollWidthMm: group.rollWidthMm,
+        rollLengthMm: group.rollLengthMm,
+        result2D: result,
+        moHexColorMap: moHexMap,
+        logoPngBase64: logo.base64,
+        logoWidthPx: logo.w,
+        logoHeightPx: logo.h,
+      });
+      doc.save(`CutOrder-Fabric-${group.sku}-${new Date().toISOString().slice(0, 10)}.pdf`);
+    }
+  }, [selectedGroups, loadLogo]);
+
+  const printThermalStickers = useCallback(async () => {
+    const labels: ThermalCutLabel[] = [];
+    if (mode === 'profiles') {
+      selectedGroups.forEach((group) => {
+        group.cuts
+          .filter((c) => c.cut_length_mm != null && c.cut_length_mm > 0)
+          .forEach((c) => {
+            labels.push({
+              soNumber: c.so_number,
+              moNumber: c.mo_number,
+              stationCode: 'CUT-PROFILE',
+              sku: c.sku,
+              itemName: c.item_name,
+              cutWidthMm: c.cut_length_mm,
+              cutHeightMm: null,
+              curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+              curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+              refId: c.bil_id,
+            });
+          });
+      });
+    } else {
+      selectedGroups.forEach((group) => {
+        group.cuts.forEach((c) => {
+          const drops = decomposePanelIntoDrops(c, group.rollWidthMm);
+          if (drops.length === 0) {
+            labels.push({
+              soNumber: c.so_number,
+              moNumber: c.mo_number,
+              stationCode: 'CUT-ROLL',
+              sku: c.sku,
+              itemName: c.item_name,
+              cutWidthMm: c.cut_length_mm,
+              cutHeightMm: c.cut_height_mm,
+              curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+              curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+              refId: c.bil_id,
+            });
+            return;
+          }
+          drops.forEach((d, idx) => {
+            labels.push({
+              soNumber: c.so_number,
+              moNumber: c.mo_number,
+              stationCode: 'CUT-ROLL',
+              sku: c.sku,
+              itemName: c.item_name,
+              cutWidthMm: d.widthMm,
+              cutHeightMm: d.heightMm,
+              curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+              curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+              refId: `${c.bil_id}-d${idx + 1}`,
+            });
+          });
+        });
+      });
+    }
+
+    if (labels.length === 0) return;
+
+    const doc = await generateThermalCutStickersPDF(labels);
+    openThermalStickerPrintWindow(doc);
+  }, [mode, selectedGroups]);
 
   /**
    * Decompose a fabric panel into actual drops for roll placement.
@@ -537,13 +655,14 @@ export default function CutOptimization() {
           <Scissors className="w-5 h-5 text-gray-500" />
           <h1 className="text-xl font-semibold text-gray-900">Cut Optimization</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* Mode toggle */}
           <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5">
             <button
               type="button"
               onClick={() => setMode('profiles')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                mode === 'profiles' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                mode === 'profiles' ? 'bg-gray-700 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <Layers className="w-3.5 h-3.5" /> Profiles (1D)
@@ -552,28 +671,56 @@ export default function CutOptimization() {
               type="button"
               onClick={() => setMode('fabric')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                mode === 'fabric' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'
+                mode === 'fabric' ? 'bg-gray-700 text-white' : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
               <Scissors className="w-3.5 h-3.5" /> Fabric (2D)
             </button>
           </div>
-          {mode === 'profiles' && selectedGroups.length > 0 && (
-            <button
-              type="button"
-              onClick={handlePrintAllProfiles}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-700"
-            >
-              <Printer className="w-3.5 h-3.5" /> Cut Order PDF
-            </button>
-          )}
+
+          {/* Refresh */}
           <button
             type="button"
             onClick={fetchPendingCuts}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Refresh"
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
+
+          {/* Actions dropdown */}
+          {selectedGroups.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setActionsOpen((p) => !p)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors"
+              >
+                Actions <MoreVertical className="w-3.5 h-3.5" />
+              </button>
+              {actionsOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
+                  <div className="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-40 py-1">
+                    <button
+                      type="button"
+                      onClick={() => { setActionsOpen(false); mode === 'profiles' ? handlePrintAllProfiles() : handlePrintAllFabric(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Printer className="w-4 h-4 text-gray-400" /> Cut Order PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setActionsOpen(false); printThermalStickers(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Printer className="w-4 h-4 text-gray-400" /> Thermal Stickers (4×1″)
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -708,6 +855,25 @@ export default function CutOptimization() {
                   stockLengthMm={group.stockLengthMm}
                   title={`${group.sku} — ${group.itemName}`}
                   subtitle={`${pieces.length} pieces · MOs: ${group.moNumbers.join(', ')}`}
+                  onPrintStickers={async () => {
+                    const labels: ThermalCutLabel[] = group.cuts
+                      .filter(c => c.cut_length_mm != null && c.cut_length_mm > 0)
+                      .map(c => ({
+                        soNumber: c.so_number,
+                        moNumber: c.mo_number,
+                        stationCode: 'CUT-PROFILE' as const,
+                        sku: c.sku,
+                        itemName: c.item_name,
+                        cutWidthMm: c.cut_length_mm,
+                        cutHeightMm: null,
+                        curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+                        curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+                        refId: c.bil_id,
+                      }));
+                    if (labels.length === 0) return;
+                    const doc = await generateThermalCutStickersPDF(labels);
+                    openThermalStickerPrintWindow(doc);
+                  }}
                 />
               );
             })}
@@ -731,6 +897,66 @@ export default function CutOptimization() {
                     subtitle={`${totalPanels} panel${totalPanels !== 1 ? 's' : ''} → ${totalDrops} drop${totalDrops !== 1 ? 's' : ''} · Roll: ${(group.rollWidthMm / 1000).toFixed(2)}m wide × ${(group.rollLengthMm / 1000).toFixed(1)}m long · MOs: ${group.moNumbers.join(', ')}`}
                     canRotate={group.canRotate}
                     onPieceClick={(piece) => setSelectedFabricPiece({ piece, skuGroup: group })}
+                    onPrintPDF={async () => {
+                      const logo = await loadLogo();
+                      const allMoIds = [...new Set(group.cuts.map(c => c.mo_id))];
+                      const moHexMap: Record<string, string> = {};
+                      allMoIds.forEach((id, i) => { moHexMap[id] = MO_HEX_COLORS[i % MO_HEX_COLORS.length]; });
+                      const r2d = optimize2D(fabricPieces, group.rollWidthMm, group.rollLengthMm, group.canRotate);
+                      const doc = generateCutPlanPDF({
+                        type: '2d',
+                        title: `${group.sku} — ${group.itemName}`,
+                        subtitle: `${totalPanels} panel(s) · Roll: ${(group.rollWidthMm / 1000).toFixed(2)}m × ${(group.rollLengthMm / 1000).toFixed(1)}m · MOs: ${group.moNumbers.join(', ')}`,
+                        sku: group.sku,
+                        moNumbers: group.moNumbers,
+                        rollWidthMm: group.rollWidthMm,
+                        rollLengthMm: group.rollLengthMm,
+                        result2D: r2d,
+                        moHexColorMap: moHexMap,
+                        logoPngBase64: logo.base64,
+                        logoWidthPx: logo.w,
+                        logoHeightPx: logo.h,
+                      });
+                      doc.save(`CutOrder-Fabric-${group.sku}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                    }}
+                    onPrintStickers={async () => {
+                      const labels: ThermalCutLabel[] = [];
+                      group.cuts.forEach(c => {
+                        const drops = decomposePanelIntoDrops(c, group.rollWidthMm);
+                        if (drops.length === 0) {
+                          labels.push({
+                            soNumber: c.so_number,
+                            moNumber: c.mo_number,
+                            stationCode: 'CUT-ROLL',
+                            sku: c.sku,
+                            itemName: c.item_name,
+                            cutWidthMm: c.cut_length_mm,
+                            cutHeightMm: c.cut_height_mm,
+                            curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+                            curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+                            refId: c.bil_id,
+                          });
+                          return;
+                        }
+                        drops.forEach((d, idx) => {
+                          labels.push({
+                            soNumber: c.so_number,
+                            moNumber: c.mo_number,
+                            stationCode: 'CUT-ROLL',
+                            sku: c.sku,
+                            itemName: c.item_name,
+                            cutWidthMm: d.widthMm,
+                            cutHeightMm: d.heightMm,
+                            curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+                            curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+                            refId: `${c.bil_id}-d${idx + 1}`,
+                          });
+                        });
+                      });
+                      if (labels.length === 0) return;
+                      const doc = await generateThermalCutStickersPDF(labels);
+                      openThermalStickerPrintWindow(doc);
+                    }}
                   />
 
                   {/* PanelCutDetail — shown when a piece from THIS group is clicked */}

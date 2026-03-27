@@ -45,6 +45,9 @@ interface ParsedRow {
   is_active?: boolean | string;
   active?: boolean | string; // backward compatibility
   manufacturer?: string;
+  collection_name?: string;
+  variant_name?: string;
+  color?: string;
   purchase_unit?: string;
   units_per_purchase_unit?: number | string;
   supply_type?: string;
@@ -57,6 +60,8 @@ interface ParsedRow {
   notes?: string;
   category?: string; // backward compatibility
   family?: string; // backward compatibility
+  collection?: string; // backward compatibility (legacy alias for collection_name)
+  variant?: string; // backward compatibility (legacy alias for variant_name)
 }
 
 interface ValidationError {
@@ -117,6 +122,16 @@ function parseNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeRollUom(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return '';
+  if (['m', 'meter', 'meters', 'metre', 'metres'].includes(raw)) return 'm';
+  if (['yd', 'yard', 'yards'].includes(raw)) return 'yd';
+  if (['ft', 'foot', 'feet'].includes(raw)) return 'ft';
+  if (['in', 'inch', 'inches', '"'].includes(raw)) return 'in';
+  return raw;
+}
+
 function splitMultiValue(value: unknown): string[] {
   const raw = String(value ?? '').trim();
   if (!raw) return [];
@@ -124,6 +139,26 @@ function splitMultiValue(value: unknown): string[] {
     .split(/[|,;]/g)
     .map((v) => v.trim())
     .filter(Boolean);
+}
+
+function normalizeImportedText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\u0000/g, '')
+    .trim();
+}
+
+function looksMojibake(value: string): boolean {
+  // Typical double-encoded UTF-8 artifacts seen in CSV exports.
+  return /Ã.|Â.|â.|�/.test(value);
+}
+
+function pickBestImportedText(primaryRaw: unknown, fallbackRaw: unknown): string {
+  const primary = normalizeImportedText(primaryRaw);
+  const fallback = normalizeImportedText(fallbackRaw);
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  if (looksMojibake(primary) && !looksMojibake(fallback)) return fallback;
+  return primary;
 }
 
 export default function ImportCatalog({ isOpen, onClose, onImportComplete }: ImportCatalogProps) {
@@ -295,7 +330,7 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
 
       const purchaseUnit = String(row.purchase_unit ?? '').trim().toLowerCase();
       if (purchaseUnit) {
-        const validPurchaseUnits = ['each', 'box', 'pack', 'set', 'roll', 'case', 'bag', 'kit', 'pair'];
+        const validPurchaseUnits = ['each', 'box', 'pack', 'set', 'roll', 'case', 'bag', 'bundle', 'carton', 'kit', 'pair', 'm', 'ft', 'yd'];
         if (!validPurchaseUnits.includes(purchaseUnit)) {
           errors.push({
             row: rowNum,
@@ -336,12 +371,41 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
             message: 'roll_width_value is required for roll items (> 0)',
           });
         }
-        const rollWidthUom = String(row.roll_width_uom ?? '').trim().toLowerCase();
+        const rollWidthUom = normalizeRollUom(row.roll_width_uom);
         if (rollWidthUom && !['m', 'yd', 'ft', 'in'].includes(rollWidthUom)) {
           errors.push({
             row: rowNum,
             field: 'roll_width_uom',
-            message: 'roll_width_uom must be one of: m, yd, ft, in',
+            message: 'roll_width_uom must be one of: m, yd, ft, in (also accepts inch/inches)',
+          });
+        }
+
+        const rollLengthUom = normalizeRollUom(row.roll_length_uom);
+        if (rollLengthUom && !['m', 'yd', 'ft', 'in'].includes(rollLengthUom)) {
+          errors.push({
+            row: rowNum,
+            field: 'roll_length_uom',
+            message: 'roll_length_uom must be one of: m, yd, ft, in (also accepts inch/inches)',
+          });
+        }
+
+        const explicitCollection = pickBestImportedText(row.collection_name, row.collection);
+        const fallbackCollection = String(row.category_group ?? '').trim();
+        if (!explicitCollection && !fallbackCollection) {
+          errors.push({
+            row: rowNum,
+            field: 'collection_name',
+            message: 'For roll items, provide collection_name (or category_group as fallback)',
+          });
+        }
+
+        const explicitVariant = pickBestImportedText(row.variant_name, row.variant);
+        const fallbackVariant = String(row.name ?? '').trim();
+        if (!explicitVariant && !fallbackVariant) {
+          errors.push({
+            row: rowNum,
+            field: 'variant_name',
+            message: 'For roll items, provide variant_name (or name as fallback)',
           });
         }
       }
@@ -555,9 +619,9 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
 
     // Roll dimensions: prefer roll_width_value + roll_width_uom; fallback to roll_width_m (legacy)
     const rollWidthValue = parseNumber(row.roll_width_value) ?? parseNumber(row.roll_width_m);
-    const rollWidthUom = String(row.roll_width_uom ?? '').trim().toLowerCase() || 'm';
+    const rollWidthUom = normalizeRollUom(row.roll_width_uom) || 'm';
     const rollLengthValue = parseNumber(row.roll_length_value) ?? (isRoll ? 29.965 : null);
-    const rollLengthUom = String(row.roll_length_uom ?? '').trim().toLowerCase() || 'yd';
+    const rollLengthUom = normalizeRollUom(row.roll_length_uom) || 'yd';
 
     const rollPricingModeRaw = String(row.roll_pricing_mode ?? '').trim().toLowerCase();
     const rollPricingMode =
@@ -570,12 +634,15 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
     const rawRollType = String(row.roll_type ?? '').trim().toLowerCase();
     const rollType = VALID_ROLL_TYPES.has(rawRollType) ? rawRollType : 'fabric';
 
-    const VALID_PURCHASE_UNITS = new Set(['each','box','pack','set','roll','case','bag','kit','pair']);
+    const VALID_PURCHASE_UNITS = new Set(['each','box','pack','set','roll','case','bag','bundle','carton','kit','pair','m','ft','yd']);
     const rawPurchaseUnit = String(row.purchase_unit ?? '').trim().toLowerCase();
     const purchaseUnit = VALID_PURCHASE_UNITS.has(rawPurchaseUnit) ? rawPurchaseUnit : 'each';
     const unitsPerPurchase = Math.max(1, parseNumber(row.units_per_purchase_unit) ?? 1);
 
     const manufacturerName = String(row.manufacturer ?? '').trim() || null;
+    const explicitCollection = pickBestImportedText(row.collection_name, row.collection);
+    const explicitVariant = pickBestImportedText(row.variant_name, row.variant);
+    const explicitColor = normalizeImportedText(row.color);
 
     return {
       sku: String(row.sku ?? '').trim(),
@@ -593,9 +660,10 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
       roll_length_value: isRoll && rollLengthValue && rollLengthValue > 0 ? rollLengthValue : null,
       roll_length_uom: isRoll && rollLengthValue && rollLengthValue > 0 ? rollLengthUom : null,
       roll_pricing_mode: isRoll ? rollPricingMode : null,
-      collection_name: isRoll ? (String(row.category_group ?? '').trim() || null) : null,
-      variant_name: isRoll ? (String(row.name ?? '').trim() || null) : null,
-      color: null,
+      // Support explicit columns first, then keep backward-compatible fallbacks.
+      collection_name: isRoll ? (explicitCollection || String(row.category_group ?? '').trim() || null) : null,
+      variant_name: isRoll ? (explicitVariant || String(row.name ?? '').trim() || null) : null,
+      color: !isRoll ? (explicitColor || null) : null,
       cost_exw: parsedCostExw,
       purchase_unit: purchaseUnit as any,
       units_per_purchase_unit: unitsPerPurchase,
@@ -626,7 +694,7 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
     } else if (incomingBasis === 'area') {
       measureBasis = 'area';
     }
-    const VALID_PURCHASE_UNITS = new Set(['each','box','pack','set','roll','case','bag','kit','pair']);
+    const VALID_PURCHASE_UNITS = new Set(['each','box','pack','set','roll','case','bag','bundle','carton','kit','pair','m','ft','yd']);
     const rawPurchaseUnit = String(row.purchase_unit ?? '').trim().toLowerCase();
     const purchaseUnit = VALID_PURCHASE_UNITS.has(rawPurchaseUnit) ? rawPurchaseUnit : 'each';
     const unitsPerPurchase = Math.max(1, parseNumber(row.units_per_purchase_unit) ?? 1);
@@ -924,14 +992,17 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
                 <p className="text-xs font-medium text-blue-900 mb-2">Expected Columns:</p>
                 <div className="text-xs text-blue-800 space-y-1">
                   <p><strong>Required:</strong> sku, name, category_group, subcategory, measure_basis, unit_of_measure, cost_exw</p>
-                  <p><strong>Optional:</strong> description, product_types, manufacturer, purchase_unit, units_per_purchase_unit, is_roll, roll_type, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom, roll_pricing_mode, supply_type, supply_origin, is_active</p>
+                  <p><strong>Optional:</strong> description, product_types, manufacturer, collection_name, variant_name, color, purchase_unit, units_per_purchase_unit, is_roll, roll_type, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom, roll_pricing_mode, supply_type, supply_origin, is_active</p>
                   <p><strong>Valid enums:</strong> supply_type = stock | order (default: stock). supply_origin = local | import (default: local)</p>
                   <p><strong>Valid enums:</strong> measure_basis = unit | linear | area</p>
                   <p><strong>Valid enums:</strong> roll_type = fabric | window_film | vinyl | mesh | paper | other (default: fabric)</p>
                   <p><strong>Valid enums:</strong> roll_pricing_mode = per_linear_meter | per_square_meter | per_unit</p>
-                  <p><strong>Valid enums:</strong> purchase_unit = each | box | pack | set | roll | case | bag | kit | pair</p>
+                  <p><strong>Valid enums:</strong> roll_width_uom / roll_length_uom = m | yd | ft | in (also: meter, yard, feet, inch)</p>
+                  <p><strong>Valid enums:</strong> purchase_unit = each | box | pack | set | roll | case | bag | bundle | carton | kit | pair | m | ft | yd</p>
                   <p><strong>Product Types (codes):</strong> roller | dual_shade | triple_shade | drapery | awning | window_film | honey_comb | vertical</p>
                   <p><strong>Default categories:</strong> Rolls/Fabric and Systems/Power Supplies</p>
+                  <p><strong>Modeling guide:</strong> EA parts: measure_basis=unit + unit_of_measure=ea. Linear parts: measure_basis=linear + unit_of_measure=m/ft/yd. Roll/Fabric: is_roll=true + roll_type + roll_width_value/uom + collection_name + variant_name.</p>
+                  <p><strong>Color rules:</strong> non-roll items can use color column. Roll/fabric uses variant_name for color/variant label.</p>
                   <p><strong>Legacy removed from v2:</strong> item_type, family, unit_price, cost_price, General</p>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
@@ -948,8 +1019,8 @@ export default function ImportCatalog({ isOpen, onClose, onImportComplete }: Imp
                 </div>
                 <div className="mt-3">
                   <a
-                    href="/catalog_import_template.csv"
-                    download
+                    href="/catalog_import_template.csv?v=20260325"
+                    download="catalog_import_template_v2.csv"
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-blue-900 bg-white border border-blue-300 rounded-md hover:bg-blue-100 transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />

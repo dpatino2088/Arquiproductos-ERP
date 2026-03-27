@@ -461,82 +461,6 @@ export function generateCutPlanPDF(opts: CutPlanPDFOptions): jsPDF {
   return doc;
 }
 
-export function generateStickersPDF(
-  pieces: TaggedPiece[],
-  sku: string,
-  materialName: string,
-): jsPDF {
-  const stickerW = 80;
-  const stickerH = 40;
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const cols = Math.floor((pageW - 10) / stickerW);
-  const rows = Math.floor((pageH - 10) / stickerH);
-  const offsetX = (pageW - cols * stickerW) / 2;
-  const offsetY = (pageH - rows * stickerH) / 2;
-
-  pieces.forEach((piece, idx) => {
-    if (idx > 0 && idx % (cols * rows) === 0) doc.addPage();
-    const pageIdx = idx % (cols * rows);
-    const col = pageIdx % cols;
-    const row = Math.floor(pageIdx / cols);
-    const x = offsetX + col * stickerW;
-    const y = offsetY + row * stickerH;
-
-    doc.setDrawColor(180);
-    doc.setLineWidth(0.3);
-    (doc as JsPDFExtras).setLineDashPattern([1, 1], 0);
-    doc.rect(x, y, stickerW, stickerH);
-    (doc as JsPDFExtras).setLineDashPattern([], 0);
-
-    const rgb = PIECE_COLORS[piece.colorIdx];
-    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-    doc.rect(x + 2, y + 2, 14, 14, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(255);
-    doc.text(piece.code, x + 9, y + 11, { align: 'center' });
-    doc.setTextColor(0);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text(piece.moNumber, x + 19, y + 7);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.text(`${sku} — ${materialName}`, x + 19, y + 11);
-    doc.text(`${Math.round(piece.widthMm)} × ${Math.round(piece.heightMm)} mm`, x + 19, y + 15);
-
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'bold');
-    const typeLabel = piece.isPrimary ? 'PRIMARY' : 'SECONDARY';
-    doc.text(typeLabel, x + 2, y + 22);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.text(`Roll ${piece.rollIdx + 1}  ·  ${piece.rotated ? 'Rotated' : 'No rotation'}`, x + 2, y + 26);
-
-    if (piece.totalDrops > 1) {
-      doc.setFontSize(6);
-      doc.text(`Drop ${piece.dropIdx + 1} of ${piece.totalDrops}`, x + 2, y + 30);
-      const pairCode = piece.isPrimary
-        ? pieceCode(piece.panelIdx, 1, piece.totalDrops)
-        : pieceCode(piece.panelIdx, 0, piece.totalDrops);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`Pair: ${pairCode}`, x + 2, y + 34);
-    }
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.5);
-    doc.setTextColor(120);
-    doc.text(`${piece.code}`, x + stickerW - 3, y + stickerH - 2, { align: 'right' });
-    doc.setTextColor(0);
-  });
-
-  return doc;
-}
-
 interface ConsolidatedCutGroup {
   sku: string;
   itemName: string;
@@ -750,5 +674,4 @@ export function generateConsolidated1DPDF(
   return doc;
 }
 
-export { buildTaggedPieces };
-export type { TaggedPiece, ConsolidatedCutGroup };
+export type { ConsolidatedCutGroup };

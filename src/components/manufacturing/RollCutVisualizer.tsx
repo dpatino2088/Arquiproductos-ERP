@@ -1,6 +1,5 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { optimize2D, type FabricPiece, type PlacedFabricPiece, type CutPlan2DResult } from '../../lib/cutOptimizer2D';
-import { generateCutPlanPDF, generateStickersPDF, buildTaggedPieces } from '../../lib/pdf/generateCutPlanPDF';
 import { Scissors, BarChart3, RotateCw, Printer, Tag } from 'lucide-react';
 
 const MO_COLORS = [
@@ -19,6 +18,8 @@ interface RollCutVisualizerProps {
   canRotate?: boolean;
   /** Fires when a placed piece is clicked — parent can show PanelCutDetail. */
   onPieceClick?: (piece: PlacedFabricPiece) => void;
+  onPrintPDF?: () => void;
+  onPrintStickers?: () => void;
 }
 
 export default function RollCutVisualizer({
@@ -30,6 +31,8 @@ export default function RollCutVisualizer({
   subtitle,
   canRotate = true,
   onPieceClick,
+  onPrintPDF,
+  onPrintStickers,
 }: RollCutVisualizerProps) {
   const [rollWidthMm, setRollWidthMm] = useState(initialWidth);
   const [rollLengthMm, setRollLengthMm] = useState(initialLength);
@@ -67,62 +70,6 @@ export default function RollCutVisualizer({
     setRollLengthMm(l);
     onRollDimensionsChange?.(w, l);
   };
-
-  const handlePrint = useCallback(async () => {
-    const logoPaths = ['/images/Arquiproductos.png', '/images/arquiproductos.png', '/images/Arquiproductos.jpg'];
-    let logoBase64: string | undefined;
-    for (const path of logoPaths) {
-      try {
-        const res = await fetch(path, { cache: 'no-store' });
-        if (!res.ok) continue;
-        const blob = await res.blob();
-        logoBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-        if (logoBase64) break;
-      } catch { /* ignore */ }
-    }
-
-    let logoW = 100, logoH = 100;
-    if (logoBase64) {
-      const dims = await new Promise<{ w: number; h: number }>(resolve => {
-        const img = new Image();
-        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-        img.onerror = () => resolve({ w: 100, h: 100 });
-        img.src = logoBase64!;
-      });
-      logoW = dims.w;
-      logoH = dims.h;
-    }
-
-    const sku = title?.split(' — ')[0] ?? 'Fabric';
-    const doc = generateCutPlanPDF({
-      type: '2d',
-      title: title ?? sku,
-      subtitle: subtitle ?? '',
-      sku,
-      moNumbers: moIds.map(id => moNumberMap[id] ?? id.slice(0, 8)),
-      rollWidthMm,
-      rollLengthMm,
-      result2D: result,
-      moHexColorMap: moColorMap,
-      logoPngBase64: logoBase64,
-      logoWidthPx: logoW,
-      logoHeightPx: logoH,
-    });
-    doc.save(`CutPlan-2D-${sku}.pdf`);
-  }, [title, subtitle, moIds, moNumberMap, rollWidthMm, rollLengthMm, result, moColorMap]);
-
-  const handlePrintStickers = useCallback(() => {
-    const sku = title?.split(' — ')[0] ?? 'Fabric';
-    const materialName = title?.split(' — ')[1] ?? sku;
-    const tagged = buildTaggedPieces(result);
-    const doc = generateStickersPDF(tagged, sku, materialName);
-    doc.save(`Stickers-${sku}.pdf`);
-  }, [title, result]);
 
   if (pieces.length === 0) {
     return (
@@ -182,22 +129,26 @@ export default function RollCutVisualizer({
             <RotateCw className="w-3 h-3" />
             {canRotate ? 'Rotate' : 'No Rotation'}
           </button>
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
-            title="Print cut plan PDF"
-          >
-            <Printer className="w-3.5 h-3.5" /> PDF
-          </button>
-          <button
-            type="button"
-            onClick={handlePrintStickers}
-            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
-            title="Print sticker labels for each piece"
-          >
-            <Tag className="w-3.5 h-3.5" /> Stickers
-          </button>
+          {onPrintPDF && (
+            <button
+              type="button"
+              onClick={onPrintPDF}
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+              title="Print cut plan PDF"
+            >
+              <Printer className="w-3.5 h-3.5" /> PDF
+            </button>
+          )}
+          {onPrintStickers && (
+            <button
+              type="button"
+              onClick={onPrintStickers}
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+              title="Print 4×1″ thermal stickers"
+            >
+              <Tag className="w-3.5 h-3.5" /> Stickers
+            </button>
+          )}
         </div>
       </div>
 

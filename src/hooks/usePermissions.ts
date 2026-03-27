@@ -150,10 +150,10 @@ export const GRANULAR_PERMS = {
     delete:  ['directory.delete'],
   },
   catalog: {
-    create: ['catalog.create', 'catalog.write'],
-    edit:    ['catalog.edit', 'catalog.write'],
-    archive: ['catalog.archive'],
-    delete:  ['catalog.delete'],
+    create: ['catalog.create', 'catalog.write', 'catalog.items.create'],
+    edit:    ['catalog.edit',  'catalog.write', 'catalog.items.write'],
+    archive: ['catalog.archive', 'catalog.items.archive'],
+    delete:  ['catalog.delete', 'catalog.items.delete'],
   },
   quotes: {
     create: ['sales.quotes.write'],
@@ -272,7 +272,7 @@ export function useManufacturingAccess() {
       canViewWorkstation:  can('manufacturing.wo.read'),
       canViewCutOpt:       can('manufacturing.cutopt.read') || can('manufacturing.wo.read'),
       canViewCalendar:     can('manufacturing.calendar.read'),
-      canViewCosts:        can('manufacturing.mo.read'),
+      canViewCosts:        can('manufacturing.costs.read'),
     };
   }, [can]);
 }

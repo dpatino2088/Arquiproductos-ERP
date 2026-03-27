@@ -10,7 +10,7 @@ import { useUIStore } from '../../stores/ui-store';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import Label from '../../components/ui/Label';
-import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { usePermissions } from '../../hooks/usePermissions';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
@@ -192,7 +192,10 @@ const catalogItemResolver: Resolver<CatalogItemFormValues> = async (values, cont
 
 export default function CatalogItemNew() {
   const { activeOrganizationId } = useOrganizationContext();
-  const { canEditCustomers: canEdit, loading: roleLoading } = useCurrentOrgRole();
+  const { can, loading: roleLoading } = usePermissions();
+  // True write access to catalog items requires an explicit catalog write permission.
+  // procurement has only catalog.read / catalog.items.read → isReadOnly will be true.
+  const canEdit = can('catalog.items.write') || can('catalog.write') || can('catalog.edit') || can('catalog.create');
   
   // Track current path so itemId stays in sync with navigation
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);

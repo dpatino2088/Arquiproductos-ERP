@@ -341,6 +341,64 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         global_installation_fee_pct: parsePct(headerForm.global_installation_fee_pct),
         exempt_tax: headerForm.exempt_tax,
       };
+      const prevStatus = proposal.status;
+      const nextStatus = headerForm.status;
+      const wasFrozen = prevStatus === 'sent' || prevStatus === 'accepted';
+      const nowFrozen = nextStatus === 'sent' || nextStatus === 'accepted';
+      const hasSnapshot =
+        !!proposal.customer_snapshot_name ||
+        !!proposal.contact_snapshot_name ||
+        !!proposal.customer_snapshot_address;
+      if (nowFrozen && (!wasFrozen || !hasSnapshot)) {
+        let customerIdToUse = proposal.customer_id;
+        let contactIdToUse = proposal.contact_id;
+        if ((!customerIdToUse || !contactIdToUse) && proposal.quote_id) {
+          const { data: quoteRow } = await supabase
+            .from('Quotes')
+            .select('customer_id, contact_id')
+            .eq('id', proposal.quote_id)
+            .eq('deleted', false)
+            .maybeSingle();
+          if (quoteRow) {
+            if (!customerIdToUse) customerIdToUse = (quoteRow as any).customer_id ?? null;
+            if (!contactIdToUse) contactIdToUse = (quoteRow as any).contact_id ?? null;
+          }
+        }
+        if (customerIdToUse) {
+          const { data: custData } = await supabase
+            .from('DirectoryCustomers')
+            .select('customer_name, street_address_line_1, street_address_line_2, city, state, zip_code, country, customer_email, customer_phone, alt_phone')
+            .eq('id', customerIdToUse)
+            .eq('organization_id', proposal.organization_id)
+            .maybeSingle();
+          if (custData) {
+            const c = custData as any;
+            const addressParts = [
+              c.street_address_line_1,
+              c.street_address_line_2,
+              [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
+              c.country,
+            ].filter(Boolean);
+            payload.customer_snapshot_name = c.customer_name ?? null;
+            payload.customer_snapshot_address = addressParts.length > 0 ? addressParts.join(', ') : null;
+            payload.customer_snapshot_email = c.customer_email ?? null;
+            payload.customer_snapshot_phone = c.customer_phone ?? c.alt_phone ?? null;
+          }
+        }
+        if (contactIdToUse) {
+          const { data: contData } = await supabase
+            .from('DirectoryContacts')
+            .select('contact_name, contact_email')
+            .eq('id', contactIdToUse)
+            .eq('organization_id', proposal.organization_id)
+            .maybeSingle();
+          if (contData) {
+            const ct = contData as any;
+            payload.contact_snapshot_name = ct.contact_name ?? null;
+            payload.contact_snapshot_email = ct.contact_email ?? null;
+          }
+        }
+      }
       const { error: e } = await supabase.from('Proposals').update(payload).eq('id', proposal.id);
       if (e) {
         if (isRLSError(e)) {

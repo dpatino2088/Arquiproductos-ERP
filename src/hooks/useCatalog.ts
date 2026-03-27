@@ -9,6 +9,7 @@ interface UseCatalogItemsOptions {
   role?: string; // item_role filter
   categoryId?: string; // category_id filter
   isRoll?: boolean; // solo ítems con is_roll = true (rolls: telas, films, etc.)
+  includeInactive?: boolean; // include inactive rows for list management views
 }
 
 export function useCatalogItems(
@@ -34,7 +35,7 @@ export function useCatalogItems(
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { activeOrganizationId } = useOrganizationContext();
   
-  const { family, productTypeId: optProductTypeId, role, categoryId, isRoll } = options;
+  const { family, productTypeId: optProductTypeId, role, categoryId, isRoll, includeInactive = false } = options;
 
   const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
@@ -105,8 +106,11 @@ export function useCatalogItems(
         let query = supabase
           .from('CatalogItems')
           .select('*')
-          .eq('organization_id', activeOrganizationId)
-          .eq('is_active', true);
+          .eq('organization_id', activeOrganizationId);
+
+        if (!includeInactive) {
+          query = query.eq('is_active', true);
+        }
 
         // ✅ FIX: Aplicar filtros por role y categoryId directamente en CatalogItems
         if (role) {
@@ -167,8 +171,11 @@ export function useCatalogItems(
           let pageQuery = supabase
             .from('CatalogItems')
             .select('*')
-            .eq('organization_id', activeOrganizationId)
-            .eq('is_active', true);
+            .eq('organization_id', activeOrganizationId);
+
+          if (!includeInactive) {
+            pageQuery = pageQuery.eq('is_active', true);
+          }
           
           if (role) {
             pageQuery = pageQuery.eq('item_role', role);
@@ -367,7 +374,7 @@ export function useCatalogItems(
     return () => {
       isMounted = false; // Cleanup: prevent state updates after unmount
     };
-  }, [activeOrganizationId, refreshTrigger, family, optProductTypeId, role, categoryId, isRoll]);
+  }, [activeOrganizationId, refreshTrigger, family, optProductTypeId, role, categoryId, isRoll, includeInactive]);
 
   return { items, loading, loadingMore, error, refetch };
 }

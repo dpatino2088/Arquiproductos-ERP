@@ -8,7 +8,7 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
-import { Search, SortAsc, SortDesc, Plus } from 'lucide-react';
+import { Search, SortAsc, SortDesc, Plus, Eye } from 'lucide-react';
 import Input from '../../components/ui/Input';
 
 // ============================================================================
@@ -25,6 +25,7 @@ interface OrderListItem {
   priority: string;
   createdAt: string;
   manufacturingOrderNo?: string | null;
+  manufacturingOrderId?: string | null;
   moStatus?: string | null;
 }
 
@@ -165,7 +166,7 @@ export default function OrderList() {
       // IMPORTANT: This query must include ALL MOs, including newly created ones
       const { data: manufacturingOrders, error: moError } = await supabase
         .from('ManufacturingOrders')
-        .select('sales_order_id, production_status, status, manufacturing_order_no, created_at')
+        .select('id, sales_order_id, production_status, status, manufacturing_order_no, created_at')
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
         .order('created_at', { ascending: false }); // Most recent first for debugging
@@ -227,6 +228,7 @@ export default function OrderList() {
         priority: so.priority_code || 'normal',
         createdAt: so.created_at,
         manufacturingOrderNo: so.ManufacturingOrder?.manufacturing_order_no || null,
+        manufacturingOrderId: so.ManufacturingOrder?.id || null,
         moStatus: so.ManufacturingOrder?.production_status || so.ManufacturingOrder?.status || null,
       };
     });
@@ -303,10 +305,11 @@ export default function OrderList() {
 
       const moNumber = rpcResult?.mo_number ?? 'MO';
       const moId = rpcResult?.mo_id as string | undefined;
+      const existingMo = Boolean((rpcResult as { existing?: boolean } | null)?.existing);
 
       // Compatibility fallback: if backend RPC doesn't auto-generate BOM,
       // generate it explicitly right after MO creation.
-      if (moId) {
+      if (moId && !existingMo) {
         const { data: bomData, error: bomError } = await supabase.rpc('generate_bom_for_manufacturing_order', {
           p_manufacturing_order_id: moId,
         });
@@ -322,8 +325,8 @@ export default function OrderList() {
 
       useUIStore.getState().addNotification({
         type: 'success',
-        title: 'Released to Manufacturing',
-        message: `Created ${moNumber} with materials ready.`,
+        title: existingMo ? 'Already in Manufacturing' : 'Released to Manufacturing',
+        message: existingMo ? `${saleOrderNo} already has ${moNumber}.` : `Created ${moNumber} with materials ready.`,
       });
       refetch();
     } catch (err: any) {
@@ -496,8 +499,16 @@ export default function OrderList() {
                             Create MO
                           </button>
                         )}
-                        {order.status === 'has_mo' && (
-                          <span className="text-sm text-gray-500 italic">MO Created</span>
+                        {order.status === 'has_mo' && order.manufacturingOrderId && (
+                          <button
+                            onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${order.manufacturingOrderId}`)}
+                            className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors flex items-center gap-2"
+                            aria-label={`View ${order.manufacturingOrderNo ?? 'MO'}`}
+                            title={`View ${order.manufacturingOrderNo ?? 'Manufacturing Order'}`}
+                          >
+                            <Eye className="w-4 h-4" />
+                            View MO
+                          </button>
                         )}
                       </div>
                     </td>
