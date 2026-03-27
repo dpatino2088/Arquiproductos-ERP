@@ -1663,6 +1663,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   sku?: string | null;
                   drive_type?: string | null;
                   drive_system_label?: string | null;
+                  opening_direction?: string | null;
+                  openingDirection?: string | null;
                 } | null;
                 const dimsSource = {
                   measurements: snap?.measurements ?? (qlInfo?.config_snapshot as { measurements?: { panels?: unknown[]; height_mm?: number } } | undefined)?.measurements,
@@ -1684,6 +1686,22 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   ? (Number((line.quote_line_snapshot as { qty?: number } | null)?.qty) || qlInfo?.quantity || 1)
                   : (Number(line.qty) || 0);
                 const unitPriceForDisplay = qtyForLine > 0 ? lineTotal / qtyForLine : lineTotal;
+                const ptRawForOpening = (line.quote_line_snapshot as { product_type?: string } | null)?.product_type ?? qlInfo?.product_type ?? null;
+                const ptNameForOpening =
+                  (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ??
+                  (ptRawForOpening && productTypeNameByCodeOrId.byCode.get(ptRawForOpening.trim().toLowerCase())) ??
+                  ptRawForOpening;
+                const isDrapery = /drapery/i.test(ptNameForOpening ?? '');
+                const openingRaw =
+                  snap?.opening_direction ??
+                  snap?.openingDirection ??
+                  (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.opening_direction ??
+                  (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.openingDirection ??
+                  null;
+                const openingLabel =
+                  isDrapery && openingRaw
+                    ? ({ left: 'Left Stack', center: 'Center Opening', right: 'Right Stack' }[openingRaw] ?? openingRaw)
+                    : null;
                 return (
                   <>
                   <SortableRow
@@ -1747,6 +1765,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                   <span className="text-xs text-gray-500">{driveLabel}</span>
                                 ) : null;
                               })()}
+                              {openingLabel ? <span className="text-xs text-gray-500">{openingLabel}</span> : null}
                               {dimsMm && dimsMm !== '—' && <span className="text-xs text-gray-500 whitespace-pre-line">{dimsMm}</span>}
                               {isInstallIncluded ? (
                                 <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-50 text-status-green">
