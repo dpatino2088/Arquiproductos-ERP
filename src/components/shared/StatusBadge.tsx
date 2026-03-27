@@ -175,7 +175,7 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
   },
   manufacturing: {
     confirmed: 'Reviewed',
-    procurement: 'Planned',
+    procurement: 'Procurement',
     materials_ready: 'Material Ready',
     quality_check: 'Quality Check',
     partial: 'Partial In Production',

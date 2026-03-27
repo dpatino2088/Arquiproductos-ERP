@@ -1027,6 +1027,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
           dimensions: dimensions ?? null,
           panel_count,
+          opening_direction:
+            (snapFrozen as { opening_direction?: string } | null)?.opening_direction ??
+            (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.opening_direction ??
+            (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.openingDirection ??
+            null,
           install_included: isInstallIncluded,
           accessories: formatAccessoriesForPDF(
             (snapFrozen as { accessories?: unknown } | null)?.accessories ??

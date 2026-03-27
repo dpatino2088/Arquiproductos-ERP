@@ -110,6 +110,8 @@ export interface QuoteLineSnapshot {
   drive_type?: string | null;
   /** Drive system brand/type label (e.g. "Manual Vertilux", "Motorize Lutron") */
   drive_system_label?: string | null;
+  /** Drapery opening direction (left / right / center) */
+  opening_direction?: string | null;
   measurements?: Record<string, unknown> | null;
   accessories?: unknown;
   base_price_mode?: 'msrp' | 'unit_msrp';

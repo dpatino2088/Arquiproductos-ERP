@@ -28,6 +28,8 @@ export interface ProposalPDFLine {
   dimensions?: string | null;
   /** Panel count – customer variant: shows "1 paño" / "2 paños" / "3 paños" as reference */
   panel_count?: number | null;
+  /** Drapery opening direction – replaces panel label for drapery products */
+  opening_direction?: 'left' | 'right' | 'center' | string | null;
   /** True if installation addon present (shows "Install Included") */
   install_included?: boolean;
   /** Internal only: accessories string */
@@ -287,17 +289,22 @@ export function generateProposalPDF(
     const driveLabel = line.drive_system_label
       ? line.drive_system_label
       : (line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : '');
-    const panelLabel = line.panel_count != null && line.panel_count >= 1
-      ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
-      : '';
+    const isDrapery = /drapery/i.test(line.product_type ?? '');
+    const openingLabel = isDrapery && line.opening_direction
+      ? ({ left: 'Left Stack', right: 'Right Stack', center: 'Center Opening' }[line.opening_direction] ?? line.opening_direction)
+      : null;
+    const panelLabel = openingLabel
+      ? openingLabel
+      : (line.panel_count != null && line.panel_count >= 1
+          ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
+          : '');
     const drivePart = driveLabel ? `\n${driveLabel}` : '';
-    // Keep Install Included before dimensions so it remains visible on dense internal rows.
     const installPart = line.install_included ? '\nInstall Included' : '';
     let dimsPart = '';
     if (includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—') {
       dimsPart = `\n${line.dimensions}`;
+      if (openingLabel) dimsPart = `\n${openingLabel}${dimsPart}`;
     } else if (!includeMeasurements && panelLabel) {
-      // Sin medidas: mostrar cantidad de paños en Description (en vez de medidas)
       dimsPart = `\n${panelLabel}`;
     }
     return `${name}${skuPart}${drivePart}${installPart}${dimsPart}`.trim();

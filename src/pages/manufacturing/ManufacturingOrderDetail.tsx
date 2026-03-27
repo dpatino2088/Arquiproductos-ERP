@@ -477,10 +477,16 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     }
     if (status === 'procurement') {
       actionItems.push({
-        label: 'Check Material Readiness',
+        label: 'Materials Ready',
         onClick: () => handleTransition('materials_ready'),
         disabled: materialsIncomplete,
         title: materialsIncomplete ? 'Materials still incomplete. Receive pending Purchase Orders first.' : undefined,
+      });
+      actionItems.push({
+        label: 'Start Production',
+        onClick: () => handleTransition('in_production'),
+        disabled: materialsIncomplete,
+        title: materialsIncomplete ? 'Materials incomplete. Cannot start production.' : undefined,
       });
     }
     if (status === 'materials_ready' || status === 'planned') {
