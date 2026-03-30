@@ -197,7 +197,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
   const [generating, setGenerating] = useState(false);
   const [operators, setOperators] = useState<OperatorOption[]>([]);
   const materialsIncomplete = materialReadiness?.hasShortage === true;
-  const canGenerateByStatus = ['confirmed', 'planned', 'procurement', 'materials_ready', 'in_production'].includes(moStatus ?? '');
+  const canGenerateByStatus = ['materials_ready', 'planned', 'in_production'].includes(moStatus ?? '');
   const sortedTasks = [...tasks].sort((a, b) => {
     const rank = (code?: string | null) => {
       const c = (code ?? '').toUpperCase();
@@ -244,7 +244,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
       addNotification({
         type: 'warning',
         title: 'Status Required',
-        message: 'Work Orders can only be generated when MO status is Reviewed or later.',
+        message: 'Work Orders can only be generated when MO is Material Ready, Planned, or In Production.',
       });
       return;
     }
@@ -311,7 +311,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-50 border border-red-100 w-fit">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />
           <span className="text-xs text-red-700">
-            Work Orders can only be generated when MO status is Reviewed or later.
+            Work Orders can only be generated when MO is Material Ready, Planned, or In Production.
           </span>
         </div>
       )}

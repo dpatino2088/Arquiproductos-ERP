@@ -19,7 +19,7 @@ import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -1100,14 +1100,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         }
       );
 
-      const proposalNoRaw = proposal.proposal_no || proposal.id.slice(0, 8);
-      const proposalNo = String(proposalNoRaw).replace(/[.\-]/g, '_');
-      const dateYmd = proposal.created_at ? new Date(proposal.created_at).toISOString().slice(0, 10).replace(/-/g, '') : new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const proposalNo = proposal.proposal_no || proposal.id.slice(0, 8);
       const customerPart = (customer?.customer_name ?? 'Customer')
-        .replace(/\s+/g, '_')
         .replace(/[\\/:*?"<>|]/g, '')
+        .trim()
         .slice(0, 80) || 'Customer';
-      const fileName = `${proposalNo}_${dateYmd}_${customerPart}.PDF`;
+      const fileName = `${proposalNo}_${customerPart}.PDF`;
       return { doc, fileName };
     },
     [proposal, proposalId, displayLines, quoteLinesMap, configuredProductsMap, customer, contact, totals, formatAccessoriesForPDF, dealerLogoUrl, headerForm]
@@ -1126,6 +1124,38 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             type: 'success',
             title: 'Preview',
             message: `PDF abierto en nueva pestaña (${result.fileName}). Descárgalo desde el botón de descarga del navegador cuando quieras.`,
+          });
+        }
+      } catch (err: any) {
+        console.error('Error generating PDF:', err);
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error',
+          message: err?.message || 'Failed to generate PDF',
+        });
+      }
+    },
+    [buildProposalPDFDoc]
+  );
+
+  const handleDownloadPDF = useCallback(
+    async (variant: 'internal' | 'customer') => {
+      try {
+        const result = await buildProposalPDFDoc(variant);
+        if (result) {
+          const blob = result.doc.output('blob');
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = result.fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Download',
+            message: `PDF descargado: ${result.fileName}`,
           });
         }
       } catch (err: any) {
@@ -1221,6 +1251,31 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               }}
             >
               <Eye className="w-4 h-4 shrink-0 text-gray-500" />
+              Without Measurements
+            </button>
+            <div className="px-3 py-1.5 text-xs font-medium text-gray-500 border-t border-b border-gray-100 mt-1">Download PDF</div>
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => {
+                handleDownloadPDF('internal');
+                setPrintDropdownOpen(false);
+              }}
+            >
+              <Download className="w-4 h-4 shrink-0 text-gray-500" />
+              Full Detail
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => {
+                handleDownloadPDF('customer');
+                setPrintDropdownOpen(false);
+              }}
+            >
+              <Download className="w-4 h-4 shrink-0 text-gray-500" />
               Without Measurements
             </button>
           </div>

@@ -80,7 +80,7 @@ export default function MaterialsTab({
     if (!canViewCosts && showCosts) setShowCosts(false);
   }, [canViewCosts, showCosts]);
 
-  const [viewMode, setViewMode] = useState<ViewMode>('category');
+  const [viewMode, setViewMode] = useState<ViewMode>('sku');
   const [shouldShowError, setShouldShowError] = useState(false);
 
   const { activeOrganizationId } = useOrganizationContext();

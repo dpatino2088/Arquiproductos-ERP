@@ -39,6 +39,11 @@ interface ProductConfig {
   has_bottom_bar: boolean;
   has_track: boolean;
   tube_type: string | null;
+  tube_cut_mm: number | null;
+  tube_cuts_per_panel: number[];
+  fabric_cut_mm: number | null;
+  bottom_bar_cut_mm: number | null;
+  bottom_bar_cuts_per_panel: number[];
   hardware_color: string | null;
   fabric_name: string | null;
   fabric_names: (string | null)[];
@@ -82,6 +87,20 @@ function buildConfigFromSol(
     || productLines.some(l => l.component_role === 'side_channel');
   const hasBottomBar = productLines.some(l => l.component_role === 'bottom_bar' || l.component_role === 'bottom_channel');
   const hasTrack = productLines.some(l => l.component_role === 'track' || l.component_role === 'top_rail');
+  const pickCutLength = (roles: string[]) => {
+    const direct = productLines.find(
+      (l) => roles.includes(l.component_role ?? '') && l.cut_length_mm != null && Number(l.qty) <= 1,
+    );
+    if (direct?.cut_length_mm != null) return Number(direct.cut_length_mm);
+    const fallback = productLines.find((l) => roles.includes(l.component_role ?? '') && l.cut_length_mm != null);
+    return fallback?.cut_length_mm != null ? Number(fallback.cut_length_mm) : null;
+  };
+
+  const pickAllCutLengths = (roles: string[]): number[] => {
+    return productLines
+      .filter((l) => roles.includes(l.component_role ?? '') && l.cut_length_mm != null)
+      .map((l) => Number(l.cut_length_mm));
+  };
 
   const fabricLine = productLines.find(l => l.component_role === 'fabric');
   const fabricName = fabricLine?.item_name ?? (sol.collection_name && sol.variant_name ? `${sol.collection_name} ${sol.variant_name}` : null);
@@ -99,6 +118,11 @@ function buildConfigFromSol(
   const driveSide = cpConfig?.driveSide ?? cpConfig?.drive_side ?? (openDir !== 'center' ? openDir : null);
   const hwColor = sol.hardware_color ?? cpConfig?.hardware_color ?? cpConfig?.hardwareColor ?? null;
   const fullness = cpConfig?.fullness_factor ?? 2;
+  const tubeCutMm = pickCutLength(['tube']);
+  const tubeCutsPerPanel = pickAllCutLengths(['tube']);
+  const fabricCutMm = pickCutLength(['fabric', 'fabric_panel', 'tape']);
+  const bottomBarCutMm = pickCutLength(['bottom_bar', 'bottom_channel']);
+  const bottomBarCutsPerPanel = pickAllCutLengths(['bottom_bar', 'bottom_channel']);
 
   let productType = sol.product_type ?? cpConfig?.productType ?? cpConfig?.product_type ?? null;
   if (!productType) {
@@ -121,6 +145,11 @@ function buildConfigFromSol(
     has_bottom_bar: hasBottomBar,
     has_track: hasTrack,
     tube_type: tubeType,
+    tube_cut_mm: tubeCutMm,
+    tube_cuts_per_panel: tubeCutsPerPanel,
+    fabric_cut_mm: fabricCutMm,
+    bottom_bar_cut_mm: bottomBarCutMm,
+    bottom_bar_cuts_per_panel: bottomBarCutsPerPanel,
     hardware_color: hwColor,
     fabric_name: fabricName,
     fabric_names: fabricNames,
@@ -152,6 +181,11 @@ function ProductDiagram({ config }: { config: ProductConfig | null }) {
           hasSideChannel={config.has_side_channel}
           hasBottomBar={config.has_bottom_bar}
           tubeType={config.tube_type}
+          tubeCutMm={config.tube_cut_mm}
+          tubeCutsPerPanel={config.tube_cuts_per_panel}
+          fabricCutMm={config.fabric_cut_mm}
+          bottomBarCutMm={config.bottom_bar_cut_mm}
+          bottomBarCutsPerPanel={config.bottom_bar_cuts_per_panel}
           hardwareColor={config.hardware_color}
           fabricName={config.fabric_name}
         />

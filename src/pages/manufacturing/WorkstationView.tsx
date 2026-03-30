@@ -81,6 +81,10 @@ interface WorkstationViewProps {
   workCenterId?: string;
 }
 
+function parseIsoDate(value: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+}
+
 export default function WorkstationView({ workCenterId }: WorkstationViewProps) {
   const { centers, loading: centersLoading } = useWorkCenters();
   const { activeOrganizationId } = useOrganizationContext();
@@ -456,7 +460,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const startTask = async (taskId: string) => {
     const now = new Date().toISOString();
     const task = tasks.find((t) => t.id === taskId);
-    const plannedStart = task?.planned_start_at ? new Date(task.planned_start_at) : null;
+    const plannedStart = task?.planned_start_at ? parseIsoDate(task.planned_start_at) : null;
     if (!plannedStart) {
       addNotification({
         type: 'warning',
@@ -522,7 +526,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           if (t.id === taskId) return false;
           if (t.status !== 'pending') return false;
           if (!t.assigned_to_user_id) return false;
-          if (!t.planned_start_at || new Date(t.planned_start_at).getTime() > Date.now()) return false;
+          if (!t.planned_start_at || parseIsoDate(t.planned_start_at).getTime() > Date.now()) return false;
           const deps = t.depends_on_task_ids ?? [];
           if (deps.length === 0) return false;
           return deps.every((depId: string) => completedIds.has(depId));
@@ -655,7 +659,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                     {(() => {
                       const upstreamOk = !isAssemblyStation || !task.siblingStatuses?.length ||
                         task.siblingStatuses.every(s => s.status === 'completed');
-                      const plannedStartDue = !!task.planned_start_at && new Date(task.planned_start_at).getTime() <= Date.now();
+                      const plannedStartDue = !!task.planned_start_at && parseIsoDate(task.planned_start_at).getTime() <= Date.now();
                       return (
                         <>
                           {task.status === 'pending' && upstreamOk && plannedStartDue && (

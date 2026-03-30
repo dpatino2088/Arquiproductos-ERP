@@ -30,8 +30,8 @@ export async function advanceMOOnTaskStart(
 
     // Progressive advance: step through intermediate states to reach in_production
     const stepsToProduction: string[] = [];
-    if (current === 'draft') stepsToProduction.push('confirmed', 'in_production');
-    else if (current === 'confirmed') stepsToProduction.push('in_production');
+    if (current === 'draft') stepsToProduction.push('confirmed', 'materials_ready', 'in_production');
+    else if (current === 'confirmed') stepsToProduction.push('materials_ready', 'in_production');
     else if (current === 'procurement') stepsToProduction.push('materials_ready', 'in_production');
     else if (current === 'materials_ready') stepsToProduction.push('in_production');
     else if (current === 'planned') stepsToProduction.push('in_production');

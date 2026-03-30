@@ -37,6 +37,7 @@ export interface EngineeringRow {
   engineering_scope: string | null;
   engineering_source_role: string | null;
   uom: string;
+  qty_type: string;
   qty_value: number;
   measure_basis: string | null;
   delta_x_mm: number | null;
@@ -191,6 +192,7 @@ export default function BOMEngineeringTab() {
           affects_role: c.affects_role ?? null,
           delta_mode: (c as any).delta_mode ?? 'subtract',
           uom: c.uom ?? 'ea',
+          qty_type: c.qty_type ?? 'fixed',
           qty_value: c.qty_value ?? 1,
           measure_basis: item?.measure_basis ?? null,
           delta_x_mm: item?.delta_x_mm != null ? Number(item.delta_x_mm) : null,

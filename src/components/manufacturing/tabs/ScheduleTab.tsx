@@ -43,6 +43,9 @@ interface SplitPrompt {
 
 function toInputDate(value?: string | null): string {
   if (!value) return '';
+  // Date-only values must be treated as local calendar dates
+  // to avoid timezone shifts (e.g. 2026-03-27 showing as 26/03).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -50,7 +53,13 @@ function toInputDate(value?: string | null): string {
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
+  // Keep pure date strings stable in local UI (no UTC reinterpretation).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  }
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
@@ -735,13 +744,14 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
   }
 
   const hasUnsavedChanges = manualOverrides.size > 0;
-  const schedulableStatuses = ['planned', 'in_production'];
-  const preScheduleStatuses = ['draft', 'confirmed', 'procurement', 'materials_ready'];
-  const scheduleEditable = canEdit && schedulableStatuses.includes(mo.status);
+  const schedulableStatuses = ['materials_ready', 'planned', 'in_production'];
+  const preScheduleStatuses = ['draft', 'confirmed', 'procurement'];
+  const hasWorkOrders = tasks.length > 0;
+  const scheduleEditable = canEdit && (schedulableStatuses.includes(mo.status) || hasWorkOrders);
   const scheduleStatusBlocker = (() => {
-    if (schedulableStatuses.includes(mo.status)) return null;
+    if (schedulableStatuses.includes(mo.status) || hasWorkOrders) return null;
     if (preScheduleStatuses.includes(mo.status))
-      return 'Schedule will be available after MO reaches Planned status. Generate Work Orders first.';
+      return 'Schedule will be available after MO reaches Material Ready status. Generate Work Orders first.';
     return 'Schedule is locked — MO has progressed past production.';
   })();
 

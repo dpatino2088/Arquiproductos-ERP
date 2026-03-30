@@ -9,7 +9,6 @@ import { useAuth } from '../../hooks/useAuth';
 import { router } from '../../lib/router';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
-import Input from '../../components/ui/Input';
 import {
   Search, Eye, Loader2, SortAsc, SortDesc,
   Calendar, Clock, ChevronRight, Play,
@@ -56,6 +55,7 @@ function deriveGlobalStatus(stations: { status: string }[]): 'pending' | 'in_pro
 
 function toDayKey(iso: string | null): string {
   if (!iso) return 'unscheduled';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const d = new Date(iso);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -432,15 +432,20 @@ export default function WorkOrdersList() {
         <StatusTabs tabs={myStatusTabs} activeTab={myTasksTab} onChange={setMyTasksTab} />
 
         <div className="mb-4 mt-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Search by MO #, product, or station..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+          <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex-1 relative min-w-[240px]">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search by MO #, product, or station..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                  aria-label="Search my tasks"
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -557,15 +562,20 @@ export default function WorkOrdersList() {
       <StatusTabs tabs={statusTabs} activeTab={statusTab} onChange={setStatusTab} />
 
       <div className="mb-4 mt-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            type="text"
-            placeholder="Search by MO #, customer, or product..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
+        <div className="bg-white border border-gray-200 py-6 px-6 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 relative min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by MO #, customer, or product..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                aria-label="Search work orders"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

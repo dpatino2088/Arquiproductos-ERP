@@ -67,7 +67,11 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
   const depsBlocked = depIds.length > 0 && siblingTasks
     ? !depIds.every(depId => siblingTasks.find(s => s.id === depId)?.status === 'completed')
     : false;
-  const plannedStartDue = task.planned_start_at ? new Date(task.planned_start_at).getTime() <= Date.now() : false;
+  const plannedStartDue = task.planned_start_at
+    ? (/^\d{4}-\d{2}-\d{2}$/.test(task.planned_start_at)
+      ? new Date(`${task.planned_start_at}T00:00:00`).getTime()
+      : new Date(task.planned_start_at).getTime()) <= Date.now()
+    : false;
   const canStart = !depsBlocked && (isAssembly ? allUpstreamReady : true) && plannedStartDue;
 
   return (

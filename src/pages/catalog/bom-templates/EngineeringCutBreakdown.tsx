@@ -247,7 +247,9 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
 
           let subtractTotal = 0;
           let addTotal = 0;
-          const groupData: Array<{ comp: EngineeringRow; children: EngineeringRow[]; mode: DeltaMode; groupDelta: number }> = [];
+          let endpointSubtotal = 0;
+          let jointSubtotal = 0;
+          const groupData: Array<{ comp: EngineeringRow; children: EngineeringRow[]; mode: DeltaMode; groupDelta: number; isJoint: boolean }> = [];
 
           for (const comp of affecting) {
             const mode = (getEffective(comp, 'delta_mode') ?? 'subtract') as DeltaMode;
@@ -259,9 +261,14 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
               const cr = getRawDelta(ch, isYAxis ? 'height' : null);
               if (cr != null) groupDelta += cr * (ch.qty_value ?? 1);
             }
-            if (mode === 'subtract') subtractTotal += groupDelta;
+            const isJoint = comp.qty_type === 'per_joint';
+            if (mode === 'subtract') {
+              subtractTotal += groupDelta;
+              if (isJoint) jointSubtotal += groupDelta;
+              else endpointSubtotal += groupDelta;
+            }
             else if (mode === 'add') addTotal += groupDelta;
-            groupData.push({ comp, children, mode, groupDelta });
+            groupData.push({ comp, children, mode, groupDelta, isJoint });
           }
 
           for (const ch of ownChildren) {
@@ -269,10 +276,14 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
             if (cr == null) continue;
             const chDelta = cr * (ch.qty_value ?? 1);
             const chMode = (getEffective(ch, 'delta_mode') ?? 'subtract') as DeltaMode;
-            if (chMode === 'subtract') subtractTotal += chDelta;
+            if (chMode === 'subtract') {
+              subtractTotal += chDelta;
+              endpointSubtotal += chDelta;
+            }
             else if (chMode === 'add') addTotal += chDelta;
           }
 
+          const hasJointDeductions = jointSubtotal > 0;
           const baseLabel = depRole ? `${getRoleLabel(depRole)}.cut` : `Curtain ${isYAxis ? 'Height' : 'Width'}`;
           const cutResult = tolerance - subtractTotal;
           const assemblyTotal = cutResult + addTotal;
@@ -412,7 +423,15 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                           );
                         })}
 
-                        {groupData.map(({ comp, children, mode, groupDelta }) => {
+                        {/* Endpoint deductions */}
+                        {hasJointDeductions && groupData.some(g => !g.isJoint) && (
+                          <tr>
+                            <td colSpan={7} className="px-4 pt-2 pb-1">
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Endpoint (lateral)</span>
+                            </td>
+                          </tr>
+                        )}
+                        {groupData.filter(g => !g.isJoint).map(({ comp, children, mode, groupDelta }) => {
                           const qty = comp.qty_value ?? 1;
                           const raw = getRawDelta(comp, isYAxis ? 'height' : null);
                           const eff = raw != null ? raw * qty : null;
@@ -495,6 +514,99 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                             </React.Fragment>
                           );
                         })}
+                        {/* Joint deductions */}
+                        {hasJointDeductions && groupData.some(g => g.isJoint) && (
+                          <>
+                            <tr>
+                              <td colSpan={7} className="px-4 pt-3 pb-1 border-t border-dashed border-amber-200">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600">Joint (between panels)</span>
+                              </td>
+                            </tr>
+                            {groupData.filter(g => g.isJoint).map(({ comp, children, mode, groupDelta }) => {
+                              const qty = comp.qty_value ?? 1;
+                              const raw = getRawDelta(comp, isYAxis ? 'height' : null);
+                              const isModified = comp.id in localChanges;
+                              const modeColor = mode === 'subtract' ? 'bg-amber-50 text-amber-700' : mode === 'add' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500';
+                              const modeLabel = mode === 'subtract' ? '− Sub' : mode === 'add' ? '+ Add' : 'Info';
+                              const totalColor = mode === 'subtract' ? 'text-amber-600' : mode === 'add' ? 'text-green-600' : 'text-gray-400';
+                              const totalPrefix = mode === 'subtract' ? '−' : mode === 'add' ? '+' : '';
+                              return (
+                                <React.Fragment key={comp.id}>
+                                  <tr className={`border-b border-gray-50 group hover:bg-amber-50/30 ${isModified ? 'bg-amber-50/40' : ''}`}>
+                                    <td className="py-1.5 px-4">
+                                      <span className="font-mono text-gray-700">{comp.component_sku}</span>
+                                      <span className="text-gray-400 ml-1">{comp.component_name}</span>
+                                      <span className="ml-1.5 text-[8px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">JOINT</span>
+                                    </td>
+                                    <td className="py-1.5 text-gray-500">{getRoleLabel(comp.component_role ?? '')}</td>
+                                    <td className="py-1.5 text-center font-mono text-gray-500">{qty}</td>
+                                    <td className="py-1.5 text-center">
+                                      <span className="font-mono text-gray-600">{raw != null ? `${raw}` : '—'}</span>
+                                    </td>
+                                    <td className="py-1.5 text-center">
+                                      <select
+                                        value={mode}
+                                        onChange={e => setChange(comp.id, 'delta_mode', e.target.value as DeltaMode)}
+                                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded border-0 cursor-pointer focus:outline-none ${modeColor}`}
+                                      >
+                                        <option value="subtract">− Subtract</option>
+                                        <option value="add">+ Add</option>
+                                        <option value="info">Info</option>
+                                      </select>
+                                    </td>
+                                    <td className="py-1.5 text-center">
+                                      <span className={`font-mono font-medium ${totalColor}`}>
+                                        {groupDelta !== 0 ? `${totalPrefix}${Math.abs(groupDelta)}` : '—'}
+                                      </span>
+                                    </td>
+                                    <td className="py-1.5 text-right pr-3">
+                                      <div className="inline-flex items-center gap-0.5">
+                                        <button type="button" onClick={() => navigateToItem(comp.component_item_id)} className="p-0.5 rounded text-gray-300 hover:text-primary" title="View in catalog">
+                                          <ExternalLink className="h-3 w-3" />
+                                        </button>
+                                        <button type="button" onClick={() => handleRemoveAffecting(comp.id)} className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity" title="Remove">
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {children.map(child => {
+                                    const cqty = child.qty_value ?? 1;
+                                    const craw = getRawDelta(child, isYAxis ? 'height' : null);
+                                    const ceff = craw != null ? craw * cqty : null;
+                                    return (
+                                      <tr key={child.id} className="border-b border-gray-50 group hover:bg-amber-50/20">
+                                        <td className="py-1 px-4 pl-10">
+                                          <span className="text-gray-300 mr-1">↳</span>
+                                          <span className="font-mono text-gray-500">{child.component_sku}</span>
+                                          <span className="text-gray-400 ml-1">{child.component_name}</span>
+                                        </td>
+                                        <td className="py-1 text-gray-400">{getRoleLabel(child.component_role ?? '')}</td>
+                                        <td className="py-1 text-center font-mono text-gray-400">{cqty}</td>
+                                        <td className="py-1 text-center">
+                                          <span className="font-mono text-gray-500">{craw != null ? `${craw}` : '—'}</span>
+                                        </td>
+                                        <td className="py-1 text-center">
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${modeColor}`}>{modeLabel}</span>
+                                        </td>
+                                        <td className="py-1 text-center">
+                                          <span className={`font-mono font-medium ${mode === 'subtract' ? 'text-amber-500' : mode === 'add' ? 'text-green-500' : 'text-gray-300'}`}>
+                                            {ceff != null ? `${totalPrefix}${Math.abs(ceff)}` : '—'}
+                                          </span>
+                                        </td>
+                                        <td className="py-1 text-right pr-3">
+                                          <button type="button" onClick={() => navigateToItem(child.component_item_id)} className="p-0.5 rounded text-gray-300 hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity" title="View in catalog">
+                                            <ExternalLink className="h-3 w-3" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
+                          </>
+                        )}
                       </tbody>
                     </table>
                   )}
@@ -508,12 +620,20 @@ const EngineeringCutBreakdown = forwardRef<CutBreakdownHandle, CutBreakdownProps
                       {tolerance !== 0 && (
                         <span className="text-orange-500"> {tolerance > 0 ? '+' : '−'} {Math.abs(tolerance)}</span>
                       )}
-                      {subtractTotal !== 0 && (
-                        <span className="text-red-500"> − {Math.abs(subtractTotal)}</span>
+                      {endpointSubtotal !== 0 && (
+                        <span className="text-red-500"> − {Math.abs(endpointSubtotal)}</span>
+                      )}
+                      {jointSubtotal !== 0 && (
+                        <span className="text-amber-600"> − {Math.abs(jointSubtotal)}<span className="text-[9px] ml-0.5">(joint)</span></span>
                       )}
                       <span className="text-gray-400"> = </span>
                       <span className="text-gray-800 font-semibold">{baseLabel} {cutResult >= 0 ? '+' : ''}{cutResult} mm</span>
                     </div>
+                    {hasJointDeductions && (
+                      <div className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1 mt-1 font-sans">
+                        Endpoint: −{endpointSubtotal} mm (per side: {(endpointSubtotal / 2).toFixed(1)}) · Joint: −{jointSubtotal} mm (per side: {(jointSubtotal / 2).toFixed(1)})
+                      </div>
+                    )}
                     {addTotal !== 0 && (
                       <div className="text-gray-400">
                         <span className="text-gray-600">Assembly</span>

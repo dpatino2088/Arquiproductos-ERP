@@ -195,26 +195,13 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- Dimension outputs for per-panel recut (tube/bottom_bar)
+        -- Always compute live dimensions for accurate tube/bar cuts
         IF v_sol.configured_product_id IS NOT NULL THEN
             BEGIN
-                SELECT COALESCE(cp.dimension_outputs, '{}'::jsonb)
-                INTO v_dim_outputs
-                FROM public."ConfiguredProducts" cp
-                WHERE cp.id = v_sol.configured_product_id
-                  AND cp.deleted = false
-                LIMIT 1;
+                v_dim_outputs := COALESCE(public.compute_system_dimensions(v_sol.configured_product_id), '{}'::jsonb);
             EXCEPTION WHEN OTHERS THEN
                 v_dim_outputs := '{}'::jsonb;
             END;
-
-            IF v_dim_outputs = '{}'::jsonb THEN
-                BEGIN
-                    v_dim_outputs := COALESCE(public.compute_system_dimensions(v_sol.configured_product_id), '{}'::jsonb);
-                EXCEPTION WHEN OTHERS THEN
-                    v_dim_outputs := '{}'::jsonb;
-                END;
-            END IF;
         END IF;
 
         v_items       := v_snapshot->'items';
@@ -359,20 +346,110 @@ BEGIN
             v_panel_cuts_key := v_role || '_panel_cuts';
             v_panel_cuts := v_dim_outputs->v_panel_cuts_key;
 
-            IF v_panel_cuts IS NULL
-               OR jsonb_typeof(v_panel_cuts) <> 'array'
-               OR jsonb_array_length(v_panel_cuts) <= 1 THEN
-                CONTINUE;
+            IF v_panel_cuts IS NOT NULL
+               AND jsonb_typeof(v_panel_cuts) = 'array'
+               AND jsonb_array_length(v_panel_cuts) > 1 THEN
+                -- MULTI-PANEL: split into per-panel lines
+                FOR v_src_line IN
+                    SELECT *
+                    FROM public."BOMInstanceLines"
+                    WHERE bom_instance_id = v_bi_id
+                      AND part_role = v_role
+                      AND deleted = false
+                LOOP
+                    IF COALESCE(v_src_line.uom, '') <> 'm' THEN
+                        CONTINUE;
+                    END IF;
+
+                    v_unit_cost_per_m := CASE
+                        WHEN COALESCE(v_src_line.qty, 0) > 0 THEN COALESCE(v_src_line.total_cost_exw, 0) / v_src_line.qty
+                        ELSE COALESCE(v_src_line.unit_cost_exw, 0)
+                    END;
+                    v_unit_msrp_per_m := CASE
+                        WHEN COALESCE(v_src_line.qty, 0) > 0 THEN COALESCE(v_src_line.total_msrp, 0) / v_src_line.qty
+                        ELSE COALESCE(v_src_line.unit_msrp, 0)
+                    END;
+
+                    UPDATE public."BOMInstanceLines"
+                    SET deleted = true, updated_at = now()
+                    WHERE id = v_src_line.id;
+
+                    FOR v_pc IN SELECT value FROM jsonb_array_elements(v_panel_cuts) AS value LOOP
+                        v_panel_idx := (v_pc->>'index')::integer;
+                        v_panel_cut_mm := COALESCE((v_pc->>(v_role || '_width_mm'))::numeric, 0);
+                        IF v_panel_cut_mm <= 0 THEN CONTINUE; END IF;
+
+                        v_qty := ROUND(v_panel_cut_mm / 1000.0, 4);
+                        v_tcx := ROUND(v_unit_cost_per_m * v_qty, 4);
+                        v_tm  := ROUND(v_unit_msrp_per_m * v_qty, 4);
+
+                        INSERT INTO public."BOMInstanceLines" (
+                            organization_id, bom_instance_id, resolved_part_id,
+                            part_role, qty, uom,
+                            unit_cost_exw, total_cost_exw, unit_msrp, total_msrp,
+                            cut_length_mm, cut_height_mm, panel_index,
+                            deleted, created_at, updated_at
+                        ) VALUES (
+                            v_src_line.organization_id, v_src_line.bom_instance_id, v_src_line.resolved_part_id,
+                            v_src_line.part_role, v_qty, v_src_line.uom,
+                            ROUND(v_unit_cost_per_m, 4), v_tcx, ROUND(v_unit_msrp_per_m, 4), v_tm,
+                            ROUND(v_panel_cut_mm, 1), NULL, v_panel_idx,
+                            false, now(), now()
+                        );
+                        v_tbl := v_tbl + 1;
+                    END LOOP;
+                END LOOP;
+            ELSE
+                -- SINGLE-PANEL: apply deductions from compute_system_dimensions
+                v_panel_cut_mm := COALESCE((v_dim_outputs->>(v_role || '_width_mm'))::numeric, 0);
+                IF v_panel_cut_mm > 0 THEN
+                    FOR v_src_line IN
+                        SELECT *
+                        FROM public."BOMInstanceLines"
+                        WHERE bom_instance_id = v_bi_id
+                          AND part_role = v_role
+                          AND deleted = false
+                          AND uom = 'm'
+                    LOOP
+                        v_qty := ROUND(v_panel_cut_mm / 1000.0, 4);
+                        v_unit_cost_per_m := CASE
+                            WHEN COALESCE(v_src_line.qty, 0) > 0 THEN COALESCE(v_src_line.total_cost_exw, 0) / v_src_line.qty
+                            ELSE COALESCE(v_src_line.unit_cost_exw, 0)
+                        END;
+                        v_unit_msrp_per_m := CASE
+                            WHEN COALESCE(v_src_line.qty, 0) > 0 THEN COALESCE(v_src_line.total_msrp, 0) / v_src_line.qty
+                            ELSE COALESCE(v_src_line.unit_msrp, 0)
+                        END;
+                        v_tcx := ROUND(v_unit_cost_per_m * v_qty, 4);
+                        v_tm  := ROUND(v_unit_msrp_per_m * v_qty, 4);
+
+                        UPDATE public."BOMInstanceLines"
+                        SET cut_length_mm = ROUND(v_panel_cut_mm, 1),
+                            qty = v_qty,
+                            total_cost_exw = v_tcx,
+                            total_msrp = v_tm,
+                            updated_at = now()
+                        WHERE id = v_src_line.id;
+                    END LOOP;
+                END IF;
             END IF;
+        END LOOP;
+
+        -- 4h. Split fabric per panel for multi-panel products
+        --     Fabric width per panel = tube_width_mm from tube_panel_cuts
+        --     Fabric height stays the same for all panels
+        v_panel_cuts := v_dim_outputs->'tube_panel_cuts';
+        IF v_panel_cuts IS NOT NULL
+           AND jsonb_typeof(v_panel_cuts) = 'array'
+           AND jsonb_array_length(v_panel_cuts) > 1 THEN
 
             FOR v_src_line IN
                 SELECT *
                 FROM public."BOMInstanceLines"
                 WHERE bom_instance_id = v_bi_id
-                  AND part_role = v_role
+                  AND part_role = 'fabric'
                   AND deleted = false
             LOOP
-                -- Only split linear-meter profile lines
                 IF COALESCE(v_src_line.uom, '') <> 'm' THEN
                     CONTINUE;
                 END IF;
@@ -392,7 +469,7 @@ BEGIN
 
                 FOR v_pc IN SELECT value FROM jsonb_array_elements(v_panel_cuts) AS value LOOP
                     v_panel_idx := (v_pc->>'index')::integer;
-                    v_panel_cut_mm := COALESCE((v_pc->>(v_role || '_width_mm'))::numeric, 0);
+                    v_panel_cut_mm := COALESCE((v_pc->>'tube_width_mm')::numeric, 0);
                     IF v_panel_cut_mm <= 0 THEN CONTINUE; END IF;
 
                     v_qty := ROUND(v_panel_cut_mm / 1000.0, 4);
@@ -409,13 +486,14 @@ BEGIN
                         v_src_line.organization_id, v_src_line.bom_instance_id, v_src_line.resolved_part_id,
                         v_src_line.part_role, v_qty, v_src_line.uom,
                         ROUND(v_unit_cost_per_m, 4), v_tcx, ROUND(v_unit_msrp_per_m, 4), v_tm,
-                        ROUND(v_panel_cut_mm, 1), NULL, v_panel_idx,
+                        ROUND(v_panel_cut_mm, 1), v_src_line.cut_height_mm, v_panel_idx,
                         false, now(), now()
                     );
                     v_tbl := v_tbl + 1;
                 END LOOP;
             END LOOP;
-        END LOOP;
+        END IF;
+
     END LOOP;
 
     -- 5) Counts after
@@ -449,9 +527,9 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.generate_bom_for_manufacturing_order(uuid) IS
-'Snapshot-based BOM generation with per-panel profile split for tube/bottom_bar. '
-'Uses compute_system_dimensions() panel cuts so endpoint/joint deductions are applied '
-'per panel, including interconnection logic (N-1).';
+'Snapshot-based BOM generation. Always computes live dimensions via compute_system_dimensions(). '
+'For multi-panel products: splits tube/bottom_bar into per-panel lines with endpoint/joint deductions (N-1). '
+'For single-panel products: applies endpoint deductions to existing profile lines (cut_length_mm, qty, costs).';
 
 NOTIFY pgrst, 'reload schema';
 

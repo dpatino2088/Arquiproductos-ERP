@@ -449,6 +449,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
+  const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'] as const;
+  const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
   const hasDeliveryOverride = financialSummary?.has_delivery_override === true;
   const deliveryBlocked = !!financialSummary && financialSummary.balance_due > 0 && !hasDeliveryOverride;
@@ -471,8 +473,10 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`),
       });
       actionItems.push({
-        label: 'Set Planned',
-        onClick: () => handleTransition('planned'),
+        label: 'Materials Ready',
+        onClick: () => handleTransition('materials_ready'),
+        disabled: materialsIncomplete,
+        title: materialsIncomplete ? 'Materials still incomplete. Receive pending Purchase Orders first.' : undefined,
       });
     }
     if (status === 'procurement') {
@@ -482,6 +486,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         disabled: materialsIncomplete,
         title: materialsIncomplete ? 'Materials still incomplete. Receive pending Purchase Orders first.' : undefined,
       });
+    }
+    if (status === 'materials_ready') {
+      actionItems.push({
+        label: 'Set Planned',
+        onClick: () => handleTransition('planned'),
+      });
       actionItems.push({
         label: 'Start Production',
         onClick: () => handleTransition('in_production'),
@@ -489,7 +499,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         title: materialsIncomplete ? 'Materials incomplete. Cannot start production.' : undefined,
       });
     }
-    if (status === 'materials_ready' || status === 'planned') {
+    if (status === 'planned') {
       actionItems.push({
         label: 'Start Production',
         onClick: () => handleTransition('in_production'),
@@ -512,10 +522,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         title: deliveryBlocked ? `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '?'} (must be 0.00) unless Financials issues an override.` : undefined,
       });
     }
-    if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status) && materials.length > 0 && canEditInventory) {
-      if (status !== 'confirmed') {
-        actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
-      }
+    if (canViewMaterialDemand && materials.length > 0 && canEditInventory) {
+      actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
     }
     if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
@@ -640,7 +648,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       )}
 
       {/* Materials incomplete — subtle inline notice */}
-      {materialsIncomplete && status !== 'cancelled' && ['draft', 'confirmed', 'procurement', 'planned'].includes(status) && (
+      {materialsIncomplete && status !== 'cancelled' && canViewMaterialDemand && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 w-full">
           <span className="inline-block w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
           <span className="text-xs text-amber-700 flex-1">
