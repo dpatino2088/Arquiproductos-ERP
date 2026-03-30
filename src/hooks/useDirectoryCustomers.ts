@@ -51,55 +51,55 @@ export interface DirectoryCustomer {
  */
 export interface CreateCustomerInput {
   customer_name: string;
-  customer_email?: string;
-  customer_phone?: string;
-  identification_number?: string;
-  customer_type_name?: string;
-  website?: string;
-  alt_phone?: string;
-  primary_contact_id?: string;
-  street_address_line_1?: string;
-  street_address_line_2?: string;
-  city?: string;
-  state?: string;
-  zip_code?: string;
-  country?: string;
-  billing_street_address_line_1?: string;
-  billing_street_address_line_2?: string;
-  billing_city?: string;
-  billing_state?: string;
-  billing_zip_code?: string;
-  billing_country?: string;
-  notes?: string;
-  status?: string;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  identification_number?: string | null;
+  customer_type_name?: string | null;
+  website?: string | null;
+  alt_phone?: string | null;
+  primary_contact_id?: string | null;
+  street_address_line_1?: string | null;
+  street_address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  country?: string | null;
+  billing_street_address_line_1?: string | null;
+  billing_street_address_line_2?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_zip_code?: string | null;
+  billing_country?: string | null;
+  notes?: string | null;
+  status?: string | null;
 }
 
 /**
  * Input para actualizar Customer
  */
 export interface UpdateCustomerInput {
-  customer_name?: string;
-  customer_email?: string;
-  customer_phone?: string;
-  identification_number?: string;
-  customer_type_name?: string;
-  website?: string;
-  alt_phone?: string;
-  primary_contact_id?: string;
-  street_address_line_1?: string;
-  street_address_line_2?: string;
-  city?: string;
-  state?: string;
-  zip_code?: string;
-  country?: string;
-  billing_street_address_line_1?: string;
-  billing_street_address_line_2?: string;
-  billing_city?: string;
-  billing_state?: string;
-  billing_zip_code?: string;
-  billing_country?: string;
-  notes?: string;
-  status?: string;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  identification_number?: string | null;
+  customer_type_name?: string | null;
+  website?: string | null;
+  alt_phone?: string | null;
+  primary_contact_id?: string | null;
+  street_address_line_1?: string | null;
+  street_address_line_2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  country?: string | null;
+  billing_street_address_line_1?: string | null;
+  billing_street_address_line_2?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_zip_code?: string | null;
+  billing_country?: string | null;
+  notes?: string | null;
+  status?: string | null;
 }
 
 /**
@@ -387,7 +387,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       const payload: any = {};
       
       if (input.customer_name !== undefined) {
-        payload.customer_name = input.customer_name.trim();
+        payload.customer_name = input.customer_name?.trim() || null;
       }
       if (input.customer_email !== undefined) {
         payload.customer_email = input.customer_email?.trim().toLowerCase() || null;
