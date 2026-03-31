@@ -196,8 +196,8 @@ export function generateCutPlanPDF(opts: CutPlanPDFOptions): jsPDF {
 
   doc.setFontSize(7.5);
   doc.setTextColor(80);
-  const moLine = `MOs: ${opts.moNumbers.join(', ')}`;
-  doc.text(moLine, infoLeft, y);
+  const woLine = `WOs: ${opts.moNumbers.join(', ')}`;
+  doc.text(woLine, infoLeft, y);
 
   if (opts.moNumbers.length > 0) {
     let legendX = infoRight;
@@ -298,7 +298,7 @@ export function generateCutPlanPDF(opts: CutPlanPDFOptions): jsPDF {
     autoTable(doc, {
       startY: y,
       margin: { left: mx, right: mx },
-      head: [['Bar', 'MO', 'SKU', 'Label', 'Length (mm)', 'Position (mm)']],
+      head: [['Bar', 'WO', 'SKU', 'Label', 'Length (mm)', 'Position (mm)']],
       body: tableRows,
       styles: { fontSize: 6.5, cellPadding: 1.5 },
       headStyles: { fillColor: [55, 65, 81], textColor: 255, fontStyle: 'bold', fontSize: 6.5, halign: 'center' },
@@ -415,18 +415,19 @@ export function generateCutPlanPDF(opts: CutPlanPDFOptions): jsPDF {
     autoTable(doc, {
       startY: y,
       margin: { left: mx, right: mx },
-      head: [['Code', 'Roll', 'MO', 'Type', 'Dimensions (mm)', 'Rotated']],
+      head: [['Code', 'Roll', 'WO', 'Type', 'Dimensions (mm)', 'Rotated']],
       body: tableRows,
-      styles: { fontSize: 6.5, cellPadding: 1.8 },
-      headStyles: { fillColor: [55, 65, 81], textColor: 255, fontStyle: 'bold', fontSize: 7, halign: 'center' },
+      // Larger text to make cut dimensions easier to read in printed cut orders.
+      styles: { fontSize: 8, cellPadding: 2.2 },
+      headStyles: { fillColor: [55, 65, 81], textColor: 255, fontStyle: 'bold', fontSize: 8, halign: 'center' },
       alternateRowStyles: { fillColor: [249, 250, 251] },
       columnStyles: {
-        0: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
-        1: { cellWidth: 12, halign: 'center' },
-        2: { cellWidth: 28 },
-        3: { cellWidth: 22, halign: 'center' },
-        4: { halign: 'center' },
-        5: { cellWidth: 16, halign: 'center' },
+        0: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 14, halign: 'center' },
+        2: { cellWidth: 32 },
+        3: { cellWidth: 24, halign: 'center' },
+        4: { halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 18, halign: 'center' },
       },
       didParseCell(data) {
         if (data.section === 'body' && data.column.index === 0) {
@@ -530,7 +531,7 @@ export function generateConsolidated1DPDF(
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text(`${groups.length} materials  ·  ${totalBars} bars  ·  ${totalPieces} pieces  ·  MOs: ${allMOs.join(', ')}`, mx, y);
+  doc.text(`${groups.length} materials  ·  ${totalBars} bars  ·  ${totalPieces} pieces  ·  WOs: ${allMOs.join(', ')}`, mx, y);
   y += 7;
 
   // Render each SKU group
@@ -635,7 +636,7 @@ export function generateConsolidated1DPDF(
     autoTable(doc, {
       startY: y,
       margin: { left: mx, right: mx },
-      head: [['Bar', 'MO', 'Length (mm)', 'Position (mm)']],
+      head: [['Bar', 'WO', 'Length (mm)', 'Position (mm)']],
       body: tableRows,
       styles: { fontSize: 5.5, cellPadding: 1.2 },
       headStyles: { fillColor: [55, 65, 81], textColor: 255, fontStyle: 'bold', fontSize: 5.5, halign: 'center' },

@@ -3,7 +3,7 @@ import { supabase } from '../../../lib/supabase/client';
 import { Loader2, Box, ChevronDown, ChevronRight, CheckCircle2, Circle, PackageCheck, Clock } from 'lucide-react';
 import RollerAssemblyDiagram from './RollerAssemblyDiagram';
 import DraperyAssemblyDiagram from './DraperyAssemblyDiagram';
-import ShadeAssemblyDiagram from './ShadeAssemblyDiagram';
+
 import AssemblyPickList, { type PickListItem, type ReadinessStatus } from './AssemblyPickList';
 
 export interface AssemblyLine extends PickListItem {
@@ -207,19 +207,25 @@ function ProductDiagram({ config }: { config: ProductConfig | null }) {
     case 'dual':
     case 'triple':
       return (
-        <ShadeAssemblyDiagram
+        <RollerAssemblyDiagram
           widthMm={config.width_mm}
           heightMm={config.height_mm}
-          shadeType={config.product_type as 'dual' | 'triple'}
           panelCount={config.panel_count}
           panelWidths={config.panel_widths}
           operatingSystem={config.operating_system}
           operatingSide={config.operator_side}
           hasCassette={config.has_cassette}
           hasSideChannel={config.has_side_channel}
+          hasBottomBar={config.has_bottom_bar}
           tubeType={config.tube_type}
+          tubeCutMm={config.tube_cut_mm}
+          tubeCutsPerPanel={config.tube_cuts_per_panel}
+          fabricCutMm={config.fabric_cut_mm}
+          bottomBarCutMm={config.bottom_bar_cut_mm}
+          bottomBarCutsPerPanel={config.bottom_bar_cuts_per_panel}
           hardwareColor={config.hardware_color}
-          fabricNames={config.fabric_names}
+          fabricName={config.fabric_name}
+          fabricLayers={config.product_type === 'dual' ? 2 : config.product_type === 'triple' ? 3 : 1}
         />
       );
     default:

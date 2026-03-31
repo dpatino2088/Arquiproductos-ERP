@@ -61,6 +61,10 @@ export interface ManufacturingOrder {
       id: string;
       customer_name: string;
     };
+    Dealers?: {
+      dealer_name: string;
+      dealer_no?: string | null;
+    };
   };
 }
 
@@ -221,6 +225,10 @@ export function useManufacturingOrders(dealerId?: string | null) {
               DirectoryCustomers:customer_id (
                 id,
                 customer_name
+              ),
+              Dealers:dealer_id (
+                dealer_name,
+                dealer_no
               )
             )
           `)
@@ -314,6 +322,10 @@ export function useManufacturingOrder(moId: string | null) {
               DirectoryCustomers:customer_id (
                 id,
                 customer_name
+              ),
+              Dealers:dealer_id (
+                dealer_name,
+                dealer_no
               )
             )
           `)

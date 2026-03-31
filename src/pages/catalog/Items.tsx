@@ -210,6 +210,32 @@ export default function Items() {
     [queryClient, scopeKey, activeOrganizationId]
   );
   const rowRefForViewport = useNearViewportWarm(warmDetail, { rootMargin: '200px' });
+
+  // Fetch ProductTypes + CatalogItemProductTypes for filtering
+  useEffect(() => {
+    if (!activeOrganizationId) return;
+    let cancelled = false;
+    (async () => {
+      const [{ data: ptRows }, { data: ciptRows }] = await Promise.all([
+        supabase.from('ProductTypes').select('id, code, label').eq('deleted', false),
+        supabase.from('CatalogItemProductTypes').select('catalog_item_id, product_type_id').eq('organization_id', activeOrganizationId),
+      ]);
+      if (cancelled) return;
+      const ptLabelMap: Record<string, string> = {};
+      (ptRows ?? []).forEach((pt: any) => { ptLabelMap[pt.id] = pt.label || pt.code; });
+      const itemPtMap: Record<string, string[]> = {};
+      (ciptRows ?? []).forEach((r: any) => {
+        const label = ptLabelMap[r.product_type_id];
+        if (!label) return;
+        if (!itemPtMap[r.catalog_item_id]) itemPtMap[r.catalog_item_id] = [];
+        if (!itemPtMap[r.catalog_item_id].includes(label)) itemPtMap[r.catalog_item_id].push(label);
+      });
+      setProductTypeMap(itemPtMap);
+      setProductTypeLabels([...new Set(Object.values(ptLabelMap))].sort());
+    })();
+    return () => { cancelled = true; };
+  }, [activeOrganizationId]);
+
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
   // Defer catalogItemIds until after pagination to avoid re-fetching on every progressive batch
   const [deferredCatalogItemIds, setDeferredCatalogItemIds] = useState<string[]>([]);
@@ -229,9 +255,11 @@ export default function Items() {
   const [selectedCategory, setSelectedCategory] = useState<string[]>([]);
   const [selectedSubcategory, setSelectedSubcategory] = useState<string[]>([]);
   const [selectedFamily, setSelectedFamily] = useState<string[]>([]);
-  // Removed selectedItemType - using selectedCategory instead
   const [selectedMeasureBasis, setSelectedMeasureBasis] = useState<string[]>([]);
   const [selectedActive, setSelectedActive] = useState<string[]>([]);
+  const [selectedProductType, setSelectedProductType] = useState<string[]>([]);
+  const [productTypeMap, setProductTypeMap] = useState<Record<string, string[]>>({});
+  const [productTypeLabels, setProductTypeLabels] = useState<string[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showMoveCategoryModal, setShowMoveCategoryModal] = useState(false);
@@ -397,6 +425,7 @@ export default function Items() {
       setSelectedFamily([]);
       setSelectedMeasureBasis([]);
       setSelectedActive([]);
+      setSelectedProductType([]);
       setShowFilters(false);
       setCurrentPage(1);
       setSortBy('sku');
@@ -640,7 +669,10 @@ export default function Items() {
       // Active filter
       const matchesActive = selectedActive.length === 0 || (item.active !== undefined && selectedActive.includes(item.active ? 'Active' : 'Inactive'));
 
-      return matchesSearch && matchesManufacturer && matchesCategory && matchesSubcategory && matchesFamily && matchesMeasureBasis && matchesActive;
+      // Product Type filter
+      const matchesProductType = selectedProductType.length === 0 || (productTypeMap[item.id] && productTypeMap[item.id].some(pt => selectedProductType.includes(pt)));
+
+      return matchesSearch && matchesManufacturer && matchesCategory && matchesSubcategory && matchesFamily && matchesMeasureBasis && matchesActive && matchesProductType;
     });
 
     // Apply sorting
@@ -947,9 +979,9 @@ export default function Items() {
     setSelectedCategory([]);
     setSelectedSubcategory([]);
     setSelectedFamily([]);
-    // Removed setSelectedItemType - using selectedCategory instead
     setSelectedMeasureBasis([]);
     setSelectedActive([]);
+    setSelectedProductType([]);
     setSearchTerm('');
   };
 
@@ -1326,7 +1358,7 @@ export default function Items() {
   const activeOptions = ['Active', 'Inactive'];
 
   const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedSubcategory.length + selectedFamily.length + 
-                             selectedMeasureBasis.length + selectedActive.length;
+                             selectedMeasureBasis.length + selectedActive.length + selectedProductType.length;
 
   if (loading) return <div className="py-6 px-6" />;
 
@@ -1672,6 +1704,44 @@ export default function Items() {
                           className="w-4 h-4"
                         />
                         <span className="text-sm text-gray-700">{manufacturer}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Product Type Filter */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Product Type</span>
+                    {selectedProductType.length > 0 && (
+                      <button
+                        onClick={() => setSelectedProductType([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                      >
+                        Clear ({selectedProductType.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {productTypeLabels.map((pt) => (
+                      <div
+                        key={pt}
+                        onClick={() => {
+                          setSelectedProductType(prev =>
+                            prev.includes(pt)
+                              ? prev.filter(p => p !== pt)
+                              : [...prev, pt]
+                          );
+                        }}
+                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedProductType.includes(pt)}
+                          readOnly
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm text-gray-700">{pt}</span>
                       </div>
                     ))}
                   </div>

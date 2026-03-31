@@ -163,12 +163,6 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const searchTerm = componentSearchTerm.trim();
     const normalizedSearch = searchTerm.toLowerCase().replace(/[-_\s]/g, '');
     const filtered = catalogItems.filter(item => {
-      if (editingComponentId) {
-        const editing = components.find(c => c.id === editingComponentId);
-        if (!(editing && editing.component_item_id === item.id) && components.some(c => c.component_item_id === item.id)) return false;
-      } else {
-        if (components.some(c => c.component_item_id === item.id)) return false;
-      }
       if (selectedCategoryFilter) {
         const catId = item.category_id || item.item_category_id;
         if (catId !== selectedCategoryFilter) return false;
@@ -396,6 +390,17 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     if (formData.qty_type === 'fixed' && (!formData.qty_value || formData.qty_value <= 0)) { useUIStore.getState().addNotification({ type: 'error', title: 'Validation Error', message: 'Quantity Value must be > 0.' }); return; }
 
     const role = normalizeRole(formData.component_role) || formData.component_role;
+
+    const duplicate = components.some(c =>
+      !c.parent_component_id
+      && c.component_item_id === formData.component_item_id
+      && c.component_role === role,
+    );
+    if (duplicate) {
+      const sel = catalogItems.find(i => i.id === formData.component_item_id);
+      useUIStore.getState().addNotification({ type: 'error', title: 'Duplicate', message: `${sel?.sku ?? 'SKU'} already exists with role "${role}". Use a different role.` });
+      return;
+    }
     const isFabric = role === 'fabric';
     const sel = catalogItems.find(i => i.id === formData.component_item_id);
     const finalUom = isFabric ? 'm' : canonicalUom(formData.uom || sel?.unit_of_measure || sel?.uom, sel?.measure_basis);

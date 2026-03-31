@@ -16,6 +16,7 @@ interface RollerAssemblyDiagramProps {
   bottomBarCutsPerPanel?: number[];
   hardwareColor?: string | null;
   fabricName?: string | null;
+  fabricLayers?: number;
 }
 
 export default function RollerAssemblyDiagram({
@@ -36,6 +37,7 @@ export default function RollerAssemblyDiagram({
   bottomBarCutsPerPanel,
   hardwareColor,
   fabricName,
+  fabricLayers,
 }: RollerAssemblyDiagramProps) {
   const isMotor = operatingSystem === 'motorized' || operatingSystem === 'motor';
   const opSide = operatingSide ?? 'right';
@@ -224,6 +226,18 @@ export default function RollerAssemblyDiagram({
           });
         })()}
 
+        {/* Fabric layers badge (Dual / Triple Shade) */}
+        {(fabricLayers ?? 1) > 1 && (
+          <g>
+            <rect x={mx + drawW - brkW - 56} y={fabricTop + fabricH - 16} width={52} height={13} rx={3}
+              fill="#7c3aed" fillOpacity={0.12} stroke="#7c3aed" strokeWidth={0.5} />
+            <text x={mx + drawW - brkW - 30} y={fabricTop + fabricH - 7} textAnchor="middle"
+              fontSize={6.5} fontWeight="bold" fill="#7c3aed">
+              H × {fabricLayers}
+            </text>
+          </g>
+        )}
+
         {/* Bottom bar */}
         {hasBottomBar && (() => {
           const barAreaW = drawW - brkW * 2 - sideChW * 2;
@@ -265,7 +279,7 @@ export default function RollerAssemblyDiagram({
         <line x1={mx - 18} y1={fabricTop} x2={mx - 18} y2={fabricTop + fabricH + hemBarH} stroke="#374151" strokeWidth={0.6} />
         <text x={mx - 22} y={fabricTop + (fabricH + hemBarH) / 2} textAnchor="middle" fontSize={6.5} fontWeight="bold" fill="#111827"
           transform={`rotate(-90, ${mx - 22}, ${fabricTop + (fabricH + hemBarH) / 2})`}>
-          Height: {scaleForDim(heightMm)} mm
+          Height: {scaleForDim(heightMm)} mm{(fabricLayers ?? 1) > 1 ? ` (× ${fabricLayers} layers)` : ''}
         </text>
 
         {/* Dimension: Tube cut */}

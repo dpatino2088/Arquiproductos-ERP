@@ -1,4 +1,6 @@
-import { X, Zap, AlertTriangle, Package, Scissors, Ruler } from 'lucide-react';
+import { X, Zap, AlertTriangle, Package, Scissors, Ruler, Printer } from 'lucide-react';
+import { generateDraperyWorkOrderPDF, type DraperyWorkOrderData } from '../../lib/pdf/generateDraperyWorkOrderPDF';
+import { formatDate } from '../../lib/utils';
 
 export interface PanelCutDetailProps {
   moNumber: string;
@@ -11,6 +13,9 @@ export interface PanelCutDetailProps {
   cutHeightMm: number;
   rollWidthMm: number;
   heatsealDirection?: 'horizontal' | 'vertical' | 'none';
+  customerName?: string;
+  soNumber?: string;
+  productName?: string;
   rule: {
     tube_wrap_mm: number;
     bottom_wrap_mm: number;
@@ -24,6 +29,8 @@ export interface PanelCutDetailProps {
     waste_pct: number;
     bottom_bar_wrap_pct: number;
   };
+  materials?: Array<{ sku: string; item_name: string; component_role: string; qty: number; uom: string }>;
+  materialsLoading?: boolean;
   onClose?: () => void;
 }
 
@@ -42,6 +49,8 @@ export default function PanelCutDetail({
   productWidthMm, productHeightMm,
   cutWidthMm, cutHeightMm, rollWidthMm,
   heatsealDirection = 'none',
+  customerName, soNumber, productName,
+  materials, materialsLoading,
   rule, onClose,
 }: PanelCutDetailProps) {
   const EDGE_TRIM_MM = 10;
@@ -124,16 +133,40 @@ export default function PanelCutDetail({
           <div className="flex items-center gap-2">
             <Scissors className="w-4 h-4 text-blue-500" />
             <span className="text-sm font-semibold text-gray-900">
-              {moNumber} · {PRODUCT_LABELS[productType] ?? productType} · {productWidthMm}×{productHeightMm}mm
+              {moNumber} · {productName || PRODUCT_LABELS[productType] || productType} · {productWidthMm}×{productHeightMm}mm
             </span>
           </div>
           <p className="text-[10px] text-gray-500 mt-0.5 ml-6">{sku} — {itemName}</p>
         </div>
-        {onClose && (
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600">
-            <X className="w-4 h-4" />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {isDrapery && (
+            <button
+              type="button"
+              title="Print Drapery Work Order"
+              className="p-1 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700"
+              onClick={() => {
+                const pdfData: DraperyWorkOrderData = {
+                  moNumber, sku, itemName,
+                  customerName, soNumber, productName,
+                  materials: materials ?? [],
+                  date: formatDate(new Date()),
+                  productWidthMm, productHeightMm,
+                  cutWidthMm, cutHeightMm, rollWidthMm,
+                  rule, heatsealDirection: heatsealDirection as DraperyWorkOrderData['heatsealDirection'],
+                };
+                const pdf = generateDraperyWorkOrderPDF(pdfData);
+                pdf.save(`DraperyWO-${moNumber}-${sku}.pdf`);
+              }}
+            >
+              <Printer className="w-4 h-4" />
+            </button>
+          )}
+          {onClose && (
+            <button type="button" onClick={onClose} className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="p-3 flex gap-4 flex-wrap lg:flex-nowrap items-start">
@@ -315,6 +348,13 @@ export default function PanelCutDetail({
 
         {/* =================== NUMERIC BREAKDOWN =================== */}
         <div className="flex-1 space-y-3 min-w-[200px]">
+          {/* Model banner */}
+          {isDrapery && productName && (
+            <div className="bg-gray-800 text-white px-3 py-1.5 rounded text-xs font-bold tracking-wide uppercase">
+              MODEL: {productName.split('·')[0]?.trim() || 'Drapery'}
+            </div>
+          )}
+
           {/* Drop breakdown */}
           <div>
             <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider">Drop Breakdown</h5>
@@ -481,30 +521,29 @@ export default function PanelCutDetail({
             </div>
           )}
 
-          {/* Materials hint based on product type */}
+          {/* Materials from WorkOrder */}
           <div>
             <h5 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1 uppercase tracking-wider">
-              <Package className="w-3 h-3" /> Materials
+              <Package className="w-3 h-3" /> Materials & Components
             </h5>
-            <ul className="space-y-1 text-xs text-gray-600">
-              {isRoller && (
-                <>
-                  <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />Hem bar — 1 ea</li>
-                  <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />Bottom weight — 1 ea</li>
-                  <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />Double-sided tape — 1 strip</li>
-                </>
-              )}
-              {isDrapery && (
-                <>
-                  <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />Hook tape — per panel</li>
-                  <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />Bottom weight chain — 1 ea</li>
-                  <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />Lead tape — per panel</li>
-                </>
-              )}
-              {!isRoller && !isDrapery && (
-                <li className="text-gray-400 italic">See BOM for required materials</li>
-              )}
-            </ul>
+            {materialsLoading ? (
+              <p className="text-[11px] text-gray-400 italic">Loading materials...</p>
+            ) : materials && materials.length > 0 ? (
+              <ul className="space-y-1 text-xs text-gray-600">
+                {materials.map((m, i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-gray-400 rounded-full flex-shrink-0" />
+                    <span className="font-mono text-[10px] text-gray-500">{m.sku}</span>
+                    <span className="truncate">{m.item_name}</span>
+                    <span className="ml-auto font-mono text-gray-500 whitespace-nowrap">
+                      {m.uom === 'ea' ? m.qty : m.qty.toFixed(3)} {m.uom}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-gray-400 italic">No materials loaded — see BOM</p>
+            )}
           </div>
         </div>
       </div>

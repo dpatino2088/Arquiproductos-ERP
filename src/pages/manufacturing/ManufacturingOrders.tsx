@@ -23,7 +23,7 @@ interface ManufacturingOrderItem {
   manufacturingOrderNo: string;
   status: ManufacturingOrderStatus | string | undefined;
   saleOrderNo: string;
-  customerName: string;
+  dealerName: string;
   archived?: boolean;
   scheduledStartDate?: string | null;
   scheduledEndDate?: string | null;
@@ -133,7 +133,7 @@ export default function ManufacturingOrders() {
         manufacturingOrderNo: mo.manufacturing_order_no,
         status: mo.status,
         saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
-        customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? 'N/A',
+        dealerName: mo.SalesOrders?.Dealers?.dealer_name ?? 'N/A',
         archived: !!mo.archived,
         scheduledStartDate: mo.planned_start_at ?? null,
         scheduledEndDate: mo.planned_end_at ?? null,
@@ -173,7 +173,7 @@ export default function ManufacturingOrders() {
       filtered = filtered.filter(mo =>
         mo.manufacturingOrderNo.toLowerCase().includes(searchLower) ||
         mo.saleOrderNo.toLowerCase().includes(searchLower) ||
-        mo.customerName.toLowerCase().includes(searchLower)
+        mo.dealerName.toLowerCase().includes(searchLower)
       );
     }
 
@@ -382,7 +382,7 @@ export default function ManufacturingOrders() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by MO #, Sale Order #, or customer name..."
+                placeholder="Search by MO #, Sale Order #, or dealer name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
@@ -447,7 +447,7 @@ export default function ManufacturingOrders() {
                   </th>
                   <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Materials</th>
                   <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Sale Order</th>
-                  <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Customer</th>
+                  <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Dealer</th>
                   <th className="py-3 px-6 text-left">
                     <button
                       onClick={() => handleSort('planned_start_at')}
@@ -498,7 +498,7 @@ export default function ManufacturingOrders() {
                       )}
                     </td>
                     <td className="py-4 px-6 text-sm text-gray-700">{mo.saleOrderNo}</td>
-                    <td className="py-4 px-6 text-sm text-gray-700">{mo.customerName}</td>
+                    <td className="py-4 px-6 text-sm text-gray-700">{mo.dealerName}</td>
                     <td className="py-4 px-6 text-sm text-gray-700">
                       {mo.scheduledStartDate
                         ? formatDate(mo.scheduledStartDate)
