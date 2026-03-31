@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, useMoMaterialReadiness } from '../../hooks/useManufacturing';
+import { useMOAllocations } from '../../hooks/useInventoryAllocations';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
@@ -67,6 +68,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [moId, setMoId] = useState<string | null>(normalizedPropMoId);
   const { manufacturingOrder: mo, loading, error, refetch } = useManufacturingOrder(moId);
   const { materials } = useManufacturingMaterials(moId ?? '');
+  const { allocations } = useMOAllocations(moId);
   const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
   const { transitionStatus, isTransitioning } = useTransitionMOStatus();
   const { issueMaterials } = useIssueMaterials();
@@ -78,6 +80,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { canEdit: canEditInventory } = useModuleAccess('inventory');
   const { can } = usePermissions();
   const canViewCosts = can('manufacturing.costs.read');
+  const canCreatePO = can('inventory.purchase_orders.write');
   const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -449,6 +452,26 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
+  const materialsAllocatedComplete = useMemo(() => {
+    if (!materials || materials.length === 0) return false;
+    const requiredByItem = new Map<string, number>();
+    for (const m of materials) {
+      if (!m.catalog_item_id) continue;
+      requiredByItem.set(m.catalog_item_id, (requiredByItem.get(m.catalog_item_id) ?? 0) + Number(m.qty || 0));
+    }
+    if (requiredByItem.size === 0) return false;
+    const allocatedByItem = new Map<string, number>();
+    for (const a of allocations) {
+      allocatedByItem.set(a.catalog_item_id, (allocatedByItem.get(a.catalog_item_id) ?? 0) + Number(a.allocated_qty || 0));
+    }
+    const EPS = 0.0001;
+    for (const [itemId, requiredQty] of requiredByItem.entries()) {
+      const allocatedQty = allocatedByItem.get(itemId) ?? 0;
+      if (allocatedQty + EPS < requiredQty) return false;
+    }
+    return true;
+  }, [materials, allocations]);
+  const canSetMaterialsReady = !materialsIncomplete && materialsAllocatedComplete;
   const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'] as const;
   const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
@@ -469,22 +492,18 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     }
     if (status === 'confirmed') {
       actionItems.push({
-        label: 'Buy Materials',
-        onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`),
-      });
-      actionItems.push({
         label: 'Materials Ready',
         onClick: () => handleTransition('materials_ready'),
-        disabled: materialsIncomplete,
-        title: materialsIncomplete ? 'Materials still incomplete. Receive pending Purchase Orders first.' : undefined,
+        disabled: !canSetMaterialsReady,
+        title: !canSetMaterialsReady ? 'Requires materials in stock and fully allocated before marking Materials Ready.' : undefined,
       });
     }
     if (status === 'procurement') {
       actionItems.push({
         label: 'Materials Ready',
         onClick: () => handleTransition('materials_ready'),
-        disabled: materialsIncomplete,
-        title: materialsIncomplete ? 'Materials still incomplete. Receive pending Purchase Orders first.' : undefined,
+        disabled: !canSetMaterialsReady,
+        title: !canSetMaterialsReady ? 'Requires materials in stock and fully allocated before marking Materials Ready.' : undefined,
       });
     }
     if (status === 'materials_ready') {
@@ -522,7 +541,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         title: deliveryBlocked ? `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '?'} (must be 0.00) unless Financials issues an override.` : undefined,
       });
     }
-    if (canViewMaterialDemand && materials.length > 0 && canEditInventory) {
+    if (canViewMaterialDemand && materials.length > 0 && canEditInventory && canCreatePO) {
       actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
     }
     if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status)) {

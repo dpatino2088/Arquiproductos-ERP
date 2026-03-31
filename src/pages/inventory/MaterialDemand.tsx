@@ -60,6 +60,11 @@ interface CreatedPO {
 
 type SortCol = 'sku' | 'required_qty' | 'need_to_buy';
 
+function getMoStatusLabel(status: string): string {
+  if (status === 'confirmed') return 'Reviewed';
+  return status.replace(/_/g, ' ');
+}
+
 export default function MaterialDemand() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
@@ -104,7 +109,7 @@ export default function MaterialDemand() {
         .from('manufacturing_order_material_demand')
         .select('*')
         .eq('organization_id', activeOrganizationId)
-        .in('mo_status', ['confirmed', 'procurement', 'materials_ready']);
+        .in('mo_status', ['confirmed', 'procurement']);
       if (error) throw error;
       if (!demand?.length) return [];
 
@@ -620,7 +625,7 @@ export default function MaterialDemand() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Material Demand</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Materials required by Draft &amp; Planned Manufacturing Orders
+            Materials required by Reviewed &amp; Procurement Manufacturing Orders
           </p>
         </div>
         {selectedRows.size > 0 && (
@@ -848,11 +853,12 @@ export default function MaterialDemand() {
                     <td className="px-4 py-3 font-medium text-gray-900">{r.manufacturing_order_no}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        r.mo_status === 'confirmed' ? 'bg-indigo-50 text-indigo-700' :
                         r.mo_status === 'in_production' ? 'bg-yellow-50 text-yellow-700' :
                         r.mo_status === 'planned' ? 'bg-blue-50 text-blue-700' :
                         'bg-gray-50 text-gray-700'
                       }`}>
-                        {r.mo_status.replace(/_/g, ' ')}
+                        {getMoStatusLabel(r.mo_status)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-900">{r.sku ?? '—'}</td>
