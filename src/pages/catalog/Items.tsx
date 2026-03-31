@@ -91,6 +91,8 @@ interface CatalogItemsListStateSnapshot {
   selectedFamily: string[];
   selectedMeasureBasis: string[];
   selectedActive: string[];
+  selectedProductType: string[];
+  selectedStock: string[];
   scrollY: number;
 }
 
@@ -132,6 +134,8 @@ function hasCatalogListParams(params: URLSearchParams): boolean {
     params.has('family') ||
     params.has('measureBasis') ||
     params.has('active') ||
+    params.has('productType') ||
+    params.has('stock') ||
     params.has('page') ||
     params.has('pageSize') ||
     params.has('sortBy') ||
@@ -271,6 +275,7 @@ export default function Items() {
   const [selectedMeasureBasis, setSelectedMeasureBasis] = useState<string[]>([]);
   const [selectedActive, setSelectedActive] = useState<string[]>([]);
   const [selectedProductType, setSelectedProductType] = useState<string[]>([]);
+  const [selectedStock, setSelectedStock] = useState<string[]>([]);
   const [productTypeMap, setProductTypeMap] = useState<Record<string, string[]>>({});
   const [productTypeLabels, setProductTypeLabels] = useState<string[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
@@ -332,6 +337,8 @@ export default function Items() {
       setSelectedFamily(Array.isArray(snapshot.selectedFamily) ? snapshot.selectedFamily : []);
       setSelectedMeasureBasis(Array.isArray(snapshot.selectedMeasureBasis) ? snapshot.selectedMeasureBasis : []);
       setSelectedActive(Array.isArray(snapshot.selectedActive) ? snapshot.selectedActive : []);
+      setSelectedProductType(Array.isArray(snapshot.selectedProductType) ? snapshot.selectedProductType : []);
+      setSelectedStock(Array.isArray(snapshot.selectedStock) ? snapshot.selectedStock : []);
 
       const scrollY = Number(snapshot.scrollY ?? 0);
       requestAnimationFrame(() => {
@@ -376,6 +383,8 @@ export default function Items() {
       setSelectedFamily(Array.isArray(snapshot.selectedFamily) ? snapshot.selectedFamily : []);
       setSelectedMeasureBasis(Array.isArray(snapshot.selectedMeasureBasis) ? snapshot.selectedMeasureBasis : []);
       setSelectedActive(Array.isArray(snapshot.selectedActive) ? snapshot.selectedActive : []);
+      setSelectedProductType(Array.isArray(snapshot.selectedProductType) ? snapshot.selectedProductType : []);
+      setSelectedStock(Array.isArray(snapshot.selectedStock) ? snapshot.selectedStock : []);
       requestAnimationFrame(() => {
         isRestoringListStateRef.current = false;
       });
@@ -405,7 +414,9 @@ export default function Items() {
       selectedSubcategory.length > 0 ||
       selectedFamily.length > 0 ||
       selectedMeasureBasis.length > 0 ||
-      selectedActive.length > 0,
+      selectedActive.length > 0 ||
+      selectedProductType.length > 0 ||
+      selectedStock.length > 0,
     [
       searchTerm,
       selectedManufacturer,
@@ -414,6 +425,8 @@ export default function Items() {
       selectedFamily,
       selectedMeasureBasis,
       selectedActive,
+      selectedProductType,
+      selectedStock,
     ]
   );
   const categoryIdFromQuery = useMemo(() => {
@@ -439,6 +452,7 @@ export default function Items() {
       setSelectedMeasureBasis([]);
       setSelectedActive([]);
       setSelectedProductType([]);
+      setSelectedStock([]);
       setShowFilters(false);
       setCurrentPage(1);
       setSortBy('sku');
@@ -625,8 +639,8 @@ export default function Items() {
     });
   }, [itemsData]);
 
-  // Filter and sort items
-  const filteredItems = useMemo(() => {
+  // Filter and sort items (excluding stock filter, which depends on availability map)
+  const preStockFilteredItems = useMemo(() => {
     const filtered = displayItems.filter(item => {
       // Search filter - FLEXIBLE (supports SKU with/without hyphens, collection, variant, color)
       const searchLower = searchTerm.toLowerCase().trim();
@@ -745,22 +759,32 @@ export default function Items() {
       if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [searchTerm, itemsData, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedSubcategory, selectedFamily, selectedMeasureBasis, selectedActive]);
+  }, [searchTerm, itemsData, items, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedSubcategory, selectedFamily, selectedMeasureBasis, selectedActive, selectedProductType, productTypeMap]);
+
+  const filteredItems = useMemo(() => {
+    if (selectedStock.length === 0) return preStockFilteredItems;
+    return preStockFilteredItems.filter((item) => {
+      const status = availabilityMap[item.id]?.availability ?? 'OUT_OF_STOCK';
+      const inStock = status === 'IN_STOCK';
+      const outOfStock = status === 'OUT_OF_STOCK';
+      return (selectedStock.includes('In Stock') && inStock) || (selectedStock.includes('Out of Stock') && outOfStock);
+    });
+  }, [preStockFilteredItems, selectedStock, availabilityMap]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
 
-  // Only fetch inventory availability for the current visible page
+  // Fetch availability for current page normally; when stock filter is active, fetch for all pre-stock filtered items
   useEffect(() => {
-    const ids = paginatedItems.map((i) => i.id).filter(Boolean);
+    const ids = (selectedStock.length > 0 ? preStockFilteredItems : paginatedItems).map((i) => i.id).filter(Boolean);
     setDeferredCatalogItemIds((prev) => {
       const key = ids.join(',');
       const prevKey = prev.join(',');
       return key === prevKey ? prev : ids;
     });
-  }, [paginatedItems]);
+  }, [paginatedItems, preStockFilteredItems, selectedStock]);
 
   const selectedItemsCount = selectedItemIds.length;
   const allPageSelected = paginatedItems.length > 0 && paginatedItems.every((item) => selectedItemIds.includes(item.id));
@@ -797,6 +821,8 @@ export default function Items() {
       selectedFamily,
       selectedMeasureBasis,
       selectedActive,
+      selectedProductType,
+      selectedStock,
       scrollY: window.scrollY || 0,
     };
     try {
@@ -817,6 +843,8 @@ export default function Items() {
     selectedFamily,
     selectedMeasureBasis,
     selectedActive,
+    selectedProductType,
+    selectedStock,
   ]);
 
   const buildCatalogItemsReturnTo = useCallback(() => {
@@ -828,6 +856,8 @@ export default function Items() {
     if (selectedFamily.length > 0) params.set('family', selectedFamily.map(encodeURIComponent).join(','));
     if (selectedMeasureBasis.length > 0) params.set('measureBasis', selectedMeasureBasis.map(encodeURIComponent).join(','));
     if (selectedActive.length > 0) params.set('active', selectedActive.map(encodeURIComponent).join(','));
+    if (selectedProductType.length > 0) params.set('productType', selectedProductType.map(encodeURIComponent).join(','));
+    if (selectedStock.length > 0) params.set('stock', selectedStock.map(encodeURIComponent).join(','));
     if (currentPage > 1) params.set('page', String(currentPage));
     if (itemsPerPage !== 25) params.set('pageSize', String(itemsPerPage));
     if (sortBy !== 'sku') params.set('sortBy', sortBy);
@@ -843,6 +873,8 @@ export default function Items() {
     selectedFamily,
     selectedMeasureBasis,
     selectedActive,
+    selectedProductType,
+    selectedStock,
     currentPage,
     itemsPerPage,
     sortBy,
@@ -873,6 +905,8 @@ export default function Items() {
       selectedFamily,
       selectedMeasureBasis,
       selectedActive,
+      selectedProductType,
+      selectedStock,
     };
     const serialized = JSON.stringify(payload);
     if (serialized === lastDbStatePayloadRef.current) return;
@@ -907,6 +941,8 @@ export default function Items() {
     selectedFamily,
     selectedMeasureBasis,
     selectedActive,
+    selectedProductType,
+    selectedStock,
   ]);
 
   useEffect(() => {
@@ -923,6 +959,8 @@ export default function Items() {
     setSelectedFamily(splitCsvParam(params.get('family')));
     setSelectedMeasureBasis(splitCsvParam(params.get('measureBasis')));
     setSelectedActive(splitCsvParam(params.get('active')));
+    setSelectedProductType(splitCsvParam(params.get('productType')));
+    setSelectedStock(splitCsvParam(params.get('stock')));
 
     const nextPage = Math.max(1, Number(params.get('page') ?? 1));
     const nextPageSize = Math.max(1, Number(params.get('pageSize') ?? 25));
@@ -995,6 +1033,7 @@ export default function Items() {
     setSelectedMeasureBasis([]);
     setSelectedActive([]);
     setSelectedProductType([]);
+    setSelectedStock([]);
     setSearchTerm('');
   };
 
@@ -1007,6 +1046,8 @@ export default function Items() {
     setSelectedFamily([]);
     setSelectedMeasureBasis([]);
     setSelectedActive([]);
+    setSelectedProductType([]);
+    setSelectedStock([]);
     setShowFilters(false);
     setCurrentPage(1);
     setSortBy('sku');
@@ -1369,9 +1410,10 @@ export default function Items() {
   // Category options already handled by selectedCategory
   const measureBasisOptions = Array.from(new Set(displayItems.map(item => item.measure_basis).filter(Boolean)));
   const activeOptions = ['Active', 'Inactive'];
+  const stockOptions = ['In Stock', 'Out of Stock'];
 
   const totalActiveFilters = selectedManufacturer.length + selectedCategory.length + selectedSubcategory.length + selectedFamily.length + 
-                             selectedMeasureBasis.length + selectedActive.length + selectedProductType.length;
+                             selectedMeasureBasis.length + selectedActive.length + selectedProductType.length + selectedStock.length;
 
   if (loading) return <div className="py-6 px-6" />;
 
@@ -1401,17 +1443,6 @@ export default function Items() {
       {/* Header — title + contextual actions per tab (same as Quotes/Sales) */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          {activeTab === 'items' && (
-            <button
-              type="button"
-              onClick={handleGoToCatalogBase}
-              className="inline-flex items-center justify-center w-8 h-8 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-              title="Back to catalog"
-              aria-label="Back to catalog"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-          )}
           <h1 className="text-title font-semibold text-foreground">Catalog Items</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
@@ -1690,6 +1721,45 @@ export default function Items() {
                     ))}
                   </div>
                 </div>
+
+                {/* Inventory Stock Filter */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Inventory</span>
+                    {selectedStock.length > 0 && (
+                      <button
+                        onClick={() => setSelectedStock([])}
+                        className="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                      >
+                        Clear ({selectedStock.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {stockOptions.map((status) => (
+                      <div
+                        key={status}
+                        onClick={() => {
+                          setSelectedStock((prev) =>
+                            prev.includes(status)
+                              ? prev.filter((s) => s !== status)
+                              : [...prev, status]
+                          );
+                        }}
+                        className="px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedStock.includes(status)}
+                          readOnly
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm text-gray-700">{status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Manufacturer Filter */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
