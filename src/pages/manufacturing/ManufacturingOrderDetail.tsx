@@ -452,7 +452,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
-  const materialsAllocatedComplete = useMemo(() => {
+  const materialsAllocatedComplete = (() => {
     if (!materials || materials.length === 0) return false;
     const requiredByItem = new Map<string, number>();
     for (const m of materials) {
@@ -470,7 +470,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       if (allocatedQty + EPS < requiredQty) return false;
     }
     return true;
-  }, [materials, allocations]);
+  })();
   const canSetMaterialsReady = !materialsIncomplete && materialsAllocatedComplete;
   const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'] as const;
   const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
