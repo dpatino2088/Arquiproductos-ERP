@@ -216,13 +216,26 @@ export default function Items() {
     if (!activeOrganizationId) return;
     let cancelled = false;
     (async () => {
-      const [{ data: ptRows }, { data: ciptRows }] = await Promise.all([
-        supabase.from('ProductTypes').select('id, code, label').eq('deleted', false),
-        supabase.from('CatalogItemProductTypes').select('catalog_item_id, product_type_id').eq('organization_id', activeOrganizationId),
+      const [{ data: ptRows, error: ptError }, { data: ciptRows, error: ciptError }] = await Promise.all([
+        supabase
+          .from('ProductTypes')
+          .select('id, name, code')
+          .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
+          .order('sort_order', { ascending: true, nullsFirst: false })
+          .order('name', { ascending: true }),
+        supabase
+          .from('CatalogItemProductTypes')
+          .select('catalog_item_id, product_type_id')
+          .eq('organization_id', activeOrganizationId),
       ]);
       if (cancelled) return;
+      if (ptError || ciptError) {
+        setProductTypeMap({});
+        setProductTypeLabels([]);
+        return;
+      }
       const ptLabelMap: Record<string, string> = {};
-      (ptRows ?? []).forEach((pt: any) => { ptLabelMap[pt.id] = pt.label || pt.code; });
+      (ptRows ?? []).forEach((pt: any) => { ptLabelMap[pt.id] = pt.name || pt.code; });
       const itemPtMap: Record<string, string[]> = {};
       (ciptRows ?? []).forEach((r: any) => {
         const label = ptLabelMap[r.product_type_id];
