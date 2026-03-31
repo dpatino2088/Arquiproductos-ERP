@@ -256,7 +256,7 @@ export default function Items() {
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
   // Defer catalogItemIds until after pagination to avoid re-fetching on every progressive batch
   const [deferredCatalogItemIds, setDeferredCatalogItemIds] = useState<string[]>([]);
-  const { map: availabilityMap } = useInventoryAvailability({
+  const { map: availabilityMap, loading: availabilityLoading } = useInventoryAvailability({
     organizationId: activeOrganizationId ?? null,
     warehouseId: defaultWarehouse?.id ?? null,
     catalogItemIds: deferredCatalogItemIds,
@@ -763,13 +763,14 @@ export default function Items() {
 
   const filteredItems = useMemo(() => {
     if (selectedStock.length === 0) return preStockFilteredItems;
+    if (availabilityLoading && deferredCatalogItemIds.length > 0) return preStockFilteredItems;
     return preStockFilteredItems.filter((item) => {
       const status = availabilityMap[item.id]?.availability ?? 'OUT_OF_STOCK';
       const inStock = status === 'IN_STOCK';
       const outOfStock = status === 'OUT_OF_STOCK';
       return (selectedStock.includes('In Stock') && inStock) || (selectedStock.includes('Out of Stock') && outOfStock);
     });
-  }, [preStockFilteredItems, selectedStock, availabilityMap]);
+  }, [preStockFilteredItems, selectedStock, availabilityMap, availabilityLoading, deferredCatalogItemIds.length]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
